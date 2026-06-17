@@ -7,6 +7,32 @@ This repository contains the source code to run the controller program for the
 The [user manual](https://seedhammer.com/doc/manual) contains detailed instructions
 for operating the machine.
 
+## About this fork
+
+This is a community fork of [seedhammer/seedhammer](https://github.com/seedhammer/seedhammer).
+The `main` branch tracks upstream `main` plus two additive features, merged as
+`dbb187a` and `e3c0c21` (the original feature branches are kept intact):
+
+- **On-device CODEX32 seed entry** — re-enables the (upstream-disabled) CODEX32
+  input flow. Upstream [PR #34](https://github.com/seedhammer/seedhammer/pull/34)
+  (declined for now, pending UI polish).
+- **BCH-validated `md1`/`mk1` engraving** — recognizes and engraves the `md1`
+  (descriptor) and `mk1` (xpub) backup strings produced by the
+  [mnemonic-engrave](https://github.com/bg002h/mnemonic-engrave) constellation of
+  CLIs, verifying the BCH checksum before engraving. Upstream
+  [PR #35](https://github.com/seedhammer/seedhammer/pull/35) (open).
+
+These formats back up arbitrary wallet descriptors across multiple plates. The
+`ms1` *secret* string is never accepted over NFC — it is hand-typed on the
+air-gapped device via the CODEX32 flow above; only the public `md1`/`mk1` strings
+are pushed and engraved.
+
+> **Flashing a fork on retail hardware:** retail SeedHammer II units ship with
+> secure boot **locked**, so running self-built firmware requires provisioning
+> your own boot key into an OTP slot — an advanced and **irreversible** procedure.
+> Consult the SeedHammer documentation before attempting it. The upstream install
+> and reproducible-build steps below are otherwise unchanged.
+
 ## Installation
 
 Press and hold the firmware upgrade button while connecting the machine to
