@@ -21,6 +21,13 @@ The `main` branch tracks upstream `main` plus two additive features, merged as
   [mnemonic-engrave](https://github.com/bg002h/mnemonic-engrave) constellation of
   CLIs, verifying the BCH checksum before engraving. Upstream
   [PR #35](https://github.com/seedhammer/seedhammer/pull/35) (open).
+- **SLIP-39 recovery — BIP-39-vs-verbatim choice** — recovering a SLIP-39 backup
+  engraves the recovered seed as BIP-39 words, which is correct for backups made
+  from a BIP-39 phrase or the `mnemonic` toolkit. For a Trezor or other SLIP-39
+  wallet backup, choose **"Engrave shares"** at the post-recovery prompt to engrave
+  your share words verbatim, or use the
+  [mnemonic-toolkit](https://github.com/bg002h/mnemonic-toolkit) CLI to recover
+  off-device.
 
 These formats back up arbitrary wallet descriptors across multiple plates. The
 `ms1` *secret* string is never accepted over NFC — it is hand-typed on the
