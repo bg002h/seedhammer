@@ -92,3 +92,71 @@ func TestDescriptorAddressFlowBackExits(t *testing.T) {
 		t.Fatal("Back did not exit descriptorAddressFlow")
 	}
 }
+
+// On a supported descriptor, Button2 opens the address view (then Back returns to
+// confirm, Back again exits). On an unsupported descriptor, Button2 is inert.
+func TestDescriptorConfirmAddressAffordance(t *testing.T) {
+	d := loadTestDesc(t, descWPKH) // supported
+	if !address.Supported(d) {
+		t.Fatal("fixture must be address-supported")
+	}
+	ds := &DescriptorScreen{Descriptor: d}
+	want0, _ := address.Receive(d, 0)
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2) // open address view from the confirm screen
+	frame, quit := runUI(ctx, func() { ds.Confirm(ctx, &descriptorTheme) })
+	defer quit()
+	var content string
+	saw := false
+	for i := 0; i < 10; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		content = c
+		if uiContains(content, want0) {
+			saw = true
+			break
+		}
+	}
+	_ = content
+	if !saw {
+		t.Fatal("Button2 did not open the address view on a supported descriptor")
+	}
+}
+
+// R0 MINOR-2 fold: on a descriptor address.Supported reports false for, the
+// Button2 affordance is inert — the address view never opens, the confirm screen
+// stays, no crash. The descriptor is the supported wpkh fixture with its Script
+// mutated to an unsupported value, so derivation still succeeds but the script
+// switch returns errUnsupported (the Supported==false branch / StyleNone path).
+func TestDescriptorConfirmAddressAffordanceUnsupported(t *testing.T) {
+	d := loadTestDesc(t, descWPKH)
+	d.Script = bip380.Script(99) // unsupported singlesig script
+	if address.Supported(d) {
+		t.Fatal("fixture must be address-unsupported for this test")
+	}
+	ds := &DescriptorScreen{Descriptor: d}
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2) // must be inert: no address view
+	frame, quit := runUI(ctx, func() { ds.Confirm(ctx, &descriptorTheme) })
+	defer quit()
+	// Drive several frames; the confirm screen must keep rendering (descriptor info,
+	// e.g. "Script") and must never show the address view's "Receive addresses".
+	sawConfirm := false
+	for i := 0; i < 8; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		if uiContains(c, "Receive addresses") || uiContains(c, "Change addresses") {
+			t.Fatal("Button2 opened the address view on an unsupported descriptor")
+		}
+		if uiContains(c, "Script") {
+			sawConfirm = true
+		}
+	}
+	if !sawConfirm {
+		t.Fatal("confirm screen did not keep rendering after inert Button2")
+	}
+}

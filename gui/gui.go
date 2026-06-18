@@ -20,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	qr "github.com/seedhammer/kortschak-qr"
+	"seedhammer.com/address"
 	"seedhammer.com/backup"
 	"seedhammer.com/bezier"
 	"seedhammer.com/bip32"
@@ -2320,10 +2321,20 @@ func (s *DescriptorScreen) Confirm(ctx *Context, th *Colors) (Plate, bool) {
 		}
 	}
 	backBtn := &Clickable{Button: Button1}
+	addrBtn := &Clickable{Button: Button2}
 	confirmBtn := &Clickable{Button: Button3}
+	// Hoisted out of the frame loop: address.Supported→Receive(desc,0) runs
+	// secp256k1 derivation (allocating); computing it per-frame would break the
+	// TestAllocs 0-alloc gate. Once, here. (spec §2 inv. 2/6, §4.1.)
+	supported := address.Supported(s.Descriptor)
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			break
+		}
+		// Drain Button2 every frame; act only when supported (queue-head idiom).
+		if addrBtn.Clicked(ctx) && supported {
+			descriptorAddressFlow(ctx, th, s.Descriptor)
+			continue
 		}
 		if confirmBtn.Clicked(ctx) {
 			labels, engravings, err := validateDescriptor(ctx.Platform.EngraverParams(), s.Descriptor)
@@ -2344,8 +2355,16 @@ func (s *DescriptorScreen) Confirm(ctx *Context, th *Colors) (Plate, bool) {
 		}
 
 		dims := ctx.Platform.DisplaySize()
+		// Fixed 3-element literal (non-escaping → 0-alloc). The address button is
+		// StyleNone when unsupported (rendered empty) — NOT an append chain
+		// (which would heap-alloc and break TestAllocs on this benchmarked screen).
+		addrStyle := StyleSecondary
+		if !supported {
+			addrStyle = StyleNone
+		}
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: addrBtn, Style: addrStyle, Icon: assets.IconInfo},
 			{Clickable: confirmBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
 		}...)
 		content := s.Draw(ctx, th, dims)
