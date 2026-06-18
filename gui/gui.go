@@ -793,7 +793,7 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, b
 	return codex32.String{}, false
 }
 
-func inputSLIP39Flow(ctx *Context, th *Colors, mnemonic slip39words.Mnemonic, selected int) bool {
+func inputSLIP39Flow(ctx *Context, th *Colors, mnemonic slip39words.Mnemonic, selected int, title string) bool {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
@@ -865,13 +865,13 @@ func inputSLIP39Flow(ctx *Context, th *Colors, mnemonic slip39words.Mnemonic, se
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
 			nav = op.Layer(nav, nav2)
 		}
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Input Words")
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 
 		ctx.Frame(op.Layer(
 			kbdOp,
 			word,
 			nav,
-			title,
+			titleOp,
 			op.Color(&ctx.B, th.Background),
 		))
 	}
@@ -2032,8 +2032,12 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 					return s, true
 				}
 			case 3:
-				mnemonic := emptySLIP39Mnemonic(20)
-				if ok := inputSLIP39Flow(ctx, th, mnemonic, 0); !ok {
+				n := slip39LengthPick(ctx, th)
+				if n == 0 {
+					break // back from the word-count picker
+				}
+				mnemonic := emptySLIP39Mnemonic(n)
+				if ok := inputSLIP39Flow(ctx, th, mnemonic, 0, "Input SLIP-39 Share"); !ok {
 					break
 				}
 				share := new(strings.Builder)
