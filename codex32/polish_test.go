@@ -60,6 +60,37 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
+func TestConsistentShares(t *testing.T) {
+	mk := func(s string) String {
+		v, err := New(s)
+		if err != nil {
+			t.Fatalf("New(%s): %v", s, err)
+		}
+		return v
+	}
+	// BIP-93 vector-2 shares: threshold 2, id NAME, indices A and C.
+	a := mk("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	c := mk("MS12NAMECACDEFGHJKLMNPQRSTUVWXYZ023FTR2GDZMPY6PN")
+	// vector-3 share: threshold 3, id CASH (a field mismatch vs the vector-2 set).
+	cash := mk("MS13CASHA320ZYXWVUTSRQPNMLKJHGFEDCA2A8D0ZEHN8A0T")
+
+	if err := ConsistentShares(nil); err != nil {
+		t.Errorf("nil set: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a}); err != nil {
+		t.Errorf("single share: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a, c}); err != nil {
+		t.Errorf("consistent pair: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a, a}); !errors.Is(err, errRepeatedIndex) {
+		t.Errorf("repeated index: %v, want errRepeatedIndex", err)
+	}
+	if err := ConsistentShares([]String{a, cash}); !errors.Is(err, errMismatchedThreshold) {
+		t.Errorf("threshold mismatch: %v, want errMismatchedThreshold", err)
+	}
+}
+
 func TestParsePrefix(t *testing.T) {
 	// No separator yet: HRP-candidate chars, nothing Known, no error.
 	f, err := ParsePrefix("ms")

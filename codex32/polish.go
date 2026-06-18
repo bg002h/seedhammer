@@ -127,6 +127,45 @@ func ParsePrefix(frag string) (Fields, error) {
 	return f, nil
 }
 
+// ConsistentShares reports whether a set of codex32 shares can belong to one
+// recovery set: all share the same HRP, threshold, identifier, and total length,
+// and all share indices are distinct. It does NOT require the set to be complete
+// (k shares) — use it to validate shares as they are collected. Returns the same
+// sentinels Interpolate uses (errMismatched{Length,HRP,Threshold,ID},
+// errRepeatedIndex), so Describe maps them. A set of 0 or 1 share is consistent.
+//
+// Each share MUST already be New-valid: ConsistentShares calls the unexported
+// parts(), which PANICS on a malformed String. Callers must only pass strings
+// that passed New without error (the keypad gates the OK button on New==nil).
+func ConsistentShares(shares []String) error {
+	if len(shares) <= 1 {
+		return nil
+	}
+	s0 := shares[0].parts()
+	for _, share := range shares {
+		p := share.parts()
+		switch {
+		case len(shares[0].s) != len(share.s):
+			return errMismatchedLength
+		case s0.hrp != p.hrp:
+			return errMismatchedHRP
+		case s0.threshold != p.threshold:
+			return errMismatchedThreshold
+		case s0.id != p.id:
+			return errMismatchedID
+		}
+	}
+	seen := make(map[fe]bool, len(shares))
+	for _, share := range shares {
+		idx := share.parts().shareIdx
+		if seen[idx] {
+			return errRepeatedIndex
+		}
+		seen[idx] = true
+	}
+	return nil
+}
+
 // checkCase returns errInvalidCase if frag mixes upper- and lower-case ASCII
 // letters (digits are case-neutral) — matching the engine's case rule, for
 // display honesty. Moot on the force-uppercasing keypad, but the package API
