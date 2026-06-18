@@ -1807,37 +1807,8 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	switch scan := obj.(type) {
 	case bip39.Mnemonic:
 		backupWalletFlow(ctx, th, scan)
-		// TODO: re-enable SLIP39. See also nfcpoller.go.
-	// case slip39.Share:
-	// 	w, err := scan.Words()
-	// 	// No space for secrets > 128 bits.
-	// 	const maximumLength = 20
-	// 	if err != nil || len(w) > maximumLength {
-	// 		return false
-	// 	}
-	// 	title := fmt.Sprintf("%d #%d 1/%d", scan.Identifier, scan.MemberIndex+1, scan.MemberThreshold)
-	// 	seedDesc := backup.Seed{
-	// 		Mnemonic:     w,
-	// 		ShortestWord: slip39words.ShortestWord,
-	// 		LongestWord:  slip39words.LongestWord,
-	// 		Title:        title,
-	// 		Font:         constant.Font,
-	// 	}
-	// 	params := ctx.Platform.EngraverParams()
-	// 	seedSide, err := backup.EngraveSeed(params, seedDesc)
-	// 	if err != nil {
-	// 		return false
-	// 	}
-	// 	plate, err := toPlate(seedSide, params)
-	// 	if err != nil {
-	// 		return false
-	// 	}
-	// 	for {
-	// 		completed := NewEngraveScreen(ctx, plate).Engrave(ctx, ops, &engraveTheme)
-	// 		if completed {
-	// 			return true
-	// 		}
-	// 	}
+	case slip39words.Share:
+		return engraveSLIP39(ctx, th, scan)
 	case codex32.String:
 		return engraveCodex32(ctx, th, scan)
 	case *bip380.Descriptor:
@@ -1980,7 +1951,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",
 			Lead:    "Choose number of words",
-			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32" /* , "SLIP-39" */},
+			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39"},
 		}
 		for {
 			choice, ok := cs.Choose(ctx, th)
@@ -1999,24 +1970,24 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 				if ok {
 					return s, true
 				}
-				// TODO: re-enable
-				// case 3:
-				// 	mnemonic := emptySLIP39Mnemonic(20)
-				// 	if ok := inputSLIP39Flow(ctx, th, mnemonic, 0); !ok {
-				// 		break
-				// 	}
-				// 	share := new(strings.Builder)
-				// 	for i, w := range mnemonic {
-				// 		if i > 0 {
-				// 			share.WriteByte(' ')
-				// 		}
-				// 		share.WriteString(slip39words.LabelFor(w))
-				// 	}
-				// 	s, err := slip39.ParseShare(share.String())
-				// 	if err != nil {
-				// 		break
-				// 	}
-				// 	return s, true
+			case 3:
+				mnemonic := emptySLIP39Mnemonic(20)
+				if ok := inputSLIP39Flow(ctx, th, mnemonic, 0); !ok {
+					break
+				}
+				share := new(strings.Builder)
+				for i, w := range mnemonic {
+					if i > 0 {
+						share.WriteByte(' ')
+					}
+					share.WriteString(slip39words.LabelFor(w))
+				}
+				s, err := slip39words.ParseShare(share.String())
+				if err != nil {
+					showError(ctx, th, "Invalid SLIP-39 share", slip39words.Describe(err))
+					break
+				}
+				return s, true
 			}
 		}
 	}
