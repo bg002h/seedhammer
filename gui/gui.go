@@ -2020,7 +2020,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",
 			Lead:    "Choose number of words",
-			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39"},
+			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39", "SEED XOR"},
 		}
 		for {
 			choice, ok := cs.Choose(ctx, th)
@@ -2061,6 +2061,14 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 					break
 				}
 				return s, true
+			case 4:
+				// SEED XOR combine returns a recovered bip39.Mnemonic that rides
+				// the existing engraveObjectFlow case bip39.Mnemonic: path. The
+				// mandatory fingerprint gate lives inside combineSeedXORFlow.
+				m, ok := combineSeedXORFlow(ctx, th)
+				if ok {
+					return m, true
+				}
 			}
 		}
 	}
