@@ -144,3 +144,47 @@ func TestConfirmCodex32Share(t *testing.T) {
 		t.Errorf("share note: got %q", c)
 	}
 }
+
+func TestCodex32KeyboardDimsBIO(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	kbd := newCodex32Keyboard(ctx)
+	dimmed := map[rune]bool{'b': true, 'i': true, 'o': true}
+	for _, k := range kbd.allKeys {
+		if dimmed[k.r] && !k.disabled {
+			t.Errorf("codex32 key %q should be disabled", k.r)
+		}
+		if k.r >= 'a' && k.r <= 'z' && !dimmed[k.r] && k.disabled {
+			t.Errorf("codex32 key %q should be enabled", k.r)
+		}
+	}
+	// Every codex32.Alphabet char (lowercased) + the '1' separator is present and enabled.
+	enabled := map[rune]bool{}
+	for _, k := range kbd.allKeys {
+		if !k.disabled {
+			enabled[k.r] = true
+		}
+	}
+	for _, c := range codex32.Alphabet {
+		lc := []rune(strings.ToLower(string(c)))[0]
+		if !enabled[lc] {
+			t.Errorf("codex32 Alphabet char %q (lc %q) missing/disabled on keypad", c, lc)
+		}
+	}
+	if !enabled['1'] {
+		t.Error("codex32 keypad must keep '1' (HRP separator) enabled")
+	}
+}
+
+func TestBIP39KeyboardNotDimmed(t *testing.T) {
+	// Regression: dimming the codex32 instance must not affect the BIP-39 keyboard.
+	ctx := NewContext(newPlatform())
+	kbd := NewKeyboard(ctx, wordKeys)
+	for _, k := range kbd.allKeys {
+		switch k.r {
+		case 'b', 'i', 'o':
+			if k.disabled {
+				t.Errorf("BIP-39 key %q must NOT be disabled (no cross-contamination)", k.r)
+			}
+		}
+	}
+}

@@ -114,3 +114,23 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) bool {
 	}
 	return false
 }
+
+// codex32Keys is the on-screen codex32 keypad: digit row + the BIP-39
+// full-QWERTY letter rows. b/i/o are present (for visual familiarity) but
+// statically dimmed by newCodex32Keyboard, since bech32 excludes them.
+const codex32Keys = "1234567890\nqwertyuiop\nasdfghjkl\nzxcvbnm"
+
+// newCodex32Keyboard builds the codex32 keypad and statically disables the
+// never-valid b/i/o keys. Per-instance, so the BIP-39 keyboard is unaffected.
+// Disabling via allKeys also disables the same elements in the per-row keys
+// slices (shared backing array); Clear() does not reset disabled.
+func newCodex32Keyboard(ctx *Context) *Keyboard {
+	kbd := NewKeyboard(ctx, codex32Keys)
+	for i := range kbd.allKeys {
+		switch kbd.allKeys[i].r {
+		case 'b', 'i', 'o':
+			kbd.allKeys[i].disabled = true
+		}
+	}
+	return kbd
+}

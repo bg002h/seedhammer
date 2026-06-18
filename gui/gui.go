@@ -670,9 +670,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 }
 
 func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
-	const alph = "1234567890\nqwertyup\nasdfghjk\nlzxcvnm"
-
-	kbd := NewKeyboard(ctx, alph)
+	kbd := newCodex32Keyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
 	for !ctx.Done {
