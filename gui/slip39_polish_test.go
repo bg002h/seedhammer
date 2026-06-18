@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"seedhammer.com/bip39"
@@ -321,6 +322,81 @@ func TestRecoverSLIP39BackoutRecognized(t *testing.T) {
 	if ok || m != nil {
 		t.Errorf("Back at collection: got (%v, %v) want (nil, false)", m, ok)
 	}
+}
+
+// pumpUntil reads frames until content matches want or maxFrames is reached,
+// returning the last frame content and whether want was seen.
+func pumpUntil(frame func() (string, bool), want string, maxFrames int) (string, bool) {
+	var content string
+	for i := 0; i < maxFrames; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		content = c
+		if uiContains(content, want) {
+			return content, true
+		}
+	}
+	return content, false
+}
+
+func TestSLIP39FingerprintBackRecognized(t *testing.T) {
+	// Back at the recovered-fingerprint check returns false (declined), so the
+	// engrave dispatch loops back to confirm — never surfacing "Unknown format".
+	secret := []byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f}
+	m := bip39.New(secret)
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2, Button1) // drained Button2 + Back
+	if confirmSLIP39Fingerprint(ctx, &descriptorTheme, 0xDEADBEEF) {
+		t.Error("Back at fingerprint check returned true; want false")
+	}
+	_ = m
+}
+
+func TestEngraveSLIP39RecoverToBackup(t *testing.T) {
+	// Full recover dispatch: confirm(Recover) → recoverSLIP39Flow (idx-3, Skip)
+	// → §3 hold-to-confirm acknowledgement → §5.4 fingerprint (BDDBDA4F) →
+	// backupWalletFlow (the recovered BIP-39 seed words appear). Asserts the ack
+	// text, the recovered fingerprint, and that the recovered seed reaches the
+	// BIP-39 backup confirm.
+	synctest.Test(t, func(t *testing.T) {
+		first := parseFixtureShare(t, slip39Vec3[0])
+		ctx := NewContext(newPlatform())
+		frame, quit := runUI(ctx, func() {
+			engraveSLIP39(ctx, &descriptorTheme, first)
+		})
+		defer quit()
+
+		// Recover at the confirm screen.
+		click(&ctx.Router, Button2)
+		// Collect the 2nd share + Skip the SLIP-39 passphrase.
+		driveShare(&ctx.Router, slip39Vec3[1])
+		click(&ctx.Router, Button3) // passphrase ChoiceScreen: Skip
+		frame()
+
+		// §3 acknowledgement screen.
+		if c, ok := pumpUntil(frame, "WRONG seed", 64); !ok {
+			t.Fatalf("acknowledgement text not shown; got %q", c)
+		}
+		// Hold to confirm the acknowledgement.
+		press(&ctx.Router, Button3)
+		frame()
+		time.Sleep(confirmDelay)
+		frame() // yields ConfirmYes → fingerprint screen
+
+		// §5.4 recovered fingerprint (no extra input needed — it just renders).
+		if c, ok := pumpUntil(frame, "BDDBDA4F", 64); !ok {
+			t.Fatalf("recovered fingerprint BDDBDA4F not shown; got %q", c)
+		}
+		// Confirm the fingerprint (Engrave) → backupWalletFlow.
+		click(&ctx.Router, Button3)
+		// The recovered BIP-39 seed (words GIFT KIDNEY …) reaches the backup
+		// confirm screen.
+		if c, ok := pumpUntil(frame, "GIFT", 64); !ok {
+			t.Fatalf("recovered seed words did not reach backupWalletFlow; got %q", c)
+		}
+	})
 }
 
 // Silence unused warnings for fixtures/helpers consumed by later tasks during

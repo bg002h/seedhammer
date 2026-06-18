@@ -5,6 +5,7 @@ import (
 	"image"
 	"sort"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/backup"
 	"seedhammer.com/bip39"
 	"seedhammer.com/font/constant"
@@ -364,11 +365,88 @@ func engraveSLIP39(ctx *Context, th *Colors, scan slip39words.Share) bool {
 			engraveSLIP39Verbatim(ctx, th, scan)
 			return true
 		case slip39Recover:
-			// Wired in Task 4 (recover → acknowledgement → fingerprint →
-			// backupWalletFlow). Placeholder: re-confirm.
-			continue
+			m, ok := recoverSLIP39Flow(ctx, th, scan)
+			if !ok {
+				continue // back to the original share's confirm
+			}
+			if !engraveRecoveredSLIP39(ctx, th, m) {
+				continue // declined the acknowledgement or fingerprint check
+			}
+			return true
 		}
 	}
+}
+
+// engraveRecoveredSLIP39 brackets the recovered-seed engrave with the SPEC §3
+// interpretation acknowledgement (hold-to-confirm) and the §5.4 always-on
+// master-fingerprint display, then hands off to backupWalletFlow (the native
+// BIP-39 seed-plate path). Returns false if the user declines either gate.
+func engraveRecoveredSLIP39(ctx *Context, th *Colors, m bip39.Mnemonic) bool {
+	// §3 — mandatory interpretation acknowledgement (hold-to-confirm). A doc
+	// note is invisible at the moment of irreversible engraving.
+	ack := &ConfirmWarningScreen{
+		Title: "Recovered Seed",
+		Body: "Recovered as a BIP-39 seed. Correct only for backups made from a BIP-39 phrase / this toolkit. " +
+			"A Trezor or other SLIP-39 wallet backup would engrave the WRONG seed.\n\nHold button to confirm.",
+		Icon: assets.IconHammer,
+	}
+	if !holdToConfirm(ctx, th, ack) {
+		return false
+	}
+	// §5.4 — always-on recovered master-fingerprint check (match backupWalletFlow's
+	// %.8X format). Framed as a check-against-records, NOT a verification claim.
+	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams, "")
+	if err != nil {
+		showError(ctx, th, "Recovery failed", "could not derive the fingerprint")
+		return false
+	}
+	if !confirmSLIP39Fingerprint(ctx, th, mfp) {
+		return false // Back at the fingerprint check
+	}
+	backupWalletFlow(ctx, th, m)
+	return true
+}
+
+// confirmSLIP39Fingerprint shows the recovered seed's master fingerprint and
+// waits for the user to confirm it against their records (Engrave/Center) or go
+// Back (Button1). Button2 is drained unconditionally (no-hang).
+func confirmSLIP39Fingerprint(ctx *Context, th *Colors, mfp uint32) bool {
+	lines := []string{
+		fmt.Sprintf("Fingerprint %.8X", mfp),
+		"Confirm this matches your wallet records before engraving.",
+	}
+	backBtn := &Clickable{Button: Button1}
+	drainBtn := &Clickable{Button: Button2}
+	okBtn := &Clickable{Button: Button3, AltButton: Center}
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return false
+		}
+		drainBtn.Clicked(ctx) // drain Button2 (no-hang)
+		if okBtn.Clicked(ctx) {
+			return true
+		}
+		dims := ctx.Platform.DisplaySize()
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconHammer},
+		}...)
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Recovered Fingerprint")
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(leadingSize)
+		body := make([]op.Op, 0, len(lines))
+		y := content.Min.Y + 8
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return false
 }
 
 // engraveSLIP39Verbatim engraves a single share's words verbatim onto a plate.
