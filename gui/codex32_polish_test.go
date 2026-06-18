@@ -188,3 +188,20 @@ func TestBIP39KeyboardNotDimmed(t *testing.T) {
 		}
 	}
 }
+
+// Backing out of the pre-engrave confirm screen must NOT surface as
+// "Unknown format": the codex32 string was recognized, the user just declined
+// to engrave. engraveObjectFlow returns true for recognized objects (only the
+// default/unrecognized case returns false → scanUnknownFormat), so a cancel
+// must also return true.
+func TestEngraveCodex32BackoutNotUnknown(t *testing.T) {
+	s, err := codex32.New("ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button1) // Back at the confirm screen
+	if !engraveObjectFlow(ctx, &descriptorTheme, s) {
+		t.Error("cancel at codex32 confirm returned false (→ \"Unknown format\"); want true (recognized, not engraved)")
+	}
+}

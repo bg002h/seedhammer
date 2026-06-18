@@ -1840,7 +1840,10 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	// 	}
 	case codex32.String:
 		if !confirmCodex32Flow(ctx, th, scan) {
-			return false
+			// Recognized codex32 string, user declined to engrave — return true
+			// (handled) like every other recognized case, NOT false (which the
+			// caller maps to "Unknown format").
+			return true
 		}
 		id, _, _ := scan.Split()
 		s := backup.SeedString{
