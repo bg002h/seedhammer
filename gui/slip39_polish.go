@@ -28,9 +28,31 @@ func showError(ctx *Context, th *Colors, title, msg string) {
 	}
 }
 
-// confirmSLIP39Flow shows a pre-engrave review of a parsed SLIP-39 share.
-// Back (Button1) → false; Engrave (Button3) → true.
-func confirmSLIP39Flow(ctx *Context, th *Colors, s slip39words.Share) bool {
+// slip39ConfirmAction is the result of the pre-engrave SLIP-39 confirm screen.
+type slip39ConfirmAction int
+
+const (
+	slip39Back    slip39ConfirmAction = iota // Button1
+	slip39Engrave                            // Button3 / Center
+	slip39Recover                            // Button2 — only when part of a multi-share set
+)
+
+// recoverable reports whether a share can be combined with siblings: it must be
+// part of a set with a threshold ≥ 2 layer (member or group), so the Recover
+// path always exercises a digest gate. A lone 1-of-1 share takes the verbatim
+// Engrave path only.
+func recoverableSLIP39(s slip39words.Share) bool {
+	return s.MemberThreshold > 1 || s.GroupThreshold > 1
+}
+
+// confirmSLIP39Flow shows a pre-engrave review of a parsed SLIP-39 share. For a
+// lone 1-of-1 share it offers Back/Engrave; for a share in a multi-share set it
+// also offers Recover (reconstruct the seed from enough shares). Button2 is
+// ALWAYS drained every frame — even when Recover is not offered — so an
+// unconsumed event cannot block the router queue head in a direct-call
+// (non-runUI) context. (Cycle-B R0-C1 EventRouter footgun.)
+func confirmSLIP39Flow(ctx *Context, th *Colors, s slip39words.Share) slip39ConfirmAction {
+	recover := recoverableSLIP39(s)
 	lines := []string{
 		fmt.Sprintf("id %d", s.Identifier),
 		fmt.Sprintf("member %d of %d", s.MemberIndex+1, s.MemberThreshold),
@@ -39,21 +61,36 @@ func confirmSLIP39Flow(ctx *Context, th *Colors, s slip39words.Share) bool {
 		lines = append(lines, fmt.Sprintf("group %d of %d", s.GroupIndex+1, s.GroupCount))
 	}
 	lines = append(lines, fmt.Sprintf("%d words", len(s.Mnemonic)))
+	if recover {
+		lines = append(lines, "Engrave this share, or Recover the seed")
+	}
 
 	backBtn := &Clickable{Button: Button1}
+	recoverBtn := &Clickable{Button: Button2}
 	engraveBtn := &Clickable{Button: Button3, AltButton: Center}
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
-			return false
+			return slip39Back
+		}
+		// Always drain Button2 — even for a lone share, where Recover is not
+		// offered — so an unconsumed event cannot block the router queue head
+		// in a direct-call (non-runUI) context. Act on it only when offered.
+		recoverClicked := recoverBtn.Clicked(ctx)
+		if recover && recoverClicked {
+			return slip39Recover
 		}
 		if engraveBtn.Clicked(ctx) {
-			return true
+			return slip39Engrave
 		}
 		dims := ctx.Platform.DisplaySize()
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		navBtns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer},
-		}...)
+		}
+		if recover {
+			navBtns = append(navBtns, NavButton{Clickable: recoverBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		navBtns = append(navBtns, NavButton{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Confirm SLIP-39 Share")
 
 		screen := layout.Rectangle{Max: dims}
@@ -70,16 +107,33 @@ func confirmSLIP39Flow(ctx *Context, th *Colors, s slip39words.Share) bool {
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
-	return false
+	return slip39Back
 }
 
-// engraveSLIP39 confirms a SLIP-39 share and engraves it verbatim. Always returns
-// true (recognized/handled) — Back, a fit failure, and engrave-complete all
-// return true, never falling to the caller's scanUnknownFormat ("Unknown format").
+// engraveSLIP39 confirms a SLIP-39 share. A lone share is engraved verbatim; a
+// share in a multi-share set may instead be Recovered into the master seed,
+// which is then engraved as the native BIP-39 plate via backupWalletFlow.
+// Always returns true (recognized/handled) — Back, a fit failure, and
+// engrave-complete all return true, never falling to the caller's
+// scanUnknownFormat ("Unknown format").
 func engraveSLIP39(ctx *Context, th *Colors, scan slip39words.Share) bool {
-	if !confirmSLIP39Flow(ctx, th, scan) {
-		return true
+	for {
+		switch confirmSLIP39Flow(ctx, th, scan) {
+		case slip39Back:
+			return true
+		case slip39Engrave:
+			engraveSLIP39Verbatim(ctx, th, scan)
+			return true
+		case slip39Recover:
+			// Wired in Task 4 (recover → acknowledgement → fingerprint →
+			// backupWalletFlow). Placeholder: re-confirm.
+			continue
+		}
 	}
+}
+
+// engraveSLIP39Verbatim engraves a single share's words verbatim onto a plate.
+func engraveSLIP39Verbatim(ctx *Context, th *Colors, scan slip39words.Share) {
 	seedDesc := backup.Seed{
 		Mnemonic:     scan.Mnemonic, // canonical uppercase words; verbatim
 		ShortestWord: slip39words.ShortestWord,
@@ -91,16 +145,16 @@ func engraveSLIP39(ctx *Context, th *Colors, scan slip39words.Share) bool {
 	seedSide, err := backup.EngraveSeed(params, seedDesc)
 	if err != nil {
 		showError(ctx, th, "Too large", "Share doesn't fit a plate.")
-		return true
+		return
 	}
 	plate, err := toPlate(seedSide, params)
 	if err != nil {
 		showError(ctx, th, "Too large", "Share doesn't fit a plate.")
-		return true
+		return
 	}
 	for {
 		if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
-			return true
+			return
 		}
 	}
 }
