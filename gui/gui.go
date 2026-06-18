@@ -718,24 +718,35 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	}
 }
 
-func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, bool) {
+func inputCodex32Flow(ctx *Context, th *Colors, title string) (any, bool) {
 	kbd := newCodex32Keyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
-	okBtn := &Clickable{Button: Button3}
+	okBtn := &Clickable{Button: Button3} // OK when valid; "Fix?" when invalid-in-window
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
-		// Parse once per frame (MIN-3): New gates acceptance; ParsePrefix drives
-		// the advisory readout.
-		share, nerr := codex32.New(kbd.Fragment)
-		parsed, perr := codex32.ParsePrefix(kbd.Fragment)
-		valid := nerr == nil
+		frag := kbd.Fragment
+		parsed, perr := codex32.ParsePrefix(frag)
+		obj, valid, msErr := validateMStar(frag, parsed)
+		inWin := codex32.MStarInWindow(frag)
 
 		if backBtn.Clicked(ctx) {
 			break
 		}
-		if valid && okBtn.Clicked(ctx) {
-			return share, true
+		// Always drain Button3 (avoid a queue-head block in direct-call tests);
+		// act on it as OK when valid, or as "Fix?" when invalid-in-window.
+		clicked3 := okBtn.Clicked(ctx)
+		if valid && clicked3 {
+			return obj, true
+		}
+		if !valid && inWin && clicked3 {
+			res, ok := codex32.Correct(frag)
+			if !ok {
+				showError(ctx, th, "No correction", "No fix within 4 changes — check your typing")
+			} else if confirmCorrectionFlow(ctx, th, res, strings.ToLower(parsed.HRP)) {
+				kbd.Fragment = res.Corrected // accept; next frame re-validates → OK
+			}
+			continue
 		}
 		dims := ctx.Platform.DisplaySize()
 
@@ -746,7 +757,7 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, b
 		kbdOp, kbdsz := kbd.Layout(ctx, th)
 		kbdOp = kbdOp.Offset(content.S(kbdsz))
 
-		word, frgSize := widget.Labelw(&ctx.B, ctx.Styles.word, dims.X-50, th.Background, kbd.Fragment)
+		word, frgSize := widget.Labelw(&ctx.B, ctx.Styles.word, dims.X-50, th.Background, frag)
 		frgSize.X = max(frgSize.X, 100)
 		r := image.Rectangle{Max: frgSize}
 		r.Min.Y -= 3
@@ -763,8 +774,6 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, b
 			),
 		).Offset(wordOff)
 
-		// Status line + (feedback | field line), stacked below the fragment box,
-		// each clamped so it never overlaps the keyboard (mirrors inputWordsFlow).
 		var infoOps []op.Op
 		lineY := wordOff.Y + frgSize.Y + 8
 		addLine := func(s string) {
@@ -779,18 +788,21 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, b
 			infoOps = append(infoOps, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
 			lineY = y + sz.Y + 4
 		}
-		addLine(codex32StatusLine(len(kbd.Fragment)))
-		if fb := codex32Feedback(kbd.Fragment, perr, nerr); fb != "" {
+		addLine(mstarStatusLine(frag, parsed))
+		if fb := mstarFeedback(frag, parsed, perr, msErr, valid); fb != "" {
 			addLine(fb)
-		} else {
-			addLine(codex32FieldLine(parsed))
+		} else if strings.EqualFold(parsed.HRP, "ms") || parsed.HRP == "" {
+			addLine(codex32FieldLine(parsed)) // ms-only header line
 		}
 
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}...)
-		if valid {
-			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
-			nav = op.Layer(nav, nav2)
+		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
+		switch {
+		case valid:
+			navBtns = append(navBtns, NavButton{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
+		case inWin:
+			navBtns = append(navBtns, NavButton{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconEdit}) // "Fix?"
 		}
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 
 		frameOps := []op.Op{kbdOp, word}
@@ -798,7 +810,7 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, b
 		frameOps = append(frameOps, nav, titleOp, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
-	return codex32.String{}, false
+	return nil, false
 }
 
 func inputSLIP39Flow(ctx *Context, th *Colors, mnemonic slip39words.Mnemonic, selected int, title string) bool {
@@ -2020,7 +2032,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",
 			Lead:    "Choose number of words",
-			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39", "SEED XOR"},
+			Choices: []string{"12 WORDS", "24 WORDS", "M*1 STRING", "SLIP-39", "SEED XOR"},
 		}
 		for {
 			choice, ok := cs.Choose(ctx, th)
@@ -2035,9 +2047,9 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 					return mnemonic, true
 				}
 			case 2:
-				s, ok := inputCodex32Flow(ctx, th, "Input Codex32 Share")
+				obj, ok := inputCodex32Flow(ctx, th, "Input m*1 string")
 				if ok {
-					return s, true
+					return obj, true
 				}
 			case 3:
 				n := slip39LengthPick(ctx, th)

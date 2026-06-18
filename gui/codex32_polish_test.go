@@ -72,7 +72,7 @@ func codex32Frame(t *testing.T, typed string) string {
 	t.Helper()
 	ctx := NewContext(newPlatform())
 	frame, quit := runUI(ctx, func() {
-		inputCodex32Flow(ctx, &descriptorTheme, "Input Codex32 Share")
+		inputCodex32Flow(ctx, &descriptorTheme, "Input m*1 string")
 	})
 	defer quit()
 	if typed != "" {
@@ -273,5 +273,52 @@ func TestRecoverCodex32Mismatch(t *testing.T) {
 	}
 	if !uiContains(content, "mismatched") {
 		t.Errorf("expected a mismatch error; got %q", content)
+	}
+}
+
+// During codex32 share recovery, entering a non-codex32 (md/mk) string is
+// rejected — recovery is ms-share-only. (Phase B caller-ripple guard.)
+func TestRecoverRejectsNonCodex32(t *testing.T) {
+	// A valid ms share with threshold ≥2 (mirrors TestRecoverCodex32's setup).
+	shareA, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	// Enter a VALID md1 for "share 2": OK it (Button3 → mdmkText), the
+	// type-assert rejects it with a modal (dismissed by Button3), then Back
+	// (Button1) exits recovery.
+	runes(&ctx.Router, "md1yqpqqxqq8xtwhw4xwn4qh")
+	click(&ctx.Router, Button3, Button3, Button1) // OK md1 → dismiss modal → Back
+	_, ok := recoverCodex32Flow(ctx, &descriptorTheme, shareA)
+	if ok {
+		t.Fatal("recovery must not accept a non-codex32 entry")
+	}
+}
+
+// The correction-confirm screen: Button3 accepts, Button1 rejects, and Button2
+// is drained every frame (must not block Button3 — the multishare R0-C1 lesson).
+func TestConfirmCorrectionFlow(t *testing.T) {
+	res := codex32.CorrectionResult{
+		Corrected: "MD1YQPQQXQQ8XTWHW4XWN4QH",
+		Edits:     []codex32.Edit{{Pos: 5, Was: 'Z', Now: 'P'}},
+	}
+	// Accept (Button3).
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button3)
+	if !confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button3 should accept the correction")
+	}
+	// Reject (Button1).
+	ctx = NewContext(newPlatform())
+	click(&ctx.Router, Button1)
+	if confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button1 should reject the correction")
+	}
+	// Button2 must not block Button3 (drain).
+	ctx = NewContext(newPlatform())
+	click(&ctx.Router, Button2, Button3)
+	if !confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button2 must be drained so Button3 still accepts")
 	}
 }
