@@ -178,6 +178,30 @@ func Describe(err error) string {
 		return "bad padding"
 	case errors.Is(err, errGroupThresholdExceedsCount):
 		return "group threshold exceeds count"
+	case errors.Is(err, errIdentifierMismatch):
+		return "id mismatch"
+	case errors.Is(err, errExtendableMismatch):
+		return "extendable mismatch"
+	case errors.Is(err, errIterationExponentMismatch):
+		return "iteration mismatch"
+	case errors.Is(err, errGroupThresholdMismatch):
+		return "group threshold mismatch"
+	case errors.Is(err, errGroupCountMismatch):
+		return "group count mismatch"
+	case errors.Is(err, errShareValueLengthMismatch):
+		return "value length mismatch"
+	case errors.Is(err, errInvalidShareValueLength):
+		return "value length mismatch"
+	case errors.Is(err, errMemberThresholdMismatch):
+		return "member threshold mismatch"
+	case errors.Is(err, errDuplicateMemberIndex):
+		return "duplicate share"
+	case errors.Is(err, errInsufficientShares):
+		return "not enough shares"
+	case errors.Is(err, errDigestVerificationFailed):
+		return "bad share set"
+	case errors.Is(err, errEmptyShares):
+		return "not enough shares"
 	default:
 		return "invalid"
 	}
