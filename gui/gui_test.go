@@ -692,3 +692,37 @@ func TestWordFlowLastWordNoFlash(t *testing.T) {
 		t.Errorf("expected candidate count on the frame entering the last word (no flash); got %q", content)
 	}
 }
+
+// bip39FromWords builds a bip39.Mnemonic from a space-separated word string,
+// mapping each word via bip39.ClosestWord (failing the test on no match).
+func bip39FromWords(t *testing.T, s string) bip39.Mnemonic {
+	t.Helper()
+	fields := strings.Fields(s)
+	m := make(bip39.Mnemonic, len(fields))
+	for i, w := range fields {
+		// Wordlist labels are uppercase (the keypad uppercases typed runes),
+		// and ClosestWord binary-searches against them.
+		word, ok := bip39.ClosestWord(strings.ToUpper(w))
+		if !ok {
+			t.Fatalf("bip39FromWords: no match for %q", w)
+		}
+		m[i] = word
+	}
+	return m
+}
+
+func TestMasterFingerprintPassphrase(t *testing.T) {
+	// Use a known-valid 12-word mnemonic from the test corpus (the abandon vector).
+	mn := bip39FromWords(t, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	bare, err := masterFingerprintFor(mn, &chaincfg.MainNetParams, "")
+	if err != nil {
+		t.Fatalf("bare fp: %v", err)
+	}
+	pass, err := masterFingerprintFor(mn, &chaincfg.MainNetParams, "TREZOR")
+	if err != nil {
+		t.Fatalf("passphrase fp: %v", err)
+	}
+	if bare == pass {
+		t.Errorf("bare and passphrase fingerprints must differ: both %08X", bare)
+	}
+}

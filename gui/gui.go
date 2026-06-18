@@ -184,8 +184,8 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 	r.Y = offy + m.Descent.Ceil()
 }
 
-func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params) (*hdkeychain.ExtendedKey, bool) {
-	seed := bip39.MnemonicSeed(m, "")
+func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
+	seed := bip39.MnemonicSeed(m, password)
 	mk, err := hdkeychain.NewMaster(seed, net)
 	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
 	// According to [0] the odds of encountering a seed that generates
@@ -452,7 +452,7 @@ type Plate struct {
 }
 
 func engraveSeed(params engrave.Params, m bip39.Mnemonic) (Plate, error) {
-	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams)
+	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams, "")
 	if err != nil {
 		return Plate{}, err
 	}
@@ -479,8 +479,8 @@ func engraveSeed(params engrave.Params, m bip39.Mnemonic) (Plate, error) {
 	return toPlate(seedSide, params)
 }
 
-func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params) (uint32, error) {
-	mk, ok := deriveMasterKey(m, network)
+func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password string) (uint32, error) {
+	mk, ok := deriveMasterKey(m, network, password)
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
 	}
@@ -2068,7 +2068,7 @@ events:
 				showErr(scr)
 				continue
 			}
-			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams); !ok {
+			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, ""); !ok {
 				showErr(&ErrorScreen{
 					Title: "Invalid Seed",
 					Body:  "The seed is invalid.",
