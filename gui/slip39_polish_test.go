@@ -26,6 +26,9 @@ func TestConfirmSLIP39Render(t *testing.T) {
 	if !uiContains(c, "member 1 of 1") {
 		t.Errorf("confirm should show member 1 of 1; got %q", c)
 	}
+	if !uiContains(c, "20 words") {
+		t.Errorf("confirm should show the word count; got %q", c)
+	}
 }
 
 func TestEngraveSLIP39BackoutRecognized(t *testing.T) {

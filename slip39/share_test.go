@@ -57,6 +57,23 @@ func TestParseShare(t *testing.T) {
 	if _, err := ParseShare("duckling enlarge"); !errors.Is(err, errWrongLength) {
 		t.Errorf("wrong length: %v, want errWrongLength", err)
 	}
+	// Empty input → wrong length (0 words).
+	if _, err := ParseShare(""); !errors.Is(err, errWrongLength) {
+		t.Errorf("empty: %v, want errWrongLength", err)
+	}
+	// 33-word (256-bit) share → unsupported size (exercises the wordsLong branch).
+	if _, err := ParseShare(strings.TrimSpace(strings.Repeat("duckling ", 33))); !errors.Is(err, errUnsupportedSize) {
+		t.Errorf("33 words: %v, want errUnsupportedSize", err)
+	}
+	// A prefix of a real word ("ducklin" ⊂ "duckling") must be rejected as
+	// not-in-wordlist — exactWord must be exact, not ClosestWord's prefix match.
+	if _, err := ParseShare("ducklin" + vecDuckling[len("duckling"):]); !errors.Is(err, errNotInWordlist) {
+		t.Errorf("prefix word: %v, want errNotInWordlist", err)
+	}
+	// Extra interior whitespace is tolerated (strings.Fields collapses runs).
+	if _, err := ParseShare(strings.ReplaceAll(vecDuckling, " ", "  ")); err != nil {
+		t.Errorf("double-spaced valid share: %v", err)
+	}
 }
 
 func TestDescribe(t *testing.T) {
