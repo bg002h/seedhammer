@@ -3,7 +3,10 @@
 // These are advisory: New remains the sole validity authority.
 package codex32
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Exported codex32 total-length bounds (BIP-93 / firmware gate). A valid string
 // is in [ShortCodeMinLength, ShortCodeMaxLength] (short checksum) or
@@ -41,4 +44,105 @@ func Describe(err error) string {
 	default:
 		return "invalid"
 	}
+}
+
+// Fields holds the codex32 header fields determinable from an in-progress
+// fragment. Each XxxKnown flag is true once that field is present and valid.
+type Fields struct {
+	HRP             string // "" until the '1' separator is seen
+	Threshold       int    // 0,2..9; valid only if ThresholdKnown
+	ThresholdKnown  bool
+	Identifier      string // up to 4 chars; valid only if IdentifierKnown
+	IdentifierKnown bool
+	ShareIndex      rune // valid only if ShareIndexKnown
+	ShareIndexKnown bool
+	Unshared        bool // ShareIndexKnown && ShareIndex is 's'/'S'
+}
+
+// ParsePrefix fail-soft-parses the determinable header fields of an in-progress
+// codex32 fragment without panicking. The returned error is non-nil ONLY for a
+// determinable violation (mixed case, non-bech32 character, bad threshold digit,
+// or threshold-0 without index S); a merely-too-short fragment returns
+// (partialFields, nil). It never splits payload/checksum — their boundary
+// depends on the final total length. Errors are the same sentinels New uses
+// (wrapped with %w), so Describe maps them. Advisory only: New stays the sole
+// validity authority.
+func ParsePrefix(frag string) (Fields, error) {
+	var f Fields
+	// When splitHRP finds no '1', it returns ("", frag) — so `data` aliases the
+	// ENTIRE input in that case. We early-return below before touching `data`,
+	// so no field is read from the not-yet-data prefix.
+	hrp, data := splitHRP(frag)
+	// Case consistency (HRP + data) is determinable at any length.
+	if err := checkCase(frag); err != nil {
+		return f, fmt.Errorf("codex32: %w", err)
+	}
+	if hrp == "" {
+		// No '1' separator yet: the typed chars are HRP candidates, not data.
+		return f, nil
+	}
+	// HRP is recorded for display, not independently rejected: New is the
+	// authority and surfaces a wrong HRP as a checksum mismatch (it folds the
+	// HRP into the checksum), so ParsePrefix stays consistent with New.
+	f.HRP = hrp
+
+	// Threshold: data[0] at len>=1 (∈ {0,2..9}; '1' and non-digits are invalid).
+	if len(data) >= 1 {
+		switch data[0] {
+		case '0', '2', '3', '4', '5', '6', '7', '8', '9':
+			f.Threshold = int(data[0] - '0')
+			f.ThresholdKnown = true
+		default:
+			return f, fmt.Errorf("codex32: %w", errInvalidThreshold)
+		}
+	}
+
+	// Identifier: data[1:5] at len>=5; each char must be bech32.
+	if len(data) >= 5 {
+		for _, c := range data[1:5] {
+			if _, ok := feFromRune(c); !ok {
+				return f, fmt.Errorf("codex32: %w", errInvalidCharacter)
+			}
+		}
+		f.Identifier = data[1:5]
+		f.IdentifierKnown = true
+	}
+
+	// Share index: data[5] at len>=6; bech32; threshold-0 ⇒ index s/S.
+	if len(data) >= 6 {
+		// data[5] is a byte; rune(byte) is the codepoint for ASCII (all valid
+		// bech32 is ASCII). Non-ASCII bytes (128..255) make feFromRune return
+		// false below → "invalid character", never a panic.
+		idx := rune(data[5])
+		if _, ok := feFromRune(idx); !ok {
+			return f, fmt.Errorf("codex32: %w", errInvalidCharacter)
+		}
+		f.ShareIndex = idx
+		f.ShareIndexKnown = true
+		f.Unshared = idx == 's' || idx == 'S'
+		if f.ThresholdKnown && f.Threshold == 0 && !f.Unshared {
+			return f, fmt.Errorf("codex32: %w", errInvalidShareIndex)
+		}
+	}
+	return f, nil
+}
+
+// checkCase returns errInvalidCase if frag mixes upper- and lower-case ASCII
+// letters (digits are case-neutral) — matching the engine's case rule, for
+// display honesty. Moot on the force-uppercasing keypad, but the package API
+// should not silently accept mixed case.
+func checkCase(frag string) error {
+	hasUpper, hasLower := false, false
+	for _, c := range frag {
+		switch {
+		case c >= 'a' && c <= 'z':
+			hasLower = true
+		case c >= 'A' && c <= 'Z':
+			hasUpper = true
+		}
+	}
+	if hasUpper && hasLower {
+		return errInvalidCase
+	}
+	return nil
 }
