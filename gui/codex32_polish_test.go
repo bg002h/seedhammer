@@ -72,7 +72,7 @@ func codex32Frame(t *testing.T, typed string) string {
 	t.Helper()
 	ctx := NewContext(newPlatform())
 	frame, quit := runUI(ctx, func() {
-		inputCodex32Flow(ctx, &descriptorTheme)
+		inputCodex32Flow(ctx, &descriptorTheme, "Input Codex32 Share")
 	})
 	defer quit()
 	if typed != "" {
@@ -140,8 +140,8 @@ func TestConfirmCodex32Share(t *testing.T) {
 	if !uiContains(c, "Share A") {
 		t.Errorf("share: want \"Share A\"; got %q", c)
 	}
-	if !uiContains(c, "not a recovered seed") {
-		t.Errorf("share note: got %q", c)
+	if !uiContains(c, "Recover the secret") {
+		t.Errorf("share note: want recover affordance; got %q", c)
 	}
 }
 
@@ -203,5 +203,75 @@ func TestEngraveCodex32BackoutNotUnknown(t *testing.T) {
 	click(&ctx.Router, Button1) // Back at the confirm screen
 	if !engraveObjectFlow(ctx, &descriptorTheme, s) {
 		t.Error("cancel at codex32 confirm returned false (→ \"Unknown format\"); want true (recognized, not engraved)")
+	}
+}
+
+func TestConfirmCodex32ShareOffersRecover(t *testing.T) {
+	s, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2) // Recover
+	if got := confirmCodex32Flow(ctx, &descriptorTheme, s); got != codex32Recover {
+		t.Errorf("share + Button2 → %v, want codex32Recover", got)
+	}
+}
+
+func TestConfirmCodex32UnsharedNoRecover(t *testing.T) {
+	s, err := codex32.New("ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2, Button3) // Button2 must be inert for an unshared secret
+	if got := confirmCodex32Flow(ctx, &descriptorTheme, s); got != codex32Engrave {
+		t.Errorf("unshared + Button2,Button3 → %v, want codex32Engrave (Button2 ignored)", got)
+	}
+}
+
+func TestRecoverCodex32(t *testing.T) {
+	shareA, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	// k=2: enter the second share (C) and accept it.
+	runes(&ctx.Router, "MS12NAMECACDEFGHJKLMNPQRSTUVWXYZ023FTR2GDZMPY6PN")
+	click(&ctx.Router, Button3)
+	secret, ok := recoverCodex32Flow(ctx, &descriptorTheme, shareA)
+	if !ok {
+		t.Fatal("recoverCodex32Flow did not recover")
+	}
+	const want = "MS12NAMES6XQGUZTTXKEQNJSJZV4JV3NZ5K3KWGSPHUH6EVW"
+	if got := secret.String(); got != want {
+		t.Errorf("recovered %q, want %q", got, want)
+	}
+}
+
+func TestRecoverCodex32Mismatch(t *testing.T) {
+	shareA, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { recoverCodex32Flow(ctx, &descriptorTheme, shareA) })
+	defer quit()
+	// Enter a share from a DIFFERENT set (threshold 3, id CASH) and accept it.
+	runes(&ctx.Router, "MS13CASHA320ZYXWVUTSRQPNMLKJHGFEDCA2A8D0ZEHN8A0T")
+	click(&ctx.Router, Button3)
+	var content string
+	for i := 0; i < 8; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		content = c
+		if uiContains(content, "mismatched") {
+			break
+		}
+	}
+	if !uiContains(content, "mismatched") {
+		t.Errorf("expected a mismatch error; got %q", content)
 	}
 }

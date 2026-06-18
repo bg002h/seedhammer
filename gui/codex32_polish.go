@@ -5,7 +5,9 @@ import (
 	"image"
 	"strings"
 
+	"seedhammer.com/backup"
 	"seedhammer.com/codex32"
+	"seedhammer.com/font/constant"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
@@ -64,39 +66,62 @@ func codex32Feedback(frag string, perr, nerr error) string {
 	return ""
 }
 
-// confirmCodex32Flow shows a pre-engrave review of a (New-valid) codex32 share
-// and returns true to engrave, false to go back. It branches on the RAW share
-// index from ParsePrefix (NOT Split(), which remaps an unshared secret's
-// threshold 0→1, mislabeling it). The codex32 string is engraved verbatim;
-// multi-share recovery is a separate cycle.
-func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) bool {
+// codex32ConfirmAction is the result of the pre-engrave codex32 confirm screen.
+type codex32ConfirmAction int
+
+const (
+	codex32Back    codex32ConfirmAction = iota // Button1
+	codex32Engrave                             // Button3
+	codex32Recover                             // Button2 — only offered for a share (index != S)
+)
+
+// confirmCodex32Flow shows a pre-engrave review of a (New-valid) codex32 string.
+// For an unshared secret it offers Back/Engrave; for a share (index != S) it also
+// offers Recover (reconstruct the secret from k shares). It branches display on
+// the RAW ParsePrefix fields (NOT Split(), which remaps an unshared secret's
+// threshold 0→1). The codex32 string is engraved verbatim.
+func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) codex32ConfirmAction {
 	f, _ := codex32.ParsePrefix(scan.String()) // scan is New-valid → no error
+	title := "Confirm Codex32 Share"
 	lines := []string{"id " + strings.ToUpper(f.Identifier)}
 	if f.Unshared {
+		title = "Confirm Codex32 Secret"
 		lines = append(lines, "Unshared secret (S)")
 	} else {
 		lines = append(lines,
 			"Share "+strings.ToUpper(string(f.ShareIndex))+" of a k-of-n set",
-			"engraves THIS share, not a recovered seed",
+			"Engrave this share, or Recover the secret",
 		)
 	}
 	lines = append(lines, fmt.Sprintf("%d chars", len(scan.String())))
 
 	backBtn := &Clickable{Button: Button1}
+	recoverBtn := &Clickable{Button: Button2}
 	engraveBtn := &Clickable{Button: Button3, AltButton: Center}
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
-			return false
+			return codex32Back
+		}
+		// Always drain Button2 — even for an unshared secret, where Recover is not
+		// offered — so an unconsumed event cannot block the router queue head in a
+		// direct-call (non-runUI) context. Act on it only for a share. (R0 C1)
+		recoverClicked := recoverBtn.Clicked(ctx)
+		if !f.Unshared && recoverClicked {
+			return codex32Recover
 		}
 		if engraveBtn.Clicked(ctx) {
-			return true
+			return codex32Engrave
 		}
 		dims := ctx.Platform.DisplaySize()
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		navBtns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer},
-		}...)
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Confirm Codex32 Share")
+		}
+		if !f.Unshared {
+			navBtns = append(navBtns, NavButton{Clickable: recoverBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		navBtns = append(navBtns, NavButton{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 
 		screen := layout.Rectangle{Max: dims}
 		_, content := screen.CutTop(leadingSize)
@@ -108,11 +133,87 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) bool {
 			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
 			y += sz.Y + 6
 		}
-		frameOps := append([]op.Op{nav, title}, body...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
-	return false
+	return codex32Back
+}
+
+// showCodex32Error displays a dismissible error modal (Button3 dismisses) over a
+// blank background; returns when dismissed or ctx.Done.
+func showCodex32Error(ctx *Context, th *Colors, msg string) {
+	errScr := &ErrorScreen{Title: "Invalid share", Body: msg}
+	for !ctx.Done {
+		dims := ctx.Platform.DisplaySize()
+		d, dismissed := errScr.Layout(ctx, th, dims)
+		if dismissed {
+			return
+		}
+		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
+	}
+}
+
+// recoverCodex32Flow collects shares 2..k (k = the first share's threshold),
+// validating each against the set as it is added, then reconstructs the unshared
+// secret via Interpolate(shares,'S'). Returns (secret, true) on success, or
+// (_, false) if the user backs out or recovery fails.
+func recoverCodex32Flow(ctx *Context, th *Colors, first codex32.String) (codex32.String, bool) {
+	f, _ := codex32.ParsePrefix(first.String())
+	if !f.ThresholdKnown || f.Threshold < 2 { // unreachable for a New-valid share; defensive
+		return codex32.String{}, false
+	}
+	k := f.Threshold
+	id := strings.ToUpper(f.Identifier)
+	shares := []codex32.String{first}
+	for len(shares) < k {
+		title := fmt.Sprintf("Share %d of %d · id %s", len(shares)+1, k, id)
+		cand, ok := inputCodex32Flow(ctx, th, title)
+		if !ok {
+			return codex32.String{}, false // Back exits recovery
+		}
+		pf, _ := codex32.ParsePrefix(cand.String())
+		if pf.Unshared {
+			showCodex32Error(ctx, th, "enter a share, not the secret")
+			continue
+		}
+		if err := codex32.ConsistentShares(append(shares, cand)); err != nil {
+			showCodex32Error(ctx, th, codex32.Describe(err))
+			continue
+		}
+		shares = append(shares, cand)
+	}
+	secret, err := codex32.Interpolate(shares, 'S')
+	if err != nil { // defense-in-depth; should not happen after ConsistentShares + exactly k
+		showCodex32Error(ctx, th, codex32.Describe(err))
+		return codex32.String{}, false
+	}
+	return secret, true
+}
+
+// engraveCodex32 confirms a codex32 string and engraves it verbatim. A share may
+// instead be recovered into the unshared secret, which is then re-confirmed and
+// engraved. Returns true (recognized/handled) in all terminal cases — Back is a
+// deliberate decline, NOT "Unknown format".
+func engraveCodex32(ctx *Context, th *Colors, scan codex32.String) bool {
+	for {
+		switch confirmCodex32Flow(ctx, th, scan) {
+		case codex32Back:
+			return true
+		case codex32Recover:
+			secret, ok := recoverCodex32Flow(ctx, th, scan)
+			if !ok {
+				continue // back to the original share's confirm
+			}
+			scan = secret // recovered unshared secret; loop re-confirms it (no Recover offered for S)
+			continue
+		case codex32Engrave:
+			id, _, _ := scan.Split()
+			s := backup.SeedString{Title: id, Seed: scan.String(), Font: constant.Font}
+			backupSeedStringFlow(ctx, th, s)
+			return true
+		}
+	}
 }
 
 // codex32Keys is the on-screen codex32 keypad: digit row + the BIP-39
