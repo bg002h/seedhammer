@@ -168,9 +168,14 @@ func recoverCodex32Flow(ctx *Context, th *Colors, first codex32.String) (codex32
 	shares := []codex32.String{first}
 	for len(shares) < k {
 		title := fmt.Sprintf("Share %d of %d · id %s", len(shares)+1, k, id)
-		cand, ok := inputCodex32Flow(ctx, th, title)
+		obj, ok := inputCodex32Flow(ctx, th, title)
 		if !ok {
 			return codex32.String{}, false // Back exits recovery
+		}
+		cand, isCodex32 := obj.(codex32.String)
+		if !isCodex32 {
+			showCodex32Error(ctx, th, "enter a codex32 share (ms1…)")
+			continue
 		}
 		pf, _ := codex32.ParsePrefix(cand.String())
 		if pf.Unshared {
@@ -234,4 +239,116 @@ func newCodex32Keyboard(ctx *Context) *Keyboard {
 		}
 	}
 	return kbd
+}
+
+// validateMStar runs the per-HRP completeness/validity check for an m*1 fragment
+// and returns the typed value the engrave dispatch routes: a codex32.String for
+// ms (via New), or an mdmkText for md/mk (via ValidMD/ValidMK). The third return
+// is New's error for ms feedback (nil for md/mk). (Phase B; SPEC §4.1(a).)
+func validateMStar(frag string, f codex32.Fields) (obj any, valid bool, msErr error) {
+	switch {
+	case strings.EqualFold(f.HRP, "ms"):
+		s, err := codex32.New(frag)
+		if err == nil {
+			return s, true, nil
+		}
+		return nil, false, err
+	case strings.EqualFold(f.HRP, "md"):
+		if codex32.ValidMD(frag) {
+			return mdmkText(frag), true, nil
+		}
+	case strings.EqualFold(f.HRP, "mk"):
+		if codex32.ValidMK(frag) {
+			return mdmkText(frag), true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// mstarStatusLine is the HRP-aware length readout. ms reuses codex32StatusLine
+// (total windows); md/mk report a data-part window state. (SPEC §4.1(b).)
+func mstarStatusLine(frag string, f codex32.Fields) string {
+	switch {
+	case strings.EqualFold(f.HRP, "md"), strings.EqualFold(f.HRP, "mk"):
+		if codex32.MStarInWindow(frag) {
+			return fmt.Sprintf("%s · %d chars", strings.ToLower(f.HRP), len(frag))
+		}
+		return fmt.Sprintf("%d chars", len(frag))
+	default: // ms or pre-separator
+		return codex32StatusLine(len(frag))
+	}
+}
+
+// mstarFeedback is the HRP-aware advisory error label. md/mk SUPPRESS the
+// codex32-share-schema ParsePrefix errors (which fire spuriously on md/mk data,
+// e.g. "bad threshold") and show only a generic "bad checksum" once in the
+// per-HRP length window; ms delegates to codex32Feedback. (SPEC §4.1(c).)
+func mstarFeedback(frag string, f codex32.Fields, perr, msErr error, valid bool) string {
+	if valid || frag == "" {
+		return ""
+	}
+	if strings.EqualFold(f.HRP, "md") || strings.EqualFold(f.HRP, "mk") {
+		if codex32.MStarInWindow(frag) {
+			return "bad checksum"
+		}
+		return ""
+	}
+	return codex32Feedback(frag, perr, msErr) // ms (or pre-separator) path unchanged
+}
+
+// confirmCorrectionFlow shows the proposed correction's per-position diff and
+// asks the user to confirm it against their source card BEFORE the corrected
+// string is accepted. The per-position diff is the UNIVERSAL anchor for all three
+// m*1 (SPEC §2.3); for ms ONLY it also shows the decoded id·thr·share header line
+// (the codex32 share schema does not exist for md/mk). Button1 rejects, Button3
+// accepts; Button2 is drained every frame so it cannot block the queue head.
+func confirmCorrectionFlow(ctx *Context, th *Colors, res codex32.CorrectionResult, hrp string) bool {
+	lines := make([]string, 0, len(res.Edits)+2)
+	for _, e := range res.Edits {
+		// e.Pos is a full-string rune index (HRP + the '1' separator included);
+		// +1 makes it 1-based for the human comparing against their source card.
+		lines = append(lines, fmt.Sprintf("pos %d: %c → %c", e.Pos+1, rune(e.Was), rune(e.Now)))
+	}
+	if hrp == "ms" {
+		if f, err := codex32.ParsePrefix(res.Corrected); err == nil {
+			if fl := codex32FieldLine(f); fl != "" {
+				lines = append(lines, fl)
+			}
+		}
+	}
+	lines = append(lines, "Compare each change to your source card.")
+
+	backBtn := &Clickable{Button: Button1}
+	drainBtn := &Clickable{Button: Button2}
+	acceptBtn := &Clickable{Button: Button3, AltButton: Center}
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return false
+		}
+		drainBtn.Clicked(ctx) // drain Button2 (R0-C1 idiom)
+		if acceptBtn.Clicked(ctx) {
+			return true
+		}
+		dims := ctx.Platform.DisplaySize()
+		nav, _ := layoutNavigation(&ctx.B, th, dims,
+			NavButton{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			NavButton{Clickable: acceptBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		)
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Apply this correction?")
+
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(leadingSize)
+		body := make([]op.Op, 0, len(lines))
+		y := content.Min.Y + 8
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return false
 }

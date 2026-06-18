@@ -43,3 +43,40 @@ func TestInputSeedCodex32(t *testing.T) {
 		t.Errorf("codex32 entry returned %q, want %q", got, want)
 	}
 }
+
+// Typing a valid md1 string returns it as mdmkText (routed to mdmkFlow), proving
+// the HRP-dispatched entry handles md/mk, not just ms. (Phase B.)
+func TestInputMStarMD1(t *testing.T) {
+	const valid = "md1yqpqqxqq8xtwhw4xwn4qh"
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Down, Down, Button3) // menu -> M*1 STRING (index 2)
+	runes(&ctx.Router, valid)
+	click(&ctx.Router, Button3) // OK (valid)
+	obj, ok := newInputFlow(ctx, &descriptorTheme)
+	if !ok {
+		t.Fatal("newInputFlow did not return a value")
+	}
+	got, isMd := obj.(mdmkText)
+	if !isMd {
+		t.Fatalf("returned %T, want mdmkText", obj)
+	}
+	if want := mdmkText(strings.ToUpper(valid)); got != want {
+		t.Errorf("md1 entry = %q, want %q", got, want)
+	}
+}
+
+// Typing a valid mk1 string returns mdmkText.
+func TestInputMStarMK1(t *testing.T) {
+	const valid = "mk1qpzg69ppsnz4v7cjv3qfjhf76k4t5pt96u0psdrqfqvll8qh7h5athg837pmkf3dpug2mmjtfel6x"
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Down, Down, Button3)
+	runes(&ctx.Router, valid)
+	click(&ctx.Router, Button3)
+	obj, ok := newInputFlow(ctx, &descriptorTheme)
+	if !ok {
+		t.Fatal("newInputFlow did not return a value")
+	}
+	if got, isMd := obj.(mdmkText); !isMd || got != mdmkText(strings.ToUpper(valid)) {
+		t.Fatalf("mk1 entry = %v (%T), want mdmkText", obj, obj)
+	}
+}

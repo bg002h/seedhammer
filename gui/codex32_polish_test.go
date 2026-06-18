@@ -275,3 +275,23 @@ func TestRecoverCodex32Mismatch(t *testing.T) {
 		t.Errorf("expected a mismatch error; got %q", content)
 	}
 }
+
+// During codex32 share recovery, entering a non-codex32 (md/mk) string is
+// rejected — recovery is ms-share-only. (Phase B caller-ripple guard.)
+func TestRecoverRejectsNonCodex32(t *testing.T) {
+	// A valid ms share with threshold ≥2 (mirrors TestRecoverCodex32's setup).
+	shareA, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	// Enter a VALID md1 for "share 2": OK it (Button3 → mdmkText), the
+	// type-assert rejects it with a modal (dismissed by Button3), then Back
+	// (Button1) exits recovery.
+	runes(&ctx.Router, "md1yqpqqxqq8xtwhw4xwn4qh")
+	click(&ctx.Router, Button3, Button3, Button1) // OK md1 → dismiss modal → Back
+	_, ok := recoverCodex32Flow(ctx, &descriptorTheme, shareA)
+	if ok {
+		t.Fatal("recovery must not accept a non-codex32 entry")
+	}
+}
