@@ -7,10 +7,12 @@ import (
 	"unicode/utf8"
 
 	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/op"
+	"seedhammer.com/gui/widget"
 )
 
-// (R0 C-1/C-2: NO "fmt"; NO "seedhammer.com/gui/layout". The op/widget imports
-// land with Layout in the next commit.)
+// (R0 C-1/C-2: NO "fmt" — Layout uses widget.Labelf, not stdlib fmt; NO
+// "seedhammer.com/gui/layout" — this widget references no layout.* symbol.)
 
 // Passphrase keyboard pages (case-preserving, printable-ASCII).
 const (
@@ -321,4 +323,74 @@ func (k *PassphraseKeyboard) adjustCol(row int) bool {
 		}
 	}
 	return found
+}
+
+// Layout renders the masked/revealed readout above the active page's key grid.
+// The returned image.Point is the COMBINED extent (readout + grid).
+func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Point) {
+	// Readout: masked '*'×len (default) or cleartext.
+	shown := k.Fragment
+	if !k.revealed {
+		shown = strings.Repeat("*", utf8.RuneCountInString(k.Fragment))
+	}
+	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, math.MaxInt, th.Text, shown)
+	const readoutGap = 8
+
+	gridY := readoutSz.Y + readoutGap
+	var content op.Op
+	rows := k.keys()
+	for i, row := range rows {
+		for j, key := range row {
+			valid := k.Valid(key)
+			bgcol := th.Text
+			col := th.Text
+			active := false
+			switch {
+			case !valid:
+				bgcol = mulAlpha(bgcol, theme.inactiveMask)
+				col = bgcol
+			case i == k.row && j == k.col:
+				active = true
+				col = th.Background
+			}
+			bgsz := key.size
+			bgr := image.Rectangle{Max: bgsz}
+			inpOp := op.Input(&ctx.B, &k.pages[k.page][i][j].clk).Clip(bgr)
+			var keyOp op.Op
+			var sz image.Point
+			switch {
+			case key.action == ppBackspace:
+				icn := assets.KeyBackspace
+				sz = image.Pt(bgsz.X, icn.Bounds().Dy())
+				keyOp = op.Compose(op.Color(&ctx.B, col), op.Mask(&ctx.B, icn))
+			case key.label != "" && key.action == ppReveal:
+				lbl := "show"
+				if k.revealed {
+					lbl = "hide"
+				}
+				keyOp, sz = widget.Labelf(&ctx.B, ctx.Styles.keyboard, col, "%s", lbl)
+			case key.label != "":
+				keyOp, sz = widget.Labelf(&ctx.B, ctx.Styles.keyboard, col, "%s", key.label)
+			default:
+				keyOp, sz = widget.Labelf(&ctx.B, ctx.Styles.keyboard, col, "%c", key.r) // NO ToUpper
+			}
+			keyOp = keyOp.Offset(bgsz.Sub(sz).Div(2))
+			bgr.Min.X -= keyPadX
+			bgr.Max.X += keyPadX
+			bgr.Min.Y -= keyPadY
+			bgr.Max.Y += keyPadY
+			bgOp := op.Color(&ctx.B, bgcol)
+			var mask op.MaskOp
+			if active {
+				mask = op.RoundedRect2(&ctx.B, bgr, keyCornerRadius)
+			} else {
+				mask = op.RoundedOutline2(&ctx.B, bgr, keyCornerRadius, keyLineWidth)
+			}
+			btnOp := op.Layer(inpOp, keyOp, op.Compose(bgOp, mask)).Offset(key.pos.Add(image.Pt(0, gridY)))
+			content = op.Layer(content, btnOp)
+		}
+	}
+	combined := image.Pt(max(readoutSz.X, k.size[k.page].X), gridY+k.size[k.page].Y)
+	full := op.Layer(content, readoutOp.Offset(image.Pt((combined.X-readoutSz.X)/2, 0)))
+	return full, combined
 }
