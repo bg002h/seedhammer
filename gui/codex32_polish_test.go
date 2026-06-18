@@ -1,0 +1,106 @@
+package gui
+
+import (
+	"strings"
+	"testing"
+
+	"seedhammer.com/codex32"
+)
+
+func TestCodex32StatusLine(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0 chars"},
+		{47, "47 chars"},
+		{48, "short · 48 chars"},
+		{93, "short · 93 chars"},
+		{94, "94 chars — keep typing"},
+		{124, "124 chars — keep typing"},
+		{125, "long · 125 chars"},
+		{127, "long · 127 chars"},
+		{128, "too long"},
+	}
+	for _, c := range cases {
+		if got := codex32StatusLine(c.n); got != c.want {
+			t.Errorf("codex32StatusLine(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
+func TestCodex32FieldLine(t *testing.T) {
+	f, _ := codex32.ParsePrefix("ms12name")
+	if got := codex32FieldLine(f); got != "id NAME · thr 2" {
+		t.Errorf("codex32FieldLine(ms12name) = %q", got)
+	}
+	f, _ = codex32.ParsePrefix("ms10tests")
+	if got := codex32FieldLine(f); got != "id TEST · thr 0 · share S" {
+		t.Errorf("codex32FieldLine(ms10tests) = %q", got)
+	}
+	var empty codex32.Fields
+	if got := codex32FieldLine(empty); got != "" {
+		t.Errorf("codex32FieldLine(empty) = %q, want \"\"", got)
+	}
+}
+
+func TestCodex32Feedback(t *testing.T) {
+	// Eager field error (bad threshold), regardless of length.
+	_, perr := codex32.ParsePrefix("MS11")
+	if got := codex32Feedback("MS11", perr, nil); got != "bad threshold" {
+		t.Errorf("feedback(MS11) = %q, want \"bad threshold\"", got)
+	}
+	// Dead zone (94..124): no determinable error → suppressed.
+	keep := "MS10TESTS" + strings.Repeat("X", 91) // 100 chars
+	_, perr = codex32.ParsePrefix(keep)
+	_, nerr := codex32.New(keep)
+	if got := codex32Feedback(keep, perr, nerr); got != "" {
+		t.Errorf("feedback(deadzone) = %q, want \"\"", got)
+	}
+	// Full-length bad checksum → shown.
+	bad := "MS10FAUXSXXXXXXXXXXXXXXXXXXXXXXXXXXVE740YYGE2GHP"
+	_, perr = codex32.ParsePrefix(bad)
+	_, nerr = codex32.New(bad)
+	if got := codex32Feedback(bad, perr, nerr); got != "bad checksum" {
+		t.Errorf("feedback(badchecksum) = %q, want \"bad checksum\"", got)
+	}
+}
+
+// codex32Frame runs inputCodex32Flow, types `typed` (uppercased by the keypad),
+// and returns the first rendered frame's extracted text.
+func codex32Frame(t *testing.T, typed string) string {
+	t.Helper()
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() {
+		inputCodex32Flow(ctx, &descriptorTheme)
+	})
+	defer quit()
+	if typed != "" {
+		runes(&ctx.Router, typed)
+	}
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	return content
+}
+
+func TestCodex32FlowReadout(t *testing.T) {
+	if c := codex32Frame(t, ""); !uiContains(c, "0 chars") {
+		t.Errorf("empty: want \"0 chars\"; got %q", c)
+	}
+	if c := codex32Frame(t, "ms12name"); !uiContains(c, "id NAME") || !uiContains(c, "thr 2") {
+		t.Errorf("fields: want id NAME + thr 2; got %q", c)
+	}
+	if c := codex32Frame(t, "ms11"); !uiContains(c, "bad threshold") {
+		t.Errorf("bad threshold: got %q", c)
+	}
+	keep := "ms10tests" + strings.Repeat("x", 91) // 100 chars → dead zone
+	if c := codex32Frame(t, keep); !uiContains(c, "keep typing") {
+		t.Errorf("keep typing: got %q", c)
+	}
+	bad := "ms10fauxsxxxxxxxxxxxxxxxxxxxxxxxxxxve740yyge2ghp" // valid len, bad checksum
+	if c := codex32Frame(t, bad); !uiContains(c, "bad checksum") {
+		t.Errorf("bad checksum: got %q", c)
+	}
+}
