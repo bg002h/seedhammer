@@ -41,6 +41,18 @@ func Describe(err error) string {
 		return "bad share index"
 	case errors.Is(err, errIncompleteGroup):
 		return "incomplete group"
+	case errors.Is(err, errMismatchedLength):
+		return "shares differ in length"
+	case errors.Is(err, errMismatchedHRP):
+		return "mismatched type"
+	case errors.Is(err, errMismatchedThreshold):
+		return "mismatched threshold"
+	case errors.Is(err, errMismatchedID):
+		return "mismatched id"
+	case errors.Is(err, errRepeatedIndex):
+		return "repeated share"
+	case errors.Is(err, errInsufficientShares):
+		return "need more shares"
 	default:
 		return "invalid"
 	}

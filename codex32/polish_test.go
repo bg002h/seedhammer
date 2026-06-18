@@ -43,7 +43,12 @@ func TestDescribe(t *testing.T) {
 		{errInvalidThreshold, "bad threshold"},
 		{errInvalidShareIndex, "bad share index"},
 		{errIncompleteGroup, "incomplete group"},
-		{errInsufficientShares, "invalid"}, // Interpolate-only → fallback
+		{errMismatchedLength, "shares differ in length"},
+		{errMismatchedHRP, "mismatched type"},
+		{errMismatchedThreshold, "mismatched threshold"},
+		{errMismatchedID, "mismatched id"},
+		{errRepeatedIndex, "repeated share"},
+		{errInsufficientShares, "need more shares"},
 		{errors.New("other"), "invalid"},
 	}
 	for _, c := range sentinels {
