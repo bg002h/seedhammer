@@ -2,9 +2,14 @@ package gui
 
 import (
 	"fmt"
+	"image"
 	"strings"
 
 	"seedhammer.com/codex32"
+	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/layout"
+	"seedhammer.com/gui/op"
+	"seedhammer.com/gui/widget"
 )
 
 // codex32StatusLine returns the window-aware length readout for an in-progress
@@ -57,4 +62,55 @@ func codex32Feedback(frag string, perr, nerr error) string {
 		return codex32.Describe(nerr)
 	}
 	return ""
+}
+
+// confirmCodex32Flow shows a pre-engrave review of a (New-valid) codex32 share
+// and returns true to engrave, false to go back. It branches on the RAW share
+// index from ParsePrefix (NOT Split(), which remaps an unshared secret's
+// threshold 0→1, mislabeling it). The codex32 string is engraved verbatim;
+// multi-share recovery is a separate cycle.
+func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) bool {
+	f, _ := codex32.ParsePrefix(scan.String()) // scan is New-valid → no error
+	lines := []string{"id " + strings.ToUpper(f.Identifier)}
+	if f.Unshared {
+		lines = append(lines, "Unshared secret (S)")
+	} else {
+		lines = append(lines,
+			"Share "+strings.ToUpper(string(f.ShareIndex))+" of a k-of-n set",
+			"engraves THIS share, not a recovered seed",
+		)
+	}
+	lines = append(lines, fmt.Sprintf("%d chars", len(scan.String())))
+
+	backBtn := &Clickable{Button: Button1}
+	engraveBtn := &Clickable{Button: Button3, AltButton: Center}
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return false
+		}
+		if engraveBtn.Clicked(ctx) {
+			return true
+		}
+		dims := ctx.Platform.DisplaySize()
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Confirm Codex32 Share")
+
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(leadingSize)
+		body := make([]op.Op, 0, len(lines))
+		y := content.Min.Y + 8
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		frameOps := append([]op.Op{nav, title}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return false
 }

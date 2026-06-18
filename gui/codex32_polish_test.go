@@ -104,3 +104,43 @@ func TestCodex32FlowReadout(t *testing.T) {
 		t.Errorf("bad checksum: got %q", c)
 	}
 }
+
+func TestConfirmCodex32Unshared(t *testing.T) {
+	s, err := codex32.New("ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { confirmCodex32Flow(ctx, &descriptorTheme, s) })
+	defer quit()
+	c, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if !uiContains(c, "Unshared secret") {
+		t.Errorf("unshared: want \"Unshared secret\"; got %q", c)
+	}
+	if !uiContains(c, "id TEST") {
+		t.Errorf("unshared id: got %q", c)
+	}
+}
+
+func TestConfirmCodex32Share(t *testing.T) {
+	s, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { confirmCodex32Flow(ctx, &descriptorTheme, s) })
+	defer quit()
+	c, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if !uiContains(c, "Share A") {
+		t.Errorf("share: want \"Share A\"; got %q", c)
+	}
+	if !uiContains(c, "not a recovered seed") {
+		t.Errorf("share note: got %q", c)
+	}
+}

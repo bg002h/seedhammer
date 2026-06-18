@@ -1841,6 +1841,9 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	// 		}
 	// 	}
 	case codex32.String:
+		if !confirmCodex32Flow(ctx, th, scan) {
+			return false
+		}
 		id, _, _ := scan.Split()
 		s := backup.SeedString{
 			Title: id,
