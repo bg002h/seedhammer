@@ -94,6 +94,14 @@ func TestConsistentShares(t *testing.T) {
 	if err := ConsistentShares([]String{a, cash}); !errors.Is(err, errMismatchedThreshold) {
 		t.Errorf("threshold mismatch: %v, want errMismatchedThreshold", err)
 	}
+	// Length mismatch (checked before threshold/id): a 48-char short string vs the
+	// 127-char long-code secret (BIP-93 vector 5). Exercises the length branch in
+	// isolation. (errMismatchedID/HRP can't be exercised with the current corpus —
+	// no same-threshold/different-id or non-"ms"-HRP New-valid share exists.)
+	long := mk("MS100C8VSM32ZXFGUHPCHTLUPZRY9X8GF2TVDW0S3JN54KHCE6MUA7LQPZYGSFJD6AN074RXVCEMLH8WU3TK925ACDEFGHJKLMNPQRSTUVWXY06FHPV80UNDVARHRAK")
+	if err := ConsistentShares([]String{a, long}); !errors.Is(err, errMismatchedLength) {
+		t.Errorf("length mismatch: %v, want errMismatchedLength", err)
+	}
 }
 
 func TestParsePrefix(t *testing.T) {
