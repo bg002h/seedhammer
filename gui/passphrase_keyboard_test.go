@@ -1,6 +1,9 @@
 package gui
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestPassphraseKeyboardConstruction(t *testing.T) {
 	ctx := NewContext(newPlatform())
@@ -180,5 +183,26 @@ func TestPassphrasePageCycleRender(t *testing.T) {
 	}
 	if !uiContains(got, "1") || !uiContains(got, "abc") { // page 2 has digit '1' + the page-cycle cap "abc"
 		t.Errorf("symbols page render: want '1' and the 'abc' page-cap; got %q", got)
+	}
+}
+
+func TestPassphraseRevealKeyFitsBothLabels(t *testing.T) {
+	// The reveal cap toggles "show"/"hide"; its cell must fit the wider label so
+	// neither overflows/clips its tap target (exec-review M-1).
+	ctx := NewContext(newPlatform())
+	k := NewPassphraseKeyboard(ctx)
+	fr := k.pages[0][len(k.pages[0])-1]
+	reveal := fr[2] // page-cycle, space, reveal, backspace
+	if reveal.action != ppReveal {
+		t.Fatalf("funcrow[2].action = %v, want ppReveal", reveal.action)
+	}
+	hideW := ctx.Styles.keyboard.Measure(math.MaxInt, "%s", "hide").X
+	showW := ctx.Styles.keyboard.Measure(math.MaxInt, "%s", "show").X
+	want := hideW
+	if showW > want {
+		want = showW
+	}
+	if reveal.size.X < want {
+		t.Errorf("reveal key size.X = %d, want >= %d (max of show/hide widths)", reveal.size.X, want)
 	}
 }

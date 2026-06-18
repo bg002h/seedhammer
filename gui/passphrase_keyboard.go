@@ -132,6 +132,15 @@ func ppKeyExtent(ctx *Context, key ppKey, cell image.Point) image.Point {
 	case ppBackspace:
 		b := assets.KeyBackspace.Bounds()
 		return image.Pt(b.Min.X*2+b.Dx(), cell.Y) // R0 I-1: include the Min.X margin (matches NewKeyboard gui.go:868)
+	case ppReveal:
+		// The reveal cap toggles "show"/"hide" at render time, so size the cell to
+		// the WIDER of the two — else a wider label would overflow/clip its tap
+		// target (exec-review M-1).
+		w := ctx.Styles.keyboard.Measure(math.MaxInt, "%s", "show").X
+		if h := ctx.Styles.keyboard.Measure(math.MaxInt, "%s", "hide").X; h > w {
+			w = h
+		}
+		return image.Pt(w, cell.Y)
 	default:
 		lbl := key.label
 		if lbl == "" {
