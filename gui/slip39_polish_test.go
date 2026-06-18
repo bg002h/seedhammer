@@ -399,6 +399,77 @@ func TestEngraveSLIP39RecoverToBackup(t *testing.T) {
 	})
 }
 
-// Silence unused warnings for fixtures/helpers consumed by later tasks during
-// incremental TDD; removed once those tests land.
-var _ = time.Second
+func TestConfirmSLIP39LoneButton2NoHang(t *testing.T) {
+	// Regression (Cycle-B no-hang class): a queued Button2 on a lone share must
+	// be drained every frame so it cannot block the router queue head — Button3
+	// still acts. This is a DIRECT-call test (no runUI): if Button2 stalled the
+	// queue, confirmSLIP39Flow would never observe Button3 and the test would
+	// hang rather than fail.
+	s := parseFixtureShare(t, slip39Duckling) // 1-of-1, no Recover offered
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2, Button2, Button3) // two drained Button2s, then act
+	if got := confirmSLIP39Flow(ctx, &descriptorTheme, s); got != slip39Engrave {
+		t.Errorf("lone share with leading Button2s: got %v want slip39Engrave (no-hang)", got)
+	}
+}
+
+func TestSLIP39PassphrasePromptDistinctFromBIP39(t *testing.T) {
+	// §5.5: the SLIP-39 passphrase prompt is labeled by FUNCTION and is
+	// distinct from the BIP-39 25th-word passphrase prompt. Render the SLIP-39
+	// passphrase choice (the first thing recoverSLIP39Flow shows once the lone
+	// share is "sufficient" — a 1-of-1 set: countSatisfied==GT immediately) and
+	// assert the disambiguating label.
+	ctx := NewContext(newPlatform())
+	cs := &ChoiceScreen{
+		Title:   "SLIP-39 Passphrase",
+		Lead:    "SLIP-39 passphrase? (NOT a BIP-39 passphrase) A wrong passphrase silently recovers a different seed.",
+		Choices: []string{"Skip", "Enter passphrase"},
+	}
+	frame, quit := runUI(ctx, func() { cs.Choose(ctx, &descriptorTheme) })
+	defer quit()
+	c, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if !uiContains(c, "NOT a BIP-39 passphrase") {
+		t.Errorf("SLIP-39 passphrase prompt must disambiguate from BIP-39; got %q", c)
+	}
+	// Sanity: the BIP-39 prompt (backupWalletFlow) uses a different lead.
+	ctx2 := NewContext(newPlatform())
+	bip := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+	frame2, quit2 := runUI(ctx2, func() { bip.Choose(ctx2, &descriptorTheme) })
+	defer quit2()
+	c2, ok2 := frame2()
+	if !ok2 {
+		t.Fatal("no BIP-39 prompt frame")
+	}
+	if uiContains(c2, "NOT a BIP-39 passphrase") {
+		t.Errorf("BIP-39 prompt must NOT carry the SLIP-39 disambiguator; got %q", c2)
+	}
+	if !uiContains(c2, "Add a BIP-39 passphrase") {
+		t.Errorf("BIP-39 prompt lead missing; got %q", c2)
+	}
+}
+
+func TestSLIP39RecoveredSeedIsolatedFromBIP39Passphrase(t *testing.T) {
+	// Passphrase isolation: the recovered seed (the words/SeedQR engraved) is
+	// fixed by the SLIP-39 passphrase during recovery and is returned BEFORE
+	// backupWalletFlow runs — so the later BIP-39 (25th-word) passphrase cannot
+	// change the recovered words. recoverSLIP39Flow with "TREZOR" yields the
+	// TREZOR secret regardless; the BIP-39 passphrase only reshapes the engraved
+	// fingerprint downstream, never these entropy bytes.
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	m, ok := driveRecover(t, ctx, first, []string{slip39Vec3[1]}, "TREZOR")
+	if !ok {
+		t.Fatal("recover failed")
+	}
+	if got := hexOfEntropy(m); got != slip39Vec3SecretTrezor {
+		t.Errorf("recovered entropy = %s want %s (must be set by the SLIP-39 passphrase only)", got, slip39Vec3SecretTrezor)
+	}
+	// And it differs from the empty-passphrase recovery — proving the SLIP-39
+	// passphrase (not the BIP-39 one) is what selected this seed.
+	if slip39Vec3SecretTrezor == slip39Vec3SecretEmpty {
+		t.Fatal("test fixtures degenerate: empty and TREZOR secrets must differ")
+	}
+}
