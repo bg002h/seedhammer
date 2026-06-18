@@ -13,6 +13,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -278,7 +279,7 @@ func TestWordKeyboardScreen(t *testing.T) {
 	for i := range bip39.NumWords {
 		w := bip39.LabelFor(i)
 		runes(&ctx.Router, w)
-		click(&ctx.Router, Button2)
+		click(&ctx.Router, Button3)
 		m := make(bip39.Mnemonic, 1)
 		inputWordsFlow(ctx, &descriptorTheme, m, 0)
 		if got := bip39.LabelFor(m[0]); got != w {
@@ -480,4 +481,214 @@ func uiContains(content, str string) bool {
 	txt := strings.ToLower(content)
 	clean := strings.ReplaceAll(strings.ToLower(str), " ", "")
 	return strings.Contains(txt, clean)
+}
+
+func TestWordFlowProgressTitle(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	m := emptyBIP39Mnemonic(24)
+	frame, quit := runUI(ctx, func() {
+		inputWordsFlow(ctx, &descriptorTheme, m, 0)
+	})
+	defer quit()
+	content, ok := frame()
+	if !ok {
+		t.Fatal("inputWordsFlow produced no frame")
+	}
+	if !uiContains(content, "Word 1 of 24") {
+		t.Errorf("title missing %q; got %q", "Word 1 of 24", content)
+	}
+}
+
+func TestWordFlowMatchCount(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	m := emptyBIP39Mnemonic(24)
+	frame, quit := runUI(ctx, func() {
+		inputWordsFlow(ctx, &descriptorTheme, m, 0)
+	})
+	defer quit()
+
+	// Empty fragment: no match count shown.
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if uiContains(content, "match") {
+		t.Errorf("match count shown on empty fragment; got %q", content)
+	}
+
+	// Type a complete word (ABANDON) -> exactly one match.
+	runes(&ctx.Router, "abandon")
+	content, ok = frame()
+	if !ok {
+		t.Fatal("no frame after typing")
+	}
+	if !uiContains(content, "1 match") {
+		t.Errorf("expected %q; got %q", "1 match", content)
+	}
+}
+
+func validMnemonic(n int) bip39.Mnemonic {
+	m := make(bip39.Mnemonic, n)
+	for i := range m {
+		m[i] = bip39.Word(i % int(bip39.NumWords))
+	}
+	return m.FixChecksum()
+}
+
+func TestCompleteCandidateWord(t *testing.T) {
+	v := validMnemonic(24)
+	cands := bip39.LastWordCandidates(v)
+	if len(cands) != 8 {
+		t.Fatalf("expected 8 candidates, got %d", len(cands))
+	}
+	last := v[len(v)-1]
+
+	// Exact candidate label completes to that word.
+	if w, ok := completeCandidateWord(cands, bip39.LabelFor(last), 1); !ok || w != last {
+		t.Errorf("exact candidate: got (%d,%v), want (%d,true)", w, ok, last)
+	}
+
+	// A non-candidate BIP-39 word must NOT complete to ITSELF (the I2 hole).
+	inCands := map[bip39.Word]bool{}
+	for _, w := range cands {
+		inCands[w] = true
+	}
+	var nonCand bip39.Word = -1
+	for w := bip39.Word(0); w < bip39.NumWords; w++ {
+		if !inCands[w] {
+			nonCand = w
+			break
+		}
+	}
+	if w, ok := completeCandidateWord(cands, bip39.LabelFor(nonCand), 1); ok && w == nonCand {
+		t.Errorf("non-candidate word %q completed to itself but must not", bip39.LabelFor(nonCand))
+	}
+}
+
+func TestUpdateValidCandidateKeys(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	v := validMnemonic(24)
+	cands := bip39.LastWordCandidates(v)
+
+	wantEnabled := map[rune]bool{}
+	for _, w := range cands {
+		label := bip39.LabelFor(w)
+		wantEnabled[unicode.ToLower(rune(label[0]))] = true
+	}
+
+	kbd := NewKeyboard(ctx, wordKeys)
+	updateValidCandidateKeys(cands, "", kbd.allKeys)
+	for i := range kbd.allKeys {
+		key := &kbd.allKeys[i]
+		if key.r == '⌫' {
+			continue
+		}
+		enabled := !key.disabled
+		if enabled != wantEnabled[key.r] {
+			t.Errorf("key %q: enabled=%v, want %v", key.r, enabled, wantEnabled[key.r])
+		}
+	}
+}
+
+func TestWordFlowLastWord24(t *testing.T) {
+	v := validMnemonic(24)
+
+	// Candidate count visible on entering the last word (empty fragment).
+	{
+		ctx := NewContext(newPlatform())
+		m := make(bip39.Mnemonic, 24)
+		copy(m, v)
+		m[23] = -1 // last slot unset; first 23 are valid
+		frame, quit := runUI(ctx, func() {
+			inputWordsFlow(ctx, &descriptorTheme, m, 23)
+		})
+		content, ok := frame()
+		quit()
+		if !ok {
+			t.Fatal("no frame at last word")
+		}
+		if !uiContains(content, "8 matches") {
+			t.Errorf("expected %q at last word; got %q", "8 matches", content)
+		}
+	}
+
+	// Typing the correct last word commits it.
+	{
+		ctx := NewContext(newPlatform())
+		m := make(bip39.Mnemonic, 24)
+		copy(m, v)
+		m[23] = -1
+		want := v[23]
+		runes(&ctx.Router, bip39.LabelFor(want))
+		click(&ctx.Router, Button3)
+		inputWordsFlow(ctx, &descriptorTheme, m, 23)
+		if m[23] != want {
+			t.Errorf("last word committed %d (%q), want %d (%q)",
+				m[23], bip39.LabelFor(m[23]), want, bip39.LabelFor(want))
+		}
+	}
+}
+
+func TestWordFlowLastWord12(t *testing.T) {
+	v := validMnemonic(12)
+
+	{
+		ctx := NewContext(newPlatform())
+		m := make(bip39.Mnemonic, 12)
+		copy(m, v)
+		m[11] = -1
+		frame, quit := runUI(ctx, func() {
+			inputWordsFlow(ctx, &descriptorTheme, m, 11)
+		})
+		content, ok := frame()
+		quit()
+		if !ok {
+			t.Fatal("no frame at last word")
+		}
+		if !uiContains(content, "128 matches") {
+			t.Errorf("expected %q at last word; got %q", "128 matches", content)
+		}
+	}
+
+	{
+		ctx := NewContext(newPlatform())
+		m := make(bip39.Mnemonic, 12)
+		copy(m, v)
+		m[11] = -1
+		want := v[11]
+		runes(&ctx.Router, bip39.LabelFor(want))
+		click(&ctx.Router, Button3)
+		inputWordsFlow(ctx, &descriptorTheme, m, 11)
+		if m[11] != want {
+			t.Errorf("last word committed %d (%q), want %d (%q)",
+				m[11], bip39.LabelFor(m[11]), want, bip39.LabelFor(want))
+		}
+	}
+}
+
+func TestWordFlowLastWordNoFlash(t *testing.T) {
+	// Forward-advance into the last word (commit word 23 of a 24-word seed) and
+	// assert the candidate count shows on the SAME frame — i.e. the candidate
+	// restriction applies immediately, with no one-frame full-keyboard flash.
+	v := validMnemonic(24)
+	ctx := NewContext(newPlatform())
+	m := make(bip39.Mnemonic, 24)
+	copy(m, v)
+	m[22] = -1
+	m[23] = -1
+	frame, quit := runUI(ctx, func() {
+		inputWordsFlow(ctx, &descriptorTheme, m, 22)
+	})
+	defer quit()
+	frame() // word-22 entry frame (empty fragment)
+	// type + commit word 22, advancing into the last word (23)
+	runes(&ctx.Router, bip39.LabelFor(v[22]))
+	click(&ctx.Router, Button3)
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame after committing word 22")
+	}
+	if !uiContains(content, "8 matches") {
+		t.Errorf("expected candidate count on the frame entering the last word (no flash); got %q", content)
+	}
 }

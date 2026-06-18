@@ -26,9 +26,9 @@ func TestInputSeedCodex32(t *testing.T) {
 	// Menu: move the selection 0 -> 2 (CODEX32) with two Down presses, confirm
 	// with Button3 (the ChoiceScreen "choose" button).
 	click(&ctx.Router, Down, Down, Button3)
-	// Keypad: type the share, then confirm with Button2 (OK).
+	// Keypad: type the share, then confirm with Button3 (OK).
 	runes(&ctx.Router, share)
-	click(&ctx.Router, Button2)
+	click(&ctx.Router, Button3)
 
 	obj, ok := newInputFlow(ctx, &descriptorTheme)
 	if !ok {

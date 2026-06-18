@@ -540,18 +540,50 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
-	okBtn := &Clickable{Button: Button2}
+	okBtn := &Clickable{Button: Button3}
 	layoutWord := func(buf *op.Buffer, n int, word string) (op.Op, image.Point) {
 		style := ctx.Styles.word
 		return widget.Labelf(buf, style, th.Background, "%2d: %s", n, word)
 	}
 	_, longest := layoutWord(nil, 24, widestWord)
 	var nvalid int
-	for !ctx.Done {
-		for kbd.Update(ctx) {
-			nvalid = updateValidBIP39Keys(kbd.Fragment, kbd.allKeys)
+	var cands []bip39.Word
+	candsFor := -1
+	onLastWord := func() bool { return selected == len(mnemonic)-1 && cands != nil }
+	updateKeys := func(frag string) int {
+		if onLastWord() {
+			return updateValidCandidateKeys(cands, frag, kbd.allKeys)
+		}
+		return updateValidBIP39Keys(frag, kbd.allKeys)
+	}
+	completeWord := func(frag string, nv int) (bip39.Word, bool) {
+		if onLastWord() {
+			return completeCandidateWord(cands, frag, nv)
+		}
+		return completeBIP39Word(frag, nv)
+	}
+	// refreshCands (re)computes the last-word candidate set and applies its key
+	// mask the first time the last word is observed. Called both at the top of
+	// the loop and right after advancing into the last word on accept, so the
+	// candidate restriction applies on the SAME frame (no one-frame full-
+	// keyboard flash).
+	refreshCands := func() {
+		if selected == len(mnemonic)-1 && candsFor != selected {
+			cands = bip39.LastWordCandidates(mnemonic)
+			candsFor = selected
+			nvalid = updateKeys(kbd.Fragment)
 			wordLabel = kbd.Fragment
-			if completedWord, complete := completeBIP39Word(wordLabel, nvalid); complete {
+			if cw, ok := completeWord(kbd.Fragment, nvalid); ok {
+				wordLabel = bip39.LabelFor(cw)
+			}
+		}
+	}
+	for !ctx.Done {
+		refreshCands()
+		for kbd.Update(ctx) {
+			nvalid = updateKeys(kbd.Fragment)
+			wordLabel = kbd.Fragment
+			if completedWord, ok := completeWord(wordLabel, nvalid); ok {
 				wordLabel = bip39.LabelFor(completedWord)
 			}
 		}
@@ -559,8 +591,8 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			return
 		}
 		for okBtn.Clicked(ctx) {
-			w, complete := completeBIP39Word(kbd.Fragment, nvalid)
-			if !complete {
+			w, ok := completeWord(kbd.Fragment, nvalid)
+			if !ok {
 				continue
 			}
 			kbd.Clear()
@@ -576,6 +608,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 					break
 				}
 			}
+			refreshCands()
 		}
 		dims := ctx.Platform.DisplaySize()
 
@@ -592,6 +625,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		r.Min.X -= buttonPadX
 		r.Max.X += buttonPadX
 		top, _ := content.CutBottom(kbdsz.Y)
+		wordOff := top.Center(longest)
 		word, _ := layoutWord(&ctx.B, selected+1, wordLabel)
 		txtBg := op.Layer(
 			word,
@@ -599,20 +633,35 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 				op.Color(&ctx.B, th.Text),
 				op.RoundedRect2(&ctx.B, r, cornerRadius),
 			),
-		).Offset(top.Center(longest))
+		).Offset(wordOff)
+
+		var countOp op.Op
+		if len(kbd.Fragment) > 0 || onLastWord() {
+			noun := "matches"
+			if nvalid == 1 {
+				noun = "match"
+			}
+			cl, csz := widget.Labelf(&ctx.B, ctx.Styles.word, th.Text, "%d %s", nvalid, noun)
+			countY := wordOff.Y + longest.Y + 8
+			if lim := top.Max.Y - csz.Y; countY > lim { // clamp so the count never overlaps the keyboard
+				countY = lim
+			}
+			countOp = cl.Offset(image.Pt((dims.X-csz.X)/2, countY))
+		}
 
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}...)
-		if _, complete := completeBIP39Word(kbd.Fragment, nvalid); complete {
+		if _, ok := completeWord(kbd.Fragment, nvalid); ok {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
 			nav = op.Layer(
 				nav,
 				nav2,
 			)
 		}
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Input Words")
+		title, _ := layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
 		ctx.Frame(op.Layer(
 			kbdOp,
 			txtBg,
+			countOp,
 			nav,
 			title,
 			op.Color(&ctx.B, th.Background),
@@ -625,7 +674,7 @@ func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
 
 	kbd := NewKeyboard(ctx, alph)
 	backBtn := &Clickable{Button: Button1}
-	okBtn := &Clickable{Button: Button2}
+	okBtn := &Clickable{Button: Button3}
 	var share codex32.String
 	valid := false
 	for !ctx.Done {
@@ -685,7 +734,7 @@ func inputSLIP39Flow(ctx *Context, th *Colors, mnemonic slip39words.Mnemonic, se
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
-	okBtn := &Clickable{Button: Button2}
+	okBtn := &Clickable{Button: Button3}
 	layoutWord := func(b *op.Buffer, n int, word string) (op.Op, image.Point) {
 		style := ctx.Styles.word
 		return widget.Labelf(b, style, th.Background, "%2d: %s", n, word)
@@ -918,6 +967,52 @@ func updateValidSLIP39Keys(frag string, keys []keyboardKey) int {
 	return nvalid
 }
 
+// completeCandidateWord reports completion against a fixed candidate set
+// (the checksum-valid last words). Unlike completeBIP39Word it never
+// completes on a non-candidate label, so a checksum-invalid final word can
+// never be accepted.
+func completeCandidateWord(cands []bip39.Word, frag string, nvalid int) (bip39.Word, bool) {
+	for _, w := range cands {
+		if frag == bip39.LabelFor(w) {
+			return w, true
+		}
+	}
+	if nvalid == 1 {
+		for _, w := range cands {
+			if strings.HasPrefix(bip39.LabelFor(w), frag) {
+				return w, true
+			}
+		}
+	}
+	return -1, false
+}
+
+// updateValidCandidateKeys restricts the keyboard to letters that extend the
+// fragment toward one of the candidate words, mirroring updateValidBIP39Keys
+// but over a fixed candidate set. Returns the number of still-matching
+// candidates.
+func updateValidCandidateKeys(cands []bip39.Word, frag string, keys []keyboardKey) int {
+	mask := ^uint32(0)
+	nvalid := 0
+	for _, w := range cands {
+		label := bip39.LabelFor(w)
+		if !strings.HasPrefix(label, frag) {
+			continue
+		}
+		nvalid++
+		suffix := label[len(frag):]
+		if len(suffix) > 0 {
+			idx := unicode.ToLower(rune(suffix[0])) - 'a'
+			mask &^= 1 << idx
+		}
+	}
+	if nvalid == 1 {
+		mask = ^uint32(0)
+	}
+	updateValidKeys(mask, keys)
+	return nvalid
+}
+
 func updateValidKeys(mask uint32, keys []keyboardKey) {
 	for i := range keys {
 		key := &keys[i]
@@ -949,7 +1044,7 @@ func (k *Keyboard) Update(ctx *Context) bool {
 		}
 	}
 	for {
-		e, ok := k.inp.Next(ctx, ButtonFilter(Left), ButtonFilter(Right), ButtonFilter(Up), ButtonFilter(Down), ButtonFilter(Center), RuneFilter(), ButtonFilter(Button3))
+		e, ok := k.inp.Next(ctx, ButtonFilter(Left), ButtonFilter(Right), ButtonFilter(Up), ButtonFilter(Down), ButtonFilter(Center), RuneFilter())
 		if !ok {
 			break
 		}
@@ -1006,7 +1101,7 @@ func (k *Keyboard) Update(ctx *Context) bool {
 						break
 					}
 				}
-			case Center, Button3:
+			case Center:
 				k.rune()
 				return true
 			}
