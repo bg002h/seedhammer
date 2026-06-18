@@ -28,4 +28,34 @@ func TestExportedLengthConstants(t *testing.T) {
 	}
 }
 
-var _ = errors.Is // keep errors imported for Tasks 2-3 in this file
+func TestDescribe(t *testing.T) {
+	if got := Describe(nil); got != "" {
+		t.Errorf("Describe(nil) = %q, want \"\"", got)
+	}
+	sentinels := []struct {
+		in   error
+		want string
+	}{
+		{errInvalidChecksum, "bad checksum"},
+		{errInvalidLength, "wrong length"},
+		{errInvalidCharacter, "invalid character"},
+		{errInvalidCase, "mixed case"},
+		{errInvalidThreshold, "bad threshold"},
+		{errInvalidShareIndex, "bad share index"},
+		{errIncompleteGroup, "incomplete group"},
+		{errInsufficientShares, "invalid"}, // Interpolate-only → fallback
+		{errors.New("other"), "invalid"},
+	}
+	for _, c := range sentinels {
+		if got := Describe(c.in); got != c.want {
+			t.Errorf("Describe(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// Real New errors (wrapped) classify correctly.
+	if _, err := New("tooshort"); Describe(err) != "wrong length" {
+		t.Errorf("Describe(New short) = %q, want \"wrong length\"", Describe(err))
+	}
+	if _, err := New("ms10fauxsxxxxxxxxxxxxxxxxxxxxxxxxxxve740yyge2ghp"); Describe(err) != "bad checksum" {
+		t.Errorf("Describe(New bad-checksum) = %q, want \"bad checksum\"", Describe(err))
+	}
+}
