@@ -3,8 +3,10 @@ package gui
 import (
 	"fmt"
 	"image"
+	"sort"
 
 	"seedhammer.com/backup"
+	"seedhammer.com/bip39"
 	"seedhammer.com/font/constant"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
@@ -134,6 +136,217 @@ func confirmSLIP39Flow(ctx *Context, th *Colors, s slip39words.Share) slip39Conf
 		ctx.Frame(op.Layer(frameOps...))
 	}
 	return slip39Back
+}
+
+// groupSatisfied reports whether a group's collected shares exactly fill its
+// member threshold (each group's first share carries its MemberThreshold; the
+// collection loop never over-fills a group, so == is the satisfaction test).
+func groupSatisfied(gs []slip39words.Share) bool {
+	return len(gs) > 0 && len(gs) == gs[0].MemberThreshold
+}
+
+// countSatisfied returns the number of groups in the roster that have reached
+// their member threshold.
+func countSatisfied(byGroup map[int][]slip39words.Share) int {
+	n := 0
+	for _, gs := range byGroup {
+		if groupSatisfied(gs) {
+			n++
+		}
+	}
+	return n
+}
+
+// selectForCombine returns the flattened members of EXACTLY groupThreshold
+// satisfied groups (a group is satisfied when it holds exactly its
+// MemberThreshold members), dropping any partial/extra group lingering in the
+// roster (e.g. a lone share from the wrong pile). ok=false if fewer than
+// groupThreshold groups are satisfied. Combine requires exactly the satisfied
+// groups' members — feeding it a flat slice with a stray partial group makes it
+// return errInsufficientShares on a genuinely-sufficient pile (plan-R0 I1).
+func selectForCombine(byGroup map[int][]slip39words.Share, groupThreshold int) ([]slip39words.Share, bool) {
+	gids := make([]int, 0, len(byGroup))
+	for g := range byGroup {
+		gids = append(gids, g)
+	}
+	sort.Ints(gids)
+	var out []slip39words.Share
+	picked := 0
+	for _, g := range gids {
+		if picked == groupThreshold {
+			break
+		}
+		gs := byGroup[g]
+		if !groupSatisfied(gs) {
+			continue // prune partial/extra groups
+		}
+		out = append(out, gs...)
+		picked++
+	}
+	if picked < groupThreshold {
+		return nil, false
+	}
+	return out, true
+}
+
+// showSLIP39Message renders a single titled message frame (no buttons) until
+// ctx.Done — used for the brief "Recovering…" indicator shown before the
+// blocking Combine call. (The firmware has no active watchdog — only a BOOTSEL
+// reboot-vector stage — so a blocking Combine at e=0/1, ~0.5–1.9s, is safe;
+// SPEC §5.6.)
+func showSLIP39Message(ctx *Context, th *Colors, title, msg string) {
+	dims := ctx.Platform.DisplaySize()
+	titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
+	screen := layout.Rectangle{Max: dims}
+	_, content := screen.CutTop(leadingSize)
+	content, _ = content.CutBottom(leadingSize)
+	lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, msg)
+	body := lbl.Offset(image.Pt((dims.X-sz.X)/2, content.Min.Y+8))
+	ctx.Frame(op.Layer(titleOp, body, op.Color(&ctx.B, th.Background)))
+}
+
+// recoverSLIP39Flow collects enough SLIP-39 shares to satisfy the group
+// threshold (each represented group at its member threshold), optionally takes
+// a SLIP-39 passphrase, reconstructs the master secret, and returns it as a
+// BIP-39 mnemonic. Returns (nil, false) if the user backs out or recovery
+// fails. The collection roster shows live group satisfaction; subsequent shares
+// inherit the first share's word length. SPEC §5.3.
+func recoverSLIP39Flow(ctx *Context, th *Colors, first slip39words.Share) (bip39.Mnemonic, bool) {
+	GT := first.GroupThreshold
+	L := len(first.Mnemonic)
+	byGroup := map[int][]slip39words.Share{first.GroupIndex: {first}}
+
+	// Collection loop: prompt until enough groups are satisfied.
+	for countSatisfied(byGroup) < GT {
+		done := countSatisfied(byGroup)
+		title := fmt.Sprintf("Share · %d/%d groups", done, GT)
+		m := emptySLIP39Mnemonic(L)
+		if ok := inputSLIP39Flow(ctx, th, m, 0, title); !ok {
+			return nil, false // Back exits recovery (the dead-end / cancel path)
+		}
+		cand, err := buildSLIP39Share(m)
+		if err != nil {
+			showError(ctx, th, "Invalid share", slip39words.Describe(err))
+			continue
+		}
+		// Eager cross-share consistency against everything collected so far.
+		if err := slip39words.ConsistentShares(append(allShares(byGroup), cand)); err != nil {
+			showError(ctx, th, "Invalid share", slip39words.Describe(err))
+			continue
+		}
+		// Reject a share for an already-satisfied group (would over-fill it;
+		// Combine needs exactly memberThreshold members per group — I1).
+		if groupSatisfied(byGroup[cand.GroupIndex]) {
+			showError(ctx, th, "Invalid share", "that group is already complete")
+			continue
+		}
+		byGroup[cand.GroupIndex] = append(byGroup[cand.GroupIndex], cand)
+	}
+
+	sel, ok := selectForCombine(byGroup, GT)
+	if !ok { // defensive — the loop guarantees GT satisfied groups
+		showError(ctx, th, "Recovery failed", "not enough shares")
+		return nil, false
+	}
+
+	// High iteration-exponent gate (§5.6): warn-and-confirm on a long wait
+	// (NOT a hard cap — that would break recoverability of real high-e backups).
+	if first.IterationExp >= 4 {
+		confirm := &ConfirmWarningScreen{
+			Title: "Slow Recovery",
+			Body:  fmt.Sprintf("This backup uses a high iteration exponent (%d) and may take a long time to recover.\n\nHold button to continue.", first.IterationExp),
+			Icon:  assets.IconInfo,
+		}
+		if !holdToConfirm(ctx, th, confirm) {
+			return nil, false
+		}
+	}
+
+	// Optional SLIP-39 (EMS-decryption) passphrase — distinct from a BIP-39
+	// 25th-word passphrase. Defaults to Skip; a wrong one silently recovers a
+	// different valid seed (SLIP-39 plausible deniability) — surfaced, not
+	// claimed verified (§5.5).
+	pass := ""
+	ppChoice := &ChoiceScreen{
+		Title:   "SLIP-39 Passphrase",
+		Lead:    "SLIP-39 passphrase? (NOT a BIP-39 passphrase) A wrong passphrase silently recovers a different seed.",
+		Choices: []string{"Skip", "Enter passphrase"},
+	}
+	if psel, ok := ppChoice.Choose(ctx, th); ok && psel == 1 {
+		p, ok := passphraseFlow(ctx, th)
+		if !ok {
+			return nil, false
+		}
+		pass = p
+	}
+
+	// Brief progress frame before the blocking decrypt.
+	showSLIP39Message(ctx, th, "Recovering", "Reconstructing the seed…")
+
+	secret, err := slip39words.Combine(sel, []byte(pass))
+	if err != nil {
+		showError(ctx, th, "Recovery failed", slip39words.Describe(err))
+		return nil, false
+	}
+	m := bip39.New(secret)
+	wipeBytes(secret)
+	return m, true
+}
+
+// buildSLIP39Share joins a completed input mnemonic into a share string and
+// parses it.
+func buildSLIP39Share(m slip39words.Mnemonic) (slip39words.Share, error) {
+	words := make([]string, len(m))
+	for i, w := range m {
+		words[i] = slip39words.LabelFor(w)
+	}
+	return slip39words.ParseShare(joinWords(words))
+}
+
+func joinWords(words []string) string {
+	out := ""
+	for i, w := range words {
+		if i > 0 {
+			out += " "
+		}
+		out += w
+	}
+	return out
+}
+
+// allShares flattens the roster into a single slice (for eager consistency
+// checking).
+func allShares(byGroup map[int][]slip39words.Share) []slip39words.Share {
+	var out []slip39words.Share
+	for _, gs := range byGroup {
+		out = append(out, gs...)
+	}
+	return out
+}
+
+// wipeBytes best-effort zeroes a secret-bearing slice (TinyGo GC may copy/
+// retain — defense-in-depth, not a guarantee; SPEC §4.8).
+func wipeBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// holdToConfirm drives a ConfirmWarningScreen to its terminal result, returning
+// true on a held confirm and false on cancel/Done.
+func holdToConfirm(ctx *Context, th *Colors, confirm *ConfirmWarningScreen) bool {
+	for !ctx.Done {
+		dims := ctx.Platform.DisplaySize()
+		d, res := confirm.Layout(ctx, th, dims)
+		switch res {
+		case ConfirmNo:
+			return false
+		case ConfirmYes:
+			return true
+		}
+		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
+	}
+	return false
 }
 
 // engraveSLIP39 confirms a SLIP-39 share. A lone share is engraved verbatim; a

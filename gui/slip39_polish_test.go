@@ -2,9 +2,11 @@ package gui
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
+	"seedhammer.com/bip39"
 	slip39words "seedhammer.com/slip39"
 )
 
@@ -140,11 +142,187 @@ func TestSLIP39LengthPickCancel(t *testing.T) {
 	}
 }
 
+// stubShare builds a minimal Share with just the fields selectForCombine reads
+// (group/member index + member threshold). Value is a valid-length placeholder.
+func stubShare(groupIndex, memberIndex, memberThreshold int) slip39words.Share {
+	return slip39words.Share{
+		GroupIndex:      groupIndex,
+		MemberIndex:     memberIndex,
+		MemberThreshold: memberThreshold,
+		Value:           make([]byte, 16),
+	}
+}
+
+func rosterOf(shares ...slip39words.Share) map[int][]slip39words.Share {
+	byGroup := map[int][]slip39words.Share{}
+	for _, s := range shares {
+		byGroup[s.GroupIndex] = append(byGroup[s.GroupIndex], s)
+	}
+	return byGroup
+}
+
+func TestSelectForCombineSingleGroup(t *testing.T) {
+	// One satisfied group (member threshold 2) → both its members; GT=1.
+	byGroup := rosterOf(stubShare(0, 0, 2), stubShare(0, 1, 2))
+	got, ok := selectForCombine(byGroup, 1)
+	if !ok {
+		t.Fatal("selectForCombine: ok=false for a satisfied single group")
+	}
+	if len(got) != 2 {
+		t.Errorf("selectForCombine returned %d members, want 2", len(got))
+	}
+}
+
+func TestSelectForCombinePrunesStrayPartialGroup(t *testing.T) {
+	// GT=2: two satisfied groups (0 and 1, each MT=2) plus a STRAY partial
+	// group 2 (one member of a 2-member group). selectForCombine must prune
+	// group 2 and return exactly the 4 members of groups 0+1 — feeding the raw
+	// accumulation to Combine would error errInsufficientShares (plan-R0 I1).
+	byGroup := rosterOf(
+		stubShare(0, 0, 2), stubShare(0, 1, 2),
+		stubShare(1, 0, 2), stubShare(1, 1, 2),
+		stubShare(2, 0, 2), // stray partial group
+	)
+	got, ok := selectForCombine(byGroup, 2)
+	if !ok {
+		t.Fatal("selectForCombine: ok=false despite 2 satisfied groups")
+	}
+	if len(got) != 4 {
+		t.Errorf("selectForCombine returned %d members, want 4 (stray partial group pruned)", len(got))
+	}
+	for _, s := range got {
+		if s.GroupIndex == 2 {
+			t.Errorf("selectForCombine leaked a member of the stray partial group 2")
+		}
+	}
+}
+
+func TestSelectForCombineInsufficientGroups(t *testing.T) {
+	// GT=2 but only one group satisfied → ok=false.
+	byGroup := rosterOf(
+		stubShare(0, 0, 2), stubShare(0, 1, 2),
+		stubShare(1, 0, 2), // group 1 partial
+	)
+	if _, ok := selectForCombine(byGroup, 2); ok {
+		t.Error("selectForCombine: ok=true with only 1 of 2 groups satisfied")
+	}
+}
+
+// driveShare emits the per-word input that inputSLIP39Flow expects: each word's
+// full (lowercase) letters followed by Button3 (the flow accepts a word only on
+// Button3 once the typed prefix is unambiguous; a full word is always an exact
+// match → complete). The SLIP-39 wordlist has no word that is a prefix of
+// another, so full-word typing is unambiguous (M1).
+func driveShare(r *EventRouter, mnemonic string) {
+	for _, w := range strings.Fields(mnemonic) {
+		runes(r, strings.ToLower(w))
+		click(r, Button3)
+	}
+}
+
+// driveRecover pre-queues the events for recoverSLIP39Flow: each collection
+// share typed via driveShare, then the SLIP-39-passphrase choice. passphrase==""
+// selects Skip (the default, index 0); a non-empty passphrase selects "Enter
+// passphrase" (Down, then choose) and types it on the PassphraseKeyboard.
+func driveRecover(t *testing.T, ctx *Context, first slip39words.Share, shares []string, passphrase string) (bip39.Mnemonic, bool) {
+	t.Helper()
+	for _, s := range shares {
+		driveShare(&ctx.Router, s)
+	}
+	if passphrase == "" {
+		click(&ctx.Router, Button3) // ChoiceScreen: Skip (default index 0)
+	} else {
+		click(&ctx.Router, Down, Button3) // choose "Enter passphrase"
+		runes(&ctx.Router, passphrase)    // case-sensitive, cross-page
+		click(&ctx.Router, Button3)       // accept on the passphrase keyboard
+	}
+	return recoverSLIP39Flow(ctx, &descriptorTheme, first)
+}
+
+func TestRecoverSLIP39(t *testing.T) {
+	// idx 3 = 2-of-3 single-group. Enter the 2nd share, SKIP the passphrase.
+	// CRITICAL (plan-R0 C1): with an EMPTY passphrase the recovered secret is
+	// the empty-passphrase value (61cf…2664), NOT the "TREZOR" value.
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	m, ok := driveRecover(t, ctx, first, []string{slip39Vec3[1]}, "")
+	if !ok {
+		t.Fatal("recover failed")
+	}
+	if got := hexOfEntropy(m); got != slip39Vec3SecretEmpty {
+		t.Errorf("recovered entropy (empty passphrase) = %s want %s", got, slip39Vec3SecretEmpty)
+	}
+}
+
+func TestRecoverSLIP39Passphrase(t *testing.T) {
+	// Same 2 shares but TYPE "TREZOR" at the passphrase prompt → the canonical
+	// corpus secret (b43c…0864). Proves the SLIP-39 passphrase feeds the
+	// Feistel decrypt and changes the result.
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	m, ok := driveRecover(t, ctx, first, []string{slip39Vec3[1]}, "TREZOR")
+	if !ok {
+		t.Fatal("recover failed")
+	}
+	if got := hexOfEntropy(m); got != slip39Vec3SecretTrezor {
+		t.Errorf("recovered entropy (TREZOR) = %s want %s", got, slip39Vec3SecretTrezor)
+	}
+}
+
+func TestRecoverSLIP39MultiGroup(t *testing.T) {
+	// group-2of3-over-2of3: GT=2 over 2 groups, each MemberThreshold==2. First
+	// share is group 0 member 0; collect group 0 member 1, group 1 members 0+1.
+	// Exercises the two-level roster + selectForCombine assembly (I1).
+	first := parseFixtureShare(t, slip39MultiGroup[0])
+	if first.GroupThreshold < 2 {
+		t.Fatalf("fixture precondition: want GroupThreshold>=2, got %d", first.GroupThreshold)
+	}
+	ctx := NewContext(newPlatform())
+	m, ok := driveRecover(t, ctx, first, slip39MultiGroup[1:], "TREZOR")
+	if !ok {
+		t.Fatal("multi-group recover failed")
+	}
+	if got := hexOfEntropy(m); got != slip39MultiGroupSecret {
+		t.Errorf("multi-group recovered entropy = %s want %s", got, slip39MultiGroupSecret)
+	}
+}
+
+func TestRecoverSLIP39Mismatch(t *testing.T) {
+	// Entering a share from a DIFFERENT set (different identifier) must surface
+	// an eager ConsistentShares error and re-prompt (not abort, not combine).
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { recoverSLIP39Flow(ctx, &descriptorTheme, first) })
+	defer quit()
+	// A share from the multi-group set (id 1003 ≠ idx-3's id) → id mismatch.
+	driveShare(&ctx.Router, slip39MultiGroup[0])
+	var content string
+	for i := 0; i < 64; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		content = c
+		if uiContains(content, "id mismatch") {
+			break
+		}
+	}
+	if !uiContains(content, "id mismatch") {
+		t.Errorf("expected an id-mismatch error; got %q", content)
+	}
+}
+
+func TestRecoverSLIP39BackoutRecognized(t *testing.T) {
+	// Back at the first collection prompt → (nil, false).
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button1) // Back at the share-collection prompt
+	m, ok := recoverSLIP39Flow(ctx, &descriptorTheme, first)
+	if ok || m != nil {
+		t.Errorf("Back at collection: got (%v, %v) want (nil, false)", m, ok)
+	}
+}
+
 // Silence unused warnings for fixtures/helpers consumed by later tasks during
 // incremental TDD; removed once those tests land.
-var _ = slip39Vec3SecretEmpty
-var _ = slip39Vec3SecretTrezor
-var _ = slip39MultiGroup
-var _ = slip39MultiGroupSecret
 var _ = time.Second
-var _ = hexOfEntropy
