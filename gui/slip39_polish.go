@@ -28,6 +28,32 @@ func showError(ctx *Context, th *Colors, title, msg string) {
 	}
 }
 
+// slip39LengthPick asks how many words are on the user's physical share and
+// returns the chosen word count ∈ {20,23,27,30,33}. The 20- and 33-word counts
+// (the only ones mainstream wallets emit) are presented prominently; the three
+// intermediate 160/192/224-bit counts follow. Returns 0 if the user backs out.
+// (inputSLIP39Flow fills a pre-sized slice, so the length must be known at
+// allocation; the user can simply count the words on their share — SPEC §5.2.)
+func slip39LengthPick(ctx *Context, th *Colors) int {
+	counts := []int{20, 33, 23, 27, 30}
+	cs := &ChoiceScreen{
+		Title: "SLIP-39 Share",
+		Lead:  "Words on your share?",
+		Choices: []string{
+			"20 (128-bit)",
+			"33 (256-bit)",
+			"23 (160-bit)",
+			"27 (192-bit)",
+			"30 (224-bit)",
+		},
+	}
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return 0
+	}
+	return counts[sel]
+}
+
 // slip39ConfirmAction is the result of the pre-engrave SLIP-39 confirm screen.
 type slip39ConfirmAction int
 

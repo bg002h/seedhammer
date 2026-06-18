@@ -111,6 +111,35 @@ func TestConfirmSLIP39LoneNoRecover(t *testing.T) {
 	}
 }
 
+func TestSLIP39LengthPick33(t *testing.T) {
+	// slip39LengthPick returns the chosen word count; the "33" option is at
+	// index 1 (presented prominently after 20), reached with one Down, then
+	// selected with Button3.
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Down, Button3)
+	if n := slip39LengthPick(ctx, &descriptorTheme); n != 33 {
+		t.Errorf("length pick = %d want 33", n)
+	}
+}
+
+func TestSLIP39LengthPickDefault20(t *testing.T) {
+	// Selecting immediately (no navigation) yields the default 20-word count.
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button3)
+	if n := slip39LengthPick(ctx, &descriptorTheme); n != 20 {
+		t.Errorf("default length pick = %d want 20", n)
+	}
+}
+
+func TestSLIP39LengthPickCancel(t *testing.T) {
+	// Back cancels the pick → 0 sentinel.
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button1)
+	if n := slip39LengthPick(ctx, &descriptorTheme); n != 0 {
+		t.Errorf("cancelled length pick = %d want 0", n)
+	}
+}
+
 // Silence unused warnings for fixtures/helpers consumed by later tasks during
 // incremental TDD; removed once those tests land.
 var _ = slip39Vec3SecretEmpty
