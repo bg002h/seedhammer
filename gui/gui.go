@@ -577,7 +577,7 @@ func fadeClip(b *op.Buffer, o op.Op, r image.Rectangle) op.Op {
 
 const wordKeys = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 
-func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int) {
+func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string) {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
@@ -698,13 +698,21 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 				nav2,
 			)
 		}
-		title, _ := layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+		// Additive title contract: empty title renders the existing dynamic
+		// "Word N of M" line byte-identically; a non-empty title (e.g. the Seed
+		// XOR "Part i of n") replaces it, like inputSLIP39Flow.
+		var titleOp op.Op
+		if title == "" {
+			titleOp, _ = layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+		} else {
+			titleOp, _ = layoutTitle(ctx, dims.X, th.Text, title)
+		}
 		ctx.Frame(op.Layer(
 			kbdOp,
 			txtBg,
 			countOp,
 			nav,
-			title,
+			titleOp,
 			op.Color(&ctx.B, th.Background),
 		))
 	}
@@ -2012,7 +2020,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",
 			Lead:    "Choose number of words",
-			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39"},
+			Choices: []string{"12 WORDS", "24 WORDS", "CODEX32", "SLIP-39", "SEED XOR"},
 		}
 		for {
 			choice, ok := cs.Choose(ctx, th)
@@ -2022,7 +2030,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 			switch choice {
 			case 0, 1:
 				mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-				inputWordsFlow(ctx, th, mnemonic, 0)
+				inputWordsFlow(ctx, th, mnemonic, 0, "")
 				if !isEmptyMnemonic(mnemonic) {
 					return mnemonic, true
 				}
@@ -2053,6 +2061,14 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 					break
 				}
 				return s, true
+			case 4:
+				// SEED XOR combine returns a recovered bip39.Mnemonic that rides
+				// the existing engraveObjectFlow case bip39.Mnemonic: path. The
+				// mandatory fingerprint gate lives inside combineSeedXORFlow.
+				m, ok := combineSeedXORFlow(ctx, th)
+				if ok {
+					return m, true
+				}
 			}
 		}
 	}
@@ -2099,7 +2115,7 @@ events:
 			}
 		}
 		if editBtn.Clicked(ctx) {
-			inputWordsFlow(ctx, th, mnemonic, s.selected)
+			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
 			continue
 		}
 		if confirmBtn.Clicked(ctx) {
