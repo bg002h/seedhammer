@@ -34,7 +34,8 @@ func (a gf1024) add(b gf1024) gf1024 {
 func (a gf1024) isZero() bool { return a.lo == feQ && a.hi == feQ }
 
 // mul multiplies in GF(1024) via the 4-subfield identity (ζ²=ζ+1):
-//   (lo+hi·ζ)(lo'+hi'·ζ) = (ll+hh) + (lh+hl+hh)·ζ.
+//
+//	(lo+hi·ζ)(lo'+hi'·ζ) = (ll+hh) + (lh+hl+hh)·ζ.
 func (a gf1024) mul(b gf1024) gf1024 {
 	ll := a.lo.Mul(b.lo)
 	lh := a.lo.Mul(b.hi)
