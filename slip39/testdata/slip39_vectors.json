@@ -1,0 +1,102 @@
+{
+ "0": [
+  "1. Valid mnemonic without sharing (128 bits)",
+  [
+   "duckling enlarge academic academic agency result length solution fridge kidney coal piece deal husband erode duke ajar critical decision keyboard"
+  ],
+  "bb54aac4b89dc868ba37d9cc21b2cece",
+  "xprv9s21ZrQH143K4QViKpwKCpS2zVbz8GrZgpEchMDg6KME9HZtjfL7iThE9w5muQA4YPHKN1u5VM1w8D4pvnjxa2BmpGMfXr7hnRrRHZ93awZ"
+ ],
+ "3": [
+  "4. Basic sharing 2-of-3 (128 bits)",
+  [
+   "shadow pistol academic always adequate wildlife fancy gross oasis cylinder mustang wrist rescue view short owner flip making coding armed",
+   "shadow pistol academic acid actress prayer class unknown daughter sweater depict flip twice unkind craft early superior advocate guest smoking"
+  ],
+  "b43ceb7e57a0ea8766221624d01b0864",
+  "xprv9s21ZrQH143K2nNuAbfWPHBtfiSCS14XQgb3otW4pX655q58EEZeC8zmjEUwucBu9dPnxdpbZLCn57yx45RBkwJHnwHFjZK4XPJ8SyeYjYg"
+ ],
+ "17": [
+  "18. Threshold number of groups and members in each group (128 bits, case 2)",
+  [
+   "eraser senior decision smug corner ruin rescue cubic angel tackle skin skunk program roster trash rumor slush angel flea amazing",
+   "eraser senior beard romp adorn nuclear spill corner cradle style ancient family general leader ambition exchange unusual garlic promise voice",
+   "eraser senior decision scared cargo theory device idea deliver modify curly include pancake both news skin realize vitamins away join"
+  ],
+  "7c3397a292a5941682d7a4ae2d898d11",
+  "xprv9s21ZrQH143K3dzDLfeY3cMp23u5vDeFYftu5RPYZPucKc99mNEddU4w99GxdgUGcSfMpVDxhnR1XpJzZNXRN1m6xNgnzFS5MwMP6QyBRKV"
+ ],
+ "35": [
+  "36. Threshold number of groups and members in each group (256 bits, case 1)",
+  [
+   "wildlife deal ceramic round aluminum pitch goat racism employer miracle percent math decision episode dramatic editor lily prospect program scene rebuild display sympathy have single mustang junction relate often chemical society wits estate",
+   "wildlife deal decision scared acne fatal snake paces obtain election dryer dominant romp tactics railroad marvel trust helpful flip peanut theory theater photo luck install entrance taxi step oven network dictate intimate listen",
+   "wildlife deal ceramic scatter argue equip vampire together ruin reject literary rival distance aquatic agency teammate rebound false argue miracle stay again blessing peaceful unknown cover beard acid island language debris industry idle",
+   "wildlife deal ceramic snake agree voter main lecture axis kitchen physics arcade velvet spine idea scroll promise platform firm sharp patrol divorce ancestor fantasy forbid goat ajar believe swimming cowboy symbolic plastic spelling",
+   "wildlife deal decision shadow analysis adjust bulb skunk muscle mandate obesity total guitar coal gravity carve slim jacket ruin rebuild ancestor numerous hour mortgage require herd maiden public ceiling pecan pickup shadow club"
+  ],
+  "5385577c8cfc6c1a8aa0f7f10ecde0a3318493262591e78b8c14c6686167123b",
+  "xprv9s21ZrQH143K2UspC9FRPfQC9NcDB4HPkx1XG9UEtuceYtpcCZ6ypNZWdgfxQ9dAFVeD1F4Zg4roY7nZm2LB7THPD6kaCege3M7EuS8v85c"
+ ],
+ "42": [
+  "43. Extendable basic sharing 2-of-3 (128 bits)",
+  [
+   "enemy favorite academic acid cowboy phrase havoc level response walnut budget painting inside trash adjust froth kitchen learn tidy punish",
+   "enemy favorite academic always academic sniff script carpet romp kind promise scatter center unfair training emphasis evening belong fake enforce"
+  ],
+  "48b1a4b80b8c209ad42c33672bdaa428",
+  "xprv9s21ZrQH143K4FS1qQdXYAFVAHiSAnjj21YAKGh2CqUPJ2yQhMmYGT4e5a2tyGLiVsRgTEvajXkxhg92zJ8zmWZas9LguQWz7WZShfJg6RS"
+ ],
+ "1": [
+  "2. Mnemonic with invalid checksum (128 bits)",
+  [
+   "duckling enlarge academic academic agency result length solution fridge kidney coal piece deal husband erode duke ajar critical decision kidney"
+  ],
+  "",
+  ""
+ ],
+ "4": [
+  "5. Basic sharing 2-of-3 (128 bits)",
+  [
+   "shadow pistol academic always adequate wildlife fancy gross oasis cylinder mustang wrist rescue view short owner flip making coding armed"
+  ],
+  "",
+  ""
+ ],
+ "5": [
+  "6. Mnemonics with different identifiers (128 bits)",
+  [
+   "adequate smoking academic acid debut wine petition glen cluster slow rhyme slow simple epidemic rumor junk tracks treat olympic tolerate",
+   "adequate stay academic agency agency formal party ting frequent learn upstairs remember smear leaf damage anatomy ladle market hush corner"
+  ],
+  "",
+  ""
+ ],
+ "9": [
+  "10. Mnemonics with greater group threshold than group counts (128 bits)",
+  [
+   "music husband acrobat acid artist finance center either graduate swimming object bike medical clothes station aspect spider maiden bulb welcome",
+   "music husband acrobat agency advance hunting bike corner density careful material civil evil tactics remind hawk discuss hobo voice rainbow",
+   "music husband beard academic black tricycle clock mayor estimate level photo episode exclude ecology papa source amazing salt verify divorce"
+  ],
+  "",
+  ""
+ ],
+ "12": [
+  "13. Mnemonics giving an invalid digest (128 bits)",
+  [
+   "guilt walnut academic acid deliver remove equip listen vampire tactics nylon rhythm failure husband fatigue alive blind enemy teaspoon rebound",
+   "guilt walnut academic agency brave hamster hobo declare herd taste alpha slim criminal mild arcade formal romp branch pink ambition"
+  ],
+  "",
+  ""
+ ],
+ "13": [
+  "14. Insufficient number of groups (128 bits, case 1)",
+  [
+   "eraser senior beard romp adorn nuclear spill corner cradle style ancient family general leader ambition exchange unusual garlic promise voice"
+  ],
+  "",
+  ""
+ ]
+}

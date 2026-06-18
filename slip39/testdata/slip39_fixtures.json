@@ -1,0 +1,142 @@
+[
+    {
+      "desc": "1-of-1 len=16",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto enlarge academic academic behavior retailer quantity picture skin frost density shame that yield exceed evil unusual fatal pile either"
+      ]
+    },
+    {
+      "desc": "2-of-3 len=16",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto extend academic acid aunt device august coal entrance oral ordinary alpha aquatic analysis trouble fishing amount forbid raisin threaten",
+        "alto extend academic agency brother promise evening garbage simple genius plot health leader beam march exclude axis provide receiver carbon"
+      ]
+    },
+    {
+      "desc": "group-2of3-over-2of3 len=16",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto flea acrobat echo client kind privacy river often taxi script glad auction relate unkind item modify rebuild decrease fatal",
+        "alto flea acrobat email document crucial strategy rocky insect prospect member galaxy slow inside together standard density cause premium august",
+        "alto flea beard echo breathe either prisoner ordinary expect flash invasion quiet making expect club include problem acne hunting likely",
+        "alto flea beard email destroy adapt alto evil width inherit gesture priest process busy home hospital ladybug debris cylinder soldier"
+      ]
+    },
+    {
+      "desc": "1-of-1 len=20",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f20212223",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto garden academic academic hairy military freshman reject predator charity evil amount romp depict ceramic script preach dress regret spirit legal phantom radar"
+      ]
+    },
+    {
+      "desc": "2-of-3 len=20",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f20212223",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto guest academic acid flame beard bracelet climate inform story auction lobe jury adult bulb scared guitar learn ocean decent company easel image",
+        "alto guest academic agency thank roster darkness funding moisture estimate grant costume object grocery prize entrance garbage purchase display rhythm being rescue sunlight"
+      ]
+    },
+    {
+      "desc": "group-2of3-over-2of3 len=20",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f20212223",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto husband acrobat echo beard estimate family junction gather beard military pharmacy privacy declare luck dragon tactics spider award ladle birthday webcam dynamic",
+        "alto husband acrobat email obesity evidence juice anxiety profile prevent boring idea multiple enlarge hybrid speak busy wildlife crystal bucket being preach divorce",
+        "alto husband beard echo destroy patrol evening pacific mustang carpet vitamins peanut inside class benefit liberty declare smart either main empty aircraft research",
+        "alto husband beard email racism greatest switch necklace calcium adorn owner diagnose spill enjoy revenue volume husband loud scatter elite plains step grocery"
+      ]
+    },
+    {
+      "desc": "1-of-1 len=24",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f2021222324252627",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto isolate academic academic acquire western dish closet coal drove surface oven legend velvet theory satisfy rival shrimp unfair unknown volume chemical exercise strike debris inside video"
+      ]
+    },
+    {
+      "desc": "2-of-3 len=24",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f2021222324252627",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto leader academic acid academic shame husky empty lips blue repeat peanut expect carpet both intend pupal herd safari silver round prayer capture inside depart luck mayor",
+        "alto leader academic agency academic scandal force package kernel both sunlight knife overall surprise black width liberty meaning anatomy born snake glad pistol angel animal upgrade retreat"
+      ]
+    },
+    {
+      "desc": "group-2of3-over-2of3 len=24",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f2021222324252627",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto lunch acrobat echo academic kernel founder impulse swing dwarf formal inform armed genuine holiday main infant true aluminum withdraw modern sharp galaxy greatest spew holiday minister",
+        "alto lunch acrobat email acne center destroy axis biology genre true task tendency terminal entrance withdraw venture provide flash keyboard closet lips sidewalk decorate secret crisis maximum",
+        "alto lunch beard echo acne pitch loan seafood admit damage smear lift energy finance parcel black cards scroll taxi oasis alto broken cause scatter costume indicate insect",
+        "alto lunch beard email academic hobo grumpy retreat shaft submit platform average frost march darkness pencil flea manager racism goat force aviation pecan pacific deny patent hunting"
+      ]
+    },
+    {
+      "desc": "1-of-1 len=28",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto merchant academic academic acquire email phantom scholar species column drug alien talent camera papa legs revenue mixed amazing wisdom subject geology problem element bulb mama lilac prevent genius withdraw"
+      ]
+    },
+    {
+      "desc": "2-of-3 len=28",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto necklace academic acid activity mailman result vanish starting dilemma devote cluster helpful human grownup funding science license strike center rainbow boring ounce craft glasses lair cultural gravity order fiscal",
+        "alto necklace academic agency advocate pencil flavor database glasses craft damage scroll rescue security trend decent decorate observe image transfer upstairs furl trend editor deny dive aspect coal campus practice"
+      ]
+    },
+    {
+      "desc": "group-2of3-over-2of3 len=28",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto painting acrobat echo admit again declare package focus network jury lungs random patent rival meaning glimpse listen eclipse mortgage ruin living exercise lunar resident railroad helpful mental actress together",
+        "alto painting acrobat email adequate filter deny wireless dynamic bedroom email mild mild learn fancy always endless pistol station camera stadium style emission prisoner railroad wildlife salt dining pants envelope",
+        "alto painting beard echo adorn enlarge airport drink huge roster require earth rumor talent unfair perfect taught spirit already minister mixed episode slap quantity stilt provide romantic diminish guilt branch",
+        "alto painting beard email actress wrote flash sunlight evil forecast hobo advocate silent spirit writing idea volume finance furl race become very adapt game prune timely fluff patent junk unhappy"
+      ]
+    },
+    {
+      "desc": "1-of-1 len=32",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto pink academic academic alto market rich alarm intend brother finger prisoner very dive grant royal response scared dive security advocate window surface envelope makeup quantity geology wireless sack relate shelter photo fraction"
+      ]
+    },
+    {
+      "desc": "2-of-3 len=32",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto prospect academic acid acquire cubic bedroom usual mouse galaxy enemy human ladybug lilac require numb scared nuclear counter vegan graduate sister submit sweater axis software depict cards task corner lift debris standard",
+        "alto prospect academic agency ambition hanger practice sister valuable nuclear crunch kitchen talent weapon havoc canyon knit biology threaten friar reaction losing simple divorce market plunge equation carve exact garden railroad estimate obtain"
+      ]
+    },
+    {
+      "desc": "group-2of3-over-2of3 len=32",
+      "secret_hex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "passphrase": "TREZOR",
+      "mnemonics": [
+        "alto recover acrobat echo afraid weapon impact unfold listen heat traveler provide pink argue curious military amazing ruin crazy champion taxi lobe slice hairy skin carve prepare dwarf velvet smith scatter ivory romp",
+        "alto recover acrobat email adorn wireless soul very greatest presence plains crowd capture hanger lying guard finance sweater grownup liquid animal traffic fawn teaspoon require kernel together credit public morning climate gross aluminum",
+        "alto recover beard echo artist excuse froth webcam brave earth exact surprise chest scandal desert grownup chemical always hybrid flip raspy fiction sympathy script year museum entrance alto diploma problem scout fused sharp",
+        "alto recover beard email acid unhappy pencil describe smart plains mixture curly secret writing party hawk herald findings humidity fiction pupal emission diet station flea silent activity very indicate burning sympathy exotic luck"
+      ]
+    }
+]
