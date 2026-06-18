@@ -295,3 +295,30 @@ func TestRecoverRejectsNonCodex32(t *testing.T) {
 		t.Fatal("recovery must not accept a non-codex32 entry")
 	}
 }
+
+// The correction-confirm screen: Button3 accepts, Button1 rejects, and Button2
+// is drained every frame (must not block Button3 — the multishare R0-C1 lesson).
+func TestConfirmCorrectionFlow(t *testing.T) {
+	res := codex32.CorrectionResult{
+		Corrected: "MD1YQPQQXQQ8XTWHW4XWN4QH",
+		Edits:     []codex32.Edit{{Pos: 5, Was: 'Z', Now: 'P'}},
+	}
+	// Accept (Button3).
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button3)
+	if !confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button3 should accept the correction")
+	}
+	// Reject (Button1).
+	ctx = NewContext(newPlatform())
+	click(&ctx.Router, Button1)
+	if confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button1 should reject the correction")
+	}
+	// Button2 must not block Button3 (drain).
+	ctx = NewContext(newPlatform())
+	click(&ctx.Router, Button2, Button3)
+	if !confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
+		t.Error("Button2 must be drained so Button3 still accepts")
+	}
+}

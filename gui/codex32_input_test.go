@@ -80,3 +80,47 @@ func TestInputMStarMK1(t *testing.T) {
 		t.Fatalf("mk1 entry = %v (%T), want mdmkText", obj, obj)
 	}
 }
+
+// A single-substitution-corrupted md1: the "Fix?" affordance (Button3 when
+// invalid-in-window) corrects it; the confirm screen's Button3 accepts; the now
+// valid string OKs through as mdmkText. (Phase B; orientation/diff end to end.)
+func TestInputMStarFixMD1(t *testing.T) {
+	const valid = "md1yqpqqxqq8xtwhw4xwn4qh"
+	const corrupted = "md1yqzqqxqq8xtwhw4xwn4qh" // data index 2 ('p'->'z'); any single bech32 sub works
+	if corrupted == valid {
+		t.Fatal("test corruption is a no-op")
+	}
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Down, Down, Button3) // menu -> M*1 STRING
+	runes(&ctx.Router, corrupted)
+	click(&ctx.Router, Button3) // Fix? (invalid-in-window)
+	click(&ctx.Router, Button3) // accept the correction (confirmCorrectionFlow)
+	click(&ctx.Router, Button3) // OK (now valid)
+	obj, ok := newInputFlow(ctx, &descriptorTheme)
+	if !ok {
+		t.Fatal("newInputFlow did not return a value")
+	}
+	if got, isMd := obj.(mdmkText); !isMd || got != mdmkText(strings.ToUpper(valid)) {
+		t.Fatalf("fixed md1 = %v (%T), want %q", obj, obj, strings.ToUpper(valid))
+	}
+}
+
+// An uncorrectable (>4-error) entry: pressing Fix? shows the "no fix" modal and
+// returns to editing — it never fabricates a correction. **Event sequence
+// (plan-R0 C-2):** Fix → dismiss modal → Back out of the ENTRY (returns
+// (nil,false)) → Back out of the MENU (the menu loops on ok=false, so a second
+// Button1 is required to make newInputFlow return). Omitting the second Back
+// hangs on the re-rendered ChoiceScreen.
+func TestInputMStarFixUncorrectable(t *testing.T) {
+	// 5 substitutions in an md1 — beyond t=4; codex32.Correct returns (_,false).
+	const corrupted = "md1zzzzzxqq8xtwhw4xwn4qh"
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Down, Down, Button3) // menu -> M*1 STRING -> entry
+	runes(&ctx.Router, corrupted)
+	// Fix? -> "no fix" modal -> dismiss -> Back(entry) -> Back(menu).
+	click(&ctx.Router, Button3, Button3, Button1, Button1)
+	obj, ok := newInputFlow(ctx, &descriptorTheme)
+	if ok {
+		t.Fatalf("uncorrectable entry must not yield a value, got %v (%T)", obj, obj)
+	}
+}
