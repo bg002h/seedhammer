@@ -282,7 +282,7 @@ func TestWordKeyboardScreen(t *testing.T) {
 		runes(&ctx.Router, w)
 		click(&ctx.Router, Button3)
 		m := make(bip39.Mnemonic, 1)
-		inputWordsFlow(ctx, &descriptorTheme, m, 0)
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
 		if got := bip39.LabelFor(m[0]); got != w {
 			t.Errorf("keyboard mapped %q to %q", w, got)
 		}
@@ -488,7 +488,7 @@ func TestWordFlowProgressTitle(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := emptyBIP39Mnemonic(24)
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 0)
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
 	})
 	defer quit()
 	content, ok := frame()
@@ -504,7 +504,7 @@ func TestWordFlowMatchCount(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := emptyBIP39Mnemonic(24)
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 0)
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
 	})
 	defer quit()
 
@@ -601,7 +601,7 @@ func TestWordFlowLastWord24(t *testing.T) {
 		copy(m, v)
 		m[23] = -1 // last slot unset; first 23 are valid
 		frame, quit := runUI(ctx, func() {
-			inputWordsFlow(ctx, &descriptorTheme, m, 23)
+			inputWordsFlow(ctx, &descriptorTheme, m, 23, "")
 		})
 		content, ok := frame()
 		quit()
@@ -622,7 +622,7 @@ func TestWordFlowLastWord24(t *testing.T) {
 		want := v[23]
 		runes(&ctx.Router, bip39.LabelFor(want))
 		click(&ctx.Router, Button3)
-		inputWordsFlow(ctx, &descriptorTheme, m, 23)
+		inputWordsFlow(ctx, &descriptorTheme, m, 23, "")
 		if m[23] != want {
 			t.Errorf("last word committed %d (%q), want %d (%q)",
 				m[23], bip39.LabelFor(m[23]), want, bip39.LabelFor(want))
@@ -639,7 +639,7 @@ func TestWordFlowLastWord12(t *testing.T) {
 		copy(m, v)
 		m[11] = -1
 		frame, quit := runUI(ctx, func() {
-			inputWordsFlow(ctx, &descriptorTheme, m, 11)
+			inputWordsFlow(ctx, &descriptorTheme, m, 11, "")
 		})
 		content, ok := frame()
 		quit()
@@ -659,7 +659,7 @@ func TestWordFlowLastWord12(t *testing.T) {
 		want := v[11]
 		runes(&ctx.Router, bip39.LabelFor(want))
 		click(&ctx.Router, Button3)
-		inputWordsFlow(ctx, &descriptorTheme, m, 11)
+		inputWordsFlow(ctx, &descriptorTheme, m, 11, "")
 		if m[11] != want {
 			t.Errorf("last word committed %d (%q), want %d (%q)",
 				m[11], bip39.LabelFor(m[11]), want, bip39.LabelFor(want))
@@ -678,7 +678,7 @@ func TestWordFlowLastWordNoFlash(t *testing.T) {
 	m[22] = -1
 	m[23] = -1
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 22)
+		inputWordsFlow(ctx, &descriptorTheme, m, 22, "")
 	})
 	defer quit()
 	frame() // word-22 entry frame (empty fragment)

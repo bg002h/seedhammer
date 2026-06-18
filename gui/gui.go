@@ -577,7 +577,7 @@ func fadeClip(b *op.Buffer, o op.Op, r image.Rectangle) op.Op {
 
 const wordKeys = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 
-func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int) {
+func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string) {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
@@ -698,13 +698,21 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 				nav2,
 			)
 		}
-		title, _ := layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+		// Additive title contract: empty title renders the existing dynamic
+		// "Word N of M" line byte-identically; a non-empty title (e.g. the Seed
+		// XOR "Part i of n") replaces it, like inputSLIP39Flow.
+		var titleOp op.Op
+		if title == "" {
+			titleOp, _ = layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+		} else {
+			titleOp, _ = layoutTitle(ctx, dims.X, th.Text, title)
+		}
 		ctx.Frame(op.Layer(
 			kbdOp,
 			txtBg,
 			countOp,
 			nav,
-			title,
+			titleOp,
 			op.Color(&ctx.B, th.Background),
 		))
 	}
@@ -2022,7 +2030,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 			switch choice {
 			case 0, 1:
 				mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-				inputWordsFlow(ctx, th, mnemonic, 0)
+				inputWordsFlow(ctx, th, mnemonic, 0, "")
 				if !isEmptyMnemonic(mnemonic) {
 					return mnemonic, true
 				}
@@ -2099,7 +2107,7 @@ events:
 			}
 		}
 		if editBtn.Clicked(ctx) {
-			inputWordsFlow(ctx, th, mnemonic, s.selected)
+			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
 			continue
 		}
 		if confirmBtn.Clicked(ctx) {
