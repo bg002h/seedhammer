@@ -7,14 +7,13 @@ import (
 	"seedhammer.com/codex32"
 )
 
-// Drives the "Input Seed" menu to the CODEX32 choice (index 2) and enters a
-// valid codex32 string on the keypad, asserting newInputFlow returns it.
+// Drives the "Input Seed" menu to the "M*1 STRING" choice (index 2) and enters a
+// valid codex32 string on the keypad, asserting newInputFlow returns it as a
+// codex32.String (the ms path of the HRP-dispatched entry).
 //
-// Without "CODEX32" in the menu this does NOT pass: with only two choices the
-// Down-key selection caps at index 1 ("24 WORDS"), so the run enters 24-word
-// BIP-39 input which never completes on a codex32 string and the test fails via
-// the test timeout — it never reaches the codex32 path. With "CODEX32" added,
-// index 2 routes to inputCodex32Flow, which returns the entered codex32 string.
+// The "M*1 STRING" entry sits at menu index 2 (after "12 WORDS"/"24 WORDS"), so
+// two Down presses select it; index 2 routes to inputCodex32Flow, which for an
+// ms1 string returns a codex32.String.
 //
 // NOTE: the keypad stores typed runes UPPERCASE, so the returned string is the
 // uppercase form of what we type; compare against strings.ToUpper(share).

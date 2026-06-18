@@ -72,7 +72,7 @@ func codex32Frame(t *testing.T, typed string) string {
 	t.Helper()
 	ctx := NewContext(newPlatform())
 	frame, quit := runUI(ctx, func() {
-		inputCodex32Flow(ctx, &descriptorTheme, "Input Codex32 Share")
+		inputCodex32Flow(ctx, &descriptorTheme, "Input m*1 string")
 	})
 	defer quit()
 	if typed != "" {
