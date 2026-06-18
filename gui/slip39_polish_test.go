@@ -355,11 +355,12 @@ func TestSLIP39FingerprintBackRecognized(t *testing.T) {
 }
 
 func TestEngraveSLIP39RecoverToBackup(t *testing.T) {
-	// Full recover dispatch: confirm(Recover) → recoverSLIP39Flow (idx-3, Skip)
-	// → §3 hold-to-confirm acknowledgement → §5.4 fingerprint (BDDBDA4F) →
-	// backupWalletFlow (the recovered BIP-39 seed words appear). Asserts the ack
-	// text, the recovered fingerprint, and that the recovered seed reaches the
-	// BIP-39 backup confirm.
+	// Full recover dispatch, BIP-39 arm of the post-recovery fork:
+	// confirm(Recover) → recoverSLIP39Flow (idx-3, Skip) → the "Recovered Seed"
+	// ChoiceScreen → choose "BIP-39 seed" (sel==0, the default) → §5.4 fingerprint
+	// (BDDBDA4F) → backupWalletFlow (the recovered BIP-39 seed words appear).
+	// Asserts the fork lead text, the recovered fingerprint, and that the
+	// recovered seed reaches the BIP-39 backup confirm.
 	synctest.Test(t, func(t *testing.T) {
 		first := parseFixtureShare(t, slip39Vec3[0])
 		ctx := NewContext(newPlatform())
@@ -375,15 +376,12 @@ func TestEngraveSLIP39RecoverToBackup(t *testing.T) {
 		click(&ctx.Router, Button3) // passphrase ChoiceScreen: Skip
 		frame()
 
-		// §3 acknowledgement screen.
-		if c, ok := pumpUntil(frame, "WRONG seed", 64); !ok {
-			t.Fatalf("acknowledgement text not shown; got %q", c)
+		// The post-recovery fork ChoiceScreen.
+		if c, ok := pumpUntil(frame, "How was this backup made", 64); !ok {
+			t.Fatalf("fork lead text not shown; got %q", c)
 		}
-		// Hold to confirm the acknowledgement.
-		press(&ctx.Router, Button3)
-		frame()
-		time.Sleep(confirmDelay)
-		frame() // yields ConfirmYes → fingerprint screen
+		// Choose the default "BIP-39 seed" arm (sel==0): no Down, just Choose.
+		click(&ctx.Router, Button3)
 
 		// §5.4 recovered fingerprint (no extra input needed — it just renders).
 		if c, ok := pumpUntil(frame, "BDDBDA4F", 64); !ok {
@@ -395,6 +393,124 @@ func TestEngraveSLIP39RecoverToBackup(t *testing.T) {
 		// confirm screen.
 		if c, ok := pumpUntil(frame, "GIFT", 64); !ok {
 			t.Fatalf("recovered seed words did not reach backupWalletFlow; got %q", c)
+		}
+	})
+}
+
+func TestEngraveSLIP39RecoverForkVerbatim(t *testing.T) {
+	// Verbatim arm of the post-recovery fork (sel==1): after recovery, choose
+	// "Engrave shares" → engraveSLIP39Verbatim runs on the FIRST share, reaching
+	// the EngraveScreen with NO BIP-39 fingerprint and NO BIP-39 SeedScreen.
+	synctest.Test(t, func(t *testing.T) {
+		first := parseFixtureShare(t, slip39Vec3[0])
+		e := newEngraver()
+		p := newPlatform()
+		p.engraver = e
+		ctx := NewContext(p)
+		frame, quit := runUI(ctx, func() {
+			engraveSLIP39(ctx, &descriptorTheme, first)
+		})
+		defer quit()
+		// Accumulate every pumped frame so the NEGATIVE assertions cover the
+		// whole run, not just up to where the positive anchor was found.
+		var seen strings.Builder
+		pump := func(want string, max int) (string, bool) {
+			var content string
+			for i := 0; i < max; i++ {
+				c, ok := frame()
+				if !ok {
+					return content, false
+				}
+				content = c
+				seen.WriteString(c)
+				seen.WriteByte('\n')
+				if uiContains(content, want) {
+					return content, true
+				}
+			}
+			return content, false
+		}
+
+		// Recover at the confirm screen, collect the 2nd share, Skip passphrase.
+		click(&ctx.Router, Button2)
+		driveShare(&ctx.Router, slip39Vec3[1])
+		click(&ctx.Router, Button3) // passphrase ChoiceScreen: Skip
+
+		// At the fork, navigate Down to "Engrave shares" (sel==1) and Choose.
+		if c, ok := pump("How was this backup made", 64); !ok {
+			t.Fatalf("fork lead text not shown; got %q", c)
+		}
+		click(&ctx.Router, Down, Button3) // sel==1 → engraveSLIP39Verbatim
+
+		// POSITIVE (C2): the verbatim path reaches the EngraveScreen. The share
+		// Title (id #m/t) is engraving GEOMETRY inside backup.Seed and is NOT
+		// rendered as on-screen label text, so assert the EngraveScreen copy.
+		c, ok := pump("Insert a blank plate", 128)
+		if !ok {
+			t.Fatalf("verbatim arm did not reach the EngraveScreen; got %q", c)
+		}
+
+		// NEGATIVE (C2): the verbatim arm uniquely never shows the BIP-39
+		// fingerprint screen nor the BIP-39 SeedScreen (recovered words GIFT…).
+		all := seen.String()
+		if uiContains(all, "Recovered Fingerprint") {
+			t.Errorf("verbatim arm must NOT show the BIP-39 fingerprint screen; saw it in the run")
+		}
+		if uiContains(all, "GIFT") {
+			t.Errorf("verbatim arm must NOT reach the BIP-39 SeedScreen (recovered words); saw it in the run")
+		}
+
+		// Drive the engrave to completion so engraveSLIP39Verbatim's
+		// `for { if Engrave() { return } }` loop returns and the UI goroutine
+		// terminates (otherwise synctest never observes the bubble idle). Mirror
+		// TestEngraveScreen: hold to start, pump while the job runs, then confirm
+		// the done screen.
+		click(&ctx.Router, Button3, Button3, Button3) // advance to connect/idle
+		press(&ctx.Router, Button3)                   // hold to start
+		frame()
+		time.Sleep(confirmDelay)
+	loop:
+		for {
+			frame()
+			select {
+			case <-e.closes:
+				break loop
+			case <-p.wakeups:
+			}
+		}
+		click(&ctx.Router, Button3) // acknowledge the completed engrave
+		synctest.Wait()
+		if _, ok := frame(); ok {
+			t.Fatal("verbatim engrave did not complete (UI still running)")
+		}
+	})
+}
+
+func TestEngraveSLIP39RecoverForkBack(t *testing.T) {
+	// Back at the post-recovery fork ChoiceScreen → engraveRecoveredSLIP39
+	// returns false → engraveSLIP39 continues back to the ORIGINAL confirm
+	// (recognized; no engrave). The share is the lone idx-3 first share, so the
+	// confirm shows its id again.
+	synctest.Test(t, func(t *testing.T) {
+		first := parseFixtureShare(t, slip39Vec3[0])
+		ctx := NewContext(newPlatform())
+		frame, quit := runUI(ctx, func() {
+			engraveSLIP39(ctx, &descriptorTheme, first)
+		})
+		defer quit()
+
+		click(&ctx.Router, Button2) // Recover
+		driveShare(&ctx.Router, slip39Vec3[1])
+		click(&ctx.Router, Button3) // passphrase ChoiceScreen: Skip
+		frame()
+
+		if c, ok := pumpUntil(frame, "How was this backup made", 64); !ok {
+			t.Fatalf("fork lead text not shown; got %q", c)
+		}
+		// Back at the fork → caller loops back to the original confirm.
+		click(&ctx.Router, Button1)
+		if c, ok := pumpUntil(frame, "Confirm SLIP-39 Share", 64); !ok {
+			t.Fatalf("Back at the fork did not return to the original confirm; got %q", c)
 		}
 	})
 }
