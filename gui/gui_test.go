@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/draw"
 	"image/png"
@@ -724,5 +725,44 @@ func TestMasterFingerprintPassphrase(t *testing.T) {
 	}
 	if bare == pass {
 		t.Errorf("bare and passphrase fingerprints must differ: both %08X", bare)
+	}
+}
+
+func TestPassphraseFlow(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	runes(&ctx.Router, "Ab1!")
+	click(&ctx.Router, Button3)
+	s, ok := passphraseFlow(ctx, &descriptorTheme)
+	if s != "Ab1!" || !ok {
+		t.Errorf("passphraseFlow = (%q, %v), want (\"Ab1!\", true)", s, ok)
+	}
+}
+
+func TestPassphraseFlowBack(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button1)
+	if s, ok := passphraseFlow(ctx, &descriptorTheme); ok || s != "" {
+		t.Errorf("back: passphraseFlow = (%q, %v), want (\"\", false)", s, ok)
+	}
+}
+
+func TestEngraveFingerprintChoiceMapping(t *testing.T) {
+	// The fingerprint choice maps index 0 -> bare, index 1 -> passphrase.
+	mn := bip39FromWords(t, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	bare, _ := masterFingerprintFor(mn, &chaincfg.MainNetParams, "")
+	pass, _ := masterFingerprintFor(mn, &chaincfg.MainNetParams, "x")
+	if bare == pass {
+		t.Fatal("fingerprints unexpectedly equal")
+	}
+	// Drive a 2-row ChoiceScreen selecting index 1 (Down + Button3) and assert it returns 1.
+	ctx := NewContext(newPlatform())
+	cs := &ChoiceScreen{Title: "Engrave fingerprint", Choices: []string{
+		"No passphrase " + fmt.Sprintf("%.8X", bare),
+		"Passphrase " + fmt.Sprintf("%.8X", pass),
+	}}
+	click(&ctx.Router, Down, Button3)
+	sel, ok := cs.Choose(ctx, &descriptorTheme)
+	if !ok || sel != 1 {
+		t.Errorf("Choose = (%d,%v), want (1,true)", sel, ok)
 	}
 }
