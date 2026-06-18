@@ -2,8 +2,10 @@ package codex32
 
 import "strings"
 
-// Edit is one substitution the decoder applied: the full-string byte index and
-// the before/after bech32 characters (for the GUI's per-position confirm diff).
+// Edit is one substitution the decoder applied: the full-string rune index
+// (== byte index for the ASCII bech32 charset; Phase B indexes []rune(frag))
+// and the before/after bech32 characters (for the GUI's per-position confirm
+// diff).
 type Edit struct {
 	Pos      int
 	Was, Now byte
