@@ -562,7 +562,12 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		}
 		return completeBIP39Word(frag, nv)
 	}
-	for !ctx.Done {
+	// refreshCands (re)computes the last-word candidate set and applies its key
+	// mask the first time the last word is observed. Called both at the top of
+	// the loop and right after advancing into the last word on accept, so the
+	// candidate restriction applies on the SAME frame (no one-frame full-
+	// keyboard flash).
+	refreshCands := func() {
 		if selected == len(mnemonic)-1 && candsFor != selected {
 			cands = bip39.LastWordCandidates(mnemonic)
 			candsFor = selected
@@ -572,6 +577,9 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 				wordLabel = bip39.LabelFor(cw)
 			}
 		}
+	}
+	for !ctx.Done {
+		refreshCands()
 		for kbd.Update(ctx) {
 			nvalid = updateKeys(kbd.Fragment)
 			wordLabel = kbd.Fragment
@@ -600,6 +608,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 					break
 				}
 			}
+			refreshCands()
 		}
 		dims := ctx.Platform.DisplaySize()
 

@@ -665,3 +665,30 @@ func TestWordFlowLastWord12(t *testing.T) {
 		}
 	}
 }
+
+func TestWordFlowLastWordNoFlash(t *testing.T) {
+	// Forward-advance into the last word (commit word 23 of a 24-word seed) and
+	// assert the candidate count shows on the SAME frame — i.e. the candidate
+	// restriction applies immediately, with no one-frame full-keyboard flash.
+	v := validMnemonic(24)
+	ctx := NewContext(newPlatform())
+	m := make(bip39.Mnemonic, 24)
+	copy(m, v)
+	m[22] = -1
+	m[23] = -1
+	frame, quit := runUI(ctx, func() {
+		inputWordsFlow(ctx, &descriptorTheme, m, 22)
+	})
+	defer quit()
+	frame() // word-22 entry frame (empty fragment)
+	// type + commit word 22, advancing into the last word (23)
+	runes(&ctx.Router, bip39.LabelFor(v[22]))
+	click(&ctx.Router, Button3)
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame after committing word 22")
+	}
+	if !uiContains(content, "8 matches") {
+		t.Errorf("expected candidate count on the frame entering the last word (no flash); got %q", content)
+	}
+}
