@@ -61,9 +61,9 @@ func TestParseShare(t *testing.T) {
 	if _, err := ParseShare(""); !errors.Is(err, errWrongLength) {
 		t.Errorf("empty: %v, want errWrongLength", err)
 	}
-	// 33-word (256-bit) share → unsupported size (exercises the wordsLong branch).
-	if _, err := ParseShare(strings.TrimSpace(strings.Repeat("duckling ", 33))); !errors.Is(err, errUnsupportedSize) {
-		t.Errorf("33 words: %v, want errUnsupportedSize", err)
+	// A word count outside {20,23,27,30,33} → wrong length (21 is invalid).
+	if _, err := ParseShare(strings.TrimSpace(strings.Repeat("duckling ", 21))); !errors.Is(err, errWrongLength) {
+		t.Errorf("21 words: %v, want errWrongLength", err)
 	}
 	// A prefix of a real word ("ducklin" ⊂ "duckling") must be rejected as
 	// not-in-wordlist — exactWord must be exact, not ClosestWord's prefix match.
@@ -76,6 +76,31 @@ func TestParseShare(t *testing.T) {
 	}
 }
 
+func TestParseShareExtractsValue(t *testing.T) {
+	s, err := ParseShare(vectorShare(t, 3, 0)) // official idx 3, 128-bit/20-word
+	if err != nil {
+		t.Fatalf("ParseShare: %v", err)
+	}
+	if len(s.Value) != 16 {
+		t.Errorf("Value len=%d want 16 (128-bit)", len(s.Value))
+	}
+	// Long path: idx 35 is 256-bit/33-word.
+	s32, err := ParseShare(vectorShare(t, 35, 0))
+	if err != nil {
+		t.Fatalf("ParseShare(33-word): %v", err)
+	}
+	if len(s32.Value) != 32 {
+		t.Errorf("Value len=%d want 32 (256-bit)", len(s32.Value))
+	}
+}
+
+func TestParseShareGroupThresholdExceedsCount(t *testing.T) {
+	_, err := ParseShare(vectorShare(t, 9, 0)) // official idx 9 — group thr > count
+	if !errors.Is(err, errGroupThresholdExceedsCount) {
+		t.Errorf("want errGroupThresholdExceedsCount, got %v", err)
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	cases := []struct {
 		in   error
@@ -84,8 +109,9 @@ func TestDescribe(t *testing.T) {
 		{nil, ""},
 		{errBadChecksum, "bad checksum"},
 		{errNotInWordlist, "unknown word"},
-		{errUnsupportedSize, "256-bit not supported"},
 		{errWrongLength, "wrong length"},
+		{errBadPadding, "bad padding"},
+		{errGroupThresholdExceedsCount, "group threshold exceeds count"},
 		{errors.New("other"), "invalid"},
 	}
 	for _, c := range cases {

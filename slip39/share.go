@@ -6,31 +6,30 @@ import (
 )
 
 var (
-	errWrongLength     = errors.New("slip39: wrong word count")
-	errUnsupportedSize = errors.New("slip39: 256-bit shares not supported")
-	errNotInWordlist   = errors.New("slip39: word not in wordlist")
-	errBadChecksum     = errors.New("slip39: bad checksum")
+	errWrongLength                = errors.New("slip39: wrong word count")
+	errNotInWordlist              = errors.New("slip39: word not in wordlist")
+	errBadChecksum                = errors.New("slip39: bad checksum")
+	errBadPadding                 = errors.New("slip39: bad padding")
+	errGroupThresholdExceedsCount = errors.New("slip39: group threshold exceeds count")
 )
 
-// Share is a parsed SLIP-39 share's header metadata (Tier 1: no secret value
-// reconstruction). Fields are decoded from the share's bit layout; the RS1024
-// checksum has been verified. Mnemonic holds the canonical (uppercase) words.
+// Share is a parsed SLIP-39 share's header metadata plus its extracted share
+// VALUE. Fields are decoded from the share's bit layout; the RS1024 checksum
+// has been verified. Mnemonic holds the canonical (uppercase) words; Value
+// holds the secret-bearing share-value bytes (16/20/24/28/32) consumed by
+// Combine (the verbatim single-share engrave path ignores Value).
 type Share struct {
 	Mnemonic        []string
-	Identifier      int  // 15-bit
-	Extendable      bool // ext flag (selects the RS1024 customization string)
-	IterationExp    int  // 4-bit
-	GroupIndex      int  // 4-bit
-	GroupThreshold  int  // decoded (stored + 1)
-	GroupCount      int  // decoded (stored + 1)
-	MemberIndex     int  // 4-bit
-	MemberThreshold int  // decoded (stored + 1)
+	Value           []byte // share-value bytes (secret-bearing; for Combine)
+	Identifier      int    // 15-bit
+	Extendable      bool   // ext flag (selects the RS1024 customization string)
+	IterationExp    int    // 4-bit
+	GroupIndex      int    // 4-bit
+	GroupThreshold  int    // decoded (stored + 1)
+	GroupCount      int    // decoded (stored + 1)
+	MemberIndex     int    // 4-bit
+	MemberThreshold int    // decoded (stored + 1)
 }
-
-const (
-	wordsShort = 20 // 128-bit
-	wordsLong  = 33 // 256-bit (unsupported in Tier 1)
-)
 
 // rs1024GEN / rs1024Polymod / rs1024Verify implement the SLIP-0039 RS1024
 // checksum over GF(1024) (error-detection only — NOT secret handling).
@@ -73,17 +72,18 @@ func exactWord(word string) (Word, bool) {
 	return w, true
 }
 
-// ParseShare validates a SLIP-39 share mnemonic (Tier 1, 128-bit/20-word only)
-// and returns its decoded header. Checks: exactly 20 words, all in the wordlist
+// ParseShare validates a SLIP-39 share mnemonic and returns its decoded header
+// plus the extracted share VALUE. Checks: a valid word count ∈ {20,23,27,30,33}
+// (master-secret sizes 16/20/24/28/32 B), all words in the wordlist
 // (case-insensitive), valid RS1024 checksum (customization string per the ext
-// bit), nothing else (no secret reconstruction). A 33-word (256-bit) share is
-// rejected as unsupported. Returns a classifiable sentinel error on failure.
+// bit), group_count ≥ group_threshold (structural), and leading value-pad bits
+// all zero. Returns a classifiable sentinel error on failure.
 func ParseShare(mnemonic string) (Share, error) {
 	fields := strings.Fields(mnemonic)
+	// Accepted word counts (M4 canonical form): 7 metadata words + a value
+	// field of {13,16,20,23,26} words → master-secret {16,20,24,28,32} B.
 	switch len(fields) {
-	case wordsShort:
-	case wordsLong:
-		return Share{}, errUnsupportedSize
+	case 20, 23, 27, 30, 33:
 	default:
 		return Share{}, errWrongLength
 	}
@@ -108,17 +108,58 @@ func ParseShare(mnemonic string) (Share, error) {
 	if !rs1024Verify(cs, indices) {
 		return Share{}, errBadChecksum
 	}
+	groupThreshold := int((hdr>>12)&0xf) + 1
+	groupCount := int((hdr>>8)&0xf) + 1
+	// Structural check (port share.rs:248-256): reject group_count <
+	// group_threshold before extracting the value.
+	if groupCount < groupThreshold {
+		return Share{}, errGroupThresholdExceedsCount
+	}
+	// Value field = words [4 : len-3]. valueWords*10 bits, left-padded with
+	// padBits zeros; padBits ≤ 8 for all five accepted counts.
+	valueWords := len(fields) - 7
+	padBits := (10 * valueWords) % 16
+	valueBytes := (10*valueWords - padBits) / 8
+	val, ok := decodeValue(indices[4:len(indices)-3], padBits, valueBytes)
+	if !ok {
+		return Share{}, errBadPadding
+	}
 	return Share{
 		Mnemonic:        canonical,
+		Value:           val,
 		Identifier:      int(hdr >> 25),
 		Extendable:      ext,
 		IterationExp:    int((hdr >> 20) & 0xf),
 		GroupIndex:      int((hdr >> 16) & 0xf),
-		GroupThreshold:  int((hdr>>12)&0xf) + 1,
-		GroupCount:      int((hdr>>8)&0xf) + 1,
+		GroupThreshold:  groupThreshold,
+		GroupCount:      groupCount,
 		MemberIndex:     int((hdr >> 4) & 0xf),
 		MemberThreshold: int(hdr&0xf) + 1,
 	}, nil
+}
+
+// decodeValue unpacks value words (10-bit, big-endian, left-padded with
+// padBits zeros) into valueBytes bytes; returns false if a leading pad bit
+// is set. Byte-oriented (no value-wide accumulator) — TinyGo int is 32-bit.
+func decodeValue(valueWords []int, padBits, valueBytes int) ([]byte, bool) {
+	getBit := func(i int) byte {
+		w := valueWords[i/10] & 0x3ff
+		return byte((w >> (9 - i%10)) & 1)
+	}
+	for i := 0; i < padBits; i++ {
+		if getBit(i) != 0 {
+			return nil, false
+		}
+	}
+	out := make([]byte, valueBytes)
+	for bi := range out {
+		var b byte
+		for j := 0; j < 8; j++ {
+			b = (b << 1) | getBit(padBits+bi*8+j)
+		}
+		out[bi] = b
+	}
+	return out, true
 }
 
 // Describe returns a short human label for a ParseShare error (for the GUI), or
@@ -131,10 +172,12 @@ func Describe(err error) string {
 		return "bad checksum"
 	case errors.Is(err, errNotInWordlist):
 		return "unknown word"
-	case errors.Is(err, errUnsupportedSize):
-		return "256-bit not supported"
 	case errors.Is(err, errWrongLength):
 		return "wrong length"
+	case errors.Is(err, errBadPadding):
+		return "bad padding"
+	case errors.Is(err, errGroupThresholdExceedsCount):
+		return "group threshold exceeds count"
 	default:
 		return "invalid"
 	}
