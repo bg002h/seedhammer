@@ -3,6 +3,7 @@ package gui
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -184,8 +185,8 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 	r.Y = offy + m.Descent.Ceil()
 }
 
-func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params) (*hdkeychain.ExtendedKey, bool) {
-	seed := bip39.MnemonicSeed(m, "")
+func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
+	seed := bip39.MnemonicSeed(m, password)
 	mk, err := hdkeychain.NewMaster(seed, net)
 	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
 	// According to [0] the odds of encountering a seed that generates
@@ -451,11 +452,7 @@ type Plate struct {
 	Spline   bspline.Curve
 }
 
-func engraveSeed(params engrave.Params, m bip39.Mnemonic) (Plate, error) {
-	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams)
-	if err != nil {
-		return Plate{}, err
-	}
+func engraveSeed(params engrave.Params, m bip39.Mnemonic, mfp uint32) (Plate, error) {
 	qrc, err := qr.Encode(string(seedqr.QR(m)), qr.M)
 	if err != nil {
 		return Plate{}, err
@@ -479,8 +476,8 @@ func engraveSeed(params engrave.Params, m bip39.Mnemonic) (Plate, error) {
 	return toPlate(seedSide, params)
 }
 
-func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params) (uint32, error) {
-	mk, ok := deriveMasterKey(m, network)
+func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password string) (uint32, error) {
+	mk, ok := deriveMasterKey(m, network, password)
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
 	}
@@ -489,6 +486,50 @@ func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params) (uint32, e
 		return 0, err
 	}
 	return bip32.Fingerprint(pkey), nil
+}
+
+// passphraseFlow lets the user enter a BIP-39 passphrase on the PassphraseKeyboard.
+// Returns (passphrase, true) on accept (possibly ""), or ("", false) on Back.
+func passphraseFlow(ctx *Context, th *Colors) (string, bool) {
+	kbd := NewPassphraseKeyboard(ctx)
+	backBtn := &Clickable{Button: Button1}
+	okBtn := &Clickable{Button: Button3}
+	for !ctx.Done {
+		for kbd.Update(ctx) {
+		}
+		if backBtn.Clicked(ctx) {
+			return "", false
+		}
+		if okBtn.Clicked(ctx) {
+			return kbd.Fragment, true
+		}
+		dims := ctx.Platform.DisplaySize()
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(8)
+		kbdOp, kbdsz := kbd.Layout(ctx, th)
+		kbdOp = kbdOp.Offset(content.S(kbdsz))
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Enter Passphrase")
+		ctx.Frame(op.Layer(kbdOp, nav, title, op.Color(&ctx.B, th.Background)))
+	}
+	return "", false
+}
+
+func showSeedError(ctx *Context, th *Colors, ss *SeedScreen, mnemonic bip39.Mnemonic, err error) {
+	errScr := NewErrorScreen(err)
+	for !ctx.Done {
+		dims := ctx.Platform.DisplaySize()
+		d, dismissed := errScr.Layout(ctx, th, dims)
+		if dismissed {
+			return
+		}
+		main := ss.Draw(ctx, th, dims, mnemonic)
+		ctx.Frame(op.Layer(d, main))
+	}
 }
 
 func isEmptyMnemonic(m bip39.Mnemonic) bool {
@@ -1891,22 +1932,42 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 		if !ss.Confirm(ctx, th, mnemonic) {
 			return
 		}
-		plate, err := engraveSeed(ctx.Platform.EngraverParams(), mnemonic)
+		mfp, err := masterFingerprintFor(mnemonic, &chaincfg.MainNetParams, "") // bare (won't fail post-Confirm)
 		if err != nil {
-			errScr := NewErrorScreen(err)
-			for !ctx.Done {
-				dims := ctx.Platform.DisplaySize()
-				d, dismissed := errScr.Layout(ctx, th, dims)
-				if dismissed {
-					break
-				}
-				main := ss.Draw(ctx, th, dims, mnemonic)
-				ctx.Frame(op.Layer(d, main))
-			}
+			showSeedError(ctx, th, ss, mnemonic, err)
 			continue
 		}
-		completed := NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
-		if completed {
+		// Optional passphrase. Fresh ChoiceScreen each iteration (choice defaults to 0=Skip).
+		ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+		if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+			if pass, ok := passphraseFlow(ctx, th); ok && pass != "" {
+				passFp, err := masterFingerprintFor(mnemonic, &chaincfg.MainNetParams, pass)
+				if err != nil {
+					showSeedError(ctx, th, ss, mnemonic, err)
+					continue
+				}
+				fpChoice := &ChoiceScreen{
+					Title: "Engrave fingerprint",
+					Choices: []string{
+						"No passphrase " + fmt.Sprintf("%.8X", mfp), // index 0 = safer default
+						"Passphrase " + fmt.Sprintf("%.8X", passFp),
+					},
+				}
+				sel, ok := fpChoice.Choose(ctx, th)
+				if !ok {
+					continue // Back from fp choice -> re-Confirm
+				}
+				if sel == 1 {
+					mfp = passFp
+				}
+			}
+		}
+		plate, err := engraveSeed(ctx.Platform.EngraverParams(), mnemonic, mfp)
+		if err != nil {
+			showSeedError(ctx, th, ss, mnemonic, err)
+			continue
+		}
+		if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
 			return
 		}
 	}
@@ -2068,7 +2129,7 @@ events:
 				showErr(scr)
 				continue
 			}
-			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams); !ok {
+			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, ""); !ok {
 				showErr(&ErrorScreen{
 					Title: "Invalid Seed",
 					Body:  "The seed is invalid.",

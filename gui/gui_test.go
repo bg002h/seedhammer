@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/draw"
 	"image/png"
@@ -690,5 +691,78 @@ func TestWordFlowLastWordNoFlash(t *testing.T) {
 	}
 	if !uiContains(content, "8 matches") {
 		t.Errorf("expected candidate count on the frame entering the last word (no flash); got %q", content)
+	}
+}
+
+// bip39FromWords builds a bip39.Mnemonic from a space-separated word string,
+// mapping each word via bip39.ClosestWord (failing the test on no match).
+func bip39FromWords(t *testing.T, s string) bip39.Mnemonic {
+	t.Helper()
+	fields := strings.Fields(s)
+	m := make(bip39.Mnemonic, len(fields))
+	for i, w := range fields {
+		// Wordlist labels are uppercase (the keypad uppercases typed runes),
+		// and ClosestWord binary-searches against them.
+		word, ok := bip39.ClosestWord(strings.ToUpper(w))
+		if !ok {
+			t.Fatalf("bip39FromWords: no match for %q", w)
+		}
+		m[i] = word
+	}
+	return m
+}
+
+func TestMasterFingerprintPassphrase(t *testing.T) {
+	// Use a known-valid 12-word mnemonic from the test corpus (the abandon vector).
+	mn := bip39FromWords(t, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	bare, err := masterFingerprintFor(mn, &chaincfg.MainNetParams, "")
+	if err != nil {
+		t.Fatalf("bare fp: %v", err)
+	}
+	pass, err := masterFingerprintFor(mn, &chaincfg.MainNetParams, "TREZOR")
+	if err != nil {
+		t.Fatalf("passphrase fp: %v", err)
+	}
+	if bare == pass {
+		t.Errorf("bare and passphrase fingerprints must differ: both %08X", bare)
+	}
+}
+
+func TestPassphraseFlow(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	runes(&ctx.Router, "Ab1!")
+	click(&ctx.Router, Button3)
+	s, ok := passphraseFlow(ctx, &descriptorTheme)
+	if s != "Ab1!" || !ok {
+		t.Errorf("passphraseFlow = (%q, %v), want (\"Ab1!\", true)", s, ok)
+	}
+}
+
+func TestPassphraseFlowBack(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button1)
+	if s, ok := passphraseFlow(ctx, &descriptorTheme); ok || s != "" {
+		t.Errorf("back: passphraseFlow = (%q, %v), want (\"\", false)", s, ok)
+	}
+}
+
+func TestEngraveFingerprintChoiceMapping(t *testing.T) {
+	// The fingerprint choice maps index 0 -> bare, index 1 -> passphrase.
+	mn := bip39FromWords(t, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	bare, _ := masterFingerprintFor(mn, &chaincfg.MainNetParams, "")
+	pass, _ := masterFingerprintFor(mn, &chaincfg.MainNetParams, "x")
+	if bare == pass {
+		t.Fatal("fingerprints unexpectedly equal")
+	}
+	// Drive a 2-row ChoiceScreen selecting index 1 (Down + Button3) and assert it returns 1.
+	ctx := NewContext(newPlatform())
+	cs := &ChoiceScreen{Title: "Engrave fingerprint", Choices: []string{
+		"No passphrase " + fmt.Sprintf("%.8X", bare),
+		"Passphrase " + fmt.Sprintf("%.8X", pass),
+	}}
+	click(&ctx.Router, Down, Button3)
+	sel, ok := cs.Choose(ctx, &descriptorTheme)
+	if !ok || sel != 1 {
+		t.Errorf("Choose = (%d,%v), want (1,true)", sel, ok)
 	}
 }
