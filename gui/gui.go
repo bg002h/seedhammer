@@ -670,18 +670,18 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 }
 
 func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
-	const alph = "1234567890\nqwertyup\nasdfghjk\nlzxcvnm"
-
-	kbd := NewKeyboard(ctx, alph)
+	kbd := newCodex32Keyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
-	var share codex32.String
-	valid := false
 	for !ctx.Done {
 		for kbd.Update(ctx) {
-			s, err := codex32.New(kbd.Fragment)
-			share, valid = s, err == nil
 		}
+		// Parse once per frame (MIN-3): New gates acceptance; ParsePrefix drives
+		// the advisory readout.
+		share, nerr := codex32.New(kbd.Fragment)
+		parsed, perr := codex32.ParsePrefix(kbd.Fragment)
+		valid := nerr == nil
+
 		if backBtn.Clicked(ctx) {
 			break
 		}
@@ -705,13 +705,37 @@ func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
 		r.Min.X -= buttonPadX
 		r.Max.X += buttonPadX
 		top, _ := content.CutBottom(kbdsz.Y)
+		wordOff := top.Center(frgSize)
 		word = op.Layer(
 			word,
 			op.Compose(
 				op.Color(&ctx.B, th.Text),
 				op.RoundedRect2(&ctx.B, r, cornerRadius),
 			),
-		).Offset(top.Center(frgSize))
+		).Offset(wordOff)
+
+		// Status line + (feedback | field line), stacked below the fragment box,
+		// each clamped so it never overlaps the keyboard (mirrors inputWordsFlow).
+		var infoOps []op.Op
+		lineY := wordOff.Y + frgSize.Y + 8
+		addLine := func(s string) {
+			if s == "" {
+				return
+			}
+			lbl, sz := widget.Label(&ctx.B, ctx.Styles.body, th.Text, s)
+			y := lineY
+			if lim := top.Max.Y - sz.Y; y > lim {
+				y = lim
+			}
+			infoOps = append(infoOps, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			lineY = y + sz.Y + 4
+		}
+		addLine(codex32StatusLine(len(kbd.Fragment)))
+		if fb := codex32Feedback(kbd.Fragment, perr, nerr); fb != "" {
+			addLine(fb)
+		} else {
+			addLine(codex32FieldLine(parsed))
+		}
 
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}...)
 		if valid {
@@ -719,13 +743,11 @@ func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
 			nav = op.Layer(nav, nav2)
 		}
 		title, _ := layoutTitle(ctx, dims.X, th.Text, "Input Codex32 Share")
-		ctx.Frame(op.Layer(
-			kbdOp,
-			word,
-			nav,
-			title,
-			op.Color(&ctx.B, th.Background),
-		))
+
+		frameOps := []op.Op{kbdOp, word}
+		frameOps = append(frameOps, infoOps...)
+		frameOps = append(frameOps, nav, title, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
 	}
 	return codex32.String{}, false
 }
@@ -1817,6 +1839,12 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	// 		}
 	// 	}
 	case codex32.String:
+		if !confirmCodex32Flow(ctx, th, scan) {
+			// Recognized codex32 string, user declined to engrave — return true
+			// (handled) like every other recognized case, NOT false (which the
+			// caller maps to "Unknown format").
+			return true
+		}
 		id, _, _ := scan.Split()
 		s := backup.SeedString{
 			Title: id,
