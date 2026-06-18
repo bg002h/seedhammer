@@ -369,32 +369,52 @@ func engraveSLIP39(ctx *Context, th *Colors, scan slip39words.Share) bool {
 			if !ok {
 				continue // back to the original share's confirm
 			}
-			if !engraveRecoveredSLIP39(ctx, th, m) {
-				continue // declined the acknowledgement or fingerprint check
+			if !engraveRecoveredSLIP39(ctx, th, scan, m) {
+				continue // Back at the fork, or declined the fingerprint check
 			}
 			return true
 		}
 	}
 }
 
-// engraveRecoveredSLIP39 brackets the recovered-seed engrave with the SPEC §3
-// interpretation acknowledgement (hold-to-confirm) and the §5.4 always-on
-// master-fingerprint display, then hands off to backupWalletFlow (the native
-// BIP-39 seed-plate path). Returns false if the user declines either gate.
-func engraveRecoveredSLIP39(ctx *Context, th *Colors, m bip39.Mnemonic) bool {
-	// §3 — mandatory interpretation acknowledgement (hold-to-confirm). A doc
-	// note is invisible at the moment of irreversible engraving.
-	ack := &ConfirmWarningScreen{
+// engraveRecoveredSLIP39 forks on how the recovered backup was made (SPEC §3
+// interpretation ambiguity). The BIP-39 arm hands off to the §5.4 always-on
+// master-fingerprint check then backupWalletFlow (the native BIP-39 seed-plate
+// path); the verbatim arm re-engraves the user's first share words verbatim via
+// engraveSLIP39Verbatim with NO BIP-39 fingerprint (it is convention-specific
+// and would mislead on a non-BIP-39 wallet). Returns false if the user backs
+// out of the fork (caller continues to the original confirm) or declines the
+// fingerprint check.
+func engraveRecoveredSLIP39(ctx *Context, th *Colors, scan slip39words.Share, m bip39.Mnemonic) bool {
+	// §3 — the device cannot tell a BIP-39/toolkit backup from a Trezor/other
+	// SLIP-39 backup; the bytes are valid under both. Ask the user, framed by
+	// how the backup was made. Fresh ChoiceScreen per call (like backupWalletFlow).
+	choice := &ChoiceScreen{
 		Title: "Recovered Seed",
-		Body: "Recovered as a BIP-39 seed. Correct only for backups made from a BIP-39 phrase / this toolkit. " +
-			"A Trezor or other SLIP-39 wallet backup would engrave the WRONG seed.\n\nHold button to confirm.",
-		Icon: assets.IconHammer,
+		// The Lead IS width-wrapped (widget.Labelw) — put the explanation here.
+		Lead: "How was this backup made? A BIP-39 phrase / this toolkit recovers as a " +
+			"seed. A Trezor or other SLIP-39 wallet should engrave its shares verbatim.",
+		// The choice buttons are SINGLE-LINE (widget.Label, NOT wrapped), so keep
+		// them short; detail lives in the Lead above.
+		Choices: []string{
+			"BIP-39 seed",    // sel == 0 (default)
+			"Engrave shares", // sel == 1
+		},
 	}
-	if !holdToConfirm(ctx, th, ack) {
-		return false
+	sel, ok := choice.Choose(ctx, th)
+	if !ok {
+		return false // Back → caller continues to the original confirm
 	}
-	// §5.4 — always-on recovered master-fingerprint check (match backupWalletFlow's
-	// %.8X format). Framed as a check-against-records, NOT a verification claim.
+	if sel == 1 {
+		// Not a constellation backup: engrave the share verbatim (convention-
+		// agnostic, restorable). NO BIP-39 fingerprint here — it would be a
+		// misleading "verification" of a number unrelated to a non-BIP-39 wallet.
+		engraveSLIP39Verbatim(ctx, th, scan)
+		return true
+	}
+	// BIP-39 arm: §5.4 — always-on recovered master-fingerprint check (match
+	// backupWalletFlow's %.8X format). Framed as a check-against-records, NOT a
+	// verification claim.
 	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams, "")
 	if err != nil {
 		showError(ctx, th, "Recovery failed", "could not derive the fingerprint")
