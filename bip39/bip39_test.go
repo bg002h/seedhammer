@@ -257,6 +257,11 @@ func TestLastWordCandidates(t *testing.T) {
 		t.Errorf("len 13: got %v, want nil", got)
 	}
 
+	// Empty mnemonic -> nil.
+	if got := LastWordCandidates(Mnemonic{}); got != nil {
+		t.Errorf("len 0: got %v, want nil", got)
+	}
+
 	// Must not mutate the input's final slot.
 	before := v24[len(v24)-1]
 	_ = LastWordCandidates(v24)
