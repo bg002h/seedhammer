@@ -43,7 +43,12 @@ func TestDescribe(t *testing.T) {
 		{errInvalidThreshold, "bad threshold"},
 		{errInvalidShareIndex, "bad share index"},
 		{errIncompleteGroup, "incomplete group"},
-		{errInsufficientShares, "invalid"}, // Interpolate-only → fallback
+		{errMismatchedLength, "shares differ in length"},
+		{errMismatchedHRP, "mismatched type"},
+		{errMismatchedThreshold, "mismatched threshold"},
+		{errMismatchedID, "mismatched id"},
+		{errRepeatedIndex, "repeated share"},
+		{errInsufficientShares, "need more shares"},
 		{errors.New("other"), "invalid"},
 	}
 	for _, c := range sentinels {
@@ -57,6 +62,45 @@ func TestDescribe(t *testing.T) {
 	}
 	if _, err := New("ms10fauxsxxxxxxxxxxxxxxxxxxxxxxxxxxve740yyge2ghp"); Describe(err) != "bad checksum" {
 		t.Errorf("Describe(New bad-checksum) = %q, want \"bad checksum\"", Describe(err))
+	}
+}
+
+func TestConsistentShares(t *testing.T) {
+	mk := func(s string) String {
+		v, err := New(s)
+		if err != nil {
+			t.Fatalf("New(%s): %v", s, err)
+		}
+		return v
+	}
+	// BIP-93 vector-2 shares: threshold 2, id NAME, indices A and C.
+	a := mk("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	c := mk("MS12NAMECACDEFGHJKLMNPQRSTUVWXYZ023FTR2GDZMPY6PN")
+	// vector-3 share: threshold 3, id CASH (a field mismatch vs the vector-2 set).
+	cash := mk("MS13CASHA320ZYXWVUTSRQPNMLKJHGFEDCA2A8D0ZEHN8A0T")
+
+	if err := ConsistentShares(nil); err != nil {
+		t.Errorf("nil set: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a}); err != nil {
+		t.Errorf("single share: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a, c}); err != nil {
+		t.Errorf("consistent pair: %v, want nil", err)
+	}
+	if err := ConsistentShares([]String{a, a}); !errors.Is(err, errRepeatedIndex) {
+		t.Errorf("repeated index: %v, want errRepeatedIndex", err)
+	}
+	if err := ConsistentShares([]String{a, cash}); !errors.Is(err, errMismatchedThreshold) {
+		t.Errorf("threshold mismatch: %v, want errMismatchedThreshold", err)
+	}
+	// Length mismatch (checked before threshold/id): a 48-char short string vs the
+	// 127-char long-code secret (BIP-93 vector 5). Exercises the length branch in
+	// isolation. (errMismatchedID/HRP can't be exercised with the current corpus —
+	// no same-threshold/different-id or non-"ms"-HRP New-valid share exists.)
+	long := mk("MS100C8VSM32ZXFGUHPCHTLUPZRY9X8GF2TVDW0S3JN54KHCE6MUA7LQPZYGSFJD6AN074RXVCEMLH8WU3TK925ACDEFGHJKLMNPQRSTUVWXY06FHPV80UNDVARHRAK")
+	if err := ConsistentShares([]String{a, long}); !errors.Is(err, errMismatchedLength) {
+		t.Errorf("length mismatch: %v, want errMismatchedLength", err)
 	}
 }
 

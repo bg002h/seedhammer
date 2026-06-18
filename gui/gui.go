@@ -669,7 +669,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	}
 }
 
-func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
+func inputCodex32Flow(ctx *Context, th *Colors, title string) (codex32.String, bool) {
 	kbd := newCodex32Keyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
@@ -742,11 +742,11 @@ func inputCodex32Flow(ctx *Context, th *Colors) (codex32.String, bool) {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
 			nav = op.Layer(nav, nav2)
 		}
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Input Codex32 Share")
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 
 		frameOps := []op.Op{kbdOp, word}
 		frameOps = append(frameOps, infoOps...)
-		frameOps = append(frameOps, nav, title, op.Color(&ctx.B, th.Background))
+		frameOps = append(frameOps, nav, titleOp, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
 	return codex32.String{}, false
@@ -1839,19 +1839,7 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	// 		}
 	// 	}
 	case codex32.String:
-		if !confirmCodex32Flow(ctx, th, scan) {
-			// Recognized codex32 string, user declined to engrave — return true
-			// (handled) like every other recognized case, NOT false (which the
-			// caller maps to "Unknown format").
-			return true
-		}
-		id, _, _ := scan.Split()
-		s := backup.SeedString{
-			Title: id,
-			Seed:  scan.String(),
-			Font:  constant.Font,
-		}
-		backupSeedStringFlow(ctx, th, s)
+		return engraveCodex32(ctx, th, scan)
 	case *bip380.Descriptor:
 		descriptorFlow(ctx, th, scan)
 	case mdmkText:
@@ -2007,7 +1995,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 					return mnemonic, true
 				}
 			case 2:
-				s, ok := inputCodex32Flow(ctx, th)
+				s, ok := inputCodex32Flow(ctx, th, "Input Codex32 Share")
 				if ok {
 					return s, true
 				}

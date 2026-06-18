@@ -41,6 +41,18 @@ func Describe(err error) string {
 		return "bad share index"
 	case errors.Is(err, errIncompleteGroup):
 		return "incomplete group"
+	case errors.Is(err, errMismatchedLength):
+		return "shares differ in length"
+	case errors.Is(err, errMismatchedHRP):
+		return "mismatched type"
+	case errors.Is(err, errMismatchedThreshold):
+		return "mismatched threshold"
+	case errors.Is(err, errMismatchedID):
+		return "mismatched id"
+	case errors.Is(err, errRepeatedIndex):
+		return "repeated share"
+	case errors.Is(err, errInsufficientShares):
+		return "need more shares"
 	default:
 		return "invalid"
 	}
@@ -125,6 +137,45 @@ func ParsePrefix(frag string) (Fields, error) {
 		}
 	}
 	return f, nil
+}
+
+// ConsistentShares reports whether a set of codex32 shares can belong to one
+// recovery set: all share the same HRP, threshold, identifier, and total length,
+// and all share indices are distinct. It does NOT require the set to be complete
+// (k shares) — use it to validate shares as they are collected. Returns the same
+// sentinels Interpolate uses (errMismatched{Length,HRP,Threshold,ID},
+// errRepeatedIndex), so Describe maps them. A set of 0 or 1 share is consistent.
+//
+// Each share MUST already be New-valid: ConsistentShares calls the unexported
+// parts(), which PANICS on a malformed String. Callers must only pass strings
+// that passed New without error (the keypad gates the OK button on New==nil).
+func ConsistentShares(shares []String) error {
+	if len(shares) <= 1 {
+		return nil
+	}
+	s0 := shares[0].parts()
+	for _, share := range shares {
+		p := share.parts()
+		switch {
+		case len(shares[0].s) != len(share.s):
+			return errMismatchedLength
+		case s0.hrp != p.hrp:
+			return errMismatchedHRP
+		case s0.threshold != p.threshold:
+			return errMismatchedThreshold
+		case s0.id != p.id:
+			return errMismatchedID
+		}
+	}
+	seen := make(map[fe]bool, len(shares))
+	for _, share := range shares {
+		idx := share.parts().shareIdx
+		if seen[idx] {
+			return errRepeatedIndex
+		}
+		seen[idx] = true
+	}
+	return nil
 }
 
 // checkCase returns errInvalidCase if frag mixes upper- and lower-case ASCII
