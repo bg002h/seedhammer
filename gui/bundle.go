@@ -279,6 +279,23 @@ func (g *bundleGatherer) pending() bool {
 	return false
 }
 
+// dropPending discards every half-scanned (primed, incomplete) sub-gatherer so a
+// partial card is never carried into the engrave. Completed cards (already in
+// g.cards) are untouched. The operator may re-scan the dropped card's full
+// chunk set to re-add it.
+func (g *bundleGatherer) dropPending() {
+	for csid, sub := range g.mkSets {
+		if sub.primed && !sub.complete() {
+			delete(g.mkSets, csid)
+		}
+	}
+	for csid, sub := range g.mdSets {
+		if sub.primed && !sub.complete() {
+			delete(g.mdSets, csid)
+		}
+	}
+}
+
 // mk1Summary is a one-line review summary for an mk1 card.
 func mk1Summary(card mk.Card) string {
 	fp := card.Fingerprint
