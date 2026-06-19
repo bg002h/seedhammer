@@ -1242,12 +1242,16 @@ func classifyPolicy(tree node) (PolicyKind, int, int) {
 		}
 	case tagTr:
 		if b, ok := tree.body.(trBody); ok {
-			if b.tree == nil {
+			// A tr is renderable ONLY as a single-key taproot: no NUMS internal
+			// key AND no script tree. ANY tr with a script tree is refused
+			// (spec §4.2): summarizing a tapscript leaf would omit the key-path
+			// and other-leaf spend conditions and mislead the operator
+			// (invariant 2.4). The !b.isNums guard makes the keyspend
+			// classification locally robust — a NUMS-keypath-only tr (no @i
+			// referenced) is already rejected by validatePlaceholderUsage before
+			// summarize, but we never claim a single-key policy for is_nums here.
+			if !b.isNums && b.tree == nil {
 				return PolicySingle, 0, 0 // tr(@N) key-path only
-			}
-			// tr(@N, single multi_a/sortedmulti_a leaf) — renderable tapscript multisig.
-			if pol, k, m, ok := multiAPolicy(*b.tree); ok {
-				return pol, k, m
 			}
 		}
 	case tagWsh:
@@ -1283,18 +1287,6 @@ func multiPolicy(n node) (PolicyKind, int, int, bool) {
 			return PolicyMulti, int(b.k), len(b.indices), true
 		case tagSortedMulti:
 			return PolicySortedMulti, int(b.k), len(b.indices), true
-		}
-	}
-	return PolicyComplex, 0, 0, false
-}
-
-func multiAPolicy(n node) (PolicyKind, int, int, bool) {
-	if b, ok := n.body.(multiKeysBody); ok {
-		switch n.tag {
-		case tagMultiA:
-			return PolicyMultiA, int(b.k), len(b.indices), true
-		case tagSortedMultiA:
-			return PolicySortedMultiA, int(b.k), len(b.indices), true
 		}
 	}
 	return PolicyComplex, 0, 0, false

@@ -28,12 +28,31 @@ func (r *bitReader) remaining() int {
 	return r.bitLimit - r.bitPos
 }
 
+// availBits is the number of bits the reader may legally read from the current
+// position, bounded by BOTH the logical bitLimit and the backing slice length.
+// md-codec asserts bit_limit <= len(bytes)*8 via debug_assert!; the Go port
+// promotes that to a hard runtime guard so a violated precondition (e.g.
+// bitLimit > len(bytes)*8) returns errTruncated from read() instead of panicking
+// out of bounds. Unreachable from Decode (the sole caller passes
+// bitLimit = 5*len(syms) <= len(symbolsToBytes(syms))*8), but defended here.
+func (r *bitReader) availBits() int {
+	avail := r.remaining()
+	sliceBits := len(r.bytes)*8 - r.bitPos
+	if sliceBits < 0 {
+		sliceBits = 0
+	}
+	if sliceBits < avail {
+		return sliceBits
+	}
+	return avail
+}
+
 // read returns the next count bits (count<=64) MSB-first, LSB-aligned.
 func (r *bitReader) read(count int) (uint64, error) {
 	if count == 0 {
 		return 0, nil
 	}
-	if r.remaining() < count {
+	if r.availBits() < count {
 		return 0, errTruncated
 	}
 	var result uint64

@@ -37,3 +37,28 @@ func TestBitReader(t *testing.T) {
 		t.Fatal("restore failed")
 	}
 }
+
+// TestBitReaderLimitExceedsSlice exercises the MINOR-1 hardening: a violated
+// precondition (bitLimit > len(bytes)*8 — the dropped Rust
+// debug_assert!(bit_limit <= bytes.len()*8)) MUST return errTruncated, not
+// panic out-of-bounds. Unreachable from Decode (proven), but defended.
+func TestBitReaderLimitExceedsSlice(t *testing.T) {
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("read panicked on over-long bitLimit: %v", p)
+		}
+	}()
+	r := newBitReader([]byte{}, 64) // bitLimit 64 > 0 available bits
+	if _, err := r.read(5); !errors.Is(err, errTruncated) {
+		t.Fatalf("read on empty slice: want errTruncated, got %v", err)
+	}
+	// A non-empty slice with bitLimit past its end: read past the real bytes
+	// must also truncate, not panic.
+	r2 := newBitReader([]byte{0xFF}, 64) // 8 real bits, limit claims 64
+	if v, err := r2.read(8); err != nil || v != 0xFF {
+		t.Fatalf("read(8) on full byte: v=%#x err=%v", v, err)
+	}
+	if _, err := r2.read(1); !errors.Is(err, errTruncated) {
+		t.Fatalf("read past slice end: want errTruncated, got %v", err)
+	}
+}
