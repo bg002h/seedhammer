@@ -13,8 +13,8 @@ import (
 // md1 over NFC via the T5 bundleGatherer (R0-C1 — bundleGatherFlow yields
 // bundleCard.strings for both kinds), hand-types the SECRET ms1 (full mode
 // only; never NFC), assembles the read-back bundle.Bundle, and runs
-// bundle.Verify. PASS/FAIL is shown via showError. Watch-only verify omits the
-// ms1 (both sides empty → bundle.Verify skips the ms1 leg).
+// bundle.Verify. A FAIL is shown via showError, a PASS via showNotice. Watch-only
+// verify omits the ms1 (both sides empty → bundle.Verify skips the ms1 leg).
 
 // singleSigReadbackCards pulls exactly one mk1 and one md1 chunk-string set from
 // a gathered card set (R0-C1: the T5 bundleGatherer's bundleCard.strings, NOT
@@ -57,11 +57,12 @@ func verifySingleSig(derived bundle.Bundle, ms1Readback string, mk1, md1 []strin
 	return bundle.Verify(d, readback)
 }
 
-// singleSigVerifyFlow drives the on-device verify-bundle. derived is the bundle
-// just engraved; full reports whether an ms1 was engraved (and so must be
-// hand-typed for the verify). It re-types + re-derives the seed, reads back the
-// public cards over NFC, optionally hand-types the ms1, and reports PASS/FAIL.
-func singleSigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bool) {
+// singleSigVerifyFlow drives the on-device verify-bundle. full reports whether
+// an ms1 was engraved (and so must be hand-typed for the verify). It re-types +
+// re-derives the seed (the comparator baseline is re-derived internally, NOT
+// passed in), reads back the public cards over NFC, optionally hand-types the
+// ms1, and reports PASS/FAIL.
+func singleSigVerifyFlow(ctx *Context, th *Colors, full bool) {
 	// Re-type the seed (fresh residency) and re-derive deterministically.
 	reMnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
@@ -123,5 +124,5 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full b
 		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		return
 	}
-	showError(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
+	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
 }

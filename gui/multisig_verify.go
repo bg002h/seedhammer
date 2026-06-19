@@ -101,5 +101,5 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		return
 	}
-	showError(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
+	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
 }
