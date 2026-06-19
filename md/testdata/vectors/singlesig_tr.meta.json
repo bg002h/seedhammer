@@ -1,0 +1,13 @@
+{
+  "template": "bip86",
+  "script": "tr",
+  "master_fingerprint": "73c5da0a",
+  "origin_path": "m/86'/0'/0'",
+  "chaincode": "c61a8f27e98182314d2444da3e600eb5836ec8ad183c86c311f95df8082b18aa",
+  "compressed_pubkey": "03418278a2885c8bb98148158d1474634097a179c642f23cf1cc04da629ac6f0fb",
+  "payload_bits": 646,
+  "payload_hex": "200ef5a108006040b40e78bb4142a823186a3c9fa60608c534911368f9803ad60dbb22b460f21b0c47e577e020ac62a80d0609e28a21722ee60520563451d18d025e85e7190bc8f3c73013698a6b1bc3ec",
+  "wallet_policy_id": "6ae6d59e8d1e028caba2bced7c7d76f0",
+  "wallet_policy_id_stub": "6ae6d59e",
+  "md1_encoding_id": "7b0b9a473de920213c14690390e9f32d"
+}

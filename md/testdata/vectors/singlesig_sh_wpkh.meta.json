@@ -1,0 +1,13 @@
+{
+  "template": "bip49",
+  "script": "sh_wpkh",
+  "master_fingerprint": "73c5da0a",
+  "origin_path": "m/49'/0'/0'",
+  "chaincode": "6eaae365ae0e0a0aab84325cfe7cd76c3b909035f889e7d3f1b847a9a0797ecb",
+  "compressed_pubkey": "02f1f347891b20f7568eae3ec9869fbfb67bcab6f358326f10ecc42356bd55939d",
+  "payload_bits": 649,
+  "payload_hex": "200ed8c21000c1801681cf1768285504375571b2d707050555c2192e7f3e6bb61dc8481afc44f3e9f8dc23d4d03cbf658178f9a3c48d907bab47571f64c34fdfdb3de55b79ac193788766211ab5eaac9ce80",
+  "wallet_policy_id": "8807be805f4edd6cf06e7adbd6bd657e",
+  "wallet_policy_id_stub": "8807be80",
+  "md1_encoding_id": "95e34e522c34d6a882bb7497f5d719c2"
+}
