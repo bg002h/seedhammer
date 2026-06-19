@@ -3,6 +3,8 @@ package gui
 import (
 	"reflect"
 	"testing"
+
+	"seedhammer.com/md"
 )
 
 // TestExtractSuppliedMd1 exercises the single-md1 supply contract (I-11): a
@@ -48,4 +50,31 @@ func TestExtractSuppliedMd1(t *testing.T) {
 			t.Fatal("ok=true with a cardMS1, want false (defensive)")
 		}
 	})
+}
+
+// TestAllSlotsHaveXpub: the full-policy gate (I-3). The full-policy fixture
+// passes; a template-only multisig (the wsh_sortedmulti md golden, which carries
+// NO pubkeys) refuses; an empty key set refuses.
+func TestAllSlotsHaveXpub(t *testing.T) {
+	// Full-policy fixture -> all slots xpub-present.
+	chunks := suppliedMultisigMd1(t)
+	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks(full): %v", err)
+	}
+	if !allSlotsHaveXpub(keys) {
+		t.Fatal("full-policy fixture rejected by the gate")
+	}
+
+	// Template-only: a slot set with XpubPresent=false must refuse.
+	tmplOnly := []md.ExpandedKey{
+		{Index: 0, XpubPresent: true},
+		{Index: 1, XpubPresent: false},
+	}
+	if allSlotsHaveXpub(tmplOnly) {
+		t.Fatal("a missing-xpub slot passed the gate, want refuse")
+	}
+	if allSlotsHaveXpub(nil) {
+		t.Fatal("empty key set passed the gate, want refuse")
+	}
 }
