@@ -150,6 +150,7 @@ const (
 	engraveBundle
 	engraveSingleSig
 	engraveMultisig
+	bip85Derive
 	qaProgram
 )
 
@@ -1505,6 +1506,9 @@ func uiFlow(ctx *Context, version string) {
 			case engraveMultisig:
 				engraveMultisigFlow(ctx, th)
 				continue
+			case bip85Derive:
+				bip85DeriveFlow(ctx, th)
+				continue
 			case backupWallet:
 				mnemonic, ok := newInputFlow(ctx, th)
 				if !ok {
@@ -1639,14 +1643,14 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 					}
 					m.prog--
 					if m.prog < 0 {
-						m.prog = engraveMultisig
+						m.prog = bip85Derive
 					}
 				case Right:
 					if !e.Pressed {
 						break
 					}
 					m.prog++
-					if m.prog > engraveMultisig {
+					if m.prog > bip85Derive {
 						m.prog = 0
 					}
 				}
@@ -1675,6 +1679,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 		titleTxt = "Engrave Single-Sig"
 	case engraveMultisig:
 		titleTxt = "Engrave Multisig"
+	case bip85Derive:
+		titleTxt = "BIP-85 Child Seed"
 	}
 
 	title, _ := layoutTitle(ctx, dims.X, th.Text, titleTxt)
@@ -1849,7 +1855,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 	contentsz := h.Add(sz)
 
 	content := plates.Offset(image.Pt((width-contentsz.X)/2, 8+h.Y(contentsz)))
-	const npage = int(engraveMultisig) + 1
+	const npage = int(bip85Derive) + 1
 	if npage > 1 {
 		content = op.Layer(content, left, right)
 	}
@@ -1859,7 +1865,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig:
+	case backupWallet, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
@@ -1868,7 +1874,7 @@ func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 }
 
 func layoutMainPager(buf *op.Buffer, th *Colors, page program) (op.Op, image.Point) {
-	const npages = int(engraveMultisig) + 1
+	const npages = int(bip85Derive) + 1
 	const space = 4
 	if npages <= 1 {
 		return op.Op{}, image.Point{}
