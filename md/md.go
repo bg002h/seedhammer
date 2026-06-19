@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/bits"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"seedhammer.com/codex32"
 )
 
@@ -1063,16 +1064,21 @@ func validateExplicitOriginRequired(d *descriptor) error {
 	return nil
 }
 
-// validateXpubBytes structurally walks the Pubkeys TLV. T2c parses pubkeys for
-// cursor correctness but skips the secp256k1 on-curve point check (no btcec
-// dep; the template-only corpus has null pubkeys). Full secp256k1 validation is
-// part of #10's xpub-expansion. Port of validate.rs:216-226 with the point
-// check elided per spec §1.
+// validateXpubBytes checks that every Pubkeys TLV entry's 33-byte compressed
+// pubkey field (bytes 32..65 of the 65-byte payload) parses as a valid
+// secp256k1 point (D4; faithful port of validate.rs:216-226). When the Pubkeys
+// TLV is absent (template-only mode) this is a no-op. The 32-byte chain-code
+// prefix (bytes 0..32) is intentionally unvalidated — any 32 bytes are a
+// structurally valid BIP-32 chain code (validate.rs:209-212).
 func validateXpubBytes(d *descriptor) error {
-	// No-op: structural TLV parse already ran in readTLV. The secp256k1 point
-	// check (Rust: bitcoin::secp256k1::PublicKey::from_slice(&xpub[32..65])) is
-	// deferred to #10.
-	_ = errInvalidXpubBytes
+	if !d.tlv.pubPresent {
+		return nil
+	}
+	for _, p := range d.tlv.pubkeys {
+		if _, err := secp256k1.ParsePubKey(p.xpub[32:65]); err != nil {
+			return errInvalidXpubBytes
+		}
+	}
 	return nil
 }
 
