@@ -205,6 +205,41 @@ func TestEncodeRejectsBadInput(t *testing.T) {
 // impossible (and the decoder does not validate the csid value). For each
 // golden string set: c1 := Decode(golden); strs := Encode(c1); each chunk must
 // pass ValidMK; c2 := Decode(strs); assert c1 == c2.
+// TestEncodeChunksGuard exercises the defensive chunk-count guard in
+// encodeChunks directly (real cards never approach maxChunks, so the guard is
+// unreachable through Encode). At the maxChunks boundary the masked total-1 /
+// index symbols must not wrap; one chunk over the limit must surface an error.
+func TestEncodeChunksGuard(t *testing.T) {
+	// chunkedFragmentBytes*maxChunks bytes of stream -> exactly maxChunks frags.
+	// encodeChunks appends crossChunkHashBytes internally, so size the bytecode
+	// so total stream == chunkedFragmentBytes*maxChunks after the hash append.
+	atLimitBytecode := make([]byte, chunkedFragmentBytes*maxChunks-crossChunkHashBytes)
+	strs, err := encodeChunks(atLimitBytecode)
+	if err != nil {
+		t.Fatalf("encodeChunks at maxChunks=%d: unexpected error: %v", maxChunks, err)
+	}
+	if len(strs) != maxChunks {
+		t.Fatalf("encodeChunks at limit: got %d chunks, want %d", len(strs), maxChunks)
+	}
+	// The last chunk's header must report total-1 = maxChunks-1 and index =
+	// maxChunks-1 without wrapping (would be visible as a malformed/short read).
+	last := strs[len(strs)-1]
+	h, err := ParseHeader(last)
+	if err != nil {
+		t.Fatalf("ParseHeader(last chunk): %v", err)
+	}
+	if h.TotalChunks != maxChunks || h.ChunkIndex != maxChunks-1 {
+		t.Fatalf("boundary header wrapped: total=%d index=%d, want total=%d index=%d",
+			h.TotalChunks, h.ChunkIndex, maxChunks, maxChunks-1)
+	}
+
+	// One fragment over the limit must error rather than silently wrap.
+	overBytecode := make([]byte, chunkedFragmentBytes*maxChunks+1-crossChunkHashBytes)
+	if _, err := encodeChunks(overBytecode); err == nil {
+		t.Fatalf("encodeChunks over maxChunks: expected error, got nil")
+	}
+}
+
 func TestEncodeGoldenRoundTrip(t *testing.T) {
 	for _, v := range parityVectors {
 		t.Run(v.name, func(t *testing.T) {

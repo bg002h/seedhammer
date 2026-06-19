@@ -14,7 +14,7 @@ package codex32
 // IS the checksum. md1 is regular-only (md-codec dropped the long code). The
 // round-trip parity test (mdencode_test + md's TestEncodeMD1StringGoldens) is
 // the guard. Pure-stdlib; TinyGo-safe (uint64 only). Analogue of
-// MKChecksumSymbols (mkencode.go:18-55).
+// MKChecksumSymbols (mkencode.go).
 func MDChecksumSymbols(dataSyms []byte) []byte {
 	n := mdmkShortSyms
 	e := &engine{
