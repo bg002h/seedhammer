@@ -1,8 +1,14 @@
 package gui
 
 import (
+	"fmt"
+	"image"
 	"strings"
 
+	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/layout"
+	"seedhammer.com/gui/op"
+	"seedhammer.com/gui/widget"
 	"seedhammer.com/mk"
 )
 
@@ -70,4 +76,70 @@ func (g *mk1Gatherer) collected() []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// mk1DisplayFlow shows the decoded mk1 account metadata for verification. Read-
+// only: no engrave, no NFC, no mutation. Measure-and-advance paging (the T1
+// lesson): the long base58 xpub is chunked into short non-wrapping lines and
+// paged gap-free so the tail is always reachable (spec invariant 2.10).
+func mk1DisplayFlow(ctx *Context, th *Colors, card mk.Card) {
+	fp := card.Fingerprint
+	if fp == "" {
+		fp = "none"
+	}
+	lines := []string{
+		"Network: " + card.Network,
+		"Path: " + card.Path,
+		"Fingerprint: " + fp,
+		fmt.Sprintf("Policy stubs: %d", len(card.Stubs)),
+		"Account xpub:",
+	}
+	lines = append(lines, chunkString(card.Xpub, 20)...)
+
+	backBtn := &Clickable{Button: Button1}
+	pageBtn := &Clickable{Button: Button3}
+	dims := ctx.Platform.DisplaySize()
+	lineWidth := dims.X - 2*8
+	screen := layout.Rectangle{Max: dims}
+	_, content := screen.CutTop(leadingSize)
+	content, _ = content.CutBottom(leadingSize)
+	contentTop := content.Min.Y + 8
+	contentBottom := content.Max.Y
+	start := 0
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return
+		}
+		shown := 0
+		y := contentTop
+		body := make([]op.Op, 0, len(lines))
+		for i := start; i < len(lines); i++ {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, lines[i])
+			if i > start && y+sz.Y > contentBottom {
+				break
+			}
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+			shown++
+			if y > contentBottom {
+				break
+			}
+		}
+		if pageBtn.Clicked(ctx) {
+			if start+shown < len(lines) {
+				start += shown
+			} else {
+				start = 0
+			}
+			continue
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "mk1 key")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: pageBtn, Style: StylePrimary, Icon: assets.IconRight},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
 }

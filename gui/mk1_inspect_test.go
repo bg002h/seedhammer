@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 
 	"seedhammer.com/mk"
@@ -51,5 +52,50 @@ func TestHasMKPrefix(t *testing.T) {
 	}
 	if hasMKPrefix("md1qabc...") {
 		t.Fatal("md1 misdetected as mk1")
+	}
+}
+
+func TestMK1DisplayFlowPaging(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	card := mk.Card{
+		Network:     "mainnet",
+		Path:        "m/48'/0'/0'/2'",
+		Fingerprint: "aabbccdd",
+		Stubs:       make([][4]byte, 1),
+		Xpub:        "xpub6Den8YwXbKQvkwukmx7Uukicw4qDgMEPuuUkhMp3Rn557YSN2uVQnCMQNSfgDtennU9nES3Wbbmz1LAPBydhNpED8NU4mf1SFF41hM7vFrc",
+	}
+	frame, quit := runUI(ctx, func() { mk1DisplayFlow(ctx, &descriptorTheme, card) })
+	defer quit()
+	var all strings.Builder
+	for i := 0; i < 16; i++ {
+		content, ok := frame()
+		if !ok {
+			break
+		}
+		all.WriteString(content)
+		click(&ctx.Router, Button3) // page forward
+	}
+	got := all.String()
+	if !uiContains(got, "m/48'/0'/0'/2'") {
+		t.Errorf("path not shown; got %q", got)
+	}
+	if !uiContains(got, "aabbccdd") {
+		t.Errorf("fingerprint not shown")
+	}
+	// Invariant 2.10: paging reaches the xpub tail, gap-free.
+	if !uiContains(got, "1hM7vFrc") {
+		t.Errorf("xpub tail not reached via paging")
+	}
+}
+
+func TestMK1DisplayFlowBackExits(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	card := mk.Card{Network: "mainnet", Path: "m", Stubs: make([][4]byte, 1), Xpub: "xpub6x"}
+	frame, quit := runUI(ctx, func() { mk1DisplayFlow(ctx, &descriptorTheme, card) })
+	defer quit()
+	frame()
+	click(&ctx.Router, Button1) // Back
+	if _, ok := frame(); ok {
+		t.Fatal("mk1DisplayFlow did not exit on Back")
 	}
 }
