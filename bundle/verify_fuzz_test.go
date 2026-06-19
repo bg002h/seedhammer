@@ -20,3 +20,25 @@ func FuzzVerify(f *testing.F) {
 		_ = Verify(b, correctBundle())
 	})
 }
+
+// FuzzVerifyWatchOnly (T6a-2 Task 8) targets the watch-only ms1-presence
+// branches added to Verify: arbitrary MS1 strings on either side (incl. empty,
+// one-sided, and garbage) over the consistent wpkh golden public legs. Verify
+// must NEVER panic — the both-empty skip, the one-sided presence mismatch, and
+// the entropy-decode error paths are all total.
+func FuzzVerifyWatchOnly(f *testing.F) {
+	f.Add("", "")
+	f.Add(wpkhMS1, wpkhMS1)
+	f.Add(wpkhMS1, "")
+	f.Add("", wpkhMS1)
+	f.Add("ms1garbage", "ms1garbage")
+	f.Add("not-an-ms1", wpkhMS1)
+
+	f.Fuzz(func(t *testing.T, dMS1, rMS1 string) {
+		d := correctBundle()
+		r := correctBundle()
+		d.MS1 = dMS1
+		r.MS1 = rMS1
+		_ = Verify(d, r)
+	})
+}
