@@ -155,6 +155,59 @@ func TestVerifyBundleEntropyComparedNotString(t *testing.T) {
 	}
 }
 
+// TestVerifyBundleWatchOnlyMatch (T6a-2, R0-C1): a watch-only bundle has MS1==""
+// on BOTH sides → the ms1 leg is SKIPPED; the mk1 + md1 + stub-binding legs
+// still run and PASS for a consistent set.
+func TestVerifyBundleWatchOnlyMatch(t *testing.T) {
+	derived := correctBundle()
+	derived.MS1 = ""
+	readback := correctBundle()
+	readback.MS1 = ""
+	if err := Verify(derived, readback); err != nil {
+		t.Fatalf("watch-only (both MS1 empty) consistent bundle: %v (want PASS)", err)
+	}
+}
+
+// TestVerifyBundleWatchOnlyStillChecksMd1: a watch-only bundle (no ms1) still
+// runs the mk1/md1/stub legs — a diverging md1 FAILs even with the ms1 leg
+// skipped.
+func TestVerifyBundleWatchOnlyStillChecksMd1(t *testing.T) {
+	derived := correctBundle()
+	derived.MS1 = ""
+	readback := trBundle() // a different policy entirely
+	readback.MS1 = ""
+	if err := Verify(derived, readback); err == nil {
+		t.Fatal("watch-only divergent descriptor accepted, want FAIL")
+	}
+}
+
+// TestVerifyBundleMs1OneSided (R0-C1): an ms1 present on ONE side only is a
+// presence mismatch → error (NOT a silent watch-only skip). Both directions.
+func TestVerifyBundleMs1OneSided(t *testing.T) {
+	// derived has ms1, readback does not.
+	d := correctBundle()
+	r := correctBundle()
+	r.MS1 = ""
+	err := Verify(d, r)
+	if err == nil {
+		t.Fatal("one-sided ms1 (derived has, readback lacks) accepted, want FAIL")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "ms1") {
+		t.Errorf("error %q does not name ms1 presence", err)
+	}
+	// derived lacks ms1, readback has it.
+	d2 := correctBundle()
+	d2.MS1 = ""
+	r2 := correctBundle()
+	err2 := Verify(d2, r2)
+	if err2 == nil {
+		t.Fatal("one-sided ms1 (readback has, derived lacks) accepted, want FAIL")
+	}
+	if !strings.Contains(strings.ToLower(err2.Error()), "ms1") {
+		t.Errorf("error %q does not name ms1 presence", err2)
+	}
+}
+
 func TestVerifyBundleStubMismatch(t *testing.T) {
 	// A read-back mk1 whose stub does NOT bind to its md1 → FAIL "stub mismatch".
 	// Construct a readback whose md1 is wpkh but mk1 is the bip44 card (its stub

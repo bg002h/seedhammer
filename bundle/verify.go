@@ -65,6 +65,19 @@ func Verify(derived, readback Bundle) error {
 		return errors.New("verify: md1 string mismatch")
 	}
 
+	// ms1 (T6a-2 watch-only extension, R0-C1): a watch-only bundle carries NO ms1
+	// (the public mk1+md1 read back over NFC; no secret). When BOTH sides have an
+	// empty MS1 the ms1 leg is SKIPPED — the mk1/md1/stub-binding legs above
+	// already establish the public cards belong together. An ms1 present on ONE
+	// side only is a presence mismatch (the operator typed an ms1 for a watch-only
+	// verify, or omitted it for a full one) → error, never a silent skip.
+	if derived.MS1 == "" && readback.MS1 == "" {
+		return nil
+	}
+	if (derived.MS1 == "") != (readback.MS1 == "") {
+		return errors.New("verify: ms1 presence mismatch (one side has an ms1, the other does not)")
+	}
+
 	// ms1: compare RECOVERED ENTROPY bytes (so a re-typed ms1 with the same
 	// entropy but any incidental string difference still matches).
 	dEnt, err := ms1Entropy(derived.MS1)

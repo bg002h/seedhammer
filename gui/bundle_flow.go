@@ -355,9 +355,28 @@ func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
 			// variant picker.
 		}
 	}
-	// Whole bundle engraved → remind the operator about the SECRET ms1 share(s),
-	// which are never gathered/engraved by the device (security spine).
-	showError(ctx, th, "Engrave Bundle", bundleMs1ReminderText())
+	// Whole bundle engraved → remind the operator about the SECRET ms1 share(s)
+	// ONLY when none were engraved here (R0-I2): the T5 gather path never produces
+	// a cardMS1, so it still shows the reminder; the T6a-2 full single-sig engrave
+	// DOES engrave the ms1, so the reminder is suppressed. The decision is derived
+	// from the cards slice — no signature/param change (T5's call site is
+	// byte-unchanged).
+	if bundleShowMs1Reminder(cards) {
+		showError(ctx, th, "Engrave Bundle", bundleMs1ReminderText())
+	}
+}
+
+// bundleShowMs1Reminder reports whether the end-of-engrave ms1 hand-engrave
+// reminder should be shown: true unless an ms1 share was itself engraved in this
+// run (any card of kind cardMS1). R0-I2: the gate is purely cards-derived so
+// bundleEngrave keeps its T5 signature.
+func bundleShowMs1Reminder(cards []bundleCard) bool {
+	for _, c := range cards {
+		if c.kind == cardMS1 {
+			return false
+		}
+	}
+	return true
 }
 
 // bundleAbortWarning informs the operator that aborting mid-bundle leaves a
