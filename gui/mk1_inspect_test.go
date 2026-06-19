@@ -136,21 +136,3 @@ func TestMdmkFlowMK1ShowsInspect(t *testing.T) {
 		t.Errorf("mk1 chooser missing Inspect key; got %q", content)
 	}
 }
-
-func TestMdmkFlowMD1NoInspect(t *testing.T) {
-	// §2.5/§2.9: an md1 string keeps the engrave-only flow (no Inspect).
-	// validateMdmk only QR-encodes + lays out (no BCH re-check), so an
-	// md1-prefixed literal exercises the isMK==false branch directly.
-	p := newPlatform()
-	p.engraver = newEngraver()
-	ctx := NewContext(p)
-	frame, quit := runUI(ctx, func() { mdmkFlow(ctx, &descriptorTheme, mdmkText("md1qqqqqqpqqzgr3hq2v")) })
-	defer quit()
-	content, ok := frame()
-	if !ok {
-		t.Fatal("mdmkFlow(md1) produced no frame")
-	}
-	if uiContains(content, "Inspect key") {
-		t.Errorf("md1 chooser must NOT offer Inspect; got %q", content)
-	}
-}

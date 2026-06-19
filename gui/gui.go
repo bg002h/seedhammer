@@ -37,6 +37,7 @@ import (
 	"seedhammer.com/gui/saver"
 	"seedhammer.com/gui/text"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/md"
 	"seedhammer.com/nonstandard"
 	"seedhammer.com/seedqr"
 	slip39words "seedhammer.com/slip39"
@@ -1939,10 +1940,15 @@ func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 		return
 	}
 	isMK := hasMKPrefix(str)
+	isMD := !isMK && hasMDPrefix(str)
 	title, lead, choices := "Engrave", "Choose engraving", labels
+	inspect := isMK || isMD
 	if isMK {
 		title, lead = "mk1 key", "Choose action"
 		choices = append([]string{"Inspect key"}, labels...)
+	} else if isMD {
+		title, lead = "md1 descriptor", "Choose action"
+		choices = append([]string{"Inspect descriptor"}, labels...)
 	}
 	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: choices}
 	for {
@@ -1950,14 +1956,26 @@ func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 		if !ok {
 			return
 		}
-		if isMK && choice == 0 {
-			if card, ok := mk1GatherFlow(ctx, th, str); ok {
-				mk1DisplayFlow(ctx, th, card)
+		if inspect && choice == 0 {
+			if isMK {
+				if card, ok := mk1GatherFlow(ctx, th, str); ok {
+					mk1DisplayFlow(ctx, th, card)
+				}
+			} else { // isMD
+				tpl, err := md.Decode(str)
+				switch {
+				case err == nil:
+					md1DisplayFlow(ctx, th, tpl)
+				case errors.Is(err, md.ErrChunkedUnsupported):
+					showError(ctx, th, "md1 descriptor", "Multi-part descriptor — not yet supported.")
+				default:
+					showError(ctx, th, "md1 descriptor", "Can't decode this descriptor.")
+				}
 			}
 			continue
 		}
 		idx := choice
-		if isMK {
+		if inspect {
 			idx-- // skip the prepended Inspect entry
 		}
 		if NewEngraveScreen(ctx, engravings[idx]).Engrave(ctx, &engraveTheme) {
