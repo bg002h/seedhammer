@@ -32,3 +32,19 @@ func TestRunVerifyResult(t *testing.T) {
 		})
 	}
 }
+
+func TestTypeAddressCasePreserved(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	var got string
+	var ok bool
+	frame, quit := runUI(ctx, func() { got, ok = typeAddressFlow(ctx, &descriptorTheme) })
+	defer quit()
+	frame()
+	runes(&ctx.Router, "bc1Q3") // mixed case must be preserved (NOT uppercased)
+	frame()
+	click(&ctx.Router, Button3) // OK
+	frame()
+	if !ok || got != "bc1Q3" {
+		t.Fatalf("typed = %q ok=%v; want bc1Q3 (case preserved)", got, ok)
+	}
+}

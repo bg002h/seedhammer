@@ -4,18 +4,165 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
+	"log"
+	"time"
 
 	"seedhammer.com/address"
 	"seedhammer.com/bip380"
 	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 )
 
-// verifyAddressFlow is a temporary stub so Task 2 compiles; Task 3 replaces it
-// with the real Scan/Type input flow.
+// verifyAddressFlow lets the user supply a candidate address — by NFC scan or by
+// typing it — then verifies it against the descriptor. Read-only: no
+// engrave/NFC-write/mutation.
 func verifyAddressFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
-	runVerify(ctx, th, desc, "")
+	cs := &ChoiceScreen{Title: "Verify address", Lead: "Input method", Choices: []string{"Scan", "Type"}}
+	choice, ok := cs.Choose(ctx, th)
+	if !ok {
+		return
+	}
+	var candidate string
+	if choice == 0 {
+		candidate, ok = scanAddressFlow(ctx, th)
+	} else {
+		candidate, ok = typeAddressFlow(ctx, th)
+	}
+	if !ok {
+		return
+	}
+	runVerify(ctx, th, desc, candidate)
+}
+
+// typeAddressFlow lets the user type a candidate address on an UNMASKED keyboard
+// (a public address is not a secret). The fragment is case-preserving (no
+// ToUpper). Returns (address, true) on OK, or ("", false) on Back. Validity is
+// checked downstream by address.Find.
+func typeAddressFlow(ctx *Context, th *Colors) (string, bool) {
+	kbd := NewAddressKeyboard(ctx)
+	backBtn := &Clickable{Button: Button1}
+	okBtn := &Clickable{Button: Button3}
+	for !ctx.Done {
+		for kbd.Update(ctx) {
+		}
+		if backBtn.Clicked(ctx) {
+			return "", false
+		}
+		if okBtn.Clicked(ctx) {
+			return kbd.Fragment, true
+		}
+		dims := ctx.Platform.DisplaySize()
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(8)
+		kbdOp, kbdsz := kbd.Layout(ctx, th)
+		kbdOp = kbdOp.Offset(content.S(kbdsz))
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Enter address")
+		ctx.Frame(op.Layer(kbdOp, nav, title, op.Color(&ctx.B, th.Background)))
+	}
+	return "", false
+}
+
+// scanAddressFlow collects a candidate address via NFC, returning the first
+// scanned addressText. Mirrors mk1GatherFlow's scanner-shell idiom (own scanner
+// goroutine; testPlatform.NFCReader()==nil → no goroutine, Back-only). Returns
+// (address, true) on a scan, or ("", false) on Back.
+func scanAddressFlow(ctx *Context, th *Colors) (string, bool) {
+	scans := make(chan scanResult, 1)
+	if r := ctx.Platform.NFCReader(); r != nil {
+		closer := make(chan struct{})
+		closed := make(chan struct{})
+		defer func() {
+			close(closer)
+			r.Close()
+			<-closed
+		}()
+		wakeup := ctx.Platform.Wakeup
+		go func() {
+			s := new(scanner)
+			for {
+				select {
+				case <-closer:
+					close(closed)
+					return
+				default:
+				}
+				obj, err := s.Scan(r)
+				scan := scanResult{Object: obj}
+				switch {
+				case errors.Is(err, errScanInProgress):
+					scan.Status = scanStarted
+				case errors.Is(err, errScanUnknownFormat):
+					scan.Status = scanUnknownFormat
+				case err == nil || err == io.EOF:
+				default:
+					scan.Status = scanFailed
+					log.Printf("nfc scan: %v", err)
+				}
+				select {
+				case old := <-scans:
+					if scan.Object == nil {
+						scan.Object = old.Object
+					}
+					scan.Status = max(scan.Status, old.Status)
+				default:
+				}
+				scans <- scan
+				wakeup()
+				if scan.Status == scanFailed {
+					time.Sleep(1 * time.Second)
+				}
+			}
+		}()
+	}
+	backBtn := &Clickable{Button: Button1}
+	dims := ctx.Platform.DisplaySize()
+	msg := ""
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return "", false
+		}
+		select {
+		case scan := <-scans:
+			if a, ok := scan.Object.(addressText); ok {
+				return string(a), true
+			}
+			switch scan.Status {
+			case scanUnknownFormat:
+				msg = "Not a recognized address."
+			case scanFailed:
+				msg = "Scan failed — try again."
+			}
+		default:
+		}
+		lines := []string{"Scan the address QR."}
+		if msg != "" {
+			lines = append(lines, msg)
+		}
+		lineWidth := dims.X - 2*8
+		y := leadingSize + 8
+		body := make([]op.Op, 0, len(lines))
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Scan address")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return "", false
 }
 
 // runVerify shows a ONE-SHOT non-blocking "Verifying…" frame, runs address.Find
