@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/bits"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"seedhammer.com/codex32"
 )
 
@@ -1063,16 +1064,21 @@ func validateExplicitOriginRequired(d *descriptor) error {
 	return nil
 }
 
-// validateXpubBytes structurally walks the Pubkeys TLV. T2c parses pubkeys for
-// cursor correctness but skips the secp256k1 on-curve point check (no btcec
-// dep; the template-only corpus has null pubkeys). Full secp256k1 validation is
-// part of #10's xpub-expansion. Port of validate.rs:216-226 with the point
-// check elided per spec §1.
+// validateXpubBytes checks that every Pubkeys TLV entry's 33-byte compressed
+// pubkey field (bytes 32..65 of the 65-byte payload) parses as a valid
+// secp256k1 point (D4; faithful port of validate.rs:216-226). When the Pubkeys
+// TLV is absent (template-only mode) this is a no-op. The 32-byte chain-code
+// prefix (bytes 0..32) is intentionally unvalidated — any 32 bytes are a
+// structurally valid BIP-32 chain code (validate.rs:209-212).
 func validateXpubBytes(d *descriptor) error {
-	// No-op: structural TLV parse already ran in readTLV. The secp256k1 point
-	// check (Rust: bitcoin::secp256k1::PublicKey::from_slice(&xpub[32..65])) is
-	// deferred to #10.
-	_ = errInvalidXpubBytes
+	if !d.tlv.pubPresent {
+		return nil
+	}
+	for _, p := range d.tlv.pubkeys {
+		if _, err := secp256k1.ParsePubKey(p.xpub[32:65]); err != nil {
+			return errInvalidXpubBytes
+		}
+	}
 	return nil
 }
 
@@ -1194,6 +1200,14 @@ type Template struct {
 	K, M       int
 	Keys       []KeyOrigin
 	Renderable bool
+	// InnerWsh is the sh-nesting discriminant (R0-C2): true iff Root==ScriptSh
+	// AND the immediate sh child is a wsh wrapper (sh(wsh(multi/sortedmulti))).
+	// It distinguishes a nested-segwit P2SH-P2WSH from a bare legacy P2SH
+	// multisig — both summarize to ScriptSh+PolicySortedMulti, but they hash to
+	// DIFFERENT addresses, so a consumer building a *bip380.Descriptor MUST use
+	// this to pick P2SH_P2WSH vs P2SH and never verify one against the other.
+	// Meaningful only when Root==ScriptSh; false for every other root.
+	InnerWsh bool
 }
 
 // Decode decodes a single-string md1 descriptor into a Template. It refuses
@@ -1292,6 +1306,22 @@ func multiPolicy(n node) (PolicyKind, int, int, bool) {
 	return PolicyComplex, 0, 0, false
 }
 
+// innerWshNesting reports whether tree is an sh(wsh(...)) wrapper — the
+// nesting discriminant for the ScriptSh + PolicySortedMulti collapse (R0-C2).
+// It mirrors the sh→wsh test in canonicalOrigin (md.go:1110-1118): an sh with a
+// single wsh child. Returns false for a bare sh(sortedmulti) and for any
+// non-sh root.
+func innerWshNesting(tree node) bool {
+	if tree.tag != tagSh {
+		return false
+	}
+	b, ok := tree.body.(childrenBody)
+	if !ok || len(b.children) != 1 {
+		return false
+	}
+	return b.children[0].tag == tagWsh
+}
+
 func summarize(d *descriptor) Template {
 	root := rootScriptKind(d.tree.tag)
 	policy, k, m := classifyPolicy(d.tree)
@@ -1314,6 +1344,7 @@ func summarize(d *descriptor) Template {
 		M:          m,
 		Keys:       keys,
 		Renderable: renderable,
+		InnerWsh:   innerWshNesting(d.tree),
 	}
 }
 

@@ -67,6 +67,35 @@ func FuzzReassemble(f *testing.F) {
 	})
 }
 
+// FuzzExpandWalletPolicy feeds arbitrary bytes as a candidate payload; any that
+// decode to a valid descriptor are expanded. ExpandWalletPolicy must never
+// panic and must always return exactly n ExpandedKey records with Index == i.
+func FuzzExpandWalletPolicy(f *testing.F) {
+	for _, name := range byteParityVectorNames {
+		if raw, err := readFileBytes(name); err == nil {
+			f.Add(raw)
+		}
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		d, err := decodePayloadValidated(b, len(b)*8)
+		if err != nil {
+			return // not a valid descriptor — skip
+		}
+		keys, err := ExpandWalletPolicy(d)
+		if err != nil {
+			return // a typed error is acceptable; only a panic is a bug
+		}
+		if len(keys) != int(d.n) {
+			t.Fatalf("ExpandWalletPolicy returned %d keys, want n=%d", len(keys), d.n)
+		}
+		for i, k := range keys {
+			if int(k.Index) != i {
+				t.Fatalf("key %d Index = %d, want %d", i, k.Index, i)
+			}
+		}
+	})
+}
+
 // FuzzParseChunkHeader feeds arbitrary strings to ParseChunkHeader: it must
 // never panic and only ever return a typed error or a ChunkHeader.
 func FuzzParseChunkHeader(f *testing.F) {

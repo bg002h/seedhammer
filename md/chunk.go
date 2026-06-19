@@ -8,19 +8,30 @@ import (
 
 // ─── Chunked md1 write/read (port of chunk.rs). ──────────────────────────────
 
+// ErrChunkSetIncomplete is returned by Reassemble / DecodeChunks when the
+// gathered chunk set is missing one or more chunks (count, gap, or a duplicate
+// that inflates the set past the declared count). Exported so package gui can
+// errors.Is-dispatch a distinct "more chunks needed" outcome (R0-C1).
+var ErrChunkSetIncomplete = errors.New("md: chunk set incomplete")
+
+// ErrChunkSetIDMismatch is returned by Reassemble / DecodeChunks when the chunk
+// set is internally consistent (same version/csid/count) but the csid
+// re-derived from the decoded descriptor does not match the header csid —
+// i.e. a mixed or tampered set. Exported so package gui can errors.Is-dispatch
+// the distinct csid-mismatch UX, separate from a generic decode failure (R0-C1).
+var ErrChunkSetIDMismatch = errors.New("md: chunk set id integrity mismatch")
+
 // Chunk errors.
 var (
-	errChunkCountRange    = errors.New("md: chunk count out of range 1..64")
-	errChunkIndexRange    = errors.New("md: chunk index >= count")
-	errChunkSetIDRange    = errors.New("md: chunk set id exceeds 20 bits")
-	errChunkCountExceeds  = errors.New("md: payload exceeds 64-chunk maximum")
-	errChunkFlagMissing   = errors.New("md: chunk header chunked-flag not set")
-	errChunkSetEmpty      = errors.New("md: empty chunk set")
-	errChunkSetInconsist  = errors.New("md: chunk set inconsistent (version/csid/count)")
-	errChunkSetIncomplete = errors.New("md: chunk set incomplete")
-	errChunkIndexGap      = errors.New("md: chunk index gap")
-	errChunkSetIDMismatch = errors.New("md: chunk set id integrity mismatch")
-	errNotChunked         = errors.New("md: string is not chunked")
+	errChunkCountRange   = errors.New("md: chunk count out of range 1..64")
+	errChunkIndexRange   = errors.New("md: chunk index >= count")
+	errChunkSetIDRange   = errors.New("md: chunk set id exceeds 20 bits")
+	errChunkCountExceeds = errors.New("md: payload exceeds 64-chunk maximum")
+	errChunkFlagMissing  = errors.New("md: chunk header chunked-flag not set")
+	errChunkSetEmpty     = errors.New("md: empty chunk set")
+	errChunkSetInconsist = errors.New("md: chunk set inconsistent (version/csid/count)")
+	errChunkIndexGap     = errors.New("md: chunk index gap")
+	errNotChunked        = errors.New("md: string is not chunked")
 )
 
 // SINGLE_STRING_PAYLOAD_BIT_LIMIT — the threshold (in payload bits) above which
@@ -240,7 +251,7 @@ func Reassemble(strs []string) (*descriptor, error) {
 		}
 	}
 	if len(parsed) != expCount {
-		return nil, errChunkSetIncomplete
+		return nil, ErrChunkSetIncomplete
 	}
 
 	// Sort by index (stable insertion sort; small N, no reflect); verify
@@ -276,7 +287,7 @@ func Reassemble(strs []string) (*descriptor, error) {
 		return nil, err
 	}
 	if deriveChunkSetID(id) != expCsid {
-		return nil, errChunkSetIDMismatch
+		return nil, ErrChunkSetIDMismatch
 	}
 	return d, nil
 }

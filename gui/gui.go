@@ -1973,7 +1973,10 @@ func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 				case err == nil:
 					md1DisplayFlow(ctx, th, tpl)
 				case errors.Is(err, md.ErrChunkedUnsupported):
-					showError(ctx, th, "md1 descriptor", "Multi-part descriptor — not yet supported.")
+					// A chunked (multi-part) md1: gather the rest of the set, then
+					// reassemble + expand + display/verify (#10b). The chunked-flag
+					// condition — not a fixed line — anchors this arm.
+					md1GatherFlow(ctx, th, str)
 				default:
 					showError(ctx, th, "md1 descriptor", "Can't decode this descriptor.")
 				}
