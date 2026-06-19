@@ -27,9 +27,10 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Account Xpub") {
 		t.Fatalf("new program not reachable/titled after Right; got %q", content)
 	}
-	// Navigate Right again reaches engraveBundle (the new navigable upper bound,
-	// inserted before qaProgram); the wrap-to-backupWallet boundary moved one
-	// program later — see TestEngraveBundleProgramNavigable.
+	// Navigate Right again reaches engraveBundle; the navigable upper bound is now
+	// engraveSingleSig (inserted before qaProgram by T6a-2), so the
+	// wrap-to-backupWallet boundary is past engraveSingleSig — see
+	// TestEngraveBundleProgramNavigable / TestEngraveSingleSigProgramNavigable.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
