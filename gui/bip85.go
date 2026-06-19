@@ -163,3 +163,100 @@ func childSeedWarning(ctx *Context, th *Colors) bool {
 	}
 	return false
 }
+
+// bip85SeedHook is a test-only seam to observe the master + child mnemonics (to
+// assert both are scrubbed on exit, I-3). nil in production. Mirrors
+// singleSigSeedHook.
+var bip85SeedHook func(master, child bip39.Mnemonic)
+
+// bip85DeriveFlow is the bip85Derive program: a hand-typed BIP-39 MASTER seed
+// (SECRET, typed-only — NEVER a scan) + optional passphrase ON THE MASTER -> pick
+// the child params (app fixed BIP-39, word count {12,18,24}, bounded index 0..9)
+// -> derive the child BIP-39 mnemonic via BIP-85 -> unskippable child-seed warning
+// -> engrave the child (words + standard SeedQR) via the engraveSeed primitive,
+// stamping the CHILD's own bare fingerprint.
+//
+// SECURITY SPINE (mirror gui/singlesig.go):
+//   - TYPED-ONLY master (I-3): from seedEntryFlow ONLY; never an NFC scan.
+//   - TWO secrets scrubbed (I-3): the master AND the derived child mnemonic, both
+//     []Word zeroed on EVERY exit (derive/abort/warning-abort/engrave-abort/error).
+//     The privkey serialization + HMAC output are wiped inside deriveBip85Child.
+//   - Mainnet-only; child engraved onto owner-held steel only, never NFC.
+func bip85DeriveFlow(ctx *Context, th *Colors) {
+	// TYPED-ONLY master (never a scan).
+	master, ok := seedEntryFlow(ctx, th)
+	if !ok {
+		return
+	}
+	var child bip39.Mnemonic
+	// Scrub BOTH secrets on EVERY exit path (I-3). child is nil until derived.
+	// This is the ONLY scrub defer and (being registered first) runs LAST/LIFO,
+	// so it zeroes both backing arrays after every other defer. The test's
+	// bip85SeedHook (called synchronously below, after child = c) holds the slice
+	// headers and reads their contents AFTER the flow returns and this defer ran.
+	defer func() {
+		for i := range master {
+			master[i] = 0
+		}
+		for i := range child {
+			child[i] = 0
+		}
+	}()
+
+	// Optional passphrase ON THE MASTER.
+	passphrase := ""
+	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+		if pass, ok := passphraseFlow(ctx, th); ok {
+			passphrase = pass
+		}
+	}
+
+	for {
+		words, index, ok := bip85ParamPickFlow(ctx, th)
+		if !ok {
+			return
+		}
+		c, err := deriveBip85Child(master, passphrase, words, index)
+		if err != nil {
+			showError(ctx, th, "BIP-85 Child", "Couldn't derive the child seed.")
+			continue
+		}
+		child = c
+		// Test-only seam: observe BOTH mnemonics synchronously while they are
+		// non-nil. nil in production. The captured slice headers alias the backing
+		// arrays the top-level scrub defer zeroes on exit (mirrors
+		// singleSigSeedHook, gui/singlesig.go:36-38 — observed-then-scrubbed).
+		if bip85SeedHook != nil {
+			bip85SeedHook(master, child)
+		}
+
+		// Unskippable child-seed warning before any engrave.
+		if !childSeedWarning(ctx, th) {
+			// Abort: scrub this child immediately and re-pick params.
+			for i := range child {
+				child[i] = 0
+			}
+			child = nil
+			continue
+		}
+
+		plate, _, err := engraveBip85Child(ctx.Platform.EngraverParams(), child)
+		if err != nil {
+			showError(ctx, th, "BIP-85 Child", "Couldn't build the child seed plate.")
+			for i := range child {
+				child[i] = 0
+			}
+			child = nil
+			continue
+		}
+		if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+			return
+		}
+		// Engrave backed out -> re-pick params (scrub this child first).
+		for i := range child {
+			child[i] = 0
+		}
+		child = nil
+	}
+}

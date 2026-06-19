@@ -3,6 +3,7 @@ package gui
 import (
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -192,6 +193,95 @@ func TestChildSeedWarningAbort(t *testing.T) {
 		}
 		if got {
 			t.Fatal("childSeedWarning returned true after Back; want false (abort)")
+		}
+	})
+}
+
+// TestBip85DeriveFlow_ScrubsBothMnemonics drives the FULL flow: type the abandon
+// master, pick the child params (12 words, index 0), confirm the child-seed
+// warning, and let the engrave complete; then it asserts BOTH the master and the
+// derived child mnemonic []Word slices are zeroed on exit (I-3: two secrets to
+// scrub). Mirrors TestEngraveSingleSigFlowSeedScrubbed (the seed-hook + zeroed-
+// slice pattern) plus TestEngraveScreen (the connect/hold-confirm/complete dance).
+func TestBip85DeriveFlow_ScrubsBothMnemonics(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var master, child bip39.Mnemonic
+		bip85SeedHook = func(m, c bip39.Mnemonic) { master, child = m, c }
+		defer func() { bip85SeedHook = nil }()
+
+		e := newEngraver()
+		p := newPlatform()
+		p.engraver = e
+		ctx := NewContext(p)
+		done := false
+		frame, quit := runUI(ctx, func() {
+			bip85DeriveFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+		frame()
+
+		// Master entry: word-count picker -> 12 words (choice 0), then type the
+		// abandon-about phrase. (seedEntryFlow's master count is []int{12,24};
+		// default index 0 = 12 words, so confirm with Button3.)
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, abandonAboutPhrase())
+		// Passphrase prompt: Skip (choice 0).
+		if c, ok := pumpUntil(frame, "Passphrase", 160); !ok {
+			t.Fatalf("did not reach the passphrase prompt; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Skip
+		frame()
+		// Param picker: word count = 12 (index 0), child index = 0 (index 0).
+		// chooseEntry queues the Down presses, pumps a frame, confirms, pumps again.
+		chooseEntry(frame, &ctx.Router, 0) // word count 12
+		chooseEntry(frame, &ctx.Router, 0) // child index 0
+		// Child-seed warning: hold Button3 to confirm (ConfirmYes).
+		if c, ok := pumpUntil(frame, "Child Seed", 160); !ok {
+			t.Fatalf("did not reach the child-seed warning; got %q", c)
+		}
+		press(&ctx.Router, Button3) // hold to confirm
+		frame()
+		time.Sleep(confirmDelay)
+		frame()
+		// Engrave screen: click to the connect step, hold to start engraving.
+		click(&ctx.Router, Button3, Button3, Button3)
+		press(&ctx.Router, Button3) // hold connect
+		frame()
+		time.Sleep(confirmDelay)
+		// Pump until the engrave job closes (completes).
+	loop:
+		for {
+			frame()
+			select {
+			case <-e.closes:
+				break loop
+			case <-p.wakeups:
+			}
+		}
+		click(&ctx.Router, Button3) // dismiss the success screen -> Engrave returns true
+		synctest.Wait()
+		// Drain remaining frames until the flow goroutine returns and the scrub
+		// defer has run.
+		for i := 0; i < 32 && !done; i++ {
+			frame()
+		}
+		if !done {
+			t.Fatal("bip85DeriveFlow did not return after a completed engrave")
+		}
+		if master == nil || child == nil {
+			t.Fatal("hook never observed both mnemonics")
+		}
+		for i, w := range master {
+			if w != 0 {
+				t.Fatalf("master[%d] = %d, not scrubbed on exit (I-3)", i, w)
+			}
+		}
+		for i, w := range child {
+			if w != 0 {
+				t.Fatalf("child[%d] = %d, not scrubbed on exit (I-3)", i, w)
+			}
 		}
 	})
 }
