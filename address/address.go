@@ -32,6 +32,64 @@ func Supported(desc *bip380.Descriptor) bool {
 
 var errUnsupported = errors.New("unsupported descriptor")
 
+// Errors returned by Find. ErrUnsupported is the exported counterpart to the
+// internal errUnsupported, returned for a keyless descriptor (which addressAt
+// would otherwise panic on).
+var (
+	ErrUnsupported      = errors.New("address: unsupported descriptor")
+	ErrAddrUnparseable  = errors.New("address: candidate is not a valid address")
+	ErrAddrWrongNetwork = errors.New("address: candidate is for a different network")
+)
+
+// addrFindMaxGap bounds the per-chain gap scan (mirrors gui.addrMaxIndex+1;
+// defined here because package address cannot import package gui).
+const addrFindMaxGap uint32 = 50
+
+// Find scans the descriptor's receive then change ranges [0,gap) for an address
+// equal to candidate. chain is 0 (receive) or 1 (change). Panic-safe / total:
+// returns a typed error (never panics) for a keyless/unsupported descriptor, an
+// unparseable candidate, or a wrong-network candidate; propagates any per-index
+// derivation error rather than masking it as a non-match.
+func Find(desc *bip380.Descriptor, candidate string, gap uint32) (chain int, index uint32, found bool, err error) {
+	if len(desc.Keys) == 0 { // R0-I1: guard before desc.Keys[0]/Supported (both panic on keyless).
+		return 0, 0, false, ErrUnsupported
+	}
+	if gap == 0 || gap > addrFindMaxGap {
+		gap = addrFindMaxGap
+	}
+	net := desc.Keys[0].Network
+	// NOTE: within package `address`, the btcd parser github.com/btcsuite/btcd/address/v2
+	// is imported under its own name `address`, so this is `address.DecodeAddress`
+	// (a bare `DecodeAddress` is undefined here — R1-M1).
+	want, derr := address.DecodeAddress(candidate, net)
+	if derr != nil {
+		return 0, 0, false, ErrAddrUnparseable
+	}
+	if !want.IsForNet(net) {
+		return 0, 0, false, ErrAddrWrongNetwork
+	}
+	wantStr := want.String()
+	for i := uint32(0); i < gap; i++ {
+		got, e := Receive(desc, i) // R0-I2: propagate, don't compare "" silently.
+		if e != nil {
+			return 0, 0, false, e
+		}
+		if got == wantStr {
+			return 0, i, true, nil
+		}
+	}
+	for i := uint32(0); i < gap; i++ {
+		got, e := Change(desc, i)
+		if e != nil {
+			return 0, 0, false, e
+		}
+		if got == wantStr {
+			return 1, i, true, nil
+		}
+	}
+	return 0, 0, false, nil
+}
+
 func addressAt(desc *bip380.Descriptor, index uint32, change bool) (string, error) {
 	var addr address.Address
 	var network *chaincfg.Params

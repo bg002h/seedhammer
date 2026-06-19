@@ -126,6 +126,16 @@ func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
 	return k
 }
 
+// NewAddressKeyboard builds a PassphraseKeyboard that renders its readout in
+// cleartext (a public address is not a secret). k.revealed MUST be set AFTER
+// NewPassphraseKeyboard: its trailing Clear() resets revealed to false, so
+// setting it earlier would be overwritten.
+func NewAddressKeyboard(ctx *Context) *PassphraseKeyboard {
+	k := NewPassphraseKeyboard(ctx)
+	k.revealed = true
+	return k
+}
+
 // ppKeyExtent measures a function key's glyph extent (label, or the backspace icon).
 func ppKeyExtent(ctx *Context, key ppKey, cell image.Point) image.Point {
 	switch key.action {

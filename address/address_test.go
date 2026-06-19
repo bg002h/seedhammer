@@ -1,17 +1,21 @@
 package address
 
 import (
+	"errors"
 	"testing"
 
+	"seedhammer.com/bip380"
 	"seedhammer.com/nonstandard"
 )
 
+// xpubs is package-level so Find tests can reference the same fixtures.
+var xpubs = []string{
+	"xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan",
+	"xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ",
+	"xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge",
+}
+
 func TestAddresses(t *testing.T) {
-	xpubs := []string{
-		"xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan",
-		"xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ",
-		"xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge",
-	}
 	tests := []struct {
 		desc     string
 		receives []string
@@ -81,5 +85,84 @@ func TestAddresses(t *testing.T) {
 				t.Errorf("descriptor %s: got change address %d:%s, want %s", test.desc, i, got, want)
 			}
 		}
+	}
+}
+
+func TestFind(t *testing.T) {
+	wpkh, err := nonstandard.OutputDescriptor([]byte("wpkh(" + xpubs[0] + ")"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	multi, err := nonstandard.OutputDescriptor([]byte("wsh(sortedmulti(1," + xpubs[0] + "/1234/<5;6>/*))"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name      string
+		desc      string // built below
+		cand      string
+		wantChain int
+		wantIndex uint32
+		wantFound bool
+		wantErrIs error // nil = no error
+	}{
+		{"wpkh receive[2]", "wpkh", "bc1qkwl5qpx6k93cqmnygn6kgucgka8q3z4kur2nm8", 0, 2, true, nil},
+		{"wpkh change[1]", "wpkh", "bc1qvwlscfgdmtkna074wylrvqly4w6nlpklsmyx7x", 1, 1, true, nil},
+		{"wpkh foreign", "wpkh", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", 0, 0, false, nil},
+		{"multi receive[0]", "multi", "bc1qt77623mmw4lnsewlmt9cs60yvxpwks540ygtzkakdf8xaa4ahsvqcma0k0", 0, 0, true, nil},
+		{"multi change[1]", "multi", "bc1qwh9lhlgx9an4kz3s9qtrfm3xyvms84lkjy4paflg408vswjq4zcqx2xzlp", 1, 1, true, nil},
+		{"unparseable", "wpkh", "not-an-address", 0, 0, false, ErrAddrUnparseable},
+		{"wrong network (testnet bech32)", "wpkh", "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", 0, 0, false, ErrAddrWrongNetwork},
+	}
+	pick := func(n string) *bip380.Descriptor {
+		if n == "multi" {
+			return multi
+		}
+		return wpkh
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ch, idx, found, err := Find(pick(c.desc), c.cand, 20)
+			if c.wantErrIs != nil {
+				if !errors.Is(err, c.wantErrIs) {
+					t.Fatalf("err=%v want %v", err, c.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if found != c.wantFound || (found && (ch != c.wantChain || idx != c.wantIndex)) {
+				t.Fatalf("got (chain=%d idx=%d found=%v) want (%d %d %v)", ch, idx, found, c.wantChain, c.wantIndex, c.wantFound)
+			}
+		})
+	}
+}
+
+func TestFindKeylessNoPanic(t *testing.T) { // R0-I1: must error, never panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Find panicked on keyless descriptor: %v", r)
+		}
+	}()
+	keyless := &bip380.Descriptor{Type: bip380.Singlesig, Script: bip380.P2WPKH} // no Keys
+	_, _, found, err := Find(keyless, "bc1qkwl5qpx6k93cqmnygn6kgucgka8q3z4kur2nm8", 20)
+	if found || !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("keyless: found=%v err=%v want ErrUnsupported", found, err)
+	}
+}
+
+func TestFindPropagatesDerivationError(t *testing.T) { // R0-I2/§2.1b: don't swallow as a non-match
+	// A range element where End != Index+1 makes derivePubKey return
+	// "unsupported range path element"; Find must propagate it, not silently
+	// compare "" == want and report not-found.
+	desc, err := nonstandard.OutputDescriptor([]byte("wpkh(" + xpubs[0] + "/1234/<5;7>/*)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, found, ferr := Find(desc, "bc1qkwl5qpx6k93cqmnygn6kgucgka8q3z4kur2nm8", 20)
+	if found || ferr == nil {
+		t.Fatalf("want propagated derivation error, got found=%v err=%v", found, ferr)
 	}
 }

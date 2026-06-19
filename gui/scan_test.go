@@ -110,3 +110,32 @@ func TestScan(t *testing.T) {
 		})
 	}
 }
+
+func scanOnce(t *testing.T, s string) (any, error) {
+	t.Helper()
+	sc := new(scanner)
+	r := strings.NewReader(s)
+	for {
+		obj, err := sc.Scan(r)
+		if errors.Is(err, errScanInProgress) {
+			continue
+		}
+		return obj, err
+	}
+}
+
+func TestScanRecognizesAddress(t *testing.T) {
+	obj, err := scanOnce(t, "bc1qkwl5qpx6k93cqmnygn6kgucgka8q3z4kur2nm8")
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if _, isAddr := obj.(addressText); !isAddr {
+		t.Fatalf("scanned object = %T, want addressText", obj)
+	}
+	// A descriptor must NOT be misrecognized as an address (address branch is
+	// AFTER the descriptor probe in the dispatch chain).
+	obj2, _ := scanOnce(t, "wpkh("+tvXpub+")")
+	if _, isAddr := obj2.(addressText); isAddr {
+		t.Fatal("descriptor misrecognized as addressText")
+	}
+}

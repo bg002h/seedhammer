@@ -134,8 +134,9 @@ func TestDescriptorAddressFlowNoSkippedIndices(t *testing.T) {
 	}
 }
 
-// On a supported descriptor, Button2 opens the address view (then Back returns to
-// confirm, Back again exits). On an unsupported descriptor, Button2 is inert.
+// On a supported descriptor, Button2 opens a Show/Verify choice; selecting "Show
+// addresses" (choice 0, confirmed via Button3) opens the address view. On an
+// unsupported descriptor, Button2 is inert.
 func TestDescriptorConfirmAddressAffordance(t *testing.T) {
 	d := loadTestDesc(t, descWPKH) // supported
 	if !address.Supported(d) {
@@ -144,7 +145,8 @@ func TestDescriptorConfirmAddressAffordance(t *testing.T) {
 	ds := &DescriptorScreen{Descriptor: d}
 	want0, _ := address.Receive(d, 0)
 	ctx := NewContext(newPlatform())
-	click(&ctx.Router, Button2) // open address view from the confirm screen
+	click(&ctx.Router, Button2) // open the Show/Verify choice from the confirm screen
+	click(&ctx.Router, Button3) // select choice 0 ("Show addresses") → address view
 	frame, quit := runUI(ctx, func() { ds.Confirm(ctx, &descriptorTheme) })
 	defer quit()
 	var content string

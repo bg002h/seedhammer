@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 
+	btcaddr "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
 	"seedhammer.com/nonstandard"
@@ -69,10 +71,19 @@ func (s *scanner) Scan(r io.Reader) (any, error) {
 		return s, nil
 	} else if codex32.ValidMD(string(buf)) || codex32.ValidMK(string(buf)) {
 		return mdmkText(buf), nil
+	} else if _, aerr := btcaddr.DecodeAddress(string(buf), &chaincfg.MainNetParams); aerr == nil {
+		return addressText(buf), nil
+	} else if _, aerr := btcaddr.DecodeAddress(string(buf), &chaincfg.TestNet3Params); aerr == nil {
+		return addressText(buf), nil
 	} else {
 		return nil, errScanUnknownFormat
 	}
 }
+
+// addressText is a candidate Bitcoin address recognized by the scanner, consumed
+// only by the verify-address flow. engraveObjectFlow has no addressText case, so
+// a top-level address scan falls through to "unknown format" (R0-M5).
+type addressText string
 
 // mdmkText is a BCH-validated md1/mk1 string, engraved verbatim as text/QR.
 type mdmkText string
