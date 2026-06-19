@@ -99,3 +99,58 @@ func TestMK1DisplayFlowBackExits(t *testing.T) {
 		t.Fatal("mk1DisplayFlow did not exit on Back")
 	}
 }
+
+func TestMK1GatherFlowBackNoReader(t *testing.T) {
+	// testPlatform.NFCReader() == nil, so a multi-chunk set can't complete;
+	// only Back exits. Verifies the no-reader render path + progress.
+	ctx := NewContext(newPlatform())
+	var card mk.Card
+	var ok bool
+	frame, quit := runUI(ctx, func() { card, ok = mk1GatherFlow(ctx, &descriptorTheme, v1c0) })
+	defer quit()
+	content, _ := frame()
+	if !uiContains(content, "1 of 2") {
+		t.Errorf("progress not shown; got %q", content)
+	}
+	click(&ctx.Router, Button1) // Back
+	if _, fok := frame(); fok {
+		t.Fatal("mk1GatherFlow did not exit on Back")
+	}
+	// mk.Card has a slice field → not comparable; check fields.
+	if ok || card.Xpub != "" || card.Path != "" || len(card.Stubs) != 0 {
+		t.Fatalf("Back should yield (zero, false); got ok=%v card=%+v", ok, card)
+	}
+}
+
+func TestMdmkFlowMK1ShowsInspect(t *testing.T) {
+	p := newPlatform()
+	p.engraver = newEngraver()
+	ctx := NewContext(p)
+	frame, quit := runUI(ctx, func() { mdmkFlow(ctx, &descriptorTheme, mdmkText(v1c0)) })
+	defer quit()
+	content, ok := frame()
+	if !ok {
+		t.Fatal("mdmkFlow produced no frame")
+	}
+	if !uiContains(content, "Inspect key") {
+		t.Errorf("mk1 chooser missing Inspect key; got %q", content)
+	}
+}
+
+func TestMdmkFlowMD1NoInspect(t *testing.T) {
+	// §2.5/§2.9: an md1 string keeps the engrave-only flow (no Inspect).
+	// validateMdmk only QR-encodes + lays out (no BCH re-check), so an
+	// md1-prefixed literal exercises the isMK==false branch directly.
+	p := newPlatform()
+	p.engraver = newEngraver()
+	ctx := NewContext(p)
+	frame, quit := runUI(ctx, func() { mdmkFlow(ctx, &descriptorTheme, mdmkText("md1qqqqqqpqqzgr3hq2v")) })
+	defer quit()
+	content, ok := frame()
+	if !ok {
+		t.Fatal("mdmkFlow(md1) produced no frame")
+	}
+	if uiContains(content, "Inspect key") {
+		t.Errorf("md1 chooser must NOT offer Inspect; got %q", content)
+	}
+}

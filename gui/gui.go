@@ -1926,22 +1926,41 @@ func validateMdmk(params engrave.Params, s string) ([]string, []Plate, error) {
 }
 
 // mdmkFlow lets the operator pick an engraving variant for an md1/mk1 string
-// and engrave it, mirroring descriptorFlow.
+// and engrave it. For mk1 (only) it also offers "Inspect key" — gather the
+// chunk set, decode, and display the account metadata (read-only) before
+// engraving. md1 behaviour is unchanged until T2c.
 func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
-	labels, engravings, err := validateMdmk(ctx.Platform.EngraverParams(), string(s))
+	str := string(s)
+	labels, engravings, err := validateMdmk(ctx.Platform.EngraverParams(), str)
 	if err != nil {
 		// Only reached if no engraving variant fits a plate (rare for an md1/mk1
 		// string). Return silently — like backupSeedStringFlow, NOT like
 		// descriptorFlow (whose ErrorScreen "Too Large" copy is descriptor-specific).
 		return
 	}
-	cs := &ChoiceScreen{Title: "Engrave", Lead: "Choose engraving", Choices: labels}
+	isMK := hasMKPrefix(str)
+	title, lead, choices := "Engrave", "Choose engraving", labels
+	if isMK {
+		title, lead = "mk1 key", "Choose action"
+		choices = append([]string{"Inspect key"}, labels...)
+	}
+	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: choices}
 	for {
 		choice, ok := cs.Choose(ctx, th)
 		if !ok {
 			return
 		}
-		if NewEngraveScreen(ctx, engravings[choice]).Engrave(ctx, &engraveTheme) {
+		if isMK && choice == 0 {
+			if card, ok := mk1GatherFlow(ctx, th, str); ok {
+				mk1DisplayFlow(ctx, th, card)
+			}
+			continue
+		}
+		idx := choice
+		if isMK {
+			idx-- // skip the prepended Inspect entry
+		}
+		if NewEngraveScreen(ctx, engravings[idx]).Engrave(ctx, &engraveTheme) {
 			return
 		}
 	}

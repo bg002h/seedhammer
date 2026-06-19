@@ -1,9 +1,13 @@
 package gui
 
 import (
+	"errors"
 	"fmt"
 	"image"
+	"io"
+	"log"
 	"strings"
+	"time"
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
@@ -142,4 +146,120 @@ func mk1DisplayFlow(ctx *Context, th *Colors, card mk.Card) {
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
+}
+
+// mk1GatherFlow collects a complete mk1 chunk set via NFC, starting from the
+// first scanned chunk, then decodes and returns the Card. It owns its own
+// scanner goroutine (StartScreen.Flow has already closed its reader before
+// engraveObjectFlow runs). Returns (Card, true) on a complete valid set, or
+// (zero, false) on Back / decode error.
+func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
+	g := &mk1Gatherer{}
+	g.offer(first) // first came from a ValidMK mdmkText; primes the set.
+	if g.complete() {
+		return decodeGathered(ctx, th, g)
+	}
+	scans := make(chan scanResult, 1)
+	if r := ctx.Platform.NFCReader(); r != nil {
+		closer := make(chan struct{})
+		closed := make(chan struct{})
+		defer func() {
+			close(closer)
+			r.Close()
+			<-closed
+		}()
+		wakeup := ctx.Platform.Wakeup
+		go func() {
+			s := new(scanner)
+			for {
+				select {
+				case <-closer:
+					close(closed)
+					return
+				default:
+				}
+				obj, err := s.Scan(r)
+				scan := scanResult{Object: obj}
+				switch {
+				case errors.Is(err, errScanInProgress):
+					scan.Status = scanStarted
+				case errors.Is(err, errScanUnknownFormat):
+					scan.Status = scanUnknownFormat
+				case err == nil || err == io.EOF:
+				default:
+					scan.Status = scanFailed
+					log.Printf("nfc scan: %v", err)
+				}
+				select {
+				case old := <-scans:
+					if scan.Object == nil {
+						scan.Object = old.Object
+					}
+					scan.Status = max(scan.Status, old.Status)
+				default:
+				}
+				scans <- scan
+				wakeup()
+				if scan.Status == scanFailed {
+					time.Sleep(1 * time.Second)
+				}
+			}
+		}()
+	}
+	backBtn := &Clickable{Button: Button1}
+	dims := ctx.Platform.DisplaySize()
+	msg := ""
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return mk.Card{}, false
+		}
+		select {
+		case scan := <-scans:
+			if s, ok := scan.Object.(mdmkText); ok {
+				switch g.offer(string(s)) {
+				case gatherAdded:
+					msg = ""
+					if g.complete() {
+						return decodeGathered(ctx, th, g)
+					}
+				case gatherForeign:
+					msg = "Different key — rescan the right card."
+				case gatherDup:
+					msg = "Already captured that chunk."
+				case gatherIgnored:
+					msg = "Not an mk1 key chunk."
+				}
+			}
+		default:
+		}
+		lines := []string{fmt.Sprintf("Captured %d of %d.", len(g.set), g.total), "Scan the next chunk."}
+		if msg != "" {
+			lines = append(lines, msg)
+		}
+		lineWidth := dims.X - 2*8
+		y := leadingSize + 8
+		body := make([]op.Op, 0, len(lines))
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Inspect key")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return mk.Card{}, false
+}
+
+func decodeGathered(ctx *Context, th *Colors, g *mk1Gatherer) (mk.Card, bool) {
+	card, err := mk.Decode(g.collected())
+	if err != nil {
+		showError(ctx, th, "Inspect key", "Can't decode this key set.")
+		return mk.Card{}, false
+	}
+	return card, true
 }
