@@ -110,6 +110,29 @@ func WalletPolicyIDStub(d *descriptor) ([4]byte, error) {
 	return stub, nil
 }
 
+// WalletPolicyIdChunks reassembles a chunked md1 set and returns its
+// WalletPolicyId — the []string-input form for callers that hold the wire
+// strings (the *descriptor is unexported). Reassemble errors surface unchanged.
+func WalletPolicyIdChunks(strs []string) ([16]byte, error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	return WalletPolicyId(d)
+}
+
+// WalletPolicyIDStubChunks is the top-4 bytes of WalletPolicyIdChunks — the
+// chunked-md1-input form of the mk1 stub source.
+func WalletPolicyIDStubChunks(strs []string) ([4]byte, error) {
+	id, err := WalletPolicyIdChunks(strs)
+	if err != nil {
+		return [4]byte{}, err
+	}
+	var stub [4]byte
+	copy(stub[:], id[:4])
+	return stub, nil
+}
+
 // resolveOriginRaw mirrors expand_per_at_n's origin resolution for the id
 // preimage (canonicalize.rs:436-444): the per-@N OriginPathOverrides entry if
 // present, else the path_decl value (Divergent[idx] / Shared) AS-IS — NO
