@@ -129,3 +129,33 @@ func TestEngraveBip85Child_UsesChildFP(t *testing.T) {
 		t.Fatalf("child fp = %08x, want 02e8bff2", gotFP)
 	}
 }
+
+// TestBip85ParamBounds asserts the picker's choice sets are exactly the in-spec
+// bounds (validated-by-construction): word count {12,18,24}, index {0..9}. Any
+// drift here (e.g. a 15 or a free-form index) would mint an out-of-spec child.
+func TestBip85ParamBounds(t *testing.T) {
+	if len(bip85WordChoices) != 3 ||
+		bip85WordChoices[0] != 12 || bip85WordChoices[1] != 18 || bip85WordChoices[2] != 24 {
+		t.Fatalf("bip85WordChoices = %v, want [12 18 24]", bip85WordChoices)
+	}
+	if len(bip85IndexChoices) != 10 {
+		t.Fatalf("bip85IndexChoices len = %d, want 10 (0..9)", len(bip85IndexChoices))
+	}
+	for i, v := range bip85IndexChoices {
+		if v != i {
+			t.Fatalf("bip85IndexChoices[%d] = %d, want %d", i, v, i)
+		}
+	}
+	// Every advertised (words,index) pair derives a valid child (no panic, no error).
+	for _, w := range bip85WordChoices {
+		for _, idx := range bip85IndexChoices {
+			child, err := deriveBip85Child(abandonAboutMnemonic(), "", w, idx)
+			if err != nil {
+				t.Fatalf("words=%d idx=%d: %v", w, idx, err)
+			}
+			if len(child) != w || !child.Valid() {
+				t.Fatalf("words=%d idx=%d: bad child (%d words, valid=%v)", w, idx, len(child), child.Valid())
+			}
+		}
+	}
+}

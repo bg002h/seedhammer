@@ -100,3 +100,38 @@ func engraveBip85Child(params engrave.Params, child bip39.Mnemonic) (Plate, uint
 	}
 	return plate, mfp, nil
 }
+
+// bip85WordChoices / bip85IndexChoices are the picker's in-spec, validated-by-
+// construction bounds (R0-I-B): word count = biptool's {12,18,24}; index is a
+// bounded small set 0..9 (no free-form numeric entry — there is no reusable
+// numeric-entry widget; a larger index space is a FOLLOWUP). The application is
+// FIXED to BIP-39 (the only engrave-as-words-faithful BIP-85 app).
+var bip85WordChoices = []int{12, 18, 24}
+var bip85IndexChoices = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+// bip85ParamPickFlow picks the child BIP-39 word count then the bounded index.
+// Returns ok==false on Back from the FIRST screen; Back from the index screen
+// re-shows the word-count screen. The returned (words,index) are always in-spec.
+func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
+	wordCS := &ChoiceScreen{
+		Title:   "Child Seed",
+		Lead:    "Child word count",
+		Choices: []string{"12 WORDS", "18 WORDS", "24 WORDS"},
+	}
+	for {
+		wsel, wok := wordCS.Choose(ctx, th)
+		if !wok {
+			return 0, 0, false
+		}
+		idxCS := &ChoiceScreen{
+			Title:   "Child Seed",
+			Lead:    "Child index",
+			Choices: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
+		}
+		isel, iok := idxCS.Choose(ctx, th)
+		if !iok {
+			continue // Back from index -> re-pick the word count.
+		}
+		return bip85WordChoices[wsel], bip85IndexChoices[isel], true
+	}
+}
