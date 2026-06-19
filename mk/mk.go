@@ -361,13 +361,18 @@ func readLEB128(read func(int) ([]byte, error)) (uint32, error) {
 	return uint32(result), nil
 }
 
+// pathString renders the mk1 card's BIP-32 path for DISPLAY (e.g. "m/48h/0h/0h/2h").
+// The hardened marker is the "h" form, matching the GUI's dominant notation
+// (bip32.Path.String / bip380 Encode) so the mk1 inspect screen agrees with the
+// other screens (t4-M1). Display-only — Encode re-parses Card.Path and accepts
+// both "h" and "'" (bip32.ParsePathElement), and only components go on-card.
 func pathString(comps []uint32) string {
 	var b strings.Builder
 	b.WriteString("m")
 	for _, c := range comps {
 		b.WriteByte('/')
 		if c&hardenedBit != 0 {
-			fmt.Fprintf(&b, "%d'", c&^uint32(hardenedBit))
+			fmt.Fprintf(&b, "%dh", c&^uint32(hardenedBit))
 		} else {
 			fmt.Fprintf(&b, "%d", c)
 		}

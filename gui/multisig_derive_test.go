@@ -53,8 +53,8 @@ func TestDeriveMultisigLeg(t *testing.T) {
 	if len(card.Stubs) != 1 || card.Stubs[0] != wantStub {
 		t.Fatalf("mk1 stubs = %v, want [%v] (bound to the supplied policy)", card.Stubs, wantStub)
 	}
-	if card.Path != "m/48'/0'/0'/2'" {
-		t.Fatalf("mk1 path = %q, want m/48'/0'/0'/2'", card.Path)
+	if card.Path != "m/48h/0h/0h/2h" {
+		t.Fatalf("mk1 path = %q, want m/48h/0h/0h/2h", card.Path)
 	}
 	if card.Fingerprint != "73c5da0a" {
 		t.Fatalf("mk1 fingerprint = %q, want 73c5da0a", card.Fingerprint)

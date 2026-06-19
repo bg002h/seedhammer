@@ -10,8 +10,8 @@ import (
 func TestMD1DisplayFlowPaging(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	tpl := md.Template{N: 2, Root: md.ScriptWsh, Policy: md.PolicyMulti, K: 2, M: 2, Renderable: true,
-		Keys: []md.KeyOrigin{{Index: 0, Fingerprint: "deadbeef", OriginPath: "m/48'/0'/0'/2'", UseSite: "<0;1>/*"},
-			{Index: 1, Fingerprint: "cafebabe", OriginPath: "m/48'/0'/0'/2'", UseSite: "<0;1>/*"}}}
+		Keys: []md.KeyOrigin{{Index: 0, Fingerprint: "deadbeef", OriginPath: "m/48h/0h/0h/2h", UseSite: "<0;1>/*"},
+			{Index: 1, Fingerprint: "cafebabe", OriginPath: "m/48h/0h/0h/2h", UseSite: "<0;1>/*"}}}
 	frame, quit := runUI(ctx, func() { md1DisplayFlow(ctx, &descriptorTheme, tpl) })
 	defer quit()
 	var all strings.Builder
@@ -32,7 +32,7 @@ func TestMD1DisplayFlowPaging(t *testing.T) {
 func TestMD1DisplayFlowComplexRefuses(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	tpl := md.Template{N: 1, Root: md.ScriptWsh, Policy: md.PolicyComplex, Renderable: false,
-		Keys: []md.KeyOrigin{{Index: 0, OriginPath: "m/0'", UseSite: "<0;1>/*"}}}
+		Keys: []md.KeyOrigin{{Index: 0, OriginPath: "m/0h", UseSite: "<0;1>/*"}}}
 	frame, quit := runUI(ctx, func() { md1DisplayFlow(ctx, &descriptorTheme, tpl) })
 	defer quit()
 	content, _ := frame()

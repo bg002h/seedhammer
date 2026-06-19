@@ -170,7 +170,7 @@ func TestDeriveXpubFlowEngravesMK1NotSeed(t *testing.T) {
 	xpub := knownAccountXpub84
 	card := mk.Card{
 		Network:     "mainnet",
-		Path:        "m/84'/0'/0'",
+		Path:        "m/84h/0h/0h",
 		Fingerprint: "73c5da0a",
 		Stubs:       [][4]byte{{0, 0, 0, 0}},
 		Xpub:        xpub,
@@ -195,7 +195,7 @@ func TestDeriveXpubFlowEngravesMK1NotSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
-	if got.Xpub != xpub || got.Path != "m/84'/0'/0'" {
+	if got.Xpub != xpub || got.Path != "m/84h/0h/0h" {
 		t.Fatalf("round-trip card mismatch: %+v", got)
 	}
 }
@@ -207,7 +207,7 @@ func TestDeriveXpubFlowEngravesMK1NotSeed(t *testing.T) {
 func TestMultiPlateEngravePlateTitles(t *testing.T) {
 	card := mk.Card{
 		Network:     "mainnet",
-		Path:        "m/84'/0'/0'",
+		Path:        "m/84h/0h/0h",
 		Fingerprint: "73c5da0a",
 		Stubs:       [][4]byte{{0, 0, 0, 0}},
 		Xpub:        knownAccountXpub84,
