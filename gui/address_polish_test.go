@@ -93,6 +93,47 @@ func TestDescriptorAddressFlowBackExits(t *testing.T) {
 	}
 }
 
+// The load-bearing regression (R1-exec defect): measure-and-advance paging must
+// never silently drop an index off-screen. Page forward across enough pages to
+// cover indices 0..7 and assert EVERY address appears — for both a single-sig
+// fixture (more fit/page) and a long-address P2WSH fixture (fewer fit/page).
+func TestDescriptorAddressFlowNoSkippedIndices(t *testing.T) {
+	for _, descStr := range []string{descWPKH, descCustomChildren} {
+		d := loadTestDesc(t, descStr)
+		seen := make(map[string]bool)
+		for i := uint32(0); i < 8; i++ {
+			a, err := address.Receive(d, i)
+			if err != nil {
+				t.Fatalf("%s: Receive(%d): %v", descStr, i, err)
+			}
+			seen[a] = false
+		}
+		ctx := NewContext(newPlatform())
+		frame, quit := runUI(ctx, func() { descriptorAddressFlow(ctx, &descriptorTheme, d) })
+		// Observe the entry page BEFORE advancing (else index 0 is paged over
+		// before frame 0 renders). Advance one page per observed frame; 60 frames
+		// covers idx 0..7 even at the worst case of 1 address/page.
+		for i := 0; i < 60; i++ {
+			c, ok := frame()
+			if !ok {
+				break
+			}
+			for a := range seen {
+				if uiContains(c, a) {
+					seen[a] = true
+				}
+			}
+			click(&ctx.Router, Button3) // advance AFTER observing this page
+		}
+		quit()
+		for a, ok := range seen {
+			if !ok {
+				t.Errorf("%s: address %q was never viewable — paging skipped it", descStr, a)
+			}
+		}
+	}
+}
+
 // On a supported descriptor, Button2 opens the address view (then Back returns to
 // confirm, Back again exits). On an unsupported descriptor, Button2 is inert.
 func TestDescriptorConfirmAddressAffordance(t *testing.T) {
