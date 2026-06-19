@@ -188,6 +188,99 @@ func ParseChunkHeader(s string) (ChunkHeader, error) {
 	return readChunkHeader(r)
 }
 
+// Reassemble decodes a descriptor from N md1 chunk strings (chunk.rs:305-389):
+// unwrap each → read 37-bit header → consistency (version/csid/count all-equal)
+// → completeness (len==count, sorted indices 0..count-1, no gaps) → concat
+// payload bytes → decodePayloadValidated → integrity gate (re-derive csid from
+// the decoded descriptor, compare to the header csid).
+func Reassemble(strs []string) (*descriptor, error) {
+	if len(strs) == 0 {
+		return nil, errChunkSetEmpty
+	}
+
+	type parsedChunk struct {
+		header  ChunkHeader
+		payload []byte
+	}
+	parsed := make([]parsedChunk, 0, len(strs))
+	for _, s := range strs {
+		b, symBits, err := unwrapString(s)
+		if err != nil {
+			return nil, err
+		}
+		r := newBitReader(b, symBits)
+		// The chunked-flag is bit 0 of symbol 0 (I-3): the header's first 4 bits
+		// are the version, then the chunked bit. readChunkHeader enforces both.
+		h, err := readChunkHeader(r)
+		if err != nil {
+			return nil, err
+		}
+		// M-5: recover the exact payload byte count from the symbol-aligned bit
+		// count, NOT len(b)*8. The chunk wire is exactly 37+8N bits, and symBits
+		// = ceil((37+8N)/5)*5 ∈ [37+8N, 37+8N+4], so (symBits-37)/8 (floor) = N.
+		payloadByteCount := (symBits - chunkHeaderBits) / 8
+		cp := make([]byte, 0, payloadByteCount)
+		for i := 0; i < payloadByteCount; i++ {
+			v, err := r.read(8)
+			if err != nil {
+				return nil, err
+			}
+			cp = append(cp, byte(v))
+		}
+		parsed = append(parsed, parsedChunk{header: h, payload: cp})
+	}
+
+	// Consistency: same version, csid, count across all chunks.
+	expCount := parsed[0].header.TotalChunks
+	expCsid := parsed[0].header.ChunkSetID
+	expVersion := parsed[0].header.Version
+	for _, p := range parsed {
+		if p.header.TotalChunks != expCount || p.header.ChunkSetID != expCsid || p.header.Version != expVersion {
+			return nil, errChunkSetInconsist
+		}
+	}
+	if len(parsed) != expCount {
+		return nil, errChunkSetIncomplete
+	}
+
+	// Sort by index (stable insertion sort; small N, no reflect); verify
+	// 0..count-1 with no gaps.
+	for i := 1; i < len(parsed); i++ {
+		j := i
+		for j > 0 && parsed[j-1].header.ChunkIndex > parsed[j].header.ChunkIndex {
+			parsed[j-1], parsed[j] = parsed[j], parsed[j-1]
+			j--
+		}
+	}
+	for i, p := range parsed {
+		if p.header.ChunkIndex != i {
+			return nil, errChunkIndexGap
+		}
+	}
+
+	// Concatenate payload bytes.
+	var full []byte
+	for _, p := range parsed {
+		full = append(full, p.payload...)
+	}
+
+	// Decode (TLV-rollback tolerates ≤7 trailing zero bits, md.go:549-554).
+	d, err := decodePayloadValidated(full, len(full)*8)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cross-chunk integrity: re-derive the csid from the decoded descriptor.
+	id, err := computeEncodingID(d)
+	if err != nil {
+		return nil, err
+	}
+	if deriveChunkSetID(id) != expCsid {
+		return nil, errChunkSetIDMismatch
+	}
+	return d, nil
+}
+
 // unwrapString verifies an md1 string's BCH, strips the 13-symbol checksum, and
 // returns (byte-padded payload bytes, symbol-aligned bit count = 5×dataSymbols).
 // The caller uses the symbol-aligned bit count (NOT len(bytes)*8) so the
