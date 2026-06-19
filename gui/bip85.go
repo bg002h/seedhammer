@@ -9,6 +9,8 @@ import (
 	"seedhammer.com/bip39"
 	"seedhammer.com/bip85"
 	"seedhammer.com/engrave"
+	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/op"
 )
 
 // validBip85Words is the set of child word counts the BIP-39 application
@@ -134,4 +136,30 @@ func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
 		}
 		return bip85WordChoices[wsel], bip85IndexChoices[isel], true
 	}
+}
+
+// childSeedWarning shows the MANDATORY, operator-acknowledged warning that the
+// flow is about to engrave a CHILD SEED — anyone with the child mnemonic controls
+// the child wallet, so engrave onto YOUR OWN steel only. Hold to confirm; Back
+// cancels. Returns true only on an acknowledged confirm. Mirrors stubZeroWarning.
+func childSeedWarning(ctx *Context, th *Colors) bool {
+	warn := &ConfirmWarningScreen{
+		Title: "Child Seed",
+		Body: "This engraves a NEW CHILD SEED derived from your master. Anyone holding " +
+			"these words controls the child wallet — engrave onto your OWN steel only.\n\n" +
+			"Hold button to confirm.",
+		Icon: assets.IconHammer,
+	}
+	for !ctx.Done {
+		dims := ctx.Platform.DisplaySize()
+		d, res := warn.Layout(ctx, th, dims)
+		switch res {
+		case ConfirmNo:
+			return false
+		case ConfirmYes:
+			return true
+		}
+		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
+	}
+	return false
 }

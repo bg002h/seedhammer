@@ -2,6 +2,7 @@ package gui
 
 import (
 	"testing"
+	"testing/synctest"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -158,4 +159,39 @@ func TestBip85ParamBounds(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestChildSeedWarningAbort: pressing Back (Button1) at the child-seed warning
+// drives ConfirmWarningScreen.Layout -> ConfirmNo, so childSeedWarning returns
+// false (abort) and no engrave proceeds. The flow goroutine must actually reach
+// and dismiss the warning (NON-vacuous): we keep the frame handle, render the
+// warning, click Back, pump frames until the goroutine returns, then assert it
+// returned false and that it ran to completion. Mirrors TestDescriptorAddressFlowBackExits.
+func TestChildSeedWarningAbort(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var got bool
+		done := false
+		frame, quit := runUI(ctx, func() {
+			got = childSeedWarning(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+		// Render the warning before driving it (the goroutine blocks on its first
+		// ctx.Frame yield until pumped).
+		if c, ok := pumpUntil(frame, "Child Seed", 16); !ok {
+			t.Fatalf("child-seed warning not shown; got %q", c)
+		}
+		click(&ctx.Router, Button1) // Back -> ConfirmNo
+		// Pump until the warning goroutine returns (the iterator ends).
+		for i := 0; i < 16 && !done; i++ {
+			frame()
+		}
+		if !done {
+			t.Fatal("childSeedWarning did not return after Back")
+		}
+		if got {
+			t.Fatal("childSeedWarning returned true after Back; want false (abort)")
+		}
+	})
 }
