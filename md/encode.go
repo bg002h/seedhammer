@@ -18,12 +18,13 @@ var (
 	errThresholdRange = errors.New("md: threshold k out of range 1..32")
 	errChildCount     = errors.New("md: child count out of range 1..32")
 	// errKGreaterThanN is reused from md.go.
-	errEmptyTLVEncode = errors.New("md: empty TLV entry (encode)")
-	errVarintOverflow = errors.New("md: varint value exceeds single-extension range")
-	errPathDepth      = errors.New("md: origin path depth exceeds 15")
-	errAltCount       = errors.New("md: alt-count out of range 2..9")
-	errKeyCountRange  = errors.New("md: key count n out of range 1..32")
-	errDivergentCount = errors.New("md: divergent path count != n")
+	errEmptyTLVEncode    = errors.New("md: empty TLV entry (encode)")
+	errVarintOverflow    = errors.New("md: varint value exceeds single-extension range")
+	errPathDepth         = errors.New("md: origin path depth exceeds 15")
+	errAltCount          = errors.New("md: alt-count out of range 2..9")
+	errKeyCountRange     = errors.New("md: key count n out of range 1..32")
+	errDivergentCount    = errors.New("md: divergent path count != n")
+	errPathDeclNMismatch = errors.New("md: pathDecl.n != descriptor.n")
 	// errOverrideOrder is reused from md.go.
 )
 
@@ -390,6 +391,15 @@ func encodePayload(d *descriptor) ([]byte, int, error) {
 				return nil, 0, err
 			}
 		}
+	}
+
+	// The key-index width (kiw) below is computed off pathDecl.n, while the
+	// canonical key count lives in descriptor.n. canonicalize keeps them in
+	// lockstep for any decoded/normalized descriptor, but guard the invariant
+	// explicitly to harden against a future author-built AST that sets one
+	// without the other (a kiw mismatch would silently corrupt the bitstream).
+	if dc.pathDecl.n != dc.n {
+		return nil, 0, errPathDeclNMismatch
 	}
 
 	var w bitWriter

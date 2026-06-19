@@ -1090,8 +1090,10 @@ func isWshInnerMulti(t tag) bool { return t == tagMulti || t == tagSortedMulti }
 
 // canonicalOrigin returns the canonical path-from-master for the top-level
 // wrapper `tree`, or (zero, false) for shapes that require explicit overrides.
-// USED ONLY by validateExplicitOriginRequired — never to substitute a
-// renderable key's decoded OriginPath.
+// Used by validateExplicitOriginRequired AND, per the R0-I1 precedence, as the
+// final fallback in resolveOriginPath (expand.go) to substitute a renderable
+// key's OriginPath when an elided shared path-decl would otherwise display the
+// wrong depth/childnum.
 func canonicalOrigin(tree node) (originPath, bool) {
 	switch tree.tag {
 	case tagPkh:
