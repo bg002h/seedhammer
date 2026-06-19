@@ -49,20 +49,20 @@ func TestEngraveSingleSigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Single-Sig") {
 		t.Fatalf("engraveSingleSig not reachable/titled after third Right; got %q", content)
 	}
-	// Right again wraps back to backupWallet (engraveSingleSig is the navigable
-	// upper bound; qaProgram stays out).
+	// Right again reaches engraveMultisig (the new navigable upper bound,
+	// inserted before qaProgram by T6b). qaProgram stays out of the carousel.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after fourth Right")
 	}
-	if !uiContains(content, "Backup Wallet") {
-		t.Fatalf("Right did not wrap to Backup Wallet; got %q", content)
+	if !uiContains(content, "Multisig") {
+		t.Fatalf("engraveMultisig not reachable after fourth Right; got %q", content)
 	}
 }
 
 // TestEngraveSingleSigLeftWrap asserts navigating Left from backupWallet wraps to
-// engraveSingleSig (the new navigable upper bound), titled non-blank.
+// engraveMultisig (the new navigable upper bound after T6b), titled non-blank.
 func TestEngraveSingleSigLeftWrap(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
@@ -71,13 +71,13 @@ func TestEngraveSingleSigLeftWrap(t *testing.T) {
 	if _, ok := frame(); !ok {
 		t.Fatal("StartScreen produced no frame")
 	}
-	// Left from backupWallet → wraps to engraveSingleSig.
+	// Left from backupWallet → wraps to engraveMultisig (the new upper bound).
 	click(&ctx.Router, Left)
 	content, ok := frame()
 	if !ok {
 		t.Fatal("no frame after Left")
 	}
-	if !uiContains(content, "Single-Sig") {
-		t.Fatalf("Left did not wrap to Single-Sig; got %q", content)
+	if !uiContains(content, "Multisig") {
+		t.Fatalf("Left did not wrap to Multisig; got %q", content)
 	}
 }
