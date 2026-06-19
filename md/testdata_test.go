@@ -34,6 +34,16 @@ func vectorPath(name, ext string) string {
 	return filepath.Join("testdata", "vectors", name+"."+ext)
 }
 
+// readFileBytes decodes a vector's .bytes.hex into raw bytes without a *testing.T
+// (used by fuzz seed corpora, which run before any sub-test).
+func readFileBytes(name string) ([]byte, error) {
+	raw, err := os.ReadFile(vectorPath(name, "bytes.hex"))
+	if err != nil {
+		return nil, err
+	}
+	return hex.DecodeString(strings.TrimSpace(string(raw)))
+}
+
 func loadBytesHex(t *testing.T, name string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(vectorPath(name, "bytes.hex"))
