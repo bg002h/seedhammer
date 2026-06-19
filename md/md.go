@@ -886,5 +886,551 @@ func symbolsToBytes(syms []byte) []byte {
 	return out
 }
 
-// _ keeps codex32 referenced until Decode (Task 4) uses it.
-var _ = codex32.MDDataSymbols
+// ─── Validators (port of validate.rs:17-226) ────────────────────────────────
+
+var (
+	errMissingExplicitOrigin    = errors.New("md: missing explicit origin")
+	errPlaceholderNotReferenced = errors.New("md: placeholder not referenced")
+	errPlaceholderOrder         = errors.New("md: placeholder first-occurrence out of order")
+	errMultipathAltMismatch     = errors.New("md: multipath alt-count mismatch")
+	errForbiddenTapLeaf         = errors.New("md: forbidden tap-tree leaf")
+	errNUMSConflict             = errors.New("md: NUMS sentinel conflict")
+	errInvalidXpubBytes         = errors.New("md: invalid xpub bytes")
+)
+
+// validatePlaceholderUsage enforces (1) every @i for 0≤i<n appears at least
+// once, and (2) first occurrences (pre-order) are in canonical ascending order
+// (port of validate.rs:17-110).
+func validatePlaceholderUsage(root node, n uint8) error {
+	seen := make([]bool, n)
+	var firstOccurrences []uint8
+	if err := walkForPlaceholders(root, seen, &firstOccurrences); err != nil {
+		return err
+	}
+	for _, wasSeen := range seen {
+		if !wasSeen {
+			return errPlaceholderNotReferenced
+		}
+	}
+	for pos, idx := range firstOccurrences {
+		if int(idx) != pos {
+			return errPlaceholderOrder
+		}
+	}
+	return nil
+}
+
+func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
+	switch b := n.body.(type) {
+	case keyArgBody:
+		if int(b.index) >= len(seen) {
+			return errPlaceholderRange
+		}
+		if !seen[b.index] {
+			seen[b.index] = true
+			*firstOccurrences = append(*firstOccurrences, b.index)
+		}
+	case childrenBody:
+		for _, c := range b.children {
+			if err := walkForPlaceholders(c, seen, firstOccurrences); err != nil {
+				return err
+			}
+		}
+	case variableBody:
+		for _, c := range b.children {
+			if err := walkForPlaceholders(c, seen, firstOccurrences); err != nil {
+				return err
+			}
+		}
+	case multiKeysBody:
+		for _, index := range b.indices {
+			if int(index) >= len(seen) {
+				return errPlaceholderRange
+			}
+			if !seen[index] {
+				seen[index] = true
+				*firstOccurrences = append(*firstOccurrences, index)
+			}
+		}
+	case trBody:
+		if !b.isNums {
+			if int(b.keyIndex) >= len(seen) {
+				return errNUMSConflict
+			}
+			if !seen[b.keyIndex] {
+				seen[b.keyIndex] = true
+				*firstOccurrences = append(*firstOccurrences, b.keyIndex)
+			}
+		}
+		if b.tree != nil {
+			if err := walkForPlaceholders(*b.tree, seen, firstOccurrences); err != nil {
+				return err
+			}
+		}
+	case hash256Body, hash160Body, timelockBody, emptyBody:
+	}
+	return nil
+}
+
+// validateMultipathConsistency: all multipath groups (shared default + per-@N
+// overrides) MUST carry the same alt-count (port of validate.rs:117-138).
+func validateMultipathConsistency(shared useSitePath, overrides []idxUseSite) error {
+	haveSeen := false
+	var seenAltCount int
+	check := func(p useSitePath) error {
+		if p.hasMultipath {
+			if !haveSeen {
+				haveSeen = true
+				seenAltCount = len(p.multipath)
+			} else if seenAltCount != len(p.multipath) {
+				return errMultipathAltMismatch
+			}
+		}
+		return nil
+	}
+	if err := check(shared); err != nil {
+		return err
+	}
+	for _, o := range overrides {
+		if err := check(o.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateTapScriptTree: all leaves in a tap-script-tree must be permitted-leaf
+// tags per §6.3.1 (port of validate.rs:141-169).
+func validateTapScriptTree(n node) error {
+	if n.tag == tagTapTree {
+		if b, ok := n.body.(childrenBody); ok {
+			for _, c := range b.children {
+				if err := validateTapScriptTree(c); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if isForbiddenLeafTag(n.tag) {
+		return errForbiddenTapLeaf
+	}
+	return nil
+}
+
+func isForbiddenLeafTag(t tag) bool {
+	switch t {
+	case tagWpkh, tagTr, tagWsh, tagSh, tagPkh, tagMulti, tagSortedMulti:
+		return true
+	}
+	return false
+}
+
+// validateExplicitOriginRequired: when canonicalOrigin(tree) is None, every @N
+// must have an explicit (non-empty) origin path on the wire — via an
+// OriginPathOverrides entry or via path_decl (port of validate.rs:182-207).
+func validateExplicitOriginRequired(d *descriptor) error {
+	if _, ok := canonicalOrigin(d.tree); ok {
+		return nil
+	}
+	for idx := uint8(0); idx < d.n; idx++ {
+		// Override path takes precedence — if present and non-empty, OK.
+		if d.tlv.originPresent {
+			overridden := false
+			for _, o := range d.tlv.originOverrides {
+				if o.idx == idx && len(o.path.components) != 0 {
+					overridden = true
+					break
+				}
+			}
+			if overridden {
+				continue
+			}
+		}
+		// Otherwise consult the path_decl for this idx.
+		declEmpty := true
+		if d.pathDecl.divergent != nil {
+			if int(idx) < len(d.pathDecl.divergent) {
+				declEmpty = len(d.pathDecl.divergent[idx].components) == 0
+			}
+		} else if d.pathDecl.shared != nil {
+			declEmpty = len(d.pathDecl.shared.components) == 0
+		}
+		if declEmpty {
+			return errMissingExplicitOrigin
+		}
+	}
+	return nil
+}
+
+// validateXpubBytes structurally walks the Pubkeys TLV. T2c parses pubkeys for
+// cursor correctness but skips the secp256k1 on-curve point check (no btcec
+// dep; the template-only corpus has null pubkeys). Full secp256k1 validation is
+// part of #10's xpub-expansion. Port of validate.rs:216-226 with the point
+// check elided per spec §1.
+func validateXpubBytes(d *descriptor) error {
+	// No-op: structural TLV parse already ran in readTLV. The secp256k1 point
+	// check (Rust: bitcoin::secp256k1::PublicKey::from_slice(&xpub[32..65])) is
+	// deferred to #10.
+	_ = errInvalidXpubBytes
+	return nil
+}
+
+// ─── Canonical-origin table (port of canonical_origin.rs:38-79) ──────────────
+
+func mkOrigin(comps ...pathComponent) originPath { return originPath{components: comps} }
+
+func isWshInnerMulti(t tag) bool { return t == tagMulti || t == tagSortedMulti }
+
+// canonicalOrigin returns the canonical path-from-master for the top-level
+// wrapper `tree`, or (zero, false) for shapes that require explicit overrides.
+// USED ONLY by validateExplicitOriginRequired — never to substitute a
+// renderable key's decoded OriginPath.
+func canonicalOrigin(tree node) (originPath, bool) {
+	switch tree.tag {
+	case tagPkh:
+		if _, ok := tree.body.(keyArgBody); ok {
+			return mkOrigin(pathComponent{true, 44}, pathComponent{true, 0}, pathComponent{true, 0}), true
+		}
+	case tagWpkh:
+		if _, ok := tree.body.(keyArgBody); ok {
+			return mkOrigin(pathComponent{true, 84}, pathComponent{true, 0}, pathComponent{true, 0}), true
+		}
+	case tagTr:
+		if b, ok := tree.body.(trBody); ok {
+			if b.tree == nil {
+				return mkOrigin(pathComponent{true, 86}, pathComponent{true, 0}, pathComponent{true, 0}), true
+			}
+			return originPath{}, false // tr(@N, TapTree) → forced explicit
+		}
+	case tagWsh:
+		if b, ok := tree.body.(childrenBody); ok && len(b.children) == 1 && isWshInnerMulti(b.children[0].tag) {
+			return mkOrigin(pathComponent{true, 48}, pathComponent{true, 0}, pathComponent{true, 0}, pathComponent{true, 2}), true
+		}
+	case tagSh:
+		if b, ok := tree.body.(childrenBody); ok && len(b.children) == 1 {
+			inner := b.children[0]
+			if inner.tag == tagWsh {
+				if gb, ok := inner.body.(childrenBody); ok && len(gb.children) == 1 && isWshInnerMulti(gb.children[0].tag) {
+					return mkOrigin(pathComponent{true, 48}, pathComponent{true, 0}, pathComponent{true, 0}, pathComponent{true, 1}), true
+				}
+			}
+		}
+	}
+	return originPath{}, false
+}
+
+// ─── decodePayloadValidated (decode.rs:56-69 ordering) ───────────────────────
+
+func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
+	d, err := decodePayload(b, totalBits)
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePlaceholderUsage(d.tree, d.n); err != nil {
+		return nil, err
+	}
+	if d.tlv.useSitePresent {
+		if err := validateMultipathConsistency(d.useSite, d.tlv.useSiteOverrides); err != nil {
+			return nil, err
+		}
+	}
+	if d.tree.tag == tagTr {
+		if b, ok := d.tree.body.(trBody); ok && b.tree != nil {
+			if err := validateTapScriptTree(*b.tree); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := validateExplicitOriginRequired(d); err != nil {
+		return nil, err
+	}
+	if err := validateXpubBytes(d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// ─── Public template types ───────────────────────────────────────────────────
+
+// ScriptKind is the top-level descriptor wrapper.
+type ScriptKind int
+
+const (
+	ScriptWpkh ScriptKind = iota
+	ScriptPkh
+	ScriptSh
+	ScriptWsh
+	ScriptTr
+)
+
+// PolicyKind is the spending-policy shape.
+type PolicyKind int
+
+const (
+	PolicySingle PolicyKind = iota
+	PolicyMulti
+	PolicySortedMulti
+	PolicyMultiA
+	PolicySortedMultiA
+	PolicyComplex
+)
+
+// KeyOrigin is the per-@N renderable key info: the key's placeholder index, its
+// xpub fingerprint (8-hex lowercase or ""), its DECODED origin path ("m" for an
+// elided origin), and its use-site path (e.g. "<0;1>/*").
+type KeyOrigin struct {
+	Index       int
+	Fingerprint string
+	OriginPath  string
+	UseSite     string
+}
+
+// Template is the decoded, renderable BIP-388 descriptor summary.
+type Template struct {
+	N          int
+	Root       ScriptKind
+	Policy     PolicyKind
+	K, M       int
+	Keys       []KeyOrigin
+	Renderable bool
+}
+
+// Decode decodes a single-string md1 descriptor into a Template. It refuses
+// chunked md1 (ErrChunkedUnsupported) and returns an error for any malformed or
+// out-of-spec wire payload.
+func Decode(s string) (Template, error) {
+	syms, err := codex32.MDDataSymbols(s)
+	if err != nil {
+		return Template{}, err
+	}
+	if len(syms) == 0 || syms[0]&1 == 1 { // chunked-flag (bit 0 of symbol 0)
+		return Template{}, ErrChunkedUnsupported
+	}
+	b := symbolsToBytes(syms)
+	d, err := decodePayloadValidated(b, 5*len(syms))
+	if err != nil {
+		return Template{}, err
+	}
+	return summarize(d), nil
+}
+
+// ─── summarize (spec §4.2 renderable-shape classifier) ───────────────────────
+
+func rootScriptKind(t tag) ScriptKind {
+	switch t {
+	case tagPkh:
+		return ScriptPkh
+	case tagSh:
+		return ScriptSh
+	case tagWsh:
+		return ScriptWsh
+	case tagTr:
+		return ScriptTr
+	default:
+		return ScriptWpkh
+	}
+}
+
+// classifyPolicy walks the renderable shapes and returns (policy, k, m). A
+// non-renderable shape returns PolicyComplex.
+func classifyPolicy(tree node) (PolicyKind, int, int) {
+	switch tree.tag {
+	case tagWpkh, tagPkh:
+		if _, ok := tree.body.(keyArgBody); ok {
+			return PolicySingle, 0, 0
+		}
+	case tagTr:
+		if b, ok := tree.body.(trBody); ok {
+			if b.tree == nil {
+				return PolicySingle, 0, 0 // tr(@N) key-path only
+			}
+			// tr(@N, single multi_a/sortedmulti_a leaf) — renderable tapscript multisig.
+			if pol, k, m, ok := multiAPolicy(*b.tree); ok {
+				return pol, k, m
+			}
+		}
+	case tagWsh:
+		if b, ok := tree.body.(childrenBody); ok && len(b.children) == 1 {
+			if pol, k, m, ok := multiPolicy(b.children[0]); ok {
+				return pol, k, m
+			}
+		}
+	case tagSh:
+		if b, ok := tree.body.(childrenBody); ok && len(b.children) == 1 {
+			inner := b.children[0]
+			// sh(wsh(multi/sortedmulti))
+			if inner.tag == tagWsh {
+				if gb, ok := inner.body.(childrenBody); ok && len(gb.children) == 1 {
+					if pol, k, m, ok := multiPolicy(gb.children[0]); ok {
+						return pol, k, m
+					}
+				}
+			}
+			// sh(multi/sortedmulti) legacy P2SH multisig
+			if pol, k, m, ok := multiPolicy(inner); ok {
+				return pol, k, m
+			}
+		}
+	}
+	return PolicyComplex, 0, 0
+}
+
+func multiPolicy(n node) (PolicyKind, int, int, bool) {
+	if b, ok := n.body.(multiKeysBody); ok {
+		switch n.tag {
+		case tagMulti:
+			return PolicyMulti, int(b.k), len(b.indices), true
+		case tagSortedMulti:
+			return PolicySortedMulti, int(b.k), len(b.indices), true
+		}
+	}
+	return PolicyComplex, 0, 0, false
+}
+
+func multiAPolicy(n node) (PolicyKind, int, int, bool) {
+	if b, ok := n.body.(multiKeysBody); ok {
+		switch n.tag {
+		case tagMultiA:
+			return PolicyMultiA, int(b.k), len(b.indices), true
+		case tagSortedMultiA:
+			return PolicySortedMultiA, int(b.k), len(b.indices), true
+		}
+	}
+	return PolicyComplex, 0, 0, false
+}
+
+func summarize(d *descriptor) Template {
+	root := rootScriptKind(d.tree.tag)
+	policy, k, m := classifyPolicy(d.tree)
+	renderable := policy != PolicyComplex
+
+	keys := make([]KeyOrigin, 0, d.n)
+	for idx := uint8(0); idx < d.n; idx++ {
+		keys = append(keys, KeyOrigin{
+			Index:       int(idx),
+			Fingerprint: fingerprintFor(d, idx),
+			OriginPath:  originPathStringFor(d, idx),
+			UseSite:     useSiteStringFor(d, idx),
+		})
+	}
+	return Template{
+		N:          int(d.n),
+		Root:       root,
+		Policy:     policy,
+		K:          k,
+		M:          m,
+		Keys:       keys,
+		Renderable: renderable,
+	}
+}
+
+// fingerprintFor returns the 8-hex lowercase fingerprint for @idx, or "".
+func fingerprintFor(d *descriptor, idx uint8) string {
+	if !d.tlv.fpPresent {
+		return ""
+	}
+	for _, fp := range d.tlv.fingerprints {
+		if fp.idx == idx {
+			return hexLower(fp.fp[:])
+		}
+	}
+	return ""
+}
+
+// originPathStringFor returns the DECODED origin path for @idx ("m" if elided).
+// Override (TLV) takes precedence over path_decl. Never substitutes the
+// canonical implied path.
+func originPathStringFor(d *descriptor, idx uint8) string {
+	if d.tlv.originPresent {
+		for _, o := range d.tlv.originOverrides {
+			if o.idx == idx {
+				return pathString(o.path.components)
+			}
+		}
+	}
+	if d.pathDecl.divergent != nil {
+		if int(idx) < len(d.pathDecl.divergent) {
+			return pathString(d.pathDecl.divergent[idx].components)
+		}
+		return "m"
+	}
+	if d.pathDecl.shared != nil {
+		return pathString(d.pathDecl.shared.components)
+	}
+	return "m"
+}
+
+// useSiteStringFor returns the use-site path for @idx (override or shared).
+func useSiteStringFor(d *descriptor, idx uint8) string {
+	if d.tlv.useSitePresent {
+		for _, o := range d.tlv.useSiteOverrides {
+			if o.idx == idx {
+				return useSiteString(o.path)
+			}
+		}
+	}
+	return useSiteString(d.useSite)
+}
+
+// pathString renders BIP-32 path components from master (e.g. "m/84'/0'/0'").
+// Empty components → "m".
+func pathString(comps []pathComponent) string {
+	s := "m"
+	for _, c := range comps {
+		s += "/" + u32str(c.value)
+		if c.hardened {
+			s += "'"
+		}
+	}
+	return s
+}
+
+// useSiteString renders a use-site path: "<0;1>/*" for the standard multipath,
+// "*" for a bare wildcard, with a trailing "'" if the wildcard is hardened.
+func useSiteString(us useSitePath) string {
+	var s string
+	if us.hasMultipath {
+		s = "<"
+		for i, a := range us.multipath {
+			if i > 0 {
+				s += ";"
+			}
+			s += u32str(a.value)
+			if a.hardened {
+				s += "'"
+			}
+		}
+		s += ">/*"
+	} else {
+		s = "*"
+	}
+	if us.wildcardHardened {
+		s += "'"
+	}
+	return s
+}
+
+func u32str(v uint32) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [10]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(buf[i:])
+}
+
+func hexLower(b []byte) string {
+	const hexdigits = "0123456789abcdef"
+	out := make([]byte, len(b)*2)
+	for i, v := range b {
+		out[i*2] = hexdigits[v>>4]
+		out[i*2+1] = hexdigits[v&0x0f]
+	}
+	return string(out)
+}
