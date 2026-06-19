@@ -2,11 +2,11 @@ package gui
 
 import "testing"
 
-// TestEngraveMultisigProgramNavigable asserts the new engraveMultisig program is
-// reachable by navigating Right past engraveSingleSig, is the new navigable upper
-// bound (a further Right wraps to backupWallet), has a NON-BLANK title, and does
-// not panic on render (layoutMainPlates must have its case). qaProgram stays out.
-func TestEngraveMultisigProgramNavigable(t *testing.T) {
+// TestBip85DeriveProgramNavigable asserts the new bip85Derive program is reachable
+// by navigating Right past engraveMultisig, is the new navigable upper bound (a
+// further Right wraps to backupWallet), has a NON-BLANK title, and does not panic
+// on render (layoutMainPlates must have its case). qaProgram stays out.
+func TestBip85DeriveProgramNavigable(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })
@@ -18,34 +18,25 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right x3 -> engraveSingleSig.
-	for i := 0; i < 3; i++ {
+	// Right x4 -> engraveMultisig.
+	for i := 0; i < 4; i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {
 			t.Fatalf("no frame after Right #%d", i+1)
 		}
 	}
-	if !uiContains(content, "Single-Sig") {
-		t.Fatalf("engraveSingleSig not reachable after 3 Rights; got %q", content)
-	}
-	// Right -> engraveMultisig (the new upper bound), titled non-blank.
-	click(&ctx.Router, Right)
-	content, ok = frame()
-	if !ok {
-		t.Fatal("no frame after fourth Right")
-	}
 	if !uiContains(content, "Multisig") {
-		t.Fatalf("engraveMultisig not reachable/titled after fourth Right; got %q", content)
+		t.Fatalf("engraveMultisig not reachable after 4 Rights; got %q", content)
 	}
-	// Right -> bip85Derive (the navigable upper bound after T7b).
+	// Right -> bip85Derive (the new upper bound), titled non-blank.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after fifth Right")
 	}
 	if !uiContains(content, "BIP-85") {
-		t.Fatalf("bip85Derive not reachable after fifth Right; got %q", content)
+		t.Fatalf("bip85Derive not reachable/titled after fifth Right; got %q", content)
 	}
 	// Right again wraps to backupWallet.
 	click(&ctx.Router, Right)
@@ -58,9 +49,9 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 	}
 }
 
-// TestEngraveMultisigLeftWrap asserts Left from backupWallet wraps to
-// bip85Derive (the navigable upper bound after T7b).
-func TestEngraveMultisigLeftWrap(t *testing.T) {
+// TestBip85DeriveLeftWrap asserts Left from backupWallet wraps to bip85Derive (the
+// new navigable upper bound).
+func TestBip85DeriveLeftWrap(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })

@@ -28,9 +28,9 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 		t.Fatalf("new program not reachable/titled after Right; got %q", content)
 	}
 	// Navigate Right again reaches engraveBundle; the navigable upper bound is now
-	// engraveMultisig (inserted before qaProgram by T6b), so the
-	// wrap-to-backupWallet boundary is past engraveMultisig — see
-	// TestEngraveMultisigProgramNavigable / TestEngraveSingleSigProgramNavigable.
+	// bip85Derive (inserted before qaProgram by T7b), so the
+	// wrap-to-backupWallet boundary is past bip85Derive — see
+	// TestBip85DeriveProgramNavigable / TestEngraveSingleSigProgramNavigable.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {

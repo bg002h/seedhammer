@@ -62,7 +62,7 @@ func TestEngraveSingleSigProgramNavigable(t *testing.T) {
 }
 
 // TestEngraveSingleSigLeftWrap asserts navigating Left from backupWallet wraps to
-// engraveMultisig (the new navigable upper bound after T6b), titled non-blank.
+// bip85Derive (the navigable upper bound after T7b), titled non-blank.
 func TestEngraveSingleSigLeftWrap(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
@@ -71,13 +71,13 @@ func TestEngraveSingleSigLeftWrap(t *testing.T) {
 	if _, ok := frame(); !ok {
 		t.Fatal("StartScreen produced no frame")
 	}
-	// Left from backupWallet → wraps to engraveMultisig (the new upper bound).
+	// Left from backupWallet → wraps to bip85Derive (the new upper bound).
 	click(&ctx.Router, Left)
 	content, ok := frame()
 	if !ok {
 		t.Fatal("no frame after Left")
 	}
-	if !uiContains(content, "Multisig") {
-		t.Fatalf("Left did not wrap to Multisig; got %q", content)
+	if !uiContains(content, "BIP-85") {
+		t.Fatalf("Left did not wrap to BIP-85; got %q", content)
 	}
 }
