@@ -3,6 +3,8 @@ package md
 import (
 	"errors"
 	"math/bits"
+
+	"seedhammer.com/codex32"
 )
 
 // ─── Encoder (port of md-codec encode.rs / tree.rs / tlv.rs / varint.rs /
@@ -409,6 +411,53 @@ func encodePayload(d *descriptor) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	return w.intoBytes(), w.bitLen(), nil
+}
+
+// ─── single-string md1 (encode.rs:136-139 + codex32.rs:23-42 bits_to_symbols).
+
+// bitsToSymbols packs the first bitCount bits of payloadBytes into 5-bit
+// symbols, MSB-first, returning ceil(bitCount/5) symbols. The final partial
+// symbol is left-justified (low bits zero-padded), the canonical codex32 form.
+// This is the ENCODE direction (net-new; MDDataSymbols is decode-only, R0-M6).
+// Mirrors codex32.rs:23-42 bits_to_symbols.
+func bitsToSymbols(payloadBytes []byte, bitCount int) ([]byte, error) {
+	symbolCount := (bitCount + 4) / 5
+	r := newBitReader(payloadBytes, bitCount)
+	syms := make([]byte, 0, symbolCount)
+	for i := 0; i < symbolCount; i++ {
+		take := r.remaining()
+		if take > 5 {
+			take = 5
+		}
+		var val uint64
+		if take > 0 {
+			v, err := r.read(take)
+			if err != nil {
+				return nil, err
+			}
+			val = v
+		}
+		// Left-justify within 5 bits when the final symbol is short.
+		sym := byte((val << uint(5-take)) & 0x1F)
+		syms = append(syms, sym)
+	}
+	return syms, nil
+}
+
+// encodeMD1String encodes a descriptor into a complete single-string md1
+// (HRP + payload symbols + 13-symbol regular BCH checksum). It is the inverse
+// of Decode for the single-string path: encodePayload → bitsToSymbols →
+// AssembleMD1. Use split for chunked output.
+func encodeMD1String(d *descriptor) (string, error) {
+	payloadBytes, bitLen, err := encodePayload(d)
+	if err != nil {
+		return "", err
+	}
+	syms, err := bitsToSymbols(payloadBytes, bitLen)
+	if err != nil {
+		return "", err
+	}
+	return codex32.AssembleMD1(syms), nil
 }
 
 // b2u converts a bool to a uint8 (1/0) for bit writing.

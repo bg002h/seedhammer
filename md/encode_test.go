@@ -3,6 +3,8 @@ package md
 import (
 	"encoding/hex"
 	"testing"
+
+	"seedhammer.com/codex32"
 )
 
 // ─── Task 3.1: per-writer bit-cost pins (M-1), locked before integration
@@ -247,5 +249,27 @@ func TestEncodePayloadCanonicalEquality(t *testing.T) {
 	if hex.EncodeToString(cb) != hex.EncodeToString(pb) {
 		t.Fatalf("encodePayload(permuted) %s != encodePayload(canonical) %s",
 			hex.EncodeToString(pb), hex.EncodeToString(cb))
+	}
+}
+
+// ─── Task 5: full-string parity — encodeMD1String == .phrase.txt for SINGLE
+// vectors (R0-M3: force-chunked excluded). ValidMD is the independent BCH check.
+
+func TestEncodeMD1StringGoldens(t *testing.T) {
+	for _, name := range singleStringVectorNames {
+		t.Run(name, func(t *testing.T) {
+			d := loadDescriptor(t, name)
+			got, err := encodeMD1String(d)
+			if err != nil {
+				t.Fatalf("encodeMD1String: %v", err)
+			}
+			want := loadPhrase(t, name)
+			if got != want {
+				t.Fatalf("md1 string mismatch:\n got %s\nwant %s", got, want)
+			}
+			if !codex32.ValidMD(got) {
+				t.Fatalf("encodeMD1String output fails ValidMD: %s", got)
+			}
+		})
 	}
 }
