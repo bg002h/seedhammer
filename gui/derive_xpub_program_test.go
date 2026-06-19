@@ -27,14 +27,15 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Account Xpub") {
 		t.Fatalf("new program not reachable/titled after Right; got %q", content)
 	}
-	// Navigate Right again should wrap back to backupWallet (engraveXpub is the
-	// upper bound of the navigable range; qaProgram stays out).
+	// Navigate Right again reaches engraveBundle (the new navigable upper bound,
+	// inserted before qaProgram); the wrap-to-backupWallet boundary moved one
+	// program later — see TestEngraveBundleProgramNavigable.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("StartScreen produced no frame after second Right")
 	}
-	if !uiContains(content, "Backup Wallet") {
-		t.Fatalf("Right did not wrap to Backup Wallet; got %q", content)
+	if !uiContains(content, "Bundle") {
+		t.Fatalf("engraveBundle not reachable after second Right; got %q", content)
 	}
 }
