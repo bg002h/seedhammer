@@ -85,3 +85,88 @@ func (r *bitReader) pos() int                { return r.bitPos }
 func (r *bitReader) restore(p int)           { r.bitPos = p }
 func (r *bitReader) limit() int              { return r.bitLimit }
 func (r *bitReader) setLimit(l int)          { r.bitLimit = l }
+
+// bitWriter is an MSB-first bit packer (port of md-codec bitstream.rs:11-84
+// BitWriter). The first bit written occupies the most-significant bit of the
+// first byte; the final in-progress byte is zero-padded on its LOW bits when
+// intoBytes is called. Mirrors the throwaway testBitWriter algorithm (md_test.go).
+type bitWriter struct {
+	bytes []byte
+	// bitPosition is the bit offset within the last byte, in 0..8. Zero means
+	// no in-progress byte (the next write pushes a fresh byte).
+	bitPosition int
+}
+
+// write packs count bits from value (LSB-aligned in value) into the stream
+// MSB-first. Bits beyond count in value are ignored. count must be <=64.
+func (w *bitWriter) write(value uint64, count int) {
+	if count == 0 {
+		return
+	}
+	var masked uint64
+	if count == 64 {
+		masked = value
+	} else {
+		masked = value & ((uint64(1) << uint(count)) - 1)
+	}
+	remaining := count
+	for remaining > 0 {
+		if w.bitPosition == 0 {
+			w.bytes = append(w.bytes, 0)
+		}
+		lastIdx := len(w.bytes) - 1
+		freeInByte := 8 - w.bitPosition
+		chunk := remaining
+		if chunk > freeInByte {
+			chunk = freeInByte
+		}
+		shift := uint(remaining - chunk)
+		bitsVal := byte((masked >> shift) & ((uint64(1) << uint(chunk)) - 1))
+		byteShift := uint(freeInByte - chunk)
+		w.bytes[lastIdx] |= bitsVal << byteShift
+		w.bitPosition += chunk
+		if w.bitPosition == 8 {
+			w.bitPosition = 0
+		}
+		remaining -= chunk
+	}
+}
+
+// bitLen returns the total number of bits written.
+func (w *bitWriter) bitLen() int {
+	if w.bitPosition == 0 {
+		return len(w.bytes) * 8
+	}
+	return (len(w.bytes)-1)*8 + w.bitPosition
+}
+
+// intoBytes returns the byte stream; the final in-progress byte is already
+// low-bit zero-padded (the buffer is returned as-is, mirroring Rust's
+// into_bytes which hands back the Vec). The returned slice aliases the
+// writer's buffer; callers must not mutate it while reusing the writer.
+func (w *bitWriter) intoBytes() []byte {
+	return w.bytes
+}
+
+// reEmitBits reads the first bitLen bits of payload MSB-first (as if payload
+// were the output of a bitWriter finalized with intoBytes, so the trailing
+// partial byte is in the high bits of the last source byte) and writes them
+// into dst. The destination is extended in place — no padding inserted. Port
+// of bitstream.rs:220-230 re_emit_bits.
+func reEmitBits(dst *bitWriter, payload []byte, bitLen int) error {
+	src := newBitReader(payload, bitLen)
+	remaining := bitLen
+	for remaining > 0 {
+		chunk := remaining
+		if chunk > 8 {
+			chunk = 8
+		}
+		v, err := src.read(chunk)
+		if err != nil {
+			return err
+		}
+		dst.write(v, chunk)
+		remaining -= chunk
+	}
+	return nil
+}
