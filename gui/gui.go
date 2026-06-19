@@ -2370,7 +2370,14 @@ func (s *DescriptorScreen) Confirm(ctx *Context, th *Colors) (Plate, bool) {
 		}
 		// Drain Button2 every frame; act only when supported (queue-head idiom).
 		if addrBtn.Clicked(ctx) && supported {
-			descriptorAddressFlow(ctx, th, s.Descriptor)
+			cs := &ChoiceScreen{Title: "Addresses", Lead: "Choose", Choices: []string{"Show addresses", "Verify an address"}}
+			switch choice, ok := cs.Choose(ctx, th); {
+			case !ok:
+			case choice == 0:
+				descriptorAddressFlow(ctx, th, s.Descriptor)
+			default:
+				verifyAddressFlow(ctx, th, s.Descriptor)
+			}
 			continue
 		}
 		if confirmBtn.Clicked(ctx) {
