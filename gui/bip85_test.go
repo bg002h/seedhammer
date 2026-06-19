@@ -285,3 +285,30 @@ func TestBip85DeriveFlow_ScrubsBothMnemonics(t *testing.T) {
 		}
 	})
 }
+
+// FuzzDeriveBip85Child asserts the derive helper never panics across arbitrary
+// word counts and indices (in-spec and out-of-spec). Out-of-spec inputs must
+// return an error, never panic; the bip39.New bounds (16<=len<=32, len%4==0) and
+// the bip85.Entropy 32-byte guard must hold for every in-spec path.
+func FuzzDeriveBip85Child(f *testing.F) {
+	f.Add(12, 0)
+	f.Add(18, 5)
+	f.Add(24, 9)
+	f.Add(15, 0)  // out-of-spec word count
+	f.Add(12, -1) // negative index
+	f.Add(0, 0)
+	f.Fuzz(func(t *testing.T, words, index int) {
+		// Must not panic. Errors are fine for out-of-spec inputs.
+		child, err := deriveBip85Child(abandonAboutMnemonic(), "", words, index)
+		if err != nil {
+			return
+		}
+		// On success the inputs were in-spec; the child must be valid.
+		if !validBip85Words(words) || index < 0 {
+			t.Fatalf("deriveBip85Child accepted out-of-spec words=%d index=%d", words, index)
+		}
+		if len(child) != words || !child.Valid() {
+			t.Fatalf("words=%d index=%d: invalid child (%d words, valid=%v)", words, index, len(child), child.Valid())
+		}
+	})
+}
