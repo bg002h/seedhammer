@@ -14,9 +14,14 @@ const (
 )
 
 var (
+	// Regenerated via the shipped mk.Encode (t6a2-M1): the previously-vendored
+	// chunks carried a stale chunk-set-id (0x1c017) from an older encoder, while
+	// mk.Encode deterministically derives csid = top20(SHA-256(bytecode)) =
+	// 0xbaa99. These chunks decode to the identical Card (same network, path,
+	// fingerprint, stub, xpub), so the comparator tests stay meaningful.
 	wpkhMK1 = []string{
-		"mk1qprsqhpqqsq3cqtsleeutks2qvzg3vs70mejhk622ws2kgdemj2cd8zwj2skzx2wq0qw70l4q99vdyh5x0z8v4yslsp8qp3yxg3dpe854wq4",
-		"mk1qprsqhpp0f30mtxzd65mvwcur9usdatwuqvq6z70r9nwrgk6xn6l8gy6nwa2n977sw6zh34rma0nh",
+		"mk1qph25epqqsq3cqtsleeutks2qvzg3vs70mejhk622ws2kgdemj2cd8zwj2skzx2wq0qw70l4q99vdyh5x0z8v4yslsp8qasghpexqvjkydy7",
+		"mk1qph25epp0f30mtxzd65mvwcur9usdatwuqvq6z70r9nwrgk6xn6l8gy6nwa2n97735qp69khmdydd",
 	}
 	wpkhMD1 = []string{
 		"md1fgdxlpqpqpm6jzzqqvqpdqw0za5zs4gyy55aq4vsmnhy4s6wyaypu34c7raqu8np",
