@@ -8,6 +8,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 	"seedhammer.com/bip85"
+	"seedhammer.com/engrave"
 )
 
 // validBip85Words is the set of child word counts the BIP-39 application
@@ -80,4 +81,22 @@ func deriveBip85Child(m bip39.Mnemonic, passphrase string, words, index int) (bi
 	}
 	child := bip39.New(hmacOut[:entLen]) // LEADING entLen bytes
 	return child, nil
+}
+
+// engraveBip85Child computes the CHILD's OWN bare-seed master fingerprint and
+// engraves the child mnemonic (words + standard SeedQR) via the engraveSeed
+// PRIMITIVE — the exact Backup-Wallet path. R0-I-A: the plate's MasterFingerprint
+// MUST be the child's own bare fp (the child is a bare mnemonic, no passphrase),
+// NEVER the master's, otherwise the steel carries a fingerprint that does not
+// match the engraved words. This skips backupWalletFlow's passphrase-fp picker.
+func engraveBip85Child(params engrave.Params, child bip39.Mnemonic) (Plate, uint32, error) {
+	mfp, err := masterFingerprintFor(child, &chaincfg.MainNetParams, "") // child's OWN bare fp; propagate err (R0-A1)
+	if err != nil {
+		return Plate{}, 0, err
+	}
+	plate, err := engraveSeed(params, child, mfp)
+	if err != nil {
+		return Plate{}, 0, err
+	}
+	return plate, mfp, nil
 }

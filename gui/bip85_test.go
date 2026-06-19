@@ -3,6 +3,7 @@ package gui
 import (
 	"testing"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 )
 
@@ -92,5 +93,39 @@ func TestDeriveBip85Child_RejectsBadWords(t *testing.T) {
 func TestDeriveBip85Child_RejectsNegativeIndex(t *testing.T) {
 	if _, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, -1); err == nil {
 		t.Fatal("index=-1: expected an error, got nil")
+	}
+}
+
+// TestEngraveBip85Child_UsesChildFP asserts the engrave glue stamps the CHILD's
+// OWN bare-seed fingerprint (R0-I-A: wrong-identifier-on-permanent-backup) — not
+// the master's — and that it engraves the child mnemonic (not the master).
+func TestEngraveBip85Child_UsesChildFP(t *testing.T) {
+	params := newPlatform().EngraverParams()
+	master := abandonAboutMnemonic()
+	masterFP, err := masterFingerprintFor(master, &chaincfg.MainNetParams, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := deriveBip85Child(master, "", 12, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantChildFP, err := masterFingerprintFor(child, &chaincfg.MainNetParams, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, gotFP, err := engraveBip85Child(params, child)
+	if err != nil {
+		t.Fatalf("engraveBip85Child: %v", err)
+	}
+	if gotFP != wantChildFP {
+		t.Fatalf("engraved fp = %08x, want the CHILD's own fp %08x", gotFP, wantChildFP)
+	}
+	if gotFP == masterFP {
+		t.Fatalf("engraved the MASTER's fp %08x — must be the child's own", masterFP)
+	}
+	// Pin the concrete child fp golden (abandon master, 12 words, idx 0).
+	if gotFP != 0x02e8bff2 {
+		t.Fatalf("child fp = %08x, want 02e8bff2", gotFP)
 	}
 }
