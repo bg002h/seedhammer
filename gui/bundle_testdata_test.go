@@ -1,6 +1,9 @@
 package gui
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"seedhammer.com/codex32"
@@ -31,11 +34,35 @@ const (
 	bundleXpubA = "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V"
 )
 
+// loadVector returns the md1 chunk string from a vendored vector (testing.TB so
+// it is reachable from both *testing.T tests and the *testing.F fuzz setup).
+// Mirrors loadChunkedVectorString (gui/md1_gather_test.go), kept separate so the
+// shipped *testing.T helper stays untouched.
+func loadVector(tb testing.TB, name string) string {
+	tb.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", name+".phrase.txt"))
+	if err != nil {
+		tb.Fatalf("read %s: %v", name, err)
+	}
+	var last string
+	for _, ln := range strings.Split(string(raw), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "chunk-set-id:") {
+			continue
+		}
+		last = ln
+	}
+	if last == "" {
+		tb.Fatalf("%s: no md1 string", name)
+	}
+	return last
+}
+
 // mk1CardA returns a complete, BCH-valid, integrity-verified chunked mk1 set
 // (>=2 chunks, csid distinct from mk1CardB). It is the "first key card".
-func mk1CardA(t *testing.T) []string {
-	t.Helper()
-	return encodeMK1Card(t, mk.Card{
+func mk1CardA(tb testing.TB) []string {
+	tb.Helper()
+	return encodeMK1Card(tb, mk.Card{
 		Network:     "mainnet",
 		Path:        "m/84'/0'/0'",
 		Fingerprint: "73c5da0a",
@@ -46,9 +73,9 @@ func mk1CardA(t *testing.T) []string {
 
 // mk1CardB returns a SECOND complete mk1 set with a DISTINCT csid (different
 // Fingerprint → different bytecode → different derived chunk_set_id).
-func mk1CardB(t *testing.T) []string {
-	t.Helper()
-	return encodeMK1Card(t, mk.Card{
+func mk1CardB(tb testing.TB) []string {
+	tb.Helper()
+	return encodeMK1Card(tb, mk.Card{
 		Network:     "mainnet",
 		Path:        "m/84'/0'/0'",
 		Fingerprint: "1a2b3c4d",
@@ -57,32 +84,32 @@ func mk1CardB(t *testing.T) []string {
 	})
 }
 
-func encodeMK1Card(t *testing.T, card mk.Card) []string {
-	t.Helper()
+func encodeMK1Card(tb testing.TB, card mk.Card) []string {
+	tb.Helper()
 	strs, err := mk.Encode(card)
 	if err != nil {
-		t.Fatalf("mk.Encode: %v", err)
+		tb.Fatalf("mk.Encode: %v", err)
 	}
 	if len(strs) < 2 {
-		t.Fatalf("mk1 card must be >=2 chunks, got %d", len(strs))
+		tb.Fatalf("mk1 card must be >=2 chunks, got %d", len(strs))
 	}
 	for i, s := range strs {
 		if !codex32.ValidMK(s) {
-			t.Fatalf("chunk %d not ValidMK: %s", i, s)
+			tb.Fatalf("chunk %d not ValidMK: %s", i, s)
 		}
 	}
 	if _, err := mk.Decode(strs); err != nil {
-		t.Fatalf("mk.Decode round-trip: %v", err)
+		tb.Fatalf("mk.Decode round-trip: %v", err)
 	}
 	return strs
 }
 
 // md1CardA returns the wshSortedmultiChunks set (csid 0x2d950): a complete,
 // integrity-verified chunked md1 descriptor set with real xpubs.
-func md1CardA(t *testing.T) []string {
-	t.Helper()
+func md1CardA(tb testing.TB) []string {
+	tb.Helper()
 	if _, err := md.DecodeChunks(wshSortedmultiChunks); err != nil {
-		t.Fatalf("md.DecodeChunks(wshSortedmultiChunks): %v", err)
+		tb.Fatalf("md.DecodeChunks(wshSortedmultiChunks): %v", err)
 	}
 	out := make([]string, len(wshSortedmultiChunks))
 	copy(out, wshSortedmultiChunks)
@@ -91,32 +118,32 @@ func md1CardA(t *testing.T) []string {
 
 // md1CardB returns the wsh_multi_chunked set (csid 0x157ae): a DISTINCT chunked
 // md1 set (single chunk, no pubkeys) — distinct csid from md1CardA.
-func md1CardB(t *testing.T) []string {
-	t.Helper()
-	s := loadChunkedVectorString(t, "wsh_multi_chunked")
+func md1CardB(tb testing.TB) []string {
+	tb.Helper()
+	s := loadVector(tb, "wsh_multi_chunked")
 	strs := []string{s}
 	if _, err := md.DecodeChunks(strs); err != nil {
-		t.Fatalf("md.DecodeChunks(wsh_multi_chunked): %v", err)
+		tb.Fatalf("md.DecodeChunks(wsh_multi_chunked): %v", err)
 	}
 	return strs
 }
 
 // mkCSID parses the chunk_set_id off an mk1 chunk string (test convenience).
-func mkCSID(t *testing.T, s string) uint32 {
-	t.Helper()
+func mkCSID(tb testing.TB, s string) uint32 {
+	tb.Helper()
 	h, err := mk.ParseHeader(s)
 	if err != nil {
-		t.Fatalf("mk.ParseHeader: %v", err)
+		tb.Fatalf("mk.ParseHeader: %v", err)
 	}
 	return h.ChunkSetID
 }
 
 // mdCSID parses the chunk_set_id off an md1 chunk string (test convenience).
-func mdCSID(t *testing.T, s string) uint32 {
-	t.Helper()
+func mdCSID(tb testing.TB, s string) uint32 {
+	tb.Helper()
 	h, err := md.ParseChunkHeader(s)
 	if err != nil {
-		t.Fatalf("md.ParseChunkHeader: %v", err)
+		tb.Fatalf("md.ParseChunkHeader: %v", err)
 	}
 	return h.ChunkSetID
 }

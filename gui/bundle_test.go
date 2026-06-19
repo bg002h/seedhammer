@@ -13,20 +13,20 @@ import (
 // never silently dropped (R0-C2).
 const ms1Fixture = "ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"
 
-func ms1Object(t *testing.T) codex32.String {
-	t.Helper()
+func ms1Object(tb testing.TB) codex32.String {
+	tb.Helper()
 	s, err := codex32.New(ms1Fixture)
 	if err != nil {
-		t.Fatalf("codex32.New(ms1): %v", err)
+		tb.Fatalf("codex32.New(ms1): %v", err)
 	}
 	return s
 }
 
 // singleMD1 returns a single-string (non-chunked) md1 — a small descriptor that
 // legitimately fits one string. wpkh_basic is the in-tree single-string vector.
-func singleMD1(t *testing.T) string {
-	t.Helper()
-	return loadChunkedVectorString(t, "wpkh_basic")
+func singleMD1(tb testing.TB) string {
+	tb.Helper()
+	return loadVector(tb, "wpkh_basic")
 }
 
 // singleMK1Fixture returns a single (non-chunked) BCH-valid mk1 string. A real
@@ -35,8 +35,8 @@ func singleMD1(t *testing.T) string {
 // REFUSED (R0-C1, host parity bundle.rs:128). No single mk1 exists in-tree, so
 // we synthesize one: header [version=0x00, type=single=0x00] + filler fragment
 // symbols + the BCH checksum, rendered with the "mk1" HRP.
-func singleMK1Fixture(t *testing.T) string {
-	t.Helper()
+func singleMK1Fixture(tb testing.TB) string {
+	tb.Helper()
 	const alphabet = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 	dataSyms := []byte{0x00, 0x00} // version 0, single card type 0
 	for i := 0; i < 10; i++ {      // 10 filler fragment syms → data-part len 28
@@ -53,7 +53,7 @@ func singleMK1Fixture(t *testing.T) string {
 	}
 	s := string(sb)
 	if !codex32.ValidMK(s) {
-		t.Fatalf("synthesized single mk1 not ValidMK: %s", s)
+		tb.Fatalf("synthesized single mk1 not ValidMK: %s", s)
 	}
 	return s
 }
