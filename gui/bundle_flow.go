@@ -284,7 +284,93 @@ func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 	return false
 }
 
-// bundleEngrave is the Phase-3 guided verbatim engrave — implemented in Task 4.
+// ─── Phase 3: guided verbatim engrave ────────────────────────────────────────
+
+// bundlePlate is one plate in the cross-card engrave plan: the verbatim card
+// string to engrave, plus the "Card X of Y · Plate P of Q" guidance context.
+type bundlePlate struct {
+	cardIdx    int    // 1-based card position
+	cardTotal  int    // total cards in the bundle
+	plateIdx   int    // 1-based plate position within this card
+	plateTotal int    // total plates for this card
+	str        string // the VERBATIM gathered chunk string (I-4)
+	label      string // the card label, for the abort warning
+}
+
+// bundlePlatePlan flattens the verified cards into a per-plate engrave plan, in
+// card-then-plate order. Every plate carries a gathered string UNMODIFIED (I-4)
+// — md1 + mk1 alike, no re-encode. A standalone md1 card yields exactly 1 plate.
+func bundlePlatePlan(cards []bundleCard) []bundlePlate {
+	var plan []bundlePlate
+	for ci, c := range cards {
+		for pi, s := range c.strings {
+			plan = append(plan, bundlePlate{
+				cardIdx:    ci + 1,
+				cardTotal:  len(cards),
+				plateIdx:   pi + 1,
+				plateTotal: len(c.strings),
+				str:        s,
+				label:      c.label,
+			})
+		}
+	}
+	return plan
+}
+
+// bundleEngrave is the Phase-3 guided verbatim engrave. It is a SIBLING of
+// multiPlateEngrave (R0-M2: Go has no default params; deriveXpubFlow's call site
+// at derive_xpub.go:162 stays BYTE-UNCHANGED), reusing the same per-plate
+// validateMdmk + ChoiceScreen + NewEngraveScreen machinery. It loops the plan,
+// titling each plate "Card X of Y · Plate P of Q"; a set-level Back records no
+// completed state and warns the partial bundle is unusable (I-5). At the end it
+// shows the ms1 reminder (mirror host bundle.rs:296-306).
 func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
-	// Phase 3 — implemented in Task 4.
+	plan := bundlePlatePlan(cards)
+	params := ctx.Platform.EngraverParams()
+	for _, p := range plan {
+		labels, plates, err := validateMdmk(params, p.str)
+		if err != nil || len(plates) == 0 {
+			// A verified card whose string can't fit a plate is unexpected; abort
+			// the whole set rather than engrave a partial bundle.
+			bundleAbortWarning(ctx, th, p)
+			return
+		}
+		cs := &ChoiceScreen{
+			Title:   fmt.Sprintf("Card %d of %d · Plate %d of %d", p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal),
+			Lead:    "Choose engraving",
+			Choices: labels,
+		}
+		engraved := false
+		for !engraved {
+			idx, ok := cs.Choose(ctx, th)
+			if !ok {
+				// Set-level abort: a partial bundle can't be used.
+				bundleAbortWarning(ctx, th, p)
+				return
+			}
+			if NewEngraveScreen(ctx, plates[idx]).Engrave(ctx, &engraveTheme) {
+				engraved = true
+			}
+			// Engrave returned without completing (Back) → re-show this plate's
+			// variant picker.
+		}
+	}
+	// Whole bundle engraved → remind the operator about the SECRET ms1 share(s),
+	// which are never gathered/engraved by the device (security spine).
+	showError(ctx, th, "Engrave Bundle", bundleMs1ReminderText())
+}
+
+// bundleAbortWarning informs the operator that aborting mid-bundle leaves a
+// partial, unusable backup; it records NO completed state (I-5). Dismiss-only.
+func bundleAbortWarning(ctx *Context, th *Colors, p bundlePlate) {
+	showError(ctx, th, "Bundle Incomplete",
+		fmt.Sprintf("Stopped at card %d of %d (%s). A partial bundle can't be used — "+
+			"discard the engraved plate(s) and start the bundle over.",
+			p.cardIdx, p.cardTotal, p.label))
+}
+
+// bundleMs1ReminderText is the end-of-bundle reminder that the SECRET ms1
+// share(s) must be hand-engraved separately (mirror host bundle.rs:296-306).
+func bundleMs1ReminderText() string {
+	return "Bundle engraved. Also hand-engrave your ms1 share(s) — they are never sent over NFC."
 }
