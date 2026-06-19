@@ -41,10 +41,10 @@ func TestEngraveBundleProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Bundle") {
 		t.Fatalf("engraveBundle not reachable/titled after second Right; got %q", content)
 	}
-	// Right again reaches engraveSingleSig (the new navigable upper bound,
-	// inserted before qaProgram; the wrap-to-backupWallet boundary moved one
-	// program later — see TestEngraveSingleSigProgramNavigable). qaProgram stays
-	// out of the carousel.
+	// Right again reaches engraveSingleSig; engraveMultisig is now the navigable
+	// upper bound (inserted before qaProgram by T6b), so the wrap-to-backupWallet
+	// boundary moved one program later — see TestEngraveMultisigProgramNavigable.
+	// qaProgram stays out of the carousel.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
