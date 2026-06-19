@@ -353,8 +353,8 @@ func TestDecodeRenderableClassification(t *testing.T) {
 			t.Fatalf("complex shape must make no k/m policy claim; got k=%d m=%d", tpl.K, tpl.M)
 		}
 		// Keys/origins still populated even though Renderable=false.
-		if len(tpl.Keys) != 1 || tpl.Keys[0].OriginPath != "m/48'/0'/0'/2'" {
-			t.Fatalf("keys = %+v, want [@0 origin m/48'/0'/0'/2']", tpl.Keys)
+		if len(tpl.Keys) != 1 || tpl.Keys[0].OriginPath != "m/48h/0h/0h/2h" {
+			t.Fatalf("keys = %+v, want [@0 origin m/48h/0h/0h/2h]", tpl.Keys)
 		}
 	})
 
@@ -379,8 +379,8 @@ func TestDecodeRenderableClassification(t *testing.T) {
 			t.Fatalf("root/N = %v/%d, want ScriptSh/2", tpl.Root, tpl.N)
 		}
 		for i, k := range tpl.Keys {
-			if k.OriginPath != "m/48'/0'/0'/1'" {
-				t.Fatalf("key %d origin = %q, want m/48'/0'/0'/1'", i, k.OriginPath)
+			if k.OriginPath != "m/48h/0h/0h/1h" {
+				t.Fatalf("key %d origin = %q, want m/48h/0h/0h/1h", i, k.OriginPath)
 			}
 		}
 	})
@@ -436,8 +436,8 @@ func TestDecodeRenderableClassification(t *testing.T) {
 			t.Fatalf("keys = %d, want 3 (is_nums cursor)", len(tpl.Keys))
 		}
 		for i, k := range tpl.Keys {
-			if k.OriginPath != "m/48'/0'/0'/2'" {
-				t.Fatalf("key %d origin = %q, want m/48'/0'/0'/2'", i, k.OriginPath)
+			if k.OriginPath != "m/48h/0h/0h/2h" {
+				t.Fatalf("key %d origin = %q, want m/48h/0h/0h/2h", i, k.OriginPath)
 			}
 		}
 	})

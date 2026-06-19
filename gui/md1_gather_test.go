@@ -135,9 +135,12 @@ func TestGatheredDescriptorFlowUnsupported(t *testing.T) {
 }
 
 // tamperedCSIDChunks is the same 6-chunk wsh(sortedmulti) set but stamped with a
-// consistent-but-WRONG chunk-set-id (real+1). It passes per-chunk BCH and the
-// version/csid/count consistency check, so reassembly reaches the integrity
-// gate where the re-derived csid won't match → ErrChunkSetIDMismatch.
+// consistent-but-WRONG chunk-set-id (header csid 0xce33a vs the real 0x2d950).
+// The exact value is irrelevant — only that it is internally consistent across
+// all chunks yet differs from the csid re-derived from the descriptor. It passes
+// per-chunk BCH and the version/csid/count consistency check, so reassembly
+// reaches the integrity gate where the re-derived csid won't match →
+// ErrChunkSetIDMismatch.
 var tamperedCSIDChunks = []string{
 	"md1fece6zspqjtvyyy4qqxppcgsc27rcm05qew6wpeqckph5wrf2leagc9a7wqdtypsc5kzzkknukj7h",
 	"md1fece6zsw9nfj7vk5zgqt2d3cq82fefgh35nuevya8z62kep2q7md6duvfx8px8ygr8gkvum08ttrf",

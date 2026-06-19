@@ -15,7 +15,7 @@ package codex32
 // NewSeed's checksum step verbatim would use codex32's residue init and emit
 // strings that silently fail ValidMK. The round-trip parity test (mkencode_test
 // and mk's TestEncode*) is the guard. Pure-stdlib; TinyGo-safe (uint64 only).
-func MKChecksumSymbols(dataSyms []byte, long bool) []byte {
+func MKChecksumSymbols(dataSyms []byte, long bool) ([]byte, error) {
 	var generator []fe
 	var targetHi, targetLo uint64
 	var n int
@@ -43,13 +43,14 @@ func MKChecksumSymbols(dataSyms []byte, long bool) []byte {
 	}
 	if err := e.inputData(string(data)); err != nil {
 		// dataSyms are 5-bit values (0..31) rendered to valid bech32 runes, so
-		// inputData never fails here; return nil defensively rather than panic.
-		return nil
+		// inputData is unreachable here; surface the error for defense-in-depth
+		// against a future caller passing out-of-range symbols.
+		return nil, err
 	}
 	e.inputTarget()
 	out := make([]byte, n)
 	for i, r := range e.residue {
 		out[i] = byte(r)
 	}
-	return out
+	return out, nil
 }

@@ -22,7 +22,10 @@ func TestMKChecksumSymbolsRoundTrip(t *testing.T) {
 			// 8-symbol chunked header + 8 fragment syms; 16 + 13 = 29 (in [14,93]).
 			data = []byte{0, 1, 2, 3, 4, 5, 0, 1, 16, 16, 16, 16, 16, 16, 16, 16}
 		}
-		ck := MKChecksumSymbols(data, long)
+		ck, err := MKChecksumSymbols(data, long)
+		if err != nil {
+			t.Fatalf("long=%v: MKChecksumSymbols: %v", long, err)
+		}
 		want := mdmkShortSyms
 		if long {
 			want = mdmkLongSyms

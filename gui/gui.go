@@ -154,6 +154,15 @@ const (
 	qaProgram
 )
 
+// Compile-time guard (t5-M1): bip85Derive MUST remain the LAST navigable program,
+// immediately before the non-navigable qaProgram. Several sites hardcode it as
+// the wrap/pager boundary (the StartScreen prog wrap at m.prog>bip85Derive, the
+// npage/npages = int(bip85Derive)+1 consts, layoutMainPlates' case list). If a
+// future program is inserted between bip85Derive and qaProgram (or qaProgram is
+// reordered) without updating those lockstep sites, this array length is no
+// longer 1 (or underflows negative) and the build fails. Keep these in lockstep.
+var _ [1]struct{} = [qaProgram - bip85Derive]struct{}{}
+
 type richText struct {
 	Content op.Op
 	Y       int

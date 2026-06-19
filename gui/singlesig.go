@@ -88,7 +88,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, b, full)
+		singleSigVerifyFlow(ctx, th, full)
 	}
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).

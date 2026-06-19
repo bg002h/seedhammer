@@ -58,15 +58,18 @@ func TestEncodeRoundTrip(t *testing.T) {
 		net    string
 		params *chaincfg.Params
 	}{
-		{"m/84'/0'/0'", "mainnet", &chaincfg.MainNetParams},
-		{"m/44'/0'/0'", "mainnet", &chaincfg.MainNetParams},
-		{"m/49'/0'/0'", "mainnet", &chaincfg.MainNetParams},
-		{"m/86'/0'/0'", "mainnet", &chaincfg.MainNetParams},
-		{"m/48'/0'/0'/2'", "mainnet", &chaincfg.MainNetParams},
-		{"m/48'/0'/0'/1'", "mainnet", &chaincfg.MainNetParams},
-		{"m/87'/0'/0'", "mainnet", &chaincfg.MainNetParams},
-		{"m/84'/1'/0'", "testnet", &chaincfg.TestNet3Params},
-		{"m/48'/1'/0'/2'", "testnet", &chaincfg.TestNet3Params},
+		// Paths are authored in the "h" hardened form to match the decoder's
+		// display output (t4-M1); Encode re-parses both "h" and "'" via
+		// bip32.ParsePath, so the round-trip input==output comparison holds.
+		{"m/84h/0h/0h", "mainnet", &chaincfg.MainNetParams},
+		{"m/44h/0h/0h", "mainnet", &chaincfg.MainNetParams},
+		{"m/49h/0h/0h", "mainnet", &chaincfg.MainNetParams},
+		{"m/86h/0h/0h", "mainnet", &chaincfg.MainNetParams},
+		{"m/48h/0h/0h/2h", "mainnet", &chaincfg.MainNetParams},
+		{"m/48h/0h/0h/1h", "mainnet", &chaincfg.MainNetParams},
+		{"m/87h/0h/0h", "mainnet", &chaincfg.MainNetParams},
+		{"m/84h/1h/0h", "testnet", &chaincfg.TestNet3Params},
+		{"m/48h/1h/0h/2h", "testnet", &chaincfg.TestNet3Params},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
@@ -94,7 +97,7 @@ func TestEncodeRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Decode(Encode): %v", err)
 			}
-			// Decode reconstructs Path with the "'" hardened form and Network from
+			// Decode reconstructs Path with the "h" hardened form and Network from
 			// the xpub version, so the round-trip Card should equal the input Card.
 			if !cardsEqual(got, card) {
 				t.Fatalf("round-trip mismatch:\n got %+v\nwant %+v", got, card)
@@ -120,7 +123,7 @@ func TestEncodeWithFingerprint(t *testing.T) {
 	xpub := deriveTestXpub(t, "m/84'/0'/0'", &chaincfg.MainNetParams)
 	card := Card{
 		Network:     "mainnet",
-		Path:        "m/84'/0'/0'",
+		Path:        "m/84h/0h/0h", // decoder displays the "h" hardened form (t4-M1)
 		Fingerprint: "deadbeef",
 		Stubs:       [][4]byte{{0xc0, 0xff, 0xee, 0x00}},
 		Xpub:        xpub,
@@ -205,6 +208,41 @@ func TestEncodeRejectsBadInput(t *testing.T) {
 // impossible (and the decoder does not validate the csid value). For each
 // golden string set: c1 := Decode(golden); strs := Encode(c1); each chunk must
 // pass ValidMK; c2 := Decode(strs); assert c1 == c2.
+// TestEncodeChunksGuard exercises the defensive chunk-count guard in
+// encodeChunks directly (real cards never approach maxChunks, so the guard is
+// unreachable through Encode). At the maxChunks boundary the masked total-1 /
+// index symbols must not wrap; one chunk over the limit must surface an error.
+func TestEncodeChunksGuard(t *testing.T) {
+	// chunkedFragmentBytes*maxChunks bytes of stream -> exactly maxChunks frags.
+	// encodeChunks appends crossChunkHashBytes internally, so size the bytecode
+	// so total stream == chunkedFragmentBytes*maxChunks after the hash append.
+	atLimitBytecode := make([]byte, chunkedFragmentBytes*maxChunks-crossChunkHashBytes)
+	strs, err := encodeChunks(atLimitBytecode)
+	if err != nil {
+		t.Fatalf("encodeChunks at maxChunks=%d: unexpected error: %v", maxChunks, err)
+	}
+	if len(strs) != maxChunks {
+		t.Fatalf("encodeChunks at limit: got %d chunks, want %d", len(strs), maxChunks)
+	}
+	// The last chunk's header must report total-1 = maxChunks-1 and index =
+	// maxChunks-1 without wrapping (would be visible as a malformed/short read).
+	last := strs[len(strs)-1]
+	h, err := ParseHeader(last)
+	if err != nil {
+		t.Fatalf("ParseHeader(last chunk): %v", err)
+	}
+	if h.TotalChunks != maxChunks || h.ChunkIndex != maxChunks-1 {
+		t.Fatalf("boundary header wrapped: total=%d index=%d, want total=%d index=%d",
+			h.TotalChunks, h.ChunkIndex, maxChunks, maxChunks-1)
+	}
+
+	// One fragment over the limit must error rather than silently wrap.
+	overBytecode := make([]byte, chunkedFragmentBytes*maxChunks+1-crossChunkHashBytes)
+	if _, err := encodeChunks(overBytecode); err == nil {
+		t.Fatalf("encodeChunks over maxChunks: expected error, got nil")
+	}
+}
+
 func TestEncodeGoldenRoundTrip(t *testing.T) {
 	for _, v := range parityVectors {
 		t.Run(v.name, func(t *testing.T) {

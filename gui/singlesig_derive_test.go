@@ -55,8 +55,8 @@ func TestDeriveSingleSigBundleWpkh(t *testing.T) {
 	if card.Network != "mainnet" {
 		t.Fatalf("mk1 network = %q, want mainnet", card.Network)
 	}
-	if card.Path != "m/84'/0'/0'" {
-		t.Fatalf("mk1 path = %q, want m/84'/0'/0'", card.Path)
+	if card.Path != "m/84h/0h/0h" {
+		t.Fatalf("mk1 path = %q, want m/84h/0h/0h", card.Path)
 	}
 	if card.Fingerprint != "73c5da0a" {
 		t.Fatalf("mk1 fingerprint = %q, want 73c5da0a", card.Fingerprint)
@@ -138,8 +138,8 @@ func TestDeriveSingleSigBundleShWpkh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mk.Decode: %v", err)
 	}
-	if card.Path != "m/49'/0'/0'" {
-		t.Fatalf("mk1 path = %q, want m/49'/0'/0'", card.Path)
+	if card.Path != "m/49h/0h/0h" {
+		t.Fatalf("mk1 path = %q, want m/49h/0h/0h", card.Path)
 	}
 	wantStub, err := md.WalletPolicyIDStubChunks(b.MD1)
 	if err != nil {
@@ -206,7 +206,7 @@ func TestDeriveSingleSigBundleMatchesGoldenWpkh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mk.Decode: %v", err)
 	}
-	if card.Fingerprint != "73c5da0a" || card.Xpub != knownAccountXpub84 || card.Path != "m/84'/0'/0'" {
+	if card.Fingerprint != "73c5da0a" || card.Xpub != knownAccountXpub84 || card.Path != "m/84h/0h/0h" {
 		t.Fatalf("mk1 decoded fields mismatch: %+v", card)
 	}
 	stub, _ := md.WalletPolicyIDStubChunks(b.MD1)

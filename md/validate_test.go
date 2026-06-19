@@ -55,6 +55,20 @@ func TestValidateXpubBytesValid(t *testing.T) {
 	}
 }
 
+// TestEncodePayloadPathDeclNMismatch (#10a-M1): a defensively-malformed
+// author-built AST whose pathDecl.n disagrees with descriptor.n is rejected by
+// encodePayload before the key-index-width (kiw) is computed off the wrong n.
+// canonicalize keeps the two in lockstep for any decoded descriptor, so this
+// guard is unreachable on the public-API path; it hardens future direct callers.
+func TestEncodePayloadPathDeclNMismatch(t *testing.T) {
+	d := singlesigWithPubkey(xpubPayload(validPubkey0))
+	// Tree/key count is n=1, but claim a 2-path shared decl: kiw would diverge.
+	d.pathDecl.n = 2
+	if _, _, err := encodePayload(d); err != errPathDeclNMismatch {
+		t.Fatalf("encodePayload with n mismatch = %v, want errPathDeclNMismatch", err)
+	}
+}
+
 // TestValidateXpubBytesOffCurve: a Pubkeys TLV whose 33-byte field is NOT a
 // valid secp256k1 point is rejected with errInvalidXpubBytes (D4; Rust
 // validate.rs:221 PublicKey::from_slice → InvalidXpubBytes). The chain-code

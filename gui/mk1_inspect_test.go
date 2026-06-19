@@ -41,7 +41,7 @@ func TestMK1Gatherer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode(collected): %v", err)
 	}
-	if card.Path != "m/48'/0'/0'/2'" {
+	if card.Path != "m/48h/0h/0h/2h" {
 		t.Fatalf("path = %q", card.Path)
 	}
 }
@@ -59,7 +59,7 @@ func TestMK1DisplayFlowPaging(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	card := mk.Card{
 		Network:     "mainnet",
-		Path:        "m/48'/0'/0'/2'",
+		Path:        "m/48h/0h/0h/2h",
 		Fingerprint: "aabbccdd",
 		Stubs:       make([][4]byte, 1),
 		Xpub:        "xpub6Den8YwXbKQvkwukmx7Uukicw4qDgMEPuuUkhMp3Rn557YSN2uVQnCMQNSfgDtennU9nES3Wbbmz1LAPBydhNpED8NU4mf1SFF41hM7vFrc",
@@ -76,7 +76,7 @@ func TestMK1DisplayFlowPaging(t *testing.T) {
 		click(&ctx.Router, Button3) // page forward
 	}
 	got := all.String()
-	if !uiContains(got, "m/48'/0'/0'/2'") {
+	if !uiContains(got, "m/48h/0h/0h/2h") {
 		t.Errorf("path not shown; got %q", got)
 	}
 	if !uiContains(got, "aabbccdd") {

@@ -46,7 +46,10 @@ func WalletPolicyId(d *descriptor) ([16]byte, error) {
 
 	// Per-@N records, idx 0..n-1 ascending (identity.rs:185-228).
 	for idx := uint8(0); idx < dc.n; idx++ {
-		origin := resolveOriginRaw(dc, idx)
+		origin, err := resolveOriginRaw(dc, idx)
+		if err != nil {
+			return [16]byte{}, err
+		}
 		us := resolveUseSiteRaw(dc, idx)
 
 		// Scratch-write origin + use-site to capture their unpadded bit lengths.
@@ -137,25 +140,34 @@ func WalletPolicyIDStubChunks(strs []string) ([4]byte, error) {
 // preimage (canonicalize.rs:436-444): the per-@N OriginPathOverrides entry if
 // present, else the path_decl value (Divergent[idx] / Shared) AS-IS — NO
 // canonicalOrigin fallback (the deliberate divergence from the display accessor,
-// R0-I2). The returned originPath may be empty (depth 0).
-func resolveOriginRaw(d *descriptor, idx uint8) originPath {
+// R0-I2). The returned originPath may be empty (depth 0): an elided shared path
+// under a wrapper that HAS a canonicalOrigin is a legitimate empty origin, and
+// is hashed AS-IS.
+//
+// A decoded descriptor always carries either a shared or a divergent path_decl
+// (readPathDecl), so the final no-decl fallthrough is unreachable on the
+// public-API path (which is additionally gated by validateExplicitOriginRequired
+// upstream). It returns errMissingExplicitOrigin as defense-in-depth against a
+// future direct caller passing an author-built AST with neither path_decl set —
+// hashing a silent empty origin there would forge a wrong WalletPolicyId.
+func resolveOriginRaw(d *descriptor, idx uint8) (originPath, error) {
 	if d.tlv.originPresent {
 		for _, o := range d.tlv.originOverrides {
 			if o.idx == idx {
-				return o.path
+				return o.path, nil
 			}
 		}
 	}
 	if d.pathDecl.divergent != nil {
 		if int(idx) < len(d.pathDecl.divergent) {
-			return d.pathDecl.divergent[idx]
+			return d.pathDecl.divergent[idx], nil
 		}
-		return originPath{}
+		return originPath{}, nil
 	}
 	if d.pathDecl.shared != nil {
-		return *d.pathDecl.shared
+		return *d.pathDecl.shared, nil
 	}
-	return originPath{}
+	return originPath{}, errMissingExplicitOrigin
 }
 
 // resolveUseSiteRaw mirrors expand_per_at_n's use-site resolution: the per-@N

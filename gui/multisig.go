@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -54,7 +55,8 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 		showError(ctx, th, "Engrave Multisig", "The supplied descriptor has no public keys to match.")
 		return
 	}
-	_ = tpl // decoded again in the restore step; kept for clarity here.
+	// tpl/keys are threaded into the restore doc below (t6b-M2) so the policy is
+	// decoded exactly once.
 
 	// (3) TYPED-ONLY seed (I-7). Never a scan.
 	mnemonic, ok := seedEntryFlow(ctx, th)
@@ -89,7 +91,7 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 	}
 	if len(reused) >= 2 {
 		showError(ctx, th, "Engrave Multisig",
-			fmt.Sprintf("This key is reused at slots @%d and @%d; engraving the first (@%d).", reused[0], reused[1], idx))
+			fmt.Sprintf("This key is reused at slots %s; engraving the first (@%d).", formatSlotList(reused), idx))
 	}
 
 	// (5) Full vs watch-only.
@@ -122,6 +124,32 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 		multisigVerifyFlow(ctx, th, b, full)
 	}
 
-	// (9) Restore doc (display-only, PUBLIC — no secret).
-	multisigRestoreDocFlow(ctx, th, suppliedMd1)
+	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys
+	// decoded at step (2) — no second ExpandWalletPolicyChunks (t6b-M2).
+	multisigRestoreDocFlow(ctx, th, tpl, keys)
+}
+
+// formatSlotList renders matched slot indices as "@a, @b and @c" for the
+// reused-key notice (t6b-M1) so EVERY reused slot is named, not just the first
+// two. Inputs of len 0/1 fall through to the obvious single-token forms.
+func formatSlotList(slots []int) string {
+	switch len(slots) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("@%d", slots[0])
+	}
+	var b strings.Builder
+	for i, s := range slots {
+		switch {
+		case i == 0:
+			// first token, no separator
+		case i == len(slots)-1:
+			b.WriteString(" and ")
+		default:
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "@%d", s)
+	}
+	return b.String()
 }

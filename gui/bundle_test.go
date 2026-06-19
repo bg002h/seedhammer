@@ -42,7 +42,10 @@ func singleMK1Fixture(tb testing.TB) string {
 	for i := 0; i < 10; i++ {      // 10 filler fragment syms → data-part len 28
 		dataSyms = append(dataSyms, byte(i%32))
 	}
-	ck := codex32.MKChecksumSymbols(dataSyms, false)
+	ck, err := codex32.MKChecksumSymbols(dataSyms, false)
+	if err != nil {
+		tb.Fatalf("MKChecksumSymbols: %v", err)
+	}
 	var sb []byte
 	sb = append(sb, 'm', 'k', '1')
 	for _, s := range dataSyms {

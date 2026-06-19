@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip32"
@@ -40,7 +41,7 @@ func Encode(card Card) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return encodeChunks(bytecode), nil
+	return encodeChunks(bytecode)
 }
 
 // encodeBytecode builds the bytecode body (the inverse of decodeBytecode):
@@ -232,7 +233,7 @@ func appendLEB128(dst []byte, v uint32) []byte {
 // encodeChunks splits the bytecode (plus its 4-byte integrity hash) into >= 2
 // chunk strings, each with an 8-symbol chunked header and a per-chunk BCH
 // checksum. The chunk_set_id is derived deterministically from the bytecode.
-func encodeChunks(bytecode []byte) []string {
+func encodeChunks(bytecode []byte) ([]string, error) {
 	csid := top20(bytecode)
 	sum := sha256.Sum256(bytecode)
 	stream := make([]byte, 0, len(bytecode)+crossChunkHashBytes)
@@ -250,6 +251,13 @@ func encodeChunks(bytecode []byte) []string {
 	}
 	total := len(frags)
 
+	// The chunked header packs total-1 and the chunk index into 5-bit symbols
+	// (0..31). maxChunks is 32 today so total-1 and i always fit, but guard
+	// against a future limit increase silently wrapping the masked symbols.
+	if total > maxChunks {
+		return nil, fmt.Errorf("mk: %d chunks exceeds limit of %d", total, maxChunks)
+	}
+
 	out := make([]string, total)
 	for i, frag := range frags {
 		hdr := []byte{
@@ -259,13 +267,17 @@ func encodeChunks(bytecode []byte) []string {
 			byte(csid >> 10 & 0x1f),
 			byte(csid >> 5 & 0x1f),
 			byte(csid & 0x1f),
-			byte(total - 1), // value-1 on the wire
-			byte(i),         // chunk index, verbatim 0-based
+			byte(total-1) & 0x1f, // value-1 on the wire
+			byte(i) & 0x1f,       // chunk index, verbatim 0-based
 		}
 		dataSyms := append(hdr, bytesToFiveBit(frag)...)
-		out[i] = assembleMK1(dataSyms)
+		s, err := assembleMK1(dataSyms)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = s
 	}
-	return out
+	return out, nil
 }
 
 // bytesToFiveBit repacks bytes into 5-bit symbols, MSB-first, zero-padding the
@@ -294,11 +306,14 @@ func bytesToFiveBit(b []byte) []byte {
 // so the resulting data-part length lands in ValidMK's bracket (regular
 // [14,93], long [96,108]); the per-chunk codex32.ValidMK gate proves the
 // selection is correct.
-func assembleMK1(dataSyms []byte) string {
+func assembleMK1(dataSyms []byte) (string, error) {
 	// Decide regular vs long by the resulting data-part length (data syms +
 	// checksum syms after "mk1").
 	long := len(dataSyms)+mdmkShortSyms > mkRegularMaxLen
-	ck := codex32.MKChecksumSymbols(dataSyms, long)
+	ck, err := codex32.MKChecksumSymbols(dataSyms, long)
+	if err != nil {
+		return "", err
+	}
 
 	buf := make([]byte, 0, 3+len(dataSyms)+len(ck))
 	buf = append(buf, "mk1"...)
@@ -308,7 +323,7 @@ func assembleMK1(dataSyms []byte) string {
 	for _, s := range ck {
 		buf = append(buf, symRune(s))
 	}
-	return string(buf)
+	return string(buf), nil
 }
 
 // top20 derives the deterministic 20-bit chunk_set_id from the bytecode:

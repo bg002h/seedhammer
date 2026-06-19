@@ -1090,8 +1090,10 @@ func isWshInnerMulti(t tag) bool { return t == tagMulti || t == tagSortedMulti }
 
 // canonicalOrigin returns the canonical path-from-master for the top-level
 // wrapper `tree`, or (zero, false) for shapes that require explicit overrides.
-// USED ONLY by validateExplicitOriginRequired — never to substitute a
-// renderable key's decoded OriginPath.
+// Used by validateExplicitOriginRequired AND, per the R0-I1 precedence, as the
+// final fallback in resolveOriginPath (expand.go) to substitute a renderable
+// key's OriginPath when an elided shared path-decl would otherwise display the
+// wrong depth/childnum.
 func canonicalOrigin(tree node) (originPath, bool) {
 	switch tree.tag {
 	case tagPkh:
@@ -1402,21 +1404,26 @@ func useSiteStringFor(d *descriptor, idx uint8) string {
 	return useSiteString(d.useSite)
 }
 
-// pathString renders BIP-32 path components from master (e.g. "m/84'/0'/0'").
-// Empty components → "m".
+// pathString renders BIP-32 path components from master (e.g. "m/84h/0h/0h").
+// Empty components → "m". The hardened marker is the "h" form, matching the GUI's
+// dominant notation (bip32.Path.String / bip380 descriptor Encode) so the inspect
+// screen agrees with the derive/verify/restore screens (t4-M1). Display-only —
+// the path string is never serialized; only components go on-card.
 func pathString(comps []pathComponent) string {
 	s := "m"
 	for _, c := range comps {
 		s += "/" + u32str(c.value)
 		if c.hardened {
-			s += "'"
+			s += "h"
 		}
 	}
 	return s
 }
 
 // useSiteString renders a use-site path: "<0;1>/*" for the standard multipath,
-// "*" for a bare wildcard, with a trailing "'" if the wildcard is hardened.
+// "*" for a bare wildcard, with a trailing "h" if the wildcard is hardened. The
+// hardened marker is the "h" form, matching pathString and the GUI's dominant
+// notation (t4-M1). Display-only.
 func useSiteString(us useSitePath) string {
 	var s string
 	if us.hasMultipath {
@@ -1427,7 +1434,7 @@ func useSiteString(us useSitePath) string {
 			}
 			s += u32str(a.value)
 			if a.hardened {
-				s += "'"
+				s += "h"
 			}
 		}
 		s += ">/*"
@@ -1435,7 +1442,7 @@ func useSiteString(us useSitePath) string {
 		s = "*"
 	}
 	if us.wildcardHardened {
-		s += "'"
+		s += "h"
 	}
 	return s
 }

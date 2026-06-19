@@ -16,10 +16,11 @@ import (
 	slip39words "seedhammer.com/slip39"
 )
 
-// showError displays a dismissible error modal (Button3 dismisses) over a blank
-// background; returns when dismissed or ctx.Done. (Generalizes showCodex32Error
-// with a title parameter.)
-func showError(ctx *Context, th *Colors, title, msg string) {
+// showModal displays a dismissible title+body modal (Button3 dismisses) over a
+// blank background; returns when dismissed or ctx.Done. (Generalizes
+// showCodex32Error with a title parameter.) Callers should use showError for
+// failures and showNotice for non-error notices.
+func showModal(ctx *Context, th *Colors, title, msg string) {
 	errScr := &ErrorScreen{Title: title, Body: msg}
 	for !ctx.Done {
 		dims := ctx.Platform.DisplaySize()
@@ -29,6 +30,19 @@ func showError(ctx *Context, th *Colors, title, msg string) {
 		}
 		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
 	}
+}
+
+// showError displays a dismissible error modal for a failure/refusal.
+func showError(ctx *Context, th *Colors, title, msg string) {
+	showModal(ctx, th, title, msg)
+}
+
+// showNotice displays a dismissible modal for a SUCCESS or informational notice
+// (e.g. "Verify OK"), so a non-error result is not surfaced via showError. The
+// presentation is identical today; the distinct entry point keeps the call sites
+// honest and lets the success/notice styling diverge later without churn.
+func showNotice(ctx *Context, th *Colors, title, msg string) {
+	showModal(ctx, th, title, msg)
 }
 
 // slip39LengthPick asks how many words are on the user's physical share and

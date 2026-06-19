@@ -53,13 +53,9 @@ func desc4Display(tpl md.Template) string {
 
 // multisigRestoreDocFlow displays the multisig restore doc on a plain, paged,
 // read-only screen (the 0-alloc gate posture; reuse the single-sig
-// restoreDocScreen). Display-only — no secret, no engrave.
-func multisigRestoreDocFlow(ctx *Context, th *Colors, suppliedMd1 []string) {
-	tpl, keys, err := md.ExpandWalletPolicyChunks(suppliedMd1)
-	if err != nil {
-		showError(ctx, th, "Restore Doc", "Couldn't decode the wallet policy.")
-		return
-	}
+// restoreDocScreen). Display-only — no secret, no engrave. The caller passes the
+// already-decoded tpl/keys (t6b-M2) so the wallet policy is not re-expanded.
+func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey) {
 	lines, _, err := multisigRestoreLines(tpl, keys)
 	if err != nil {
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
