@@ -147,6 +147,7 @@ type program int
 const (
 	backupWallet program = iota
 	engraveXpub
+	engraveBundle
 	qaProgram
 )
 
@@ -1493,6 +1494,9 @@ func uiFlow(ctx *Context, version string) {
 			case engraveXpub:
 				deriveXpubFlow(ctx, th)
 				continue
+			case engraveBundle:
+				bundleFlow(ctx, th)
+				continue
 			case backupWallet:
 				mnemonic, ok := newInputFlow(ctx, th)
 				if !ok {
@@ -1627,14 +1631,14 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 					}
 					m.prog--
 					if m.prog < 0 {
-						m.prog = engraveXpub
+						m.prog = engraveBundle
 					}
 				case Right:
 					if !e.Pressed {
 						break
 					}
 					m.prog++
-					if m.prog > engraveXpub {
+					if m.prog > engraveBundle {
 						m.prog = 0
 					}
 				}
@@ -1657,6 +1661,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 		titleTxt = "Backup Wallet"
 	case engraveXpub:
 		titleTxt = "Account Xpub"
+	case engraveBundle:
+		titleTxt = "Engrave Bundle"
 	}
 
 	title, _ := layoutTitle(ctx, dims.X, th.Text, titleTxt)
@@ -1831,7 +1837,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 	contentsz := h.Add(sz)
 
 	content := plates.Offset(image.Pt((width-contentsz.X)/2, 8+h.Y(contentsz)))
-	const npage = int(engraveXpub) + 1
+	const npage = int(engraveBundle) + 1
 	if npage > 1 {
 		content = op.Layer(content, left, right)
 	}
@@ -1841,7 +1847,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engraveXpub:
+	case backupWallet, engraveXpub, engraveBundle:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
@@ -1850,7 +1856,7 @@ func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 }
 
 func layoutMainPager(buf *op.Buffer, th *Colors, page program) (op.Op, image.Point) {
-	const npages = int(engraveXpub) + 1
+	const npages = int(engraveBundle) + 1
 	const space = 4
 	if npages <= 1 {
 		return op.Op{}, image.Point{}
