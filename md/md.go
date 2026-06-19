@@ -1200,6 +1200,14 @@ type Template struct {
 	K, M       int
 	Keys       []KeyOrigin
 	Renderable bool
+	// InnerWsh is the sh-nesting discriminant (R0-C2): true iff Root==ScriptSh
+	// AND the immediate sh child is a wsh wrapper (sh(wsh(multi/sortedmulti))).
+	// It distinguishes a nested-segwit P2SH-P2WSH from a bare legacy P2SH
+	// multisig — both summarize to ScriptSh+PolicySortedMulti, but they hash to
+	// DIFFERENT addresses, so a consumer building a *bip380.Descriptor MUST use
+	// this to pick P2SH_P2WSH vs P2SH and never verify one against the other.
+	// Meaningful only when Root==ScriptSh; false for every other root.
+	InnerWsh bool
 }
 
 // Decode decodes a single-string md1 descriptor into a Template. It refuses
@@ -1298,6 +1306,22 @@ func multiPolicy(n node) (PolicyKind, int, int, bool) {
 	return PolicyComplex, 0, 0, false
 }
 
+// innerWshNesting reports whether tree is an sh(wsh(...)) wrapper — the
+// nesting discriminant for the ScriptSh + PolicySortedMulti collapse (R0-C2).
+// It mirrors the sh→wsh test in canonicalOrigin (md.go:1110-1118): an sh with a
+// single wsh child. Returns false for a bare sh(sortedmulti) and for any
+// non-sh root.
+func innerWshNesting(tree node) bool {
+	if tree.tag != tagSh {
+		return false
+	}
+	b, ok := tree.body.(childrenBody)
+	if !ok || len(b.children) != 1 {
+		return false
+	}
+	return b.children[0].tag == tagWsh
+}
+
 func summarize(d *descriptor) Template {
 	root := rootScriptKind(d.tree.tag)
 	policy, k, m := classifyPolicy(d.tree)
@@ -1320,6 +1344,7 @@ func summarize(d *descriptor) Template {
 		M:          m,
 		Keys:       keys,
 		Renderable: renderable,
+		InnerWsh:   innerWshNesting(d.tree),
 	}
 }
 

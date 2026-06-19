@@ -210,7 +210,7 @@ func TestReassembleReorderOK(t *testing.T) {
 	}
 }
 
-// TestReassembleDropChunk: a missing chunk -> errChunkSetIncomplete.
+// TestReassembleDropChunk: a missing chunk -> ErrChunkSetIncomplete.
 func TestReassembleDropChunk(t *testing.T) {
 	chunks, err := split(chunkedMD1Vector())
 	if err != nil {
@@ -220,8 +220,8 @@ func TestReassembleDropChunk(t *testing.T) {
 		t.Skip("need >=2 chunks")
 	}
 	dropped := chunks[1:]
-	if _, err := Reassemble(dropped); err != errChunkSetIncomplete {
-		t.Fatalf("Reassemble(dropped) = %v, want errChunkSetIncomplete", err)
+	if _, err := Reassemble(dropped); err != ErrChunkSetIncomplete {
+		t.Fatalf("Reassemble(dropped) = %v, want ErrChunkSetIncomplete", err)
 	}
 }
 
@@ -232,8 +232,8 @@ func TestReassembleDuplicate(t *testing.T) {
 		t.Fatalf("split: %v", err)
 	}
 	dup := append(append([]string(nil), chunks...), chunks[0])
-	if _, err := Reassemble(dup); err != errChunkSetIncomplete {
-		t.Fatalf("Reassemble(dup) = %v, want errChunkSetIncomplete", err)
+	if _, err := Reassemble(dup); err != ErrChunkSetIncomplete {
+		t.Fatalf("Reassemble(dup) = %v, want ErrChunkSetIncomplete", err)
 	}
 }
 
@@ -244,8 +244,8 @@ func TestReassembleCorruptCSID(t *testing.T) {
 	id, _ := computeEncodingID(d)
 	realCsid := deriveChunkSetID(id)
 	wrong := splitWithCSID(t, d, (realCsid+1)&0xFFFFF)
-	if _, err := Reassemble(wrong); err != errChunkSetIDMismatch {
-		t.Fatalf("Reassemble(wrong csid) = %v, want errChunkSetIDMismatch", err)
+	if _, err := Reassemble(wrong); err != ErrChunkSetIDMismatch {
+		t.Fatalf("Reassemble(wrong csid) = %v, want ErrChunkSetIDMismatch", err)
 	}
 }
 
