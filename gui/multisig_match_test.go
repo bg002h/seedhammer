@@ -120,3 +120,24 @@ func TestFindUserSlot(t *testing.T) {
 		}
 	})
 }
+
+// TestFormatSlotList (t6b-M1): the reused-key notice must name EVERY reused
+// slot, not just the first two — so a 3+-match notice lists all of them.
+func TestFormatSlotList(t *testing.T) {
+	cases := []struct {
+		in   []int
+		want string
+	}{
+		{nil, ""},
+		{[]int{}, ""},
+		{[]int{2}, "@2"},
+		{[]int{0, 2}, "@0 and @2"},
+		{[]int{0, 1, 3}, "@0, @1 and @3"},
+		{[]int{0, 1, 2, 4}, "@0, @1, @2 and @4"},
+	}
+	for _, c := range cases {
+		if got := formatSlotList(c.in); got != c.want {
+			t.Errorf("formatSlotList(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
