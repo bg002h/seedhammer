@@ -98,6 +98,10 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) codex32Co
 	backBtn := &Clickable{Button: Button1}
 	recoverBtn := &Clickable{Button: Button2}
 	engraveBtn := &Clickable{Button: Button3, AltButton: Center}
+	// "Show secret" is offered only for an unshared secret that actually decodes
+	// as an m-format ms1 (a plain BIP-93 secret is not decodable). Probe once.
+	_, _, _, msErr := codex32.DecodeMS1(scan)
+	showSecret := f.Unshared && msErr == nil
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			return codex32Back
@@ -105,8 +109,12 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) codex32Co
 		// Always drain Button2 — even for an unshared secret, where Recover is not
 		// offered — so an unconsumed event cannot block the router queue head in a
 		// direct-call (non-runUI) context. Act on it only for a share. (R0 C1)
-		recoverClicked := recoverBtn.Clicked(ctx)
-		if !f.Unshared && recoverClicked {
+		recoverClicked := recoverBtn.Clicked(ctx) // always drained (queue-head idiom)
+		switch {
+		case showSecret && recoverClicked:
+			ms1DecodeFlow(ctx, th, scan) // display-only "Show secret" sub-flow
+			continue
+		case !f.Unshared && recoverClicked:
 			return codex32Recover
 		}
 		if engraveBtn.Clicked(ctx) {
@@ -116,8 +124,11 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) codex32Co
 		navBtns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
 		}
-		if !f.Unshared {
-			navBtns = append(navBtns, NavButton{Clickable: recoverBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		switch {
+		case showSecret:
+			navBtns = append(navBtns, NavButton{Clickable: recoverBtn, Style: StyleSecondary, Icon: assets.IconInfo}) // Show secret
+		case !f.Unshared:
+			navBtns = append(navBtns, NavButton{Clickable: recoverBtn, Style: StyleSecondary, Icon: assets.IconRight}) // Recover
 		}
 		navBtns = append(navBtns, NavButton{Clickable: engraveBtn, Style: StylePrimary, Icon: assets.IconHammer})
 		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
