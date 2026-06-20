@@ -77,3 +77,125 @@ var (
 	errMultisigEmptyDivergent    = errors.New("md: EncodeMultisig OriginDivergent requires a non-empty Origin for every cosigner")
 	errMultisigBadScript         = errors.New("md: EncodeMultisig unknown script kind")
 )
+
+// EncodeMultisig assembles a sortedmulti k-of-n wallet-policy md1 over the given
+// cosigners in CALLER ORDER (which fixes @0..@{n-1}; see the ordering contract on
+// the package doc above). It returns the chunked md1 strings (>=2), the 4-byte
+// WalletPolicyIDStub, and the per-slot @N→fingerprint map (SlotInfo), plus an
+// error. It refuses unsupported shapes/params via typed errors (k/n bounds and
+// k<=n are enforced by the shipped split pipeline; this function adds the
+// origin-mode and script-kind guards).
+func EncodeMultisig(req EncodeMultisigRequest) (out []string, stub [4]byte, slots []SlotInfo, err error) {
+	n := len(req.Cosigners)
+
+	// Build the path declaration per the EXPLICIT origin mode.
+	var pd pathDecl
+	switch req.OriginMode {
+	case OriginShared:
+		if len(req.SharedOrigin) == 0 {
+			return nil, [4]byte{}, nil, errMultisigEmptySharedOrigin
+		}
+		so := originPath{components: toComponents(req.SharedOrigin)}
+		pd = pathDecl{n: uint8(n), shared: &so}
+	case OriginDivergent:
+		paths := make([]originPath, n)
+		for i, c := range req.Cosigners {
+			if len(c.Origin) == 0 {
+				return nil, [4]byte{}, nil, errMultisigEmptyDivergent
+			}
+			paths[i] = originPath{components: toComponents(c.Origin)}
+		}
+		pd = pathDecl{n: uint8(n), divergent: paths}
+	default:
+		return nil, [4]byte{}, nil, errMultisigBadScript
+	}
+
+	// The multisig tree per wrapper (sortedmulti{k, [0..n-1]} in cosigner order).
+	tree, terr := multiSigTree(req.Script, req.K, n)
+	if terr != nil {
+		return nil, [4]byte{}, nil, terr
+	}
+
+	// N pubkey TLV entries (idx-ascending, cosigner order) + optional per-cosigner
+	// fingerprint entries (only the present subset, idx-ascending).
+	pubkeys := make([]idxPub, n)
+	var fps []idxFP
+	slots = make([]SlotInfo, n)
+	for i, c := range req.Cosigners {
+		var xpub [65]byte
+		copy(xpub[:32], c.ChainCode[:])
+		copy(xpub[32:], c.CompressedPubkey[:])
+		pubkeys[i] = idxPub{idx: uint8(i), xpub: xpub}
+		if c.FpPresent {
+			fps = append(fps, idxFP{idx: uint8(i), fp: c.Fingerprint})
+		}
+		slots[i] = SlotInfo{Index: uint8(i), Fingerprint: c.Fingerprint, FpPresent: c.FpPresent}
+	}
+
+	d := &descriptor{
+		n:        uint8(n),
+		pathDecl: pd,
+		// useSite = <0;1>/* — hasMultipath, alts {0},{1}, unhardened wildcard.
+		useSite: useSitePath{
+			hasMultipath:     true,
+			multipath:        []alternative{{hardened: false, value: 0}, {hardened: false, value: 1}},
+			wildcardHardened: false,
+		},
+		tree: tree,
+		tlv: tlvSection{
+			pubPresent:   true,
+			pubkeys:      pubkeys,
+			fpPresent:    len(fps) > 0,
+			fingerprints: fps,
+		},
+	}
+
+	out, err = split(d)
+	if err != nil {
+		return nil, [4]byte{}, nil, err
+	}
+	stub, err = WalletPolicyIDStub(d)
+	if err != nil {
+		return nil, [4]byte{}, nil, err
+	}
+	return out, stub, slots, nil
+}
+
+// toComponents converts the public RAW []PathComponent into the internal
+// []pathComponent (same shape; Hardened/Value → hardened/value).
+func toComponents(in []PathComponent) []pathComponent {
+	out := make([]pathComponent, len(in))
+	for i, c := range in {
+		out[i] = pathComponent{hardened: c.Hardened, value: c.Value}
+	}
+	return out
+}
+
+// multiSigTree returns the wallet-policy tree for the three sortedmulti wrappers,
+// each wrapping sortedmulti{k, [0..n-1]} (indices in cosigner order):
+//
+//	MultisigWsh   -> node{tagWsh, [node{tagSortedMulti, multiKeysBody{k,[0..n-1]}}]}
+//	MultisigShWsh -> node{tagSh,  [node{tagWsh, [node{tagSortedMulti, ...}]}]}
+//	MultisigSh    -> node{tagSh,  [node{tagSortedMulti, ...}]}
+//
+// k/n bounds (k,n in 1..32, k<=n) are enforced downstream by writeNode's
+// multiKeysBody guards (errThresholdRange/errChildCount/errKGreaterThanN); this
+// helper only fixes the wrapper shape and rejects an unknown script kind.
+func multiSigTree(script MultisigScript, k uint8, n int) (node, error) {
+	indices := make([]uint8, n)
+	for i := range indices {
+		indices[i] = uint8(i)
+	}
+	sm := node{tag: tagSortedMulti, body: multiKeysBody{k: k, indices: indices}}
+	switch script {
+	case MultisigWsh:
+		return node{tag: tagWsh, body: childrenBody{children: []node{sm}}}, nil
+	case MultisigShWsh:
+		inner := node{tag: tagWsh, body: childrenBody{children: []node{sm}}}
+		return node{tag: tagSh, body: childrenBody{children: []node{inner}}}, nil
+	case MultisigSh:
+		return node{tag: tagSh, body: childrenBody{children: []node{sm}}}, nil
+	default:
+		return node{}, errMultisigBadScript
+	}
+}
