@@ -356,6 +356,11 @@ func cosignerFromCard(card mk.Card, includeFp bool) (md.MultisigCosigner, error)
 // index, skipping SelfSlot), builds the homogeneous-fp []MultisigCosigner, and
 // calls md.EncodeMultisig in that exact (caller-owned, order-preserving) order.
 func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint32, cosigners []mk.Card) (out []string, stub [4]byte, slots []md.SlotInfo, err error) {
+	// Defensive bounds: the @S picker is bounded to 0..n-1, but assembleBuildPolicy
+	// must never panic on an out-of-range self-slot (fuzz/robustness).
+	if p.N < 1 || p.SelfSlot < 0 || p.SelfSlot >= p.N {
+		return nil, [4]byte{}, nil, errBuildSlotCount
+	}
 	if len(cosigners) != p.N-1 {
 		return nil, [4]byte{}, nil, errBuildSlotCount
 	}
