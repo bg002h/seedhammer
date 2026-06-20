@@ -282,7 +282,7 @@ func jsonUnmarshalStrict(b []byte, v any) error {
 	return dec.Decode(v)
 }
 
-var multisigFullSets = []string{"multisig_wsh_full"}
+var multisigFullSets = []string{"multisig_wsh_full", "multisig_sh_wsh_full", "multisig_sh_full"}
 
 // TestEncodeMultisigFullPolicyParity (A2): EncodeMultisig fed the meta inputs
 // reproduces the vendored chunk strings byte-for-byte, the reassembled payload
@@ -322,6 +322,27 @@ func TestEncodeMultisigFullPolicyParity(t *testing.T) {
 			}
 			if hex.EncodeToString(stub[:]) != m.Stub {
 				t.Fatalf("stub: got %x want %s", stub, m.Stub)
+			}
+			tpl, _, err := ExpandWalletPolicyChunks(out)
+			if err != nil {
+				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+			}
+			switch req.Script {
+			case MultisigWsh:
+				if tpl.Root != ScriptWsh || tpl.InnerWsh {
+					t.Fatalf("%s: Root=%v InnerWsh=%v, want Wsh/false", name, tpl.Root, tpl.InnerWsh)
+				}
+			case MultisigShWsh:
+				if tpl.Root != ScriptSh || !tpl.InnerWsh {
+					t.Fatalf("%s: Root=%v InnerWsh=%v, want Sh/true", name, tpl.Root, tpl.InnerWsh)
+				}
+			case MultisigSh:
+				if tpl.Root != ScriptSh || tpl.InnerWsh {
+					t.Fatalf("%s: Root=%v InnerWsh=%v, want Sh/false", name, tpl.Root, tpl.InnerWsh)
+				}
+			}
+			if tpl.Policy != PolicySortedMulti {
+				t.Fatalf("%s: Policy=%v, want SortedMulti", name, tpl.Policy)
 			}
 		})
 	}
