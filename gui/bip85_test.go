@@ -312,3 +312,49 @@ func FuzzDeriveBip85Child(f *testing.F) {
 		}
 	})
 }
+
+// TestParseBip85Index pins the width-safe typed-index validator: it parses base-10
+// via strconv.ParseUint (never a bare int), accepts leading zeros, and rejects
+// anything > 2^31-1 (the BIP-85 hardened max), non-[0-9] runes, signs, whitespace,
+// 0x, and empty input. The >2^31-1 reject is the validator's job, NOT a length cap
+// (R0-M2): "9999999999" is 10 digits but still out of range.
+func TestParseBip85Index(t *testing.T) {
+	ok := []struct {
+		in   string
+		want int
+	}{
+		{"0", 0},
+		{"7", 7},
+		{"007", 7},          // leading zeros ACCEPTED (R0 adjudication #1)
+		{"1000000", 1000000},
+		{"2147483647", 2147483647}, // = 2^31-1, the boundary, ACCEPTED
+	}
+	for _, tc := range ok {
+		got, err := parseBip85Index(tc.in)
+		if err != nil {
+			t.Fatalf("parseBip85Index(%q): unexpected error %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("parseBip85Index(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+	bad := []string{
+		"",            // empty
+		"12a",         // trailing letter
+		"a12",         // leading letter
+		"-1",          // sign
+		"+1",          // sign
+		" 1",          // leading whitespace
+		"1 ",          // trailing whitespace
+		"0x10",        // hex prefix
+		"1.0",         // decimal point
+		"2147483648",  // = 2^31, first out-of-range value
+		"9999999999",  // 10 digits but > 2^31-1 (range, not length, is the authority)
+		"9223372036854775808", // > 2^63, ParseUint(…,64) itself overflows
+	}
+	for _, in := range bad {
+		if got, err := parseBip85Index(in); err == nil {
+			t.Fatalf("parseBip85Index(%q) = %d, want an error", in, got)
+		}
+	}
+}

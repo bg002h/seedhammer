@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -17,6 +18,32 @@ import (
 // supports (biptool's guard n<12||24<n||n%3!=0 -> exactly {12,18,24}).
 func validBip85Words(n int) bool {
 	return n == 12 || n == 18 || n == 24
+}
+
+// bip85MaxIndex is the BIP-85 / BIP-32 hardened-child ceiling: an un-hardened
+// index in [0, 2^31-1]. It equals hdkeychain.HardenedKeyStart-1; biptool rejects
+// anything >= HardenedKeyStart with "bip32: path element out of range".
+const bip85MaxIndex = hdkeychain.HardenedKeyStart - 1 // = 2147483647 = 2^31-1
+
+// parseBip85Index parses a typed decimal child index, WIDTH-SAFE on every target.
+// It uses strconv.ParseUint(s,10,64) — NEVER a bare int — so a value > the 64-bit
+// host's int is still caught, not wrapped. It rejects empty input, any non-[0-9]
+// rune (sign, whitespace, '.', "0x", letters — all typeable on the keyboard), and
+// any value > 2^31-1 (the hardened max). Leading zeros are accepted ("007" -> 7),
+// matching base-10 ParseUint. The returned value is guaranteed in [0, 2^31-1], so
+// it fits an int on every target.
+func parseBip85Index(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("bip85: empty index")
+	}
+	v, err := strconv.ParseUint(s, 10, 64) // base 10; rejects sign/whitespace/0x/letters/overflow
+	if err != nil {
+		return 0, fmt.Errorf("bip85: invalid index %q", s)
+	}
+	if v > bip85MaxIndex {
+		return 0, fmt.Errorf("bip85: index %s exceeds the maximum %d", s, bip85MaxIndex)
+	}
+	return int(v), nil // safe: v <= 2^31-1
 }
 
 // deriveBip85Child re-creates biptool's `derive bip39` (cmd/biptool/main.go:137-189)
