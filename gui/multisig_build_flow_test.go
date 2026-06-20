@@ -3,6 +3,7 @@ package gui
 import (
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 // TestMultisigFrontDoorRouting drives the new choose-or-supply front-door at the
@@ -64,5 +65,65 @@ func TestMultisigFrontDoorRouting(t *testing.T) {
 				t.Fatal("engraveMultisigFlow did not return on Back from the front-door")
 			}
 		})
+	})
+}
+
+// TestMultisigBuildExperimentalWarningAbort: Back (Button1) at the EXPERIMENTAL
+// warning drives ConfirmWarningScreen.Layout -> ConfirmNo, so the warning
+// returns false (abort). Mirrors TestChildSeedWarningAbort (NON-vacuous: the
+// goroutine actually reaches + dismisses the warning).
+func TestMultisigBuildExperimentalWarningAbort(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var got bool
+		done := false
+		frame, quit := runUI(ctx, func() {
+			got = multisigBuildExperimentalWarning(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+		if c, ok := pumpUntil(frame, "EXPERIMENTAL", 16); !ok {
+			t.Fatalf("experimental warning not shown; got %q", c)
+		}
+		click(&ctx.Router, Button1) // Back -> ConfirmNo
+		for i := 0; i < 16 && !done; i++ {
+			frame()
+		}
+		if !done {
+			t.Fatal("warning did not return after Back")
+		}
+		if got {
+			t.Fatal("warning returned true after Back; want false (abort, no engrave)")
+		}
+	})
+}
+
+// TestMultisigBuildExperimentalWarningConfirm: holding Button3 confirms
+// (ConfirmYes -> true), the only route past the warning.
+func TestMultisigBuildExperimentalWarningConfirm(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var got bool
+		done := false
+		frame, quit := runUI(ctx, func() {
+			got = multisigBuildExperimentalWarning(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+		if c, ok := pumpUntil(frame, "EXPERIMENTAL", 16); !ok {
+			t.Fatalf("experimental warning not shown; got %q", c)
+		}
+		press(&ctx.Router, Button3) // hold to confirm
+		frame()
+		time.Sleep(confirmDelay)
+		for i := 0; i < 16 && !done; i++ {
+			frame()
+		}
+		if !done {
+			t.Fatal("warning did not return after hold-confirm")
+		}
+		if !got {
+			t.Fatal("warning returned false after hold-confirm; want true")
+		}
 	})
 }

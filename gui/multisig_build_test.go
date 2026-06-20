@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -304,5 +305,39 @@ func TestBuildReviewLines(t *testing.T) {
 	}
 	if !strings.Contains(joinedInc, "73c5da0a") {
 		t.Fatalf("include review missing slot @0 fp 73c5da0a:\n%s", joinedInc)
+	}
+}
+
+// TestBuildCosignerCards: exactly `want` mk1 cards decode in gather order; a
+// wrong count or any md1/ms1 present refuses.
+func TestBuildCosignerCards(t *testing.T) {
+	other := canonicalBip85Master(t)
+	otherXpub, otherFP, err := deriveAccountXpub(other, "", &chaincfg.MainNetParams, multisigSharedOrigin())
+	if err != nil {
+		t.Fatalf("deriveAccountXpub: %v", err)
+	}
+	strs, err := mk.Encode(mk.Card{
+		Network: "mainnet", Path: "m/48h/0h/0h/2h",
+		Fingerprint: fmt.Sprintf("%08x", otherFP),
+		Stubs:       [][4]byte{{0, 0, 0, 0}}, Xpub: otherXpub,
+	})
+	if err != nil {
+		t.Fatalf("mk.Encode: %v", err)
+	}
+	mk1 := bundleCard{kind: cardMK1, label: "mk1 key", strings: strs}
+
+	got, ok := buildCosignerCards([]bundleCard{mk1}, 1)
+	if !ok || len(got) != 1 {
+		t.Fatalf("want 1 card ok; got ok=%v len=%d", ok, len(got))
+	}
+	if got[0].Xpub != otherXpub {
+		t.Fatalf("decoded xpub mismatch")
+	}
+	if _, ok := buildCosignerCards([]bundleCard{mk1}, 2); ok {
+		t.Fatal("wrong count accepted")
+	}
+	md1 := bundleCard{kind: cardMD1, label: "md1", strings: []string{"md1x"}}
+	if _, ok := buildCosignerCards([]bundleCard{mk1, md1}, 1); ok {
+		t.Fatal("md1-polluted gather accepted")
 	}
 }

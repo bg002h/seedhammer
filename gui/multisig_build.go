@@ -7,6 +7,7 @@ import (
 	"image"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip32"
 	"seedhammer.com/bip39"
 	"seedhammer.com/gui/assets"
@@ -35,12 +36,158 @@ import (
 var buildMultisigSeedHook func(bip39.Mnemonic)
 
 func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
-	// Implemented across Tasks 2–5. Task 1 only wires the front-door route; the
-	// first user-facing screen is the template picker (Task 2).
-	_, ok := multisigTemplatePick(ctx, th)
+	// (1) Bounded param pickers (template/n/k/@S/fp).
+	p, ok := buildParamPickFlow(ctx, th)
 	if !ok {
 		return
 	}
+
+	// (2) Gather the n-1 cosigner mk1 cards over NFC (PUBLIC; ms1 refused at
+	// classify). Decode each to an mk.Card.
+	cards, ok := bundleGatherFlow(ctx, th)
+	if !ok {
+		return
+	}
+	cosigners, ok := buildCosignerCards(cards, p.N-1)
+	if !ok {
+		showError(ctx, th, "Build Policy", fmt.Sprintf("Gather exactly %d cosigner key cards (and no md1).", p.N-1))
+		return
+	}
+
+	// (3) TYPED-ONLY self seed (I-SCRUB). Scrub on EVERY exit.
+	mnemonic, ok := seedEntryFlow(ctx, th)
+	if !ok {
+		return
+	}
+	if buildMultisigSeedHook != nil {
+		buildMultisigSeedHook(mnemonic)
+	}
+	defer func() {
+		for i := range mnemonic {
+			mnemonic[i] = 0
+		}
+	}()
+	passphrase := ""
+	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+		if pass, ok := passphraseFlow(ctx, th); ok {
+			passphrase = pass
+		}
+	}
+
+	// (4) Derive the self key at the LOCKED shared origin (self-origin ==
+	// policy-origin by construction). deriveAccountXpub neuters (no xprv) +
+	// scrubs the seed/master internally.
+	selfXpub, selfMasterFP, err := deriveAccountXpub(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin())
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't derive your key from the seed.")
+		return
+	}
+
+	// (5) Assemble via the SOLE md1 producer md.EncodeMultisig.
+	assembledMd1, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, cosigners)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't assemble the wallet policy.")
+		return
+	}
+
+	// (6) Review the (stub, slots) ordering handle (I-ORDER). Back -> abort.
+	if !buildReviewFlow(ctx, th, stub, slots, p.IncludeFp) {
+		return
+	}
+
+	// (7) The MANDATORY unskippable EXPERIMENTAL warning (I-WARN). Abort the
+	// engrave on Back/ConfirmNo.
+	if !multisigBuildExperimentalWarning(ctx, th) {
+		return
+	}
+
+	// (8) Full vs watch-only.
+	modeChoice := &ChoiceScreen{Title: "Engrave Mode", Lead: "What to engrave?", Choices: []string{"Full (seed + keys)", "Watch-only (keys)"}}
+	modeSel, ok := modeChoice.Choose(ctx, th)
+	if !ok {
+		return
+	}
+	full := modeSel == 0
+
+	// (9) Derive the operator's leg over the ASSEMBLED md1 (flows EXACTLY like a
+	// supplied md1; binds mk1.Stubs to `stub`, I-STUB) and engrave.
+	b, err := deriveMultisigLeg(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin(), assembledMd1, full)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't derive the bundle from the seed.")
+		return
+	}
+	cardsOut := multisigEngraveCards(b.MS1, b.MK1, b.MD1, full)
+	bundleEngrave(ctx, th, cardsOut)
+
+	// (10) Offer verify-bundle.
+	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
+	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
+		multisigVerifyFlow(ctx, th, b, full)
+	}
+
+	// (11) Restore doc (display-only, PUBLIC) over the assembled md1.
+	tpl, keys, err := md.ExpandWalletPolicyChunks(assembledMd1)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't decode the assembled policy.")
+		return
+	}
+	multisigRestoreDocFlow(ctx, th, tpl, keys)
+}
+
+// multisigBuildExperimentalWarning is the MANDATORY, unskippable, operator-
+// acknowledged warning shown immediately before any Build-path engrave (I-WARN):
+// the device-authored policy is NOT validated end-to-end (no coordinator /
+// hardware round-trip), so the operator MUST verify the assembled descriptor +
+// the shown stub/per-slot fingerprints against their coordinator BEFORE funding.
+// Hold to confirm; Back/ConfirmNo returns false and the caller ABORTS the
+// engrave. There is no skip/setting path. Mirrors childSeedWarning.
+func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
+	warn := &ConfirmWarningScreen{
+		Title: "EXPERIMENTAL",
+		Body: "This device-authored multisig policy is NOT validated end-to-end — there is no " +
+			"coordinator or hardware round-trip. You MUST verify the assembled descriptor and the " +
+			"shown policy stub + per-slot fingerprints against your coordinator/wallet BEFORE funding. " +
+			"The fingerprint choice changes the policy id.\n\nHold button to confirm.",
+		Icon: assets.IconHammer,
+	}
+	for !ctx.Done {
+		dims := ctx.Platform.DisplaySize()
+		d, res := warn.Layout(ctx, th, dims)
+		switch res {
+		case ConfirmNo:
+			return false
+		case ConfirmYes:
+			return true
+		}
+		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
+	}
+	return false
+}
+
+// buildCosignerCards filters the gathered cards down to EXACTLY `want` cosigner
+// mk1 cards (cardMK1), decoding each to an mk.Card. It refuses (ok=false) when
+// the count != want or any md1/ms1 card is present (the Build path gathers KEYS,
+// not a descriptor). Order is gather order (I-ORDER fills remaining slots in this
+// order).
+func buildCosignerCards(cards []bundleCard, want int) ([]mk.Card, bool) {
+	var out []mk.Card
+	for _, c := range cards {
+		switch c.kind {
+		case cardMK1:
+			card, err := mk.Decode(c.strings)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, card)
+		case cardMD1, cardMS1:
+			return nil, false // the Build path gathers cosigner KEYS only.
+		}
+	}
+	if len(out) != want {
+		return nil, false
+	}
+	return out, true
 }
 
 // multisigScriptChoices is the bounded template picker's list (LOCKED: all three
