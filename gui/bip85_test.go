@@ -302,17 +302,22 @@ func FuzzDeriveBip85Child(f *testing.F) {
 	f.Add(12, 0)
 	f.Add(18, 5)
 	f.Add(24, 9)
-	f.Add(15, 0)  // out-of-spec word count
-	f.Add(12, -1) // negative index
+	f.Add(15, 0)             // out-of-spec word count
+	f.Add(12, -1)            // negative index
 	f.Add(0, 0)
+	f.Add(12, 1<<31)         // = 2147483648: would wrap uint32 -> unhardened element 0 (R0-M1)
+	f.Add(12, 1<<31+1)       // = 2147483649: would wrap to unhardened element 1 (R0-M1)
+	f.Add(12, 2147483647)    // = 2^31-1: the accepted boundary
 	f.Fuzz(func(t *testing.T, words, index int) {
 		// Must not panic. Errors are fine for out-of-spec inputs.
 		child, err := deriveBip85Child(abandonAboutMnemonic(), "", words, index)
 		if err != nil {
 			return
 		}
-		// On success the inputs were in-spec; the child must be valid.
-		if !validBip85Words(words) || index < 0 {
+		// On success the inputs were in-spec; the child must be valid AND the index
+		// must be a valid hardened index (0..2^31-1) — accepting index>2^31-1 means
+		// the uint32 truncation guard failed (R0-M1).
+		if !validBip85Words(words) || index < 0 || index > bip85MaxIndex {
 			t.Fatalf("deriveBip85Child accepted out-of-spec words=%d index=%d", words, index)
 		}
 		if len(child) != words || !child.Valid() {
