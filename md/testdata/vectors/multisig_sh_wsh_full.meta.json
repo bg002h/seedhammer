@@ -1,0 +1,16 @@
+{
+  "script": "sh_wsh_sortedmulti",
+  "k": 2,
+  "n": 3,
+  "origin_mode": "shared",
+  "shared_origin": "m/48'/0'/0'/2'",
+  "fp_present": false,
+  "cosigners": [
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false},
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false},
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false}
+  ],
+  "payload_hex": "2092d84212a00183087088615e1e1294e82ac86e772561a713a4a858465380f03bcffd4052b1a4bd0cf11d95243f009c1e98bf6b309baa6d8ec7065e41bd5bb8060342f3c659b868b68d3d7ce826a6d4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b9294e82ac86e772561a713a4a858465380f03bcffd4052b1a4bd0cf11d95243f009c1e98bf6b309baa6d8ec7065e41bd5bb8060342f3c659b868b68d3d7ce826a6c",
+  "wallet_policy_id": "60ceb25871f07173b1f3186ebdd10274",
+  "wallet_policy_id_stub": "60ceb258"
+}
