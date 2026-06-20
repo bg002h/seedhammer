@@ -5,6 +5,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 )
@@ -496,4 +497,32 @@ func TestBip85IndexEntryFlow(t *testing.T) {
 			}
 		})
 	})
+}
+
+// TestDeriveBip85Child_ScrubsPkey is the M4 GENUINE fail-before/pass-after
+// assertion (the lone true one in this batch). Via the sanctioned, in-file
+// bip85PkeyHook (mirroring bip85SeedHook), it captures the live *btcec.PrivateKey
+// and asserts the leaf scalar (pkey.Key) is zeroed after deriveBip85Child
+// returns. FAILS on 3a23dbb (no `defer pkey.Zero()`); PASSES after the fix.
+func TestDeriveBip85Child_ScrubsPkey(t *testing.T) {
+	var captured *btcec.PrivateKey
+	bip85PkeyHook = func(p *btcec.PrivateKey) { captured = p }
+	defer func() { bip85PkeyHook = nil }()
+
+	child, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, 0)
+	if err != nil {
+		t.Fatalf("deriveBip85Child: %v", err)
+	}
+	// No-behaviour-regression: the canonical abandon/12/idx0 child is unchanged.
+	const wantChild = "prosper short ramp prepare exchange stove life snack client enough purpose fold"
+	if got := child.String(); got != wantChild {
+		t.Fatalf("child mismatch:\n got %q\nwant %q", got, wantChild)
+	}
+	if captured == nil {
+		t.Fatal("bip85PkeyHook never fired — the hook was not invoked")
+	}
+	// The load-bearing assertion: the leaf scalar is scrubbed on return.
+	if !captured.Key.IsZero() {
+		t.Fatal("pkey.Key not zeroed after deriveBip85Child returned (M4: missing defer pkey.Zero())")
+	}
 }

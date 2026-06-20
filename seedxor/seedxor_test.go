@@ -188,3 +188,40 @@ func TestDescribe(t *testing.T) {
 		}
 	}
 }
+
+// TestCombineScrubNoCorruption is the M3 regression guard. The per-part entropy
+// copies wiped by the fix (e0 at seedxor.go:38, e at :44) are function-local and
+// unobservable seam-free (spec R0 Q1/Minor-2), so this is NOT a buffer-zeroed
+// assertion. It proves the additive in-loop `wipe(e)` does not corrupt the XOR:
+// each part's entropy is wiped only AFTER it has been XORed into out, so the
+// combined result must still match the vector. Also re-confirms the
+// errMismatchedLengths path (where wipe(e) now runs alongside wipe(out)) still
+// returns its sentinel.
+func TestCombineScrubNoCorruption(t *testing.T) {
+	// Success path: the result must be byte-identical to the vector even though
+	// each per-part entropy copy is wiped immediately after use.
+	for _, v := range loadVectors(t) {
+		t.Run(v.Name, func(t *testing.T) {
+			parts := make([]bip39.Mnemonic, len(v.Parts))
+			for i, p := range v.Parts {
+				parts[i] = parseM(t, p)
+			}
+			want := parseM(t, v.Result)
+			got, err := Combine(parts)
+			if err != nil {
+				t.Fatalf("Combine: %v", err)
+			}
+			if string(got.Entropy()) != string(want.Entropy()) {
+				t.Fatalf("Combine entropy = %x, want %x (wipe(e) corrupted the XOR?)",
+					got.Entropy(), want.Entropy())
+			}
+		})
+	}
+
+	// Mismatched-lengths path still returns its sentinel (now wipes e too).
+	twelve := parseM(t, "romance wink lottery autumn shop bring dawn tongue range crater truth ability")
+	twentyfour := parseM(t, "silent toe meat possible chair blossom wait occur this worth option bag nurse find fish scene bench asthma bike wage world quit primary indoor")
+	if _, err := Combine([]bip39.Mnemonic{twelve, twentyfour}); !errors.Is(err, errMismatchedLengths) {
+		t.Fatalf("mismatched: err = %v, want errMismatchedLengths", err)
+	}
+}

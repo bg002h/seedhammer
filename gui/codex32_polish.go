@@ -100,7 +100,8 @@ func confirmCodex32Flow(ctx *Context, th *Colors, scan codex32.String) codex32Co
 	engraveBtn := &Clickable{Button: Button3, AltButton: Center}
 	// "Show secret" is offered only for an unshared secret that actually decodes
 	// as an m-format ms1 (a plain BIP-93 secret is not decodable). Probe once.
-	_, _, _, msErr := codex32.DecodeMS1(scan)
+	_, _, ent, msErr := codex32.DecodeMS1(scan)
+	wipeBytes(ent) // L1: scrub the discarded probe entropy (nil on err -> no-op)
 	showSecret := f.Unshared && msErr == nil
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
