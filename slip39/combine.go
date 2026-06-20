@@ -78,6 +78,18 @@ func Combine(shares []Share, passphrase []byte) ([]byte, error) {
 		v []byte
 	}
 	groupShares := make([]gshare, 0, len(gids))
+	var ems []byte
+	// M2: scrub recovered group-share secrets + ems on EVERY return path
+	// (success + all three error returns at :103/:108/:116). The closure reads
+	// groupShares/ems at defer-execution time, so it observes whatever was
+	// appended before the return; ems is nil on paths (a)/(b) (wipe(nil) is a
+	// no-op) and holds the EMS only after the group-layer recoverSecret succeeds.
+	defer func() {
+		for _, gs := range groupShares {
+			wipe(gs.v)
+		}
+		wipe(ems)
+	}()
 	for _, g := range gids {
 		gs := byGroup[g]
 		mt := gs[0].MemberThreshold
@@ -116,10 +128,6 @@ func Combine(shares []Share, passphrase []byte) ([]byte, error) {
 		return nil, err
 	}
 	master := feistelDecrypt(ems, passphrase, first.IterationExp, first.Identifier, first.Extendable)
-	for _, gs := range groupShares {
-		wipe(gs.v)
-	}
-	wipe(ems)
 	return master, nil
 }
 
@@ -137,6 +145,7 @@ func recoverSecret(threshold int, shares []bytePoint) ([]byte, error) {
 	sum := mac.Sum(nil)
 	if subtle.ConstantTimeCompare(digest, sum[:digestLen]) != 1 {
 		wipe(s)
+		wipe(d) // M2: also scrub the interpolated digest‖random buffer on this path
 		return nil, errDigestVerificationFailed
 	}
 	wipe(d)
