@@ -29,10 +29,12 @@ func verifyMultisig(derived bundle.Bundle, ms1Readback string, mk1, md1 []string
 }
 
 // multisigVerifyFlow drives the on-device verify-bundle for the multisig flow:
-// re-type the seed (fresh residency), gather the supplied md1 + operator mk1
-// over NFC, re-cross-match to recover the operator's origin, re-derive the leg,
-// hand-type the ms1 (full only; never NFC), and report PASS/FAIL. `full` reports
-// whether an ms1 was engraved (and so must be hand-typed for the verify).
+// re-type the seed (fresh residency), gather the supplied md1 + the operator's
+// engraved mk1 plate over NFC (extractSuppliedMd1AndMk1), re-cross-match to
+// recover the operator's origin, re-derive the leg, hand-type the ms1 (full
+// only; never NFC), and report PASS/FAIL — comparing the READ-BACK mk1 against
+// the re-derived mk1 (H1: never the re-derived value against itself). `full`
+// reports whether an ms1 was engraved (and so must be hand-typed for verify).
 func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bool) {
 	reMnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
@@ -57,9 +59,9 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 	if !ok {
 		return
 	}
-	suppliedMd1, ok := extractSuppliedMd1(cards)
+	suppliedMd1, suppliedMk1, ok := extractSuppliedMd1AndMk1(cards)
 	if !ok {
-		showError(ctx, th, "Verify Bundle", "Read back exactly one wallet-policy md1 (and no key cards).")
+		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card (mk1).")
 		return
 	}
 	_, keys, err := md.ExpandWalletPolicyChunks(suppliedMd1)
@@ -97,7 +99,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 		ms1Readback = s.String()
 	}
 
-	if err := verifyMultisig(reDerived, ms1Readback, reDerived.MK1, suppliedMd1); err != nil {
+	if err := verifyMultisig(reDerived, ms1Readback, suppliedMk1, suppliedMd1); err != nil {
 		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		return
 	}
