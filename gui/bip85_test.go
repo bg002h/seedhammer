@@ -358,3 +358,47 @@ func TestParseBip85Index(t *testing.T) {
 		}
 	}
 }
+
+// TestDeriveBip85Child_RejectsHighIndex pins the defense-in-depth upper-bound
+// guard: an index > 2^31-1 MUST error, never silently truncate. On this 64-bit
+// host, 1<<31 and 1<<31+1 fit an int and would otherwise wrap through
+// uint32(index)+h into an UNHARDENED element with no error (the R0-reproduced
+// bug). The lower bound (-1) still errors with its distinct message (R0-M3).
+func TestDeriveBip85Child_RejectsHighIndex(t *testing.T) {
+	for _, idx := range []int{1 << 31, 1<<31 + 1} { // 2147483648, 2147483649
+		if _, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, idx); err == nil {
+			t.Fatalf("index=%d: expected an error (silent uint32 truncation), got nil", idx)
+		}
+	}
+	// Lower bound still errors (retained).
+	if _, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, -1); err == nil {
+		t.Fatal("index=-1: expected an error, got nil")
+	}
+}
+
+// TestDeriveBip85Child_HighIndexGolden pins the boundary child at index 2^31-1.
+// PROBE-VERIFIED at HEAD 8459654 two independent ways (in-tree derive + biptool's
+// bip32.ParsePath path); re-probe-verify at impl time (Task 4 has the command).
+// Index 0 stays byte-unchanged vs the shipped golden (typed path is additive).
+func TestDeriveBip85Child_HighIndexGolden(t *testing.T) {
+	child, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, 2147483647) // = 2^31-1
+	if err != nil {
+		t.Fatalf("index=2147483647: %v", err)
+	}
+	const want = "jewel solution patient quarter elite grace quarter dinosaur taste parent dial clump"
+	if got := child.String(); got != want {
+		t.Fatalf("high-index child mismatch:\n got %q\nwant %q", got, want)
+	}
+	if len(child) != 12 || !child.Valid() {
+		t.Fatalf("high-index child: %d words, valid=%v", len(child), child.Valid())
+	}
+	// Index 0 unchanged vs the shipped golden.
+	c0, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, 0)
+	if err != nil {
+		t.Fatalf("index=0: %v", err)
+	}
+	const want0 = "prosper short ramp prepare exchange stove life snack client enough purpose fold"
+	if got := c0.String(); got != want0 {
+		t.Fatalf("index-0 child changed:\n got %q\nwant %q", got, want0)
+	}
+}

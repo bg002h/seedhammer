@@ -63,6 +63,12 @@ func deriveBip85Child(m bip39.Mnemonic, passphrase string, words, index int) (bi
 	if index < 0 {
 		return nil, fmt.Errorf("bip85: invalid index: %d", index)
 	}
+	if index > bip85MaxIndex {
+		// Defense-in-depth (independent of the picker's parseBip85Index): a 64-bit
+		// host int > 2^31-1 would otherwise be silently truncated/wrapped by the
+		// uint32(index)+h cast below into a different/UNHARDENED element. Reject it.
+		return nil, fmt.Errorf("bip85: index %d exceeds the maximum %d", index, bip85MaxIndex)
+	}
 
 	const h = hdkeychain.HardenedKeyStart
 	seed := bip39.MnemonicSeed(m, passphrase)
