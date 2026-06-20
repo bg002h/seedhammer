@@ -11,6 +11,7 @@ import (
 	"seedhammer.com/bip85"
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
 )
 
@@ -169,6 +170,50 @@ func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
 		}
 		return bip85WordChoices[wsel], bip85IndexChoices[isel], true
 	}
+}
+
+// bip85IndexEntryFlow lets the operator TYPE the child index on a cleartext
+// keyboard (the index is public, not a secret). It clones typeAddressFlow
+// (gui/verify_address.go:44-71): Back (Button1) -> (0,false); OK (Button3) parses
+// kbd.Fragment via parseBip85Index. On a parse error it shows the message and
+// RE-PROMPTS (clears the keyboard, re-loops) — it NEVER returns a silent 0 and
+// NEVER aborts. Only a valid index in [0,2^31-1] returns (idx,true).
+func bip85IndexEntryFlow(ctx *Context, th *Colors) (int, bool) {
+	kbd := NewAddressKeyboard(ctx)
+	backBtn := &Clickable{Button: Button1}
+	okBtn := &Clickable{Button: Button3}
+	for !ctx.Done {
+		for kbd.Update(ctx) {
+		}
+		if backBtn.Clicked(ctx) {
+			return 0, false
+		}
+		if okBtn.Clicked(ctx) {
+			idx, err := parseBip85Index(kbd.Fragment)
+			if err != nil {
+				showError(ctx, th, "Child index", "Enter a whole number 0 to 2147483647.")
+				// R0-m1: keep the readout CLEARTEXT on re-prompt (the index is
+				// public). kbd.Clear() resets revealed=false, so re-create the
+				// cleartext keyboard rather than just clearing it.
+				kbd = NewAddressKeyboard(ctx)
+				continue
+			}
+			return idx, true
+		}
+		dims := ctx.Platform.DisplaySize()
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(8)
+		kbdOp, kbdsz := kbd.Layout(ctx, th)
+		kbdOp = kbdOp.Offset(content.S(kbdsz))
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Child index")
+		ctx.Frame(op.Layer(kbdOp, nav, title, op.Color(&ctx.B, th.Background)))
+	}
+	return 0, false
 }
 
 // childSeedWarning shows the MANDATORY, operator-acknowledged warning that the

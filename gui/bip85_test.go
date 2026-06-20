@@ -402,3 +402,85 @@ func TestDeriveBip85Child_HighIndexGolden(t *testing.T) {
 		t.Fatalf("index-0 child changed:\n got %q\nwant %q", got, want0)
 	}
 }
+
+// TestBip85IndexEntryFlow drives the typed child-index keyboard flow: a valid
+// decimal returns (idx,true); a non-numeric/empty Fragment shows an error and
+// RE-PROMPTS (no abort, no silent 0); Back returns (0,false). Mirrors
+// TestTypeAddressCasePreserved (runes -> kbd.Update; Button3=OK, Button1=Back).
+func TestBip85IndexEntryFlow(t *testing.T) {
+	// Valid high index -> (2147483647, true).
+	t.Run("valid_high_index", func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var idx int
+		var ok bool
+		frame, quit := runUI(ctx, func() { idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme) })
+		defer quit()
+		frame()
+		runes(&ctx.Router, "2147483647")
+		frame()
+		click(&ctx.Router, Button3) // OK
+		frame()
+		if !ok || idx != 2147483647 {
+			t.Fatalf("typed 2147483647 -> (%d,%v); want (2147483647,true)", idx, ok)
+		}
+	})
+
+	// Back from an empty keyboard -> (0,false).
+	t.Run("back_exits", func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var idx int
+		var ok bool
+		frame, quit := runUI(ctx, func() { idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme) })
+		defer quit()
+		frame()
+		click(&ctx.Router, Button1) // Back
+		frame()
+		if ok || idx != 0 {
+			t.Fatalf("Back -> (%d,%v); want (0,false)", idx, ok)
+		}
+	})
+
+	// Non-numeric input on OK -> error + re-prompt (NOT a silent 0, NOT an abort).
+	// After the error, the flow loops back to the keyboard; clearing the bad runes
+	// and typing a valid index then succeeds.
+	t.Run("nonnumeric_reprompts_then_valid", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx := NewContext(newPlatform())
+			var idx int
+			var ok bool
+			done := false
+			frame, quit := runUI(ctx, func() {
+				idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			frame()
+			runes(&ctx.Router, "abc")
+			frame()
+			click(&ctx.Router, Button3) // OK on a non-numeric Fragment -> error screen
+			// The flow must NOT have returned: it shows the error, then re-prompts.
+			if done {
+				t.Fatal("flow returned on a non-numeric index; want error + re-prompt")
+			}
+			// Dismiss the error screen (Back/OK), then type a valid index and confirm.
+			if c, ok := pumpUntil(frame, "index", 16); !ok {
+				t.Fatalf("error screen not shown after non-numeric input; got %q", c)
+			}
+			click(&ctx.Router, Button3) // dismiss showError -> back to the keyboard
+			frame()
+			// Backspace the 3 stale runes, then type a valid index.
+			runes(&ctx.Router, "5")
+			frame()
+			click(&ctx.Router, Button3) // OK
+			for i := 0; i < 16 && !done; i++ {
+				frame()
+			}
+			if !done {
+				t.Fatal("flow did not return after a valid re-entry")
+			}
+			if !ok {
+				t.Fatalf("re-entered a valid index -> ok=false; want true (idx=%d)", idx)
+			}
+		})
+	})
+}
