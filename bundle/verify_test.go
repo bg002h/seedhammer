@@ -107,22 +107,25 @@ func TestVerifyBundleMutatedDescriptor(t *testing.T) {
 	}
 }
 
-// TestVerifyBundleMd1FieldNamed exercises the md1 exact-string branch directly:
-// a read-back that shares the derived mk1 + ms1 (so fp/xpub/path agree and the
-// stub binds) but is handed a re-chunked md1 that does NOT match the derived
-// md1 strings. To keep the stub-binding precondition satisfiable we reuse the
-// derived md1 for the binding side and assert the comparator's md1 field check
-// fires when the strings differ — using a whitespace-trimmed-but-reordered set
-// is not representative, so we instead confirm md1 ordering matters.
-func TestVerifyBundleMd1Reordered(t *testing.T) {
+// TestVerifyBundleMd1PositionalContract documents and guards the COMPARATOR
+// CONTRACT: bundle.Verify compares md1 POSITIONALLY (equalStrings), so it
+// correctly rejects an out-of-order md1 []string. Canonical ChunkIndex ordering
+// is the GATHER layer's responsibility — md1Gatherer.collected()
+// (gui/md1_gather.go), which the H2 fix made deterministic; see the gui test
+// TestMD1GathererCollectedIndexOrder (T-H2). This is NOT product behaviour that
+// rejects correct backups (the gather layer canonicalizes order before Verify);
+// it asserts the comparator stays a pure positional compare and is NOT weakened
+// to sort internally (which would re-introduce parsing into the deterministic
+// core). Assertion unchanged from the former TestVerifyBundleMd1Reordered.
+func TestVerifyBundleMd1PositionalContract(t *testing.T) {
 	derived := correctBundle()
 	readback := correctBundle()
-	// Reorder the md1 chunks: a valid set (Reassemble is order-tolerant, so the
-	// stub still binds) but the exact-string sequence differs → md1 mismatch.
+	// An out-of-order md1 []string: a valid set (Reassemble is order-tolerant, so
+	// the stub still binds) but the positional sequence differs → md1 mismatch.
 	readback.MD1 = []string{wpkhMD1[1], wpkhMD1[0], wpkhMD1[2]}
 	err := Verify(derived, readback)
 	if err == nil {
-		t.Fatal("reordered md1 accepted, want FAIL")
+		t.Fatal("out-of-order md1 accepted by the positional comparator, want FAIL")
 	}
 	if !strings.Contains(err.Error(), "md1") {
 		t.Errorf("error %q does not name md1", err)
@@ -234,5 +237,37 @@ func TestVerifyBundleStubMismatch(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "stub") {
 		t.Errorf("error %q does not name stub", err)
+	}
+}
+
+// T-M1 (verify-cluster M1): a readback ms1 whose recovered entropy MATCHES the
+// derived ms1 but whose BIP-39 language byte DIFFERS (Japanese mnem, lang 1, vs
+// the derived English entr, lang 0) must FAIL — identical entropy under a
+// different wordlist is a different wallet. The fixture is built directly because
+// EncodeMS1 only emits entr/English; this is a hand-typed-readback-only string.
+// Proven on 3a23dbb: Verify PASSES this (the M1 bug). After the language compare
+// it FAILS with "verify: ms1 wordlist/language mismatch".
+func TestVerifyBundleLanguageMismatch(t *testing.T) {
+	derived := correctBundle() // entr / English, entropy = zero-16
+	readback := correctBundle()
+	// codex32.NewSeed("ms",0,"entr",'s',[]byte{0x02,0x01,<zero16>}) — a valid
+	// language-1 (Japanese) mnem ms1 with the SAME zero-16 entropy as wpkhMS1.
+	// (Verified: decodes to prefix=2/mnem, language=1, entropy=00..00.)
+	readback.MS1 = "ms10entrsqgqsqqqqqqqqqqqqqqqqqqqqqqqqqj9tawneveyd9j"
+	err := Verify(derived, readback)
+	if err == nil {
+		t.Fatal("language-differ readback (same entropy) accepted, want FAIL")
+	}
+	if !strings.Contains(err.Error(), "language") && !strings.Contains(err.Error(), "wordlist") {
+		t.Errorf("error %q does not name language/wordlist", err)
+	}
+}
+
+// TestVerifyBundleLanguageEnglishNotOverRejected: a legitimate English/entr
+// readback (language 0) against an English/entr derived (language 0) must still
+// PASS — the language compare must not over-reject identical-wordlist readbacks.
+func TestVerifyBundleLanguageEnglishNotOverRejected(t *testing.T) {
+	if err := Verify(correctBundle(), correctBundle()); err != nil {
+		t.Fatalf("English/entr readback over-rejected: %v (want PASS)", err)
 	}
 }

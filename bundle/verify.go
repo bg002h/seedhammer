@@ -80,11 +80,11 @@ func Verify(derived, readback Bundle) error {
 
 	// ms1: compare RECOVERED ENTROPY bytes (so a re-typed ms1 with the same
 	// entropy but any incidental string difference still matches).
-	dEnt, err := ms1Entropy(derived.MS1)
+	dLang, dEnt, err := ms1Entropy(derived.MS1)
 	if err != nil {
 		return fmt.Errorf("verify: derived ms1: %w", err)
 	}
-	rEnt, err := ms1Entropy(readback.MS1)
+	rLang, rEnt, err := ms1Entropy(readback.MS1)
 	if err != nil {
 		wipe(dEnt)
 		return fmt.Errorf("verify: readback ms1: %w", err)
@@ -94,6 +94,14 @@ func Verify(derived, readback Bundle) error {
 	wipe(rEnt)
 	if !match {
 		return errors.New("verify: ms1 entropy mismatch")
+	}
+	// Compare the BIP-39 wordlist LANGUAGE, not just the entropy: identical
+	// entropy under a different wordlist yields different mnemonic words → a
+	// different PBKDF2 seed → a different wallet. Compare on language (not raw
+	// prefix) so a legitimate English readback (entr OR English-mnem, both
+	// language 0) is not over-rejected on an incidental prefix difference.
+	if dLang != rLang {
+		return errors.New("verify: ms1 wordlist/language mismatch")
 	}
 	return nil
 }
@@ -117,22 +125,23 @@ func checkStubBinding(which string, b Bundle) error {
 	return fmt.Errorf("verify: %s mk1/md1 stub mismatch (key card does not bind to this policy)", which)
 }
 
-// ms1Entropy decodes an ms1 secret string to its recovered BIP-39 entropy. The
-// returned slice is SECRET; Verify scrubs it after the compare.
-func ms1Entropy(s string) ([]byte, error) {
+// ms1Entropy decodes an ms1 secret string to its recovered BIP-39 entropy and
+// its codex32 language byte (0=entr/English; 1..9=a non-English mnem wordlist).
+// The returned slice is SECRET; Verify scrubs it after the compare.
+func ms1Entropy(s string) (language int, entropy []byte, err error) {
 	str, err := codex32.New(s)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	_, _, entropy, err := codex32.DecodeMS1(str)
+	_, language, ent, err := codex32.DecodeMS1(str)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	// Copy so the caller owns a scrubbable buffer independent of the decoder.
-	out := make([]byte, len(entropy))
-	copy(out, entropy)
-	wipe(entropy)
-	return out, nil
+	out := make([]byte, len(ent))
+	copy(out, ent)
+	wipe(ent)
+	return language, out, nil
 }
 
 func equalStrings(a, b []string) bool {

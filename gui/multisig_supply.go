@@ -33,6 +33,38 @@ func extractSuppliedMd1(cards []bundleCard) ([]string, bool) {
 	return md1, true
 }
 
+// extractSuppliedMd1AndMk1 reads back BOTH the operator mk1 key card AND the
+// wallet-policy md1 from the gathered card set (H1). It requires EXACTLY one of
+// each; ok=false on a missing card, a duplicate (>=2 of either), or any stray
+// cardMS1. Modeled on singleSigReadbackCards (gui/singlesig_verify.go:23). The
+// read-back mk1 is the operator's ENGRAVED plate (compared against the
+// re-derived mk1 inside verifyMultisig) — NOT a re-derived value. This is a
+// distinct helper from extractSuppliedMd1 (the supply/engrave filter, which
+// refuses any key card); do NOT widen that one — it has a second caller in the
+// live engrave flow (gui/multisig.go:71).
+func extractSuppliedMd1AndMk1(cards []bundleCard) (md1, mk1 []string, ok bool) {
+	for _, c := range cards {
+		switch c.kind {
+		case cardMD1:
+			if md1 != nil {
+				return nil, nil, false // more than one descriptor — ambiguous
+			}
+			md1 = c.strings
+		case cardMK1:
+			if mk1 != nil {
+				return nil, nil, false // more than one key card — ambiguous
+			}
+			mk1 = c.strings
+		case cardMS1:
+			return nil, nil, false // a stray secret card pollutes the supply.
+		}
+	}
+	if len(md1) == 0 || len(mk1) == 0 {
+		return nil, nil, false
+	}
+	return md1, mk1, true
+}
+
 // allSlotsHaveXpub is the full-policy gate (I-3): the supplied md1 must be a
 // FULL wallet policy — every expanded slot must carry an xpub, else there is no
 // public key to cross-match the typed seed against. A template-only md1 (no

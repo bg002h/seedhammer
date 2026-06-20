@@ -7,6 +7,17 @@ import (
 	"seedhammer.com/md"
 )
 
+// Multisig verify success copy (L2). HONEST scoping: on an air-gapped device the
+// only cross-checkable facts are the operator's own key card (mk1, H1) + xpub/
+// origin (findUserSlot) + the secret (ms1 entropy/language, M1). The md1 policy
+// string is the supplied input compared to a clone of itself, and foreign
+// cosigners' xpubs have no source of truth — so we do NOT claim a full-bundle
+// guarantee.
+const (
+	multisigVerifyOKTitle = "Verify OK"
+	multisigVerifyOKBody  = "Operator key and secret verified. Other cosigners' keys are taken as supplied."
+)
+
 // ─── T6b: verify-bundle for a SUPPLIED multisig bundle (user's slot only) ────
 //
 // verifyMultisig assembles the read-back bundle and runs the deterministic
@@ -29,10 +40,12 @@ func verifyMultisig(derived bundle.Bundle, ms1Readback string, mk1, md1 []string
 }
 
 // multisigVerifyFlow drives the on-device verify-bundle for the multisig flow:
-// re-type the seed (fresh residency), gather the supplied md1 + operator mk1
-// over NFC, re-cross-match to recover the operator's origin, re-derive the leg,
-// hand-type the ms1 (full only; never NFC), and report PASS/FAIL. `full` reports
-// whether an ms1 was engraved (and so must be hand-typed for the verify).
+// re-type the seed (fresh residency), gather the supplied md1 + the operator's
+// engraved mk1 plate over NFC (extractSuppliedMd1AndMk1), re-cross-match to
+// recover the operator's origin, re-derive the leg, hand-type the ms1 (full
+// only; never NFC), and report PASS/FAIL — comparing the READ-BACK mk1 against
+// the re-derived mk1 (H1: never the re-derived value against itself). `full`
+// reports whether an ms1 was engraved (and so must be hand-typed for verify).
 func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bool) {
 	reMnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
@@ -57,9 +70,9 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 	if !ok {
 		return
 	}
-	suppliedMd1, ok := extractSuppliedMd1(cards)
+	suppliedMd1, suppliedMk1, ok := extractSuppliedMd1AndMk1(cards)
 	if !ok {
-		showError(ctx, th, "Verify Bundle", "Read back exactly one wallet-policy md1 (and no key cards).")
+		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card (mk1).")
 		return
 	}
 	_, keys, err := md.ExpandWalletPolicyChunks(suppliedMd1)
@@ -90,16 +103,21 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 			showError(ctx, th, "Verify Bundle", "That isn't an ms1 secret share.")
 			return
 		}
-		if _, _, _, err := codex32.DecodeMS1(s); err != nil {
+		// L1: capture + scrub the probe's secret entropy (codebase convention,
+		// gui/ms1_decode.go:29) — DecodeMS1 allocates a fresh entropy slice we
+		// otherwise abandon to the GC.
+		_, _, ent, err := codex32.DecodeMS1(s)
+		if err != nil {
 			showError(ctx, th, "Verify Bundle", "That isn't a valid ms1 secret share.")
 			return
 		}
+		wipeBytes(ent)
 		ms1Readback = s.String()
 	}
 
-	if err := verifyMultisig(reDerived, ms1Readback, reDerived.MK1, suppliedMd1); err != nil {
+	if err := verifyMultisig(reDerived, ms1Readback, suppliedMk1, suppliedMd1); err != nil {
 		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		return
 	}
-	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
+	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKBody)
 }

@@ -54,10 +54,17 @@ func (g *md1Gatherer) offer(s string) gatherStatus {
 
 func (g *md1Gatherer) complete() bool { return g.primed && len(g.set) == g.total }
 
+// collected returns the gathered chunk strings in ascending ChunkIndex order
+// (0..total-1), deterministically — NEVER Go's randomized map-iteration order.
+// The deterministic comparator (bundle.Verify) compares md1 positionally against
+// the index-ordered derived side (md.split emits index order), so a random
+// readback order would FALSE-FAIL a correct backup. collected() is only ever
+// called after complete() (md1_gather.go:76,140; bundle.go:234), which requires
+// every index 0..total-1 present, so each lookup is populated (no "" gaps).
 func (g *md1Gatherer) collected() []string {
 	out := make([]string, 0, len(g.set))
-	for _, s := range g.set {
-		out = append(out, s)
+	for i := 0; i < g.total; i++ {
+		out = append(out, g.set[i])
 	}
 	return out
 }

@@ -78,3 +78,51 @@ func TestAllSlotsHaveXpub(t *testing.T) {
 		t.Fatal("empty key set passed the gate, want refuse")
 	}
 }
+
+// extractSuppliedMd1AndMk1 (verify-cluster H1): reads back BOTH the operator mk1
+// AND the wallet-policy md1 from the gathered card set. Exactly one of each, else
+// ok=false. (extractSuppliedMd1 is the SUPPLY filter — one md1, zero key cards —
+// and must stay unchanged: it has two callers including the live engrave flow.)
+func TestExtractSuppliedMd1AndMk1(t *testing.T) {
+	mk1 := bundleCard{kind: cardMK1, strings: []string{"mk1a", "mk1b"}}
+	md1 := bundleCard{kind: cardMD1, strings: []string{"md1a", "md1b", "md1c"}}
+
+	t.Run("one mk1 + one md1 → ok", func(t *testing.T) {
+		gotMd1, gotMk1, ok := extractSuppliedMd1AndMk1([]bundleCard{mk1, md1})
+		if !ok {
+			t.Fatal("valid mk1+md1 set rejected")
+		}
+		if !equalStringSlice(gotMd1, md1.strings) {
+			t.Fatalf("md1 = %v, want %v", gotMd1, md1.strings)
+		}
+		if !equalStringSlice(gotMk1, mk1.strings) {
+			t.Fatalf("mk1 = %v, want %v", gotMk1, mk1.strings)
+		}
+	})
+	t.Run("missing mk1 → not ok", func(t *testing.T) {
+		if _, _, ok := extractSuppliedMd1AndMk1([]bundleCard{md1}); ok {
+			t.Fatal("set with no mk1 accepted")
+		}
+	})
+	t.Run("missing md1 → not ok", func(t *testing.T) {
+		if _, _, ok := extractSuppliedMd1AndMk1([]bundleCard{mk1}); ok {
+			t.Fatal("set with no md1 accepted")
+		}
+	})
+	t.Run("two mk1 → ambiguous, not ok", func(t *testing.T) {
+		if _, _, ok := extractSuppliedMd1AndMk1([]bundleCard{mk1, mk1, md1}); ok {
+			t.Fatal("ambiguous (two mk1) set accepted")
+		}
+	})
+	t.Run("two md1 → ambiguous, not ok", func(t *testing.T) {
+		if _, _, ok := extractSuppliedMd1AndMk1([]bundleCard{mk1, md1, md1}); ok {
+			t.Fatal("ambiguous (two md1) set accepted")
+		}
+	})
+	t.Run("stray ms1 → not ok", func(t *testing.T) {
+		ms1 := bundleCard{kind: cardMS1, strings: []string{"ms1x"}}
+		if _, _, ok := extractSuppliedMd1AndMk1([]bundleCard{mk1, md1, ms1}); ok {
+			t.Fatal("set with a stray ms1 accepted")
+		}
+	})
+}
