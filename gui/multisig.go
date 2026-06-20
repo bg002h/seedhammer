@@ -32,7 +32,36 @@ import (
 // it is scrubbed on exit). nil in production. Mirrors singleSigSeedHook.
 var multisigSeedHook func(bip39.Mnemonic)
 
+// engraveMultisigFlow is the engraveMultisig program front-door (T6c Phase B):
+// "Supply policy (md1)" runs the UNCHANGED T6b body (supplyMultisigPolicyFlow);
+// "Build policy" runs the on-device authoring path (buildMultisigPolicyFlow).
+// This adds NO program (I-LOCKSTEP: enum/guard/dispatch/title/plate/carousel
+// untouched) — it only branches inside the existing program's flow function.
 func engraveMultisigFlow(ctx *Context, th *Colors) {
+	front := &ChoiceScreen{
+		Title:   "Multisig",
+		Lead:    "Supply or build a policy?",
+		Choices: []string{"Supply policy (md1)", "Build policy"},
+	}
+	sel, ok := front.Choose(ctx, th)
+	if !ok {
+		return
+	}
+	if sel == 0 {
+		supplyMultisigPolicyFlow(ctx, th)
+		return
+	}
+	buildMultisigPolicyFlow(ctx, th)
+}
+
+// supplyMultisigPolicyFlow is the UNCHANGED T6b body: gather a SUPPLIED
+// multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a full
+// policy (every slot xpub-present) -> hand-type the seed (TYPED-ONLY, never a
+// scan) -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
+// leg (ms1 + policy-bound mk1; the supplied md1 engraved VERBATIM) -> engrave
+// (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder) -> offer
+// verify-bundle -> show the multisig restore doc.
+func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (1) Gather the SUPPLIED md1 over NFC (PUBLIC). Refuse a polluted/ambiguous
 	// supply BEFORE any seed is typed (no secret exists yet).
 	cards, ok := bundleGatherFlow(ctx, th)
