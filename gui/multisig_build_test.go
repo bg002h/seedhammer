@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
@@ -154,6 +155,97 @@ func TestAssembleBuildPolicy_T6bByteMatch(t *testing.T) {
 	wantStub := [4]byte{0x7b, 0x71, 0x64, 0x21}
 	if stub != wantStub {
 		t.Fatalf("stub = %x, want 7b716421", stub)
+	}
+	// Sanity: the self slot really is the abandon-about key (masterFP 0x73c5da0a).
+	if selfMasterFP != 0x73c5da0a {
+		t.Fatalf("self masterFP = %08x, want 73c5da0a", selfMasterFP)
+	}
+}
+
+// xpubFromExpandedKey rebuilds a base58 mainnet xpub from a decoded fixture
+// slot's 65-byte ExpandedKey.Xpub (chainCode[0:32] ‖ compressedPubkey[32:65]).
+// decodeXpubBytes (the production path) extracts ONLY the chain code and the
+// compressed pubkey, so the depth/childNum/parentFP carried in the base58 string
+// do not affect the round-trip — any valid values produce an xpub whose decode
+// yields the SAME 65 bytes (verified by TestAssembleBuildPolicy_T6bWrapperByteMatch
+// asserting a byte-exact fixture match). We use the foreign key's real synthetic
+// chain code + pubkey, a depth of 4 (m/48'/0'/0'/2' has 4 components), childNum 0,
+// and a zero parent fingerprint.
+func xpubFromExpandedKey(t *testing.T, k md.ExpandedKey) string {
+	t.Helper()
+	cc := k.Xpub[0:32]
+	pk := k.Xpub[32:65]
+	var parentFP [4]byte // not recovered by decodeXpubBytes; any value round-trips
+	ek := hdkeychain.NewExtendedKey(chaincfg.MainNetParams.HDPublicKeyID[:], pk, cc, parentFP[:], 4, 0, false)
+	return ek.String()
+}
+
+// TestAssembleBuildPolicy_T6bWrapperByteMatch drives the FULL production wrapper
+// (assembleBuildPolicy -> cosignerFromCard -> decodeXpubBytes -> md.EncodeMultisig)
+// for the T6b 2-of-3 wsh(sortedmulti) fixture, where TestAssembleBuildPolicy_T6bByteMatch
+// bypassed the wrapper for the two foreign slots (calling md.EncodeMultisig directly).
+// The foreign slots @0/@2 are re-serialized from the decoded fixture bytes back into
+// real base58 xpubs and wrapped as gathered mk.Cards (so cosignerFromCard accepts
+// them); self @1 is the abandon-about seed. The 6 assembled chunks must be
+// byte-identical to the on-disk fixture and the stub must be 7b716421 (the exec-
+// review's A3 wrapper byte-match probe). fp-presence=OMIT (the fixture is fp-ABSENT).
+func TestAssembleBuildPolicy_T6bWrapperByteMatch(t *testing.T) {
+	chunks := suppliedMultisigMd1(t)
+	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+	if len(keys) != 3 {
+		t.Fatalf("fixture has %d slots, want 3", len(keys))
+	}
+
+	// Self slot @1: derive the abandon-about key at the shared origin (exactly as
+	// the Build flow does).
+	self := abandonAboutMnemonic()
+	selfXpub, selfMasterFP, err := deriveAccountXpub(self, "", &chaincfg.MainNetParams, multisigSharedOrigin())
+	if err != nil {
+		t.Fatalf("deriveAccountXpub(self): %v", err)
+	}
+
+	// Foreign cosigners @0 and @2: re-serialize each decoded 65-byte key into a
+	// real base58 xpub and wrap as a gathered mk.Card (gather order @0 then @2,
+	// matching the wrapper's remaining-slot fill skipping SelfSlot=1).
+	card0 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[0]), Stubs: [][4]byte{{0, 0, 0, 0}}}
+	card2 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[2]), Stubs: [][4]byte{{0, 0, 0, 0}}}
+
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: false}
+	out, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, []mk.Card{card0, card2})
+	if err != nil {
+		t.Fatalf("assembleBuildPolicy: %v", err)
+	}
+	if len(out) != len(chunks) {
+		t.Fatalf("assembled %d chunks, want %d", len(out), len(chunks))
+	}
+	for i := range chunks {
+		if out[i] != chunks[i] {
+			t.Fatalf("chunk[%d] mismatch (wrapper-driven fp-absent T6b replay):\n got %s\nwant %s", i, out[i], chunks[i])
+		}
+	}
+	wantStub := [4]byte{0x7b, 0x71, 0x64, 0x21}
+	if stub != wantStub {
+		t.Fatalf("stub = %x, want 7b716421", stub)
+	}
+	// The returned stub must match WalletPolicyIDStubChunks(out) (I-STUB).
+	gotStub, err := md.WalletPolicyIDStubChunks(out)
+	if err != nil {
+		t.Fatalf("WalletPolicyIDStubChunks: %v", err)
+	}
+	if gotStub != stub {
+		t.Fatalf("returned stub %x != WalletPolicyIDStubChunks(out) %x (I-STUB)", stub, gotStub)
+	}
+	// fp-omit: every slot's FpPresent must be false; self is @1.
+	if len(slots) != 3 {
+		t.Fatalf("slots = %d, want 3", len(slots))
+	}
+	for i, s := range slots {
+		if s.FpPresent {
+			t.Fatalf("slot %d FpPresent=true under fp-omit", i)
+		}
 	}
 	// Sanity: the self slot really is the abandon-about key (masterFP 0x73c5da0a).
 	if selfMasterFP != 0x73c5da0a {
