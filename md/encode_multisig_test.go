@@ -3,6 +3,7 @@ package md
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -473,6 +474,51 @@ func TestEncodeMultisigRoundTrip(t *testing.T) {
 				}
 			}
 			_ = tpl
+		})
+	}
+}
+
+// TestEncodeMultisigRefuse (A6/I5): invalid k/n, divergent-count/origin
+// mismatch, and empty origins yield typed errors. The shipped split guards
+// surface via errors.Is; the assembler's own guards are matched directly.
+func TestEncodeMultisigRefuse(t *testing.T) {
+	cc, pk := mkXpub65(t, "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "03a9394a2f1a4f99613a716956c8540f6dba6f18931c2639107221b267d740af23")
+	cosigner := MultisigCosigner{ChainCode: cc, CompressedPubkey: pk}
+	three := []MultisigCosigner{cosigner, cosigner, cosigner}
+
+	mkReq := func(mut func(*EncodeMultisigRequest)) EncodeMultisigRequest {
+		r := EncodeMultisigRequest{
+			Cosigners: append([]MultisigCosigner(nil), three...),
+			K:         2, Script: MultisigWsh, OriginMode: OriginShared, SharedOrigin: sharedOrigin4828(),
+		}
+		mut(&r)
+		return r
+	}
+
+	for _, tc := range []struct {
+		name    string
+		req     EncodeMultisigRequest
+		wantErr error // matched via errors.Is when non-nil; else just "must error"
+	}{
+		{"k>n", mkReq(func(r *EncodeMultisigRequest) { r.K = 4 }), errKGreaterThanN},
+		{"k=0", mkReq(func(r *EncodeMultisigRequest) { r.K = 0 }), errThresholdRange},
+		{"empty-shared-origin", mkReq(func(r *EncodeMultisigRequest) { r.SharedOrigin = nil }), errMultisigEmptySharedOrigin},
+		{"divergent-empty-origin", mkReq(func(r *EncodeMultisigRequest) {
+			r.OriginMode = OriginDivergent
+			r.SharedOrigin = nil
+			// all three cosigners have nil Origin → empty divergent
+		}), errMultisigEmptyDivergent},
+		{"zero-cosigners", mkReq(func(r *EncodeMultisigRequest) { r.Cosigners = nil; r.K = 1 }), errKeyCountRange},
+		{"bad-script", mkReq(func(r *EncodeMultisigRequest) { r.Script = MultisigScript(99) }), errMultisigBadScript},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := EncodeMultisig(tc.req)
+			if err == nil {
+				t.Fatalf("%s: got nil error, want %v", tc.name, tc.wantErr)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("%s: err = %v, want errors.Is %v", tc.name, err, tc.wantErr)
+			}
 		})
 	}
 }
