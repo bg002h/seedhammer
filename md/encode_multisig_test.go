@@ -117,3 +117,67 @@ func TestEncodeMultisigSmoke(t *testing.T) {
 		t.Fatalf("slot 0 should be fp-absent")
 	}
 }
+
+// TestEncodeMultisigTemplateParity (A1): the bare multi-key AST for the wsh and
+// sh(wsh) wrappers encodes to the SAME bit layout as the Rust-sourced vendored
+// template goldens. wsh_sortedmulti.bytes.hex carries tagSortedMulti directly at
+// n=3 (indices [0,1,2]); sh_wsh_multi.bytes.hex carries tagSh⊃tagWsh⊃tagMulti at
+// n=2 (indices [0,1]) — tag-only wrappers, identical layout to sortedmulti per
+// VF10/VF2 — so we assert the WRAPPER bytes match by building a tagMulti-bodied
+// tree for the sh(wsh) parity leg. The k / index-list are parameterized PER
+// VECTOR (each vendored .descriptor.json declares its own n): wsh_sortedmulti is
+// n=3 (k=2, [0,1,2]), sh_wsh_multi is n=2 (k=2, [0,1]). Using a fixed n=3 index
+// list for the n=2 vector would reference placeholder @2 and validatePlaceholderUsage
+// would reject it ("placeholder index out of range").
+func TestEncodeMultisigTemplateParity(t *testing.T) {
+	mkTree := func(rootTag tag, innerWsh bool, multiTag tag, k uint8, indices []uint8) node {
+		mk := node{tag: multiTag, body: multiKeysBody{k: k, indices: indices}}
+		switch {
+		case rootTag == tagWsh:
+			return node{tag: tagWsh, body: childrenBody{children: []node{mk}}}
+		case rootTag == tagSh && innerWsh:
+			inner := node{tag: tagWsh, body: childrenBody{children: []node{mk}}}
+			return node{tag: tagSh, body: childrenBody{children: []node{inner}}}
+		default:
+			return node{tag: tagSh, body: childrenBody{children: []node{mk}}}
+		}
+	}
+	for _, tc := range []struct {
+		vector  string
+		tree    node
+		wantHex string
+	}{
+		// wsh_sortedmulti is the sortedmulti template golden (n=3, k=2, [0,1,2]) —
+		// exact match.
+		{"wsh_sortedmulti", mkTree(tagWsh, false, tagSortedMulti, 2, []uint8{0, 1, 2}), "2082001821c22180"},
+		// sh_wsh_multi is the only vendored sh(wsh) wrapper golden (n=2, k=2, [0,1]);
+		// it carries tagMulti, so build the matching tagMulti tree to assert the
+		// wrapper layout at the vector's own n.
+		{"sh_wsh_multi", mkTree(tagSh, true, tagMulti, 2, []uint8{0, 1}), "2042001830860850"},
+	} {
+		t.Run(tc.vector, func(t *testing.T) {
+			// The vendored template golden has NO origin/usesite/pubkeys TLV; build
+			// the matching bare descriptor (shared empty origin, bare-star use-site).
+			d := loadDescriptor(t, tc.vector)
+			got, _, err := encodePayload(&descriptor{
+				n:        d.n,
+				pathDecl: d.pathDecl,
+				useSite:  d.useSite,
+				tree:     tc.tree,
+				tlv:      d.tlv,
+			})
+			if err != nil {
+				t.Fatalf("encodePayload: %v", err)
+			}
+			want := loadBytesHex(t, tc.vector)
+			if hex.EncodeToString(got) != hex.EncodeToString(want) {
+				t.Fatalf("template bytes mismatch:\n got  %x\n want %x", got, want)
+			}
+			// Belt-and-suspenders: pin the exact expected hex per vector so a
+			// silently-rewritten .bytes.hex can't make the test vacuously pass.
+			if hex.EncodeToString(got) != tc.wantHex {
+				t.Fatalf("template bytes != pinned wantHex:\n got  %x\n want %s", got, tc.wantHex)
+			}
+		})
+	}
+}
