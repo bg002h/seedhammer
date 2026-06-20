@@ -476,3 +476,38 @@ func TestDecodeRenderableBytecodeProvenance(t *testing.T) {
 		})
 	}
 }
+
+// shWpkhNode is the canonical decoded sh(wpkh) tree (md/encode_singlesig.go:100-102):
+// an sh with a single wpkh child referencing placeholder @0.
+func shWpkhNode() node {
+	inner := node{tag: tagWpkh, body: keyArgBody{index: 0}}
+	return node{tag: tagSh, body: childrenBody{children: []node{inner}}}
+}
+
+// TestClassifyPolicyShWpkhRenders: classifyPolicy(sh(wpkh)) is PolicySingle (was
+// PolicyComplex), so summarize marks it renderable. The new arm must NOT alter
+// the existing sh(wsh(sortedmulti)) / bare sh(sortedmulti) classifications.
+func TestClassifyPolicyShWpkhRenders(t *testing.T) {
+	pol, k, m := classifyPolicy(shWpkhNode())
+	if pol != PolicySingle || k != 0 || m != 0 {
+		t.Fatalf("classifyPolicy(sh(wpkh)) = (%v,%d,%d), want (PolicySingle,0,0)", pol, k, m)
+	}
+}
+
+// TestInnerWpkhNesting: innerWpkhNesting is true only for sh(wpkh); false for a
+// bare wpkh, for sh(wsh(...)), and for a non-sh root.
+func TestInnerWpkhNesting(t *testing.T) {
+	if !innerWpkhNesting(shWpkhNode()) {
+		t.Fatal("innerWpkhNesting(sh(wpkh)) = false, want true")
+	}
+	bareWpkh := node{tag: tagWpkh, body: keyArgBody{index: 0}}
+	if innerWpkhNesting(bareWpkh) {
+		t.Fatal("innerWpkhNesting(wpkh) = true, want false")
+	}
+	// sh(wsh(...)) must NOT be classified as inner-wpkh.
+	wsh := node{tag: tagWsh, body: childrenBody{children: []node{{tag: tagSortedMulti, body: multiKeysBody{k: 1, indices: []uint8{0, 1}}}}}}
+	shWsh := node{tag: tagSh, body: childrenBody{children: []node{wsh}}}
+	if innerWpkhNesting(shWsh) {
+		t.Fatal("innerWpkhNesting(sh(wsh(...))) = true, want false")
+	}
+}

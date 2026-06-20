@@ -16,7 +16,7 @@ func isBip380ExpressibleShape(root md.ScriptKind, policy md.PolicyKind, renderab
 	}
 	switch policy {
 	case md.PolicySingle:
-		return root == md.ScriptWpkh || root == md.ScriptPkh || root == md.ScriptTr
+		return root == md.ScriptWpkh || root == md.ScriptPkh || root == md.ScriptTr || root == md.ScriptSh
 	case md.PolicySortedMulti:
 		return root == md.ScriptWsh || root == md.ScriptSh
 	}
@@ -31,6 +31,7 @@ func FuzzExpandedToDescriptor(f *testing.F) {
 	f.Add([]byte{0, 0, 2, 3, 1, 1}) // wpkh single, 1 key, xpub present
 	f.Add([]byte{3, 2, 2, 3, 1, 1}) // sh sortedmulti, innerWsh, 2 keys
 	f.Add([]byte{4, 1, 3, 2, 0, 0}) // tr multi (unsorted) — must be unsupported
+	f.Add([]byte{2, 0, 1, 1, 1, 10}) // sh single, InnerWpkh(bit8)+xpubPresent(bit2)=10, 1 key
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, b []byte) {
@@ -48,10 +49,11 @@ func FuzzExpandedToDescriptor(f *testing.F) {
 		innerWsh := at(5)&1 == 1
 		xpubPresent := at(5)&2 == 2
 		wildcardHardened := at(5)&4 == 4
+		innerWpkh := at(5)&8 == 8
 
 		tpl := md.Template{
 			N: n, Root: root, Policy: policy, K: k, M: n,
-			Renderable: renderable, InnerWsh: innerWsh,
+			Renderable: renderable, InnerWsh: innerWsh, InnerWpkh: innerWpkh,
 		}
 		keys := make([]md.ExpandedKey, n)
 		for i := range keys {

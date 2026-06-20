@@ -1173,8 +1173,9 @@ const (
 	// ScriptShWpkh is APPENDED after ScriptTr (R0-M2): a BIP-49 nested-segwit
 	// sh(wpkh) single-sig wrapper. It is an EncodeSingleSig input discriminant
 	// only — the decoder summarizes an sh(wpkh) wire to Root==ScriptSh (the
-	// on-wire root tag is Sh). Appending (not inserting) preserves the existing
-	// values so rootScriptKind/#10b consumers are unaffected.
+	// on-wire root tag is Sh) and carries the Template.InnerWpkh discriminant so
+	// the projection picks P2SH_P2WPKH. Appending (not inserting) preserves the
+	// existing values so rootScriptKind/#10b consumers are unaffected.
 	ScriptShWpkh
 )
 
@@ -1216,6 +1217,12 @@ type Template struct {
 	// this to pick P2SH_P2WSH vs P2SH and never verify one against the other.
 	// Meaningful only when Root==ScriptSh; false for every other root.
 	InnerWsh bool
+	// InnerWpkh is the sh(wpkh) single-sig discriminant: true iff Root==ScriptSh
+	// AND the immediate sh child is a wpkh key (sh(wpkh) — BIP-49 P2SH-P2WPKH).
+	// A consumer building a *bip380.Descriptor uses it to pick P2SH_P2WPKH for the
+	// single-sig sh root, symmetric with InnerWsh for the sorted-multi sh root.
+	// Meaningful only when Root==ScriptSh && Policy==PolicySingle.
+	InnerWpkh bool
 }
 
 // Decode decodes a single-string md1 descriptor into a Template. It refuses
@@ -1285,6 +1292,12 @@ func classifyPolicy(tree node) (PolicyKind, int, int) {
 	case tagSh:
 		if b, ok := tree.body.(childrenBody); ok && len(b.children) == 1 {
 			inner := b.children[0]
+			// sh(wpkh) — BIP-49 P2SH-P2WPKH single-sig nested-segwit.
+			if inner.tag == tagWpkh {
+				if _, ok := inner.body.(keyArgBody); ok {
+					return PolicySingle, 0, 0
+				}
+			}
 			// sh(wsh(multi/sortedmulti))
 			if inner.tag == tagWsh {
 				if gb, ok := inner.body.(childrenBody); ok && len(gb.children) == 1 {
@@ -1330,6 +1343,25 @@ func innerWshNesting(tree node) bool {
 	return b.children[0].tag == tagWsh
 }
 
+// innerWpkhNesting reports whether tree is an sh(wpkh) wrapper — the single-sig
+// nested-segwit discriminant (BIP-49 P2SH-P2WPKH). It mirrors innerWshNesting:
+// an sh with a single wpkh-key child. Returns false for a bare wpkh, for any
+// sh(wsh(...))/sh(multi), and for any non-sh root.
+func innerWpkhNesting(tree node) bool {
+	if tree.tag != tagSh {
+		return false
+	}
+	b, ok := tree.body.(childrenBody)
+	if !ok || len(b.children) != 1 {
+		return false
+	}
+	if b.children[0].tag != tagWpkh {
+		return false
+	}
+	_, ok = b.children[0].body.(keyArgBody)
+	return ok
+}
+
 func summarize(d *descriptor) Template {
 	root := rootScriptKind(d.tree.tag)
 	policy, k, m := classifyPolicy(d.tree)
@@ -1353,6 +1385,7 @@ func summarize(d *descriptor) Template {
 		Keys:       keys,
 		Renderable: renderable,
 		InnerWsh:   innerWshNesting(d.tree),
+		InnerWpkh:  innerWpkhNesting(d.tree),
 	}
 }
 

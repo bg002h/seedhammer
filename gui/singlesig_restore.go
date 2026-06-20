@@ -22,11 +22,12 @@ import (
 // wallet watch-only: the master fingerprint, the concrete output descriptor, and
 // the first receive + change addresses. It carries NO secret.
 //
-// R0-I1 (Option Y): the descriptor is built DIRECTLY, bypassing the md1
-// classifier — classifyPolicy/scriptForTemplate drop single-key sh(wpkh)
-// (md1_expand.go has no ScriptSh+single arm), so an md1→classify→descriptor path
-// would lose the BIP-49 restore doc. Building the *bip380.Descriptor from the
-// engraved xpub + chosen script keeps all 4 types, including sh-wpkh.
+// R0-I1 (Option Y): the restore doc builds the descriptor DIRECTLY from the
+// engraved xpub + chosen script (rather than re-encoding to md1 and decoding
+// back). This keeps the restore-doc path independent of the verify-projection
+// path and threads the REAL ParentFingerprint for a canonical xpub. (The md1
+// verify path DOES now render sh(wpkh) → P2SH_P2WPKH via the InnerWpkh
+// discriminant; both paths agree on the BIP-49 descriptor.)
 //
 // The Key carries the REAL ParentFingerprint (R0-I1): Key.String() re-serializes
 // the xpub from (KeyData, ChainCode, ParentFingerprint, depth/childnum); a
