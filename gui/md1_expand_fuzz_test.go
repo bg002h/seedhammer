@@ -7,9 +7,14 @@ import (
 	"seedhammer.com/md"
 )
 
-// isBip380ExpressibleShape reports whether (root, policy, innerWsh) is one of
+// isBip380ExpressibleShape reports whether (root, policy, renderable) is one of
 // the faithfully-projectable shapes (D2) — the ONLY shapes for which
-// expandedToDescriptor may return expandOK.
+// expandedToDescriptor may return expandOK. It deliberately does NOT inspect the
+// inner-nesting discriminant (InnerWsh/InnerWpkh): for ScriptSh it reports
+// expressible regardless. That is sound because the invariant is one-directional
+// (expandOK ⇒ expressible): when the inner kind is absent, scriptForTemplate
+// returns expandUnsupported (never expandOK), so the harness stays correctly
+// over-permissive on the expressible side rather than ever under-reporting.
 func isBip380ExpressibleShape(root md.ScriptKind, policy md.PolicyKind, renderable bool) bool {
 	if !renderable {
 		return false
