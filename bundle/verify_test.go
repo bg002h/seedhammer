@@ -236,3 +236,35 @@ func TestVerifyBundleStubMismatch(t *testing.T) {
 		t.Errorf("error %q does not name stub", err)
 	}
 }
+
+// T-M1 (verify-cluster M1): a readback ms1 whose recovered entropy MATCHES the
+// derived ms1 but whose BIP-39 language byte DIFFERS (Japanese mnem, lang 1, vs
+// the derived English entr, lang 0) must FAIL — identical entropy under a
+// different wordlist is a different wallet. The fixture is built directly because
+// EncodeMS1 only emits entr/English; this is a hand-typed-readback-only string.
+// Proven on 3a23dbb: Verify PASSES this (the M1 bug). After the language compare
+// it FAILS with "verify: ms1 wordlist/language mismatch".
+func TestVerifyBundleLanguageMismatch(t *testing.T) {
+	derived := correctBundle() // entr / English, entropy = zero-16
+	readback := correctBundle()
+	// codex32.NewSeed("ms",0,"entr",'s',[]byte{0x02,0x01,<zero16>}) — a valid
+	// language-1 (Japanese) mnem ms1 with the SAME zero-16 entropy as wpkhMS1.
+	// (Verified: decodes to prefix=2/mnem, language=1, entropy=00..00.)
+	readback.MS1 = "ms10entrsqgqsqqqqqqqqqqqqqqqqqqqqqqqqqj9tawneveyd9j"
+	err := Verify(derived, readback)
+	if err == nil {
+		t.Fatal("language-differ readback (same entropy) accepted, want FAIL")
+	}
+	if !strings.Contains(err.Error(), "language") && !strings.Contains(err.Error(), "wordlist") {
+		t.Errorf("error %q does not name language/wordlist", err)
+	}
+}
+
+// TestVerifyBundleLanguageEnglishNotOverRejected: a legitimate English/entr
+// readback (language 0) against an English/entr derived (language 0) must still
+// PASS — the language compare must not over-reject identical-wordlist readbacks.
+func TestVerifyBundleLanguageEnglishNotOverRejected(t *testing.T) {
+	if err := Verify(correctBundle(), correctBundle()); err != nil {
+		t.Fatalf("English/entr readback over-rejected: %v (want PASS)", err)
+	}
+}
