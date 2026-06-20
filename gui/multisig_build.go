@@ -1,10 +1,15 @@
 package gui
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"seedhammer.com/bip32"
 	"seedhammer.com/bip39"
 	"seedhammer.com/md"
+	"seedhammer.com/mk"
 )
 
 // ─── T6c Phase B: the on-device "Build policy" authoring path ────────────────
@@ -149,4 +154,91 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 		p.IncludeFp = multisigIncludeFpFor(fpIdx)
 		return p, true
 	}
+}
+
+var errBuildSlotCount = errors.New("multisig build: cosigner count != n-1")
+
+// multisigSharedOrigin is the LOCKED shared origin for OriginShared mode: the
+// BIP-48 P2WSH multisig account path m/48'/0'/0'/2' (matches T6b / pathPickerFlow
+// BIP-48). Self and every cosigner declare this single shared origin.
+func multisigSharedOrigin() bip32.Path {
+	const h = hdkeychain.HardenedKeyStart
+	return bip32.Path{48 | h, 0 | h, 0 | h, 2 | h}
+}
+
+// fpBytes converts a uint32 master fingerprint to the 4-byte big-endian form the
+// encoder's MultisigCosigner.Fingerprint expects.
+func fpBytes(fp uint32) [4]byte {
+	return [4]byte{byte(fp >> 24), byte(fp >> 16), byte(fp >> 8), byte(fp)}
+}
+
+// cosignerFromCard parses ONE gathered cosigner mk.Card into a MultisigCosigner.
+// includeFp drives HOMOGENEOUS fp-presence: when true the card's 8-hex
+// Fingerprint is decoded to 4 bytes (a missing fp under Include is an error so
+// the policy stays homogeneous); when false no fp is set. The card's Origin is
+// IGNORED (OriginShared mode declares the single shared origin).
+func cosignerFromCard(card mk.Card, includeFp bool) (md.MultisigCosigner, error) {
+	cc, pk, _, err := decodeXpubBytes(card.Xpub)
+	if err != nil {
+		return md.MultisigCosigner{}, err
+	}
+	c := md.MultisigCosigner{ChainCode: cc, CompressedPubkey: pk}
+	if includeFp {
+		if card.Fingerprint == "" {
+			return md.MultisigCosigner{}, errors.New("multisig build: Include selected but a cosigner card has no fingerprint")
+		}
+		raw, err := hex.DecodeString(card.Fingerprint)
+		if err != nil || len(raw) != 4 {
+			return md.MultisigCosigner{}, errors.New("multisig build: bad cosigner fingerprint")
+		}
+		var fp [4]byte
+		copy(fp[:], raw)
+		c.Fingerprint = fp
+		c.FpPresent = true
+	}
+	return c, nil
+}
+
+// assembleBuildPolicy is the SOLE md1-bytes producer call site for the Build
+// path (I-VERBATIM). It places the self-derived key at p.SelfSlot and the
+// gathered cosigners in the REMAINING slots in gather order (ascending slot
+// index, skipping SelfSlot), builds the homogeneous-fp []MultisigCosigner, and
+// calls md.EncodeMultisig in that exact (caller-owned, order-preserving) order.
+func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint32, cosigners []mk.Card) (out []string, stub [4]byte, slots []md.SlotInfo, err error) {
+	if len(cosigners) != p.N-1 {
+		return nil, [4]byte{}, nil, errBuildSlotCount
+	}
+	selfCC, selfPK, _, err := decodeXpubBytes(selfXpub)
+	if err != nil {
+		return nil, [4]byte{}, nil, err
+	}
+	self := md.MultisigCosigner{ChainCode: selfCC, CompressedPubkey: selfPK}
+	if p.IncludeFp {
+		self.Fingerprint = fpBytes(selfMasterFP)
+		self.FpPresent = true
+	}
+
+	all := make([]md.MultisigCosigner, p.N)
+	all[p.SelfSlot] = self
+	gi := 0 // gather index into cosigners
+	for slot := 0; slot < p.N; slot++ {
+		if slot == p.SelfSlot {
+			continue
+		}
+		c, cerr := cosignerFromCard(cosigners[gi], p.IncludeFp)
+		if cerr != nil {
+			return nil, [4]byte{}, nil, cerr
+		}
+		all[slot] = c
+		gi++
+	}
+
+	req := md.EncodeMultisigRequest{
+		Cosigners:    all,
+		K:            uint8(p.K),
+		Script:       p.Script,
+		OriginMode:   md.OriginShared,
+		SharedOrigin: originComponents(multisigSharedOrigin()),
+	}
+	return md.EncodeMultisig(req)
 }
