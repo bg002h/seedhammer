@@ -107,22 +107,25 @@ func TestVerifyBundleMutatedDescriptor(t *testing.T) {
 	}
 }
 
-// TestVerifyBundleMd1FieldNamed exercises the md1 exact-string branch directly:
-// a read-back that shares the derived mk1 + ms1 (so fp/xpub/path agree and the
-// stub binds) but is handed a re-chunked md1 that does NOT match the derived
-// md1 strings. To keep the stub-binding precondition satisfiable we reuse the
-// derived md1 for the binding side and assert the comparator's md1 field check
-// fires when the strings differ — using a whitespace-trimmed-but-reordered set
-// is not representative, so we instead confirm md1 ordering matters.
-func TestVerifyBundleMd1Reordered(t *testing.T) {
+// TestVerifyBundleMd1PositionalContract documents and guards the COMPARATOR
+// CONTRACT: bundle.Verify compares md1 POSITIONALLY (equalStrings), so it
+// correctly rejects an out-of-order md1 []string. Canonical ChunkIndex ordering
+// is the GATHER layer's responsibility — md1Gatherer.collected()
+// (gui/md1_gather.go), which the H2 fix made deterministic; see the gui test
+// TestMD1GathererCollectedIndexOrder (T-H2). This is NOT product behaviour that
+// rejects correct backups (the gather layer canonicalizes order before Verify);
+// it asserts the comparator stays a pure positional compare and is NOT weakened
+// to sort internally (which would re-introduce parsing into the deterministic
+// core). Assertion unchanged from the former TestVerifyBundleMd1Reordered.
+func TestVerifyBundleMd1PositionalContract(t *testing.T) {
 	derived := correctBundle()
 	readback := correctBundle()
-	// Reorder the md1 chunks: a valid set (Reassemble is order-tolerant, so the
-	// stub still binds) but the exact-string sequence differs → md1 mismatch.
+	// An out-of-order md1 []string: a valid set (Reassemble is order-tolerant, so
+	// the stub still binds) but the positional sequence differs → md1 mismatch.
 	readback.MD1 = []string{wpkhMD1[1], wpkhMD1[0], wpkhMD1[2]}
 	err := Verify(derived, readback)
 	if err == nil {
-		t.Fatal("reordered md1 accepted, want FAIL")
+		t.Fatal("out-of-order md1 accepted by the positional comparator, want FAIL")
 	}
 	if !strings.Contains(err.Error(), "md1") {
 		t.Errorf("error %q does not name md1", err)
