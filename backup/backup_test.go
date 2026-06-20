@@ -389,3 +389,60 @@ func compareGolden(t testing.TB, name string, plan engrave.Engraving) {
 		t.Fatal(err)
 	}
 }
+
+// engraveStringRecovered runs EngraveSeedString under a recover so a panic on
+// current code is reported as a test failure instead of crashing the run.
+func engraveStringRecovered(t *testing.T, raw string) (err error, panicked bool) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+		}
+	}()
+	cx, e := codex32.New(raw)
+	if e != nil {
+		t.Fatalf("codex32.New(%q): %v", raw, e)
+	}
+	id, _, _ := cx.Split()
+	s := SeedString{Title: id, Seed: cx.String(), Font: constant.Font}
+	_, err = EngraveSeedString(params, s)
+	return err, false
+}
+
+func TestEngraveSeedStringTooLong(t *testing.T) {
+	cases := []struct{ name, s string }{
+		// 93-char short code -> QR dim 37 (V5, unsupported).
+		{"dim37", "ms10testsqqrsu9guyv4rzwplgex4gkmzd9c8wl593jfe4gdg47mtm3xt6tv7pelw7h7qxzs3rq0jvtg3ye6xggmhcl92"},
+		// 127-char BIP-93 long-code reference -> QR dim 41 (V6, unsupported).
+		{"dim41", "ms100c8vsm32zxfguhpchtlupzry9x8gf2tvdw0s3jn54khce6mua7lqpzygsfjd6an074rxvcemlh8wu3tk925acdefghjklmnpqrstuvwxy06fhpv80undvarhrak"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err, panicked := engraveStringRecovered(t, tc.s)
+			if panicked {
+				t.Fatalf("%s: EngraveSeedString panicked; want a returned error", tc.name)
+			}
+			if err == nil {
+				t.Fatalf("%s: want non-nil error, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestEngraveSeedStringHappy(t *testing.T) {
+	// 74-char codex32 short code -> QR dim 33 (V4, supported).
+	const happy = "ms10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyq0pgjxpzx0ysaam"
+	cx, err := codex32.New(happy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _, _ := cx.Split()
+	s := SeedString{Title: id, Seed: cx.String(), Font: constant.Font}
+	e, err := EngraveSeedString(params, s)
+	if err != nil {
+		t.Fatalf("happy path returned error: %v", err)
+	}
+	if e == nil {
+		t.Fatal("happy path returned nil Engraving")
+	}
+}

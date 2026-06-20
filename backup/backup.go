@@ -2,6 +2,7 @@
 package backup
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"math"
@@ -77,6 +78,9 @@ func EngraveSeedString(params engrave.Params, plate SeedString) (engrave.Engravi
 	qrc, err := qr.Encode(seed, qr.M)
 	if err != nil {
 		return nil, err
+	}
+	if qrc.Size > 33 {
+		return nil, errors.New("seed too long to engrave QR")
 	}
 	qrCmd, err := engrave.ConstantQR(qrc)
 	if err != nil {

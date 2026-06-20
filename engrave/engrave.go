@@ -405,6 +405,12 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 // except for the QR code version (size).
 func ConstantQR(qrc *qr.Code) (*ConstantQRCmd, error) {
 	dim := qrc.Size
+	if dim > 33 {
+		// bitmapForQRStatic only supports versions 1-4 (dims 21/25/29/33).
+		// Reject larger versions here so no caller can trigger the panic
+		// at bitmapForQRStatic's default case.
+		return nil, errors.New("seed too long to engrave QR")
+	}
 	qr := bitmapForQR(qrc)
 	engraved := newBitmap(dim, dim)
 	posMarkers, alignMarkers := bitmapForQRStatic(dim)
