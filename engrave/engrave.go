@@ -1462,9 +1462,12 @@ func (s *SafePointer) Progress(p uint) {
 	// Advance s.completed.
 	for len(s.history) > s.completed {
 		k := s.history[s.completed]
-		// Stop when an engraving knot later than progress
-		// is reached.
-		if k.Engrave && s.progress < k.T {
+		// Stop when a knot later than progress is reached. The guard
+		// is symmetric across move and engrave knots: a leading move
+		// knot whose duration k.T exceeds the driver-reported progress
+		// must not retire early, or the unsigned s.progress -= k.T
+		// below would underflow (wrap) and corrupt the safe point.
+		if s.progress < k.T {
 			break
 		}
 		s.progress -= k.T
