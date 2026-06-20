@@ -370,6 +370,60 @@ func TestSafePointer(t *testing.T) {
 	}
 }
 
+func TestSafePointerNoUnderflow(t *testing.T) {
+	// A leading non-engrave MOVE knot (the universal start of every engraving),
+	// followed by a clamped triple at P and a trailing engrave knot. The move's
+	// T is larger than the first reported progress, which on f907eea wraps
+	// s.progress via the asymmetric guard at engrave.go:1467.
+	P := bezier.Pt(10, 10)
+	hist := []bspline.Knot{
+		{Ctrl: bezier.Pt(5, 5), T: 100, Engrave: false}, // leading move
+		{Ctrl: P, T: 50, Engrave: true},                 // k0 of clamped triple
+		{Ctrl: P, T: 50, Engrave: true},                 // k1
+		{Ctrl: P, T: 50, Engrave: true},                 // k2 (triple ends at cum T=250)
+		{Ctrl: bezier.Pt(20, 20), T: 50, Engrave: true},
+	}
+	sp := new(SafePointer)
+	for _, k := range hist {
+		sp.Knot(k)
+	}
+
+	// Cumulative T through the END of the clamped triple (k2): 100+50+50+50.
+	const tripleEnd = 250
+
+	// Independent sum of all T fed, for the wrap-catcher counter-invariant.
+	var totalTicks uint
+	for _, k := range hist {
+		totalTicks += k.T
+	}
+
+	// Feed progress in increments that keep completed < tripleEnd until the
+	// final step, so the safe point must NOT advance to P early.
+	steps := []uint{0, 50, 50, 49, 1, 100} // cumulative: 0,50,100,149,150,250
+	completed := uint(0)
+	for i, d := range steps {
+		sp.Progress(d)
+		completed += d
+
+		// (a) Wrap-catcher counter-invariant: progress never exceeds total ticks.
+		if sp.progress > totalTicks {
+			t.Fatalf("step %d: sp.progress=%d exceeds totalTicks=%d (underflow wrap)", i, sp.progress, totalTicks)
+		}
+
+		// (b) Safe-point reference: never select the triple's control point P
+		// before its cumulative T has fully elapsed (completed >= tripleEnd).
+		if completed < tripleEnd && sp.safePoint == P {
+			t.Fatalf("step %d: safePoint advanced to %v at completed=%d < tripleEnd=%d (not-yet-reached safe point)",
+				i, P, completed, tripleEnd)
+		}
+	}
+
+	// After the full triple has elapsed, the safe point MUST be P.
+	if sp.safePoint != P {
+		t.Fatalf("after completed=%d safePoint=%v, want %v", completed, sp.safePoint, P)
+	}
+}
+
 func FuzzConstantQR(f *testing.F) {
 	f.Fuzz(func(t *testing.T, entropy []byte) {
 		if len(entropy) < 16 {
