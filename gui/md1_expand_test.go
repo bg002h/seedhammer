@@ -1,9 +1,11 @@
 package gui
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/address"
 	"seedhammer.com/bip32"
 	"seedhammer.com/bip380"
@@ -241,5 +243,99 @@ func TestExpandedToDescriptorExoticRangeUnsupported(t *testing.T) {
 	k.UseSite = md.UseSite{HasMultipath: true, Multipath: []md.UseSiteAlt{{Value: 0}, {Value: 5}}}
 	if desc, status := expandedToDescriptor(tpl, []md.ExpandedKey{k}); status != expandUnsupported || desc != nil {
 		t.Fatalf("exotic <0;5>/* range → status=%v, want expandUnsupported", status)
+	}
+}
+
+// TestShWpkhGoldenAddress (Task 3, A1/I1 — load-bearing): a BIP-49 sh(wpkh) md1
+// for the abandon seed, decoded through the REAL projection path
+// (EncodeSingleSig(ScriptShWpkh) -> ExpandWalletPolicyChunks -> expandedToDescriptor),
+// derives the byte-exact P2SH-P2WPKH receive[0]/change[0] golden.
+func TestShWpkhGoldenAddress(t *testing.T) {
+	m := abandonAboutMnemonic()
+	path := singleSigPath(49) // m/49'/0'/0'
+	xpub, masterFP, err := deriveAccountXpub(m, "", &chaincfg.MainNetParams, path)
+	if err != nil {
+		t.Fatalf("deriveAccountXpub: %v", err)
+	}
+	const wantAcctXpub = "xpub6C6nQwHaWbSrzs5tZ1q7m5R9cPK9eYpNMFesiXsYrgc1P8bvLLAet9JfHjYXKjToD8cBRswJXXbbFpXgwsswVPAZzKMa1jUp2kVkGVUaJa7"
+	if xpub != wantAcctXpub {
+		t.Fatalf("BIP-49 account xpub = %s, want %s", xpub, wantAcctXpub)
+	}
+	cc, pk, _, err := decodeXpubBytes(xpub)
+	if err != nil {
+		t.Fatalf("decodeXpubBytes: %v", err)
+	}
+	var fp [4]byte
+	binary.BigEndian.PutUint32(fp[:], masterFP)
+
+	strs, err := md.EncodeSingleSig(cc, pk, fp, originComponents(path), md.ScriptShWpkh)
+	if err != nil {
+		t.Fatalf("EncodeSingleSig: %v", err)
+	}
+	tpl, keys, err := md.ExpandWalletPolicyChunks(strs)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+	// The real decode now renders it (Task 1 touch-point under test).
+	if tpl.Root != md.ScriptSh || tpl.Policy != md.PolicySingle || !tpl.Renderable || !tpl.InnerWpkh {
+		t.Fatalf("decoded tpl = {Root:%v Policy:%v Renderable:%v InnerWpkh:%v}, want ScriptSh/PolicySingle/true/true", tpl.Root, tpl.Policy, tpl.Renderable, tpl.InnerWpkh)
+	}
+	if tpl.InnerWsh {
+		t.Fatal("InnerWsh = true for sh(wpkh); want false (discriminants independent)")
+	}
+
+	desc, status := expandedToDescriptor(tpl, keys)
+	if status != expandOK {
+		t.Fatalf("status = %v, want expandOK", status)
+	}
+	if desc.Script != bip380.P2SH_P2WPKH || desc.Type != bip380.Singlesig {
+		t.Fatalf("desc = {Script:%v Type:%v}, want P2SH_P2WPKH/Singlesig", desc.Script, desc.Type)
+	}
+	r0, err := address.Receive(desc, 0)
+	if err != nil {
+		t.Fatalf("address.Receive: %v", err)
+	}
+	c0, err := address.Change(desc, 0)
+	if err != nil {
+		t.Fatalf("address.Change: %v", err)
+	}
+	const wantRecv0 = "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf"
+	const wantChange0 = "34K56kSjgUCUSD8GTtuF7c9Zzwokbs6uZ7"
+	if r0 != wantRecv0 {
+		t.Fatalf("BIP-49 sh(wpkh) receive[0] = %s, want %s", r0, wantRecv0)
+	}
+	if c0 != wantChange0 {
+		t.Fatalf("BIP-49 sh(wpkh) change[0] = %s, want %s", c0, wantChange0)
+	}
+}
+
+// TestShWpkhNoCollision (Task 3, A2/I2): for the SAME key material, the
+// sh(wpkh) P2SH-P2WPKH receive[0] differs from both the sh(wsh(sortedmulti))
+// P2SH-P2WSH and the bare sh(sortedmulti) P2SH receive[0]. Built directly so
+// the three sh shapes share one key set.
+func TestShWpkhNoCollision(t *testing.T) {
+	k1 := []md.ExpandedKey{expandedKey(0, [4]byte{0x5a, 0x8, 0x4, 0xe3})}
+	k2 := []md.ExpandedKey{
+		expandedKey(0, [4]byte{0x5a, 0x8, 0x4, 0xe3}),
+		expandedKey(1, [4]byte{0xdd, 0x4f, 0xad, 0xee}),
+	}
+	shWpkh := md.Template{N: 1, Root: md.ScriptSh, Policy: md.PolicySingle, Renderable: true, InnerWpkh: true}
+	bare := md.Template{N: 2, Root: md.ScriptSh, Policy: md.PolicySortedMulti, K: 1, M: 2, Renderable: true, InnerWsh: false}
+	nested := md.Template{N: 2, Root: md.ScriptSh, Policy: md.PolicySortedMulti, K: 1, M: 2, Renderable: true, InnerWsh: true}
+
+	dWpkh, sWpkh := expandedToDescriptor(shWpkh, k1)
+	dBare, sBare := expandedToDescriptor(bare, k2)
+	dNested, sNested := expandedToDescriptor(nested, k2)
+	if sWpkh != expandOK || sBare != expandOK || sNested != expandOK {
+		t.Fatalf("statuses = %v/%v/%v, want all expandOK", sWpkh, sBare, sNested)
+	}
+	if dWpkh.Script != bip380.P2SH_P2WPKH || dBare.Script != bip380.P2SH || dNested.Script != bip380.P2SH_P2WSH {
+		t.Fatalf("scripts = %v/%v/%v, want P2SH_P2WPKH/P2SH/P2SH_P2WSH", dWpkh.Script, dBare.Script, dNested.Script)
+	}
+	aWpkh, _ := address.Receive(dWpkh, 0)
+	aBare, _ := address.Receive(dBare, 0)
+	aNested, _ := address.Receive(dNested, 0)
+	if aWpkh == aBare || aWpkh == aNested || aBare == aNested {
+		t.Fatalf("collision: P2SH_P2WPKH=%s P2SH=%s P2SH_P2WSH=%s must be pairwise-distinct", aWpkh, aBare, aNested)
 	}
 }
