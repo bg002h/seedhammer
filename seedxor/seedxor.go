@@ -35,7 +35,9 @@ func Combine(parts []bip39.Mnemonic) (bip39.Mnemonic, error) {
 	if len(parts) < 2 {
 		return nil, errTooFewParts
 	}
-	out := append([]byte(nil), parts[0].Entropy()...)
+	e0 := parts[0].Entropy()
+	out := append([]byte(nil), e0...)
+	wipe(e0) // M3: scrub the first part's entropy copy (out is a distinct alloc)
 	if !interopLen(len(out)) {
 		wipe(out)
 		return nil, errBadLength
@@ -44,11 +46,13 @@ func Combine(parts []bip39.Mnemonic) (bip39.Mnemonic, error) {
 		e := p.Entropy()
 		if len(e) != len(out) {
 			wipe(out)
+			wipe(e) // M3: scrub the mismatched part's entropy before the early return
 			return nil, errMismatchedLengths
 		}
 		for i := range out {
 			out[i] ^= e[i]
 		}
+		wipe(e) // M3: scrub this part's entropy copy after it is XORed into out
 	}
 	m := bip39.New(out) // safe: len(out) ∈ {16,24,32}, all valid for New
 	wipe(out)
