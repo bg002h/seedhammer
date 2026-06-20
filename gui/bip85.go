@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -106,6 +107,13 @@ func deriveBip85Child(m bip39.Mnemonic, passphrase string, words, index int) (bi
 	priv := pkey.Serialize() // 32-byte secret
 	k.Zero()
 	defer wipeBytes(priv)
+	defer pkey.Zero() // M4: scrub the live leaf EC private-key scalar (pkey.Key)
+	// Test-only seam: observe the live *PrivateKey so a test can assert
+	// pkey.Zero() scrubbed pkey.Key on return. nil in production. Mirrors
+	// bip85SeedHook (the sanctioned in-file test-only seam).
+	if bip85PkeyHook != nil {
+		bip85PkeyHook(pkey)
+	}
 
 	hmacOut := bip85.Entropy(priv) // 64-byte secret
 	defer wipeBytes(hmacOut)
@@ -239,6 +247,11 @@ func childSeedWarning(ctx *Context, th *Colors) bool {
 // assert both are scrubbed on exit, I-3). nil in production. Mirrors
 // singleSigSeedHook.
 var bip85SeedHook func(master, child bip39.Mnemonic)
+
+// bip85PkeyHook is a test-only seam to observe the leaf EC private key so a test
+// can assert deriveBip85Child's `defer pkey.Zero()` scrubbed pkey.Key on return
+// (M4). nil in production. Mirrors bip85SeedHook (the sanctioned in-file seam).
+var bip85PkeyHook func(pkey *btcec.PrivateKey)
 
 // bip85DeriveFlow is the bip85Derive program: a hand-typed BIP-39 MASTER seed
 // (SECRET, typed-only — NEVER a scan) + optional passphrase ON THE MASTER -> pick
