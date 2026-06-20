@@ -510,6 +510,7 @@ func TestEncodeMultisigRefuse(t *testing.T) {
 		}), errMultisigEmptyDivergent},
 		{"zero-cosigners", mkReq(func(r *EncodeMultisigRequest) { r.Cosigners = nil; r.K = 1 }), errKeyCountRange},
 		{"bad-script", mkReq(func(r *EncodeMultisigRequest) { r.Script = MultisigScript(99) }), errMultisigBadScript},
+		{"bad-origin-mode", mkReq(func(r *EncodeMultisigRequest) { r.OriginMode = OriginMode(99) }), errMultisigBadOriginMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, err := EncodeMultisig(tc.req)

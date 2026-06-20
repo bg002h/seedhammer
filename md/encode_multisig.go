@@ -76,6 +76,7 @@ var (
 	errMultisigEmptySharedOrigin = errors.New("md: EncodeMultisig OriginShared requires a non-empty SharedOrigin")
 	errMultisigEmptyDivergent    = errors.New("md: EncodeMultisig OriginDivergent requires a non-empty Origin for every cosigner")
 	errMultisigBadScript         = errors.New("md: EncodeMultisig unknown script kind")
+	errMultisigBadOriginMode     = errors.New("md: unknown multisig origin mode")
 )
 
 // EncodeMultisig assembles a sortedmulti k-of-n wallet-policy md1 over the given
@@ -107,7 +108,7 @@ func EncodeMultisig(req EncodeMultisigRequest) (out []string, stub [4]byte, slot
 		}
 		pd = pathDecl{n: uint8(n), divergent: paths}
 	default:
-		return nil, [4]byte{}, nil, errMultisigBadScript
+		return nil, [4]byte{}, nil, errMultisigBadOriginMode
 	}
 
 	// The multisig tree per wrapper (sortedmulti{k, [0..n-1]} in cosigner order).

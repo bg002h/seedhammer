@@ -262,49 +262,74 @@ type buildPolicyParams struct {
 	IncludeFp bool // homogeneous fp-presence
 }
 
+// Picker stage indices for buildParamPickFlow's stage-loop. Back from any stage
+// > stageTemplate steps back ONE stage; Back from stageTemplate abandons.
+const (
+	stageTemplate = iota // template (script kind)
+	stageN               // cosigner count n
+	stageK               // threshold k (range depends on n)
+	stageSelfSlot        // self-slot @S (range depends on n)
+	stageFp              // fingerprint presence
+	stageDone            // all picked
+)
+
 // buildParamPickFlow runs the bounded pickers in order: template -> n -> k(n) ->
-// self-slot @S -> fp-presence. Back from any picker re-shows the previous one
-// (or returns ok==false from the first). Every returned param is in-range by
-// construction (no free-form widget exists).
+// self-slot @S -> fp-presence. Back navigates back ONE stage through the full
+// sequence; Back from the FIRST stage (template) abandons the Build flow
+// (ok==false). k's and @S's ranges depend on n and are re-derived whenever those
+// stages are (re-)entered, so changing n upstream correctly re-bounds them. Every
+// returned param is in-range by construction (no free-form widget exists).
 func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 	var p buildPolicyParams
-	// Stage 1: template.
-	script, ok := multisigTemplatePick(ctx, th)
-	if !ok {
-		return p, false
+	stage := stageTemplate
+	for stage != stageDone {
+		switch stage {
+		case stageTemplate:
+			script, ok := multisigTemplatePick(ctx, th)
+			if !ok {
+				return p, false // Back from the first stage -> abandon the Build flow.
+			}
+			p.Script = script
+			stage = stageN
+		case stageN:
+			nCS := &ChoiceScreen{Title: "Cosigners", Lead: "How many keys (n)?", Choices: multisigNChoices()}
+			nIdx, ok := nCS.Choose(ctx, th)
+			if !ok {
+				stage = stageTemplate // Back -> re-pick template.
+				continue
+			}
+			p.N = multisigNFor(nIdx)
+			stage = stageK
+		case stageK:
+			kCS := &ChoiceScreen{Title: "Threshold", Lead: fmt.Sprintf("Required signatures (k of %d)?", p.N), Choices: multisigKChoices(p.N)}
+			kIdx, ok := kCS.Choose(ctx, th)
+			if !ok {
+				stage = stageN // Back -> re-pick n (which re-bounds k/@S).
+				continue
+			}
+			p.K = multisigKFor(kIdx)
+			stage = stageSelfSlot
+		case stageSelfSlot:
+			sCS := &ChoiceScreen{Title: "Your slot", Lead: "Which slot is your key?", Choices: multisigSelfSlotChoices(p.N)}
+			sIdx, ok := sCS.Choose(ctx, th)
+			if !ok {
+				stage = stageK // Back -> re-pick k.
+				continue
+			}
+			p.SelfSlot = sIdx
+			stage = stageFp
+		case stageFp:
+			fpCS := &ChoiceScreen{Title: "Fingerprints", Lead: "Include key fingerprints?", Choices: multisigFpChoices()}
+			fpIdx, ok := fpCS.Choose(ctx, th)
+			if !ok {
+				stage = stageSelfSlot // Back -> re-pick @S.
+				continue
+			}
+			p.IncludeFp = multisigIncludeFpFor(fpIdx)
+			stage = stageDone
+		}
 	}
-	p.Script = script
-	for {
-		// Stage 2: n.
-		nCS := &ChoiceScreen{Title: "Cosigners", Lead: "How many keys (n)?", Choices: multisigNChoices()}
-		nIdx, ok := nCS.Choose(ctx, th)
-		if !ok {
-			return p, false // Back from n -> abandon (template already chosen; simplest).
-		}
-		p.N = multisigNFor(nIdx)
-		// Stage 3: k (dependent on n).
-		kCS := &ChoiceScreen{Title: "Threshold", Lead: fmt.Sprintf("Required signatures (k of %d)?", p.N), Choices: multisigKChoices(p.N)}
-		kIdx, ok := kCS.Choose(ctx, th)
-		if !ok {
-			continue // Back from k -> re-pick n.
-		}
-		p.K = multisigKFor(kIdx)
-		// Stage 4: self-slot @S.
-		sCS := &ChoiceScreen{Title: "Your slot", Lead: "Which slot is your key?", Choices: multisigSelfSlotChoices(p.N)}
-		sIdx, ok := sCS.Choose(ctx, th)
-		if !ok {
-			continue // Back from @S -> re-pick n (and k).
-		}
-		p.SelfSlot = sIdx
-		// Stage 5: fp-presence.
-		fpCS := &ChoiceScreen{Title: "Fingerprints", Lead: "Include key fingerprints?", Choices: multisigFpChoices()}
-		fpIdx, ok := fpCS.Choose(ctx, th)
-		if !ok {
-			continue // Back from fp -> re-pick n.
-		}
-		p.IncludeFp = multisigIncludeFpFor(fpIdx)
-		return p, true
-	}
+	return p, true
 }
 
 var errBuildSlotCount = errors.New("multisig build: cosigner count != n-1")

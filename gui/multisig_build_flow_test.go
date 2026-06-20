@@ -70,6 +70,67 @@ func TestMultisigFrontDoorRouting(t *testing.T) {
 	})
 }
 
+// TestBuildParamPickBackNav drives buildParamPickFlow's stage loop and asserts
+// that Back navigates back ONE stage through the full picker sequence
+// (template -> n -> k -> @S -> fp), and that Back from the FIRST stage
+// (template) abandons the Build flow (ok==false). This is the NIT-2 fix: Back
+// from n used to abandon the whole flow rather than re-show the template.
+func TestBuildParamPickBackNav(t *testing.T) {
+	t.Run("back from k re-shows n, then template (no abandon)", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx := NewContext(newPlatform())
+			done := false
+			var gotOK bool
+			frame, quit := runUI(ctx, func() {
+				_, gotOK = buildParamPickFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			// Forward: template (wsh, default) -> n (default) -> k.
+			if _, ok := pumpUntil(frame, "Template", 16); !ok {
+				t.Fatal("template picker not shown")
+			}
+			click(&ctx.Router, Button3) // template wsh
+			frame()
+			if _, ok := pumpUntil(frame, "Cosigners", 16); !ok {
+				t.Fatal("n picker not shown")
+			}
+			click(&ctx.Router, Button3) // n=2
+			frame()
+			if _, ok := pumpUntil(frame, "Threshold", 16); !ok {
+				t.Fatal("k picker not shown")
+			}
+			// Back once: k -> n (re-shown, NOT an abandon).
+			click(&ctx.Router, Button1)
+			if _, ok := pumpUntil(frame, "Cosigners", 16); !ok {
+				t.Fatal("Back from k did not re-show the n picker")
+			}
+			if done {
+				t.Fatal("flow abandoned on Back from k; want re-show n")
+			}
+			// Back again: n -> template (re-shown, NOT an abandon).
+			click(&ctx.Router, Button1)
+			if _, ok := pumpUntil(frame, "Template", 16); !ok {
+				t.Fatal("Back from n did not re-show the template picker")
+			}
+			if done {
+				t.Fatal("flow abandoned on Back from n; want re-show template")
+			}
+			// Back from template DOES abandon -> ok==false.
+			click(&ctx.Router, Button1)
+			for i := 0; i < 16 && !done; i++ {
+				frame()
+			}
+			if !done {
+				t.Fatal("flow did not return on Back from the template (first) stage")
+			}
+			if gotOK {
+				t.Fatal("Back from template returned ok==true; want false (abandon)")
+			}
+		})
+	})
+}
+
 // TestMultisigBuildExperimentalWarningAbort: Back (Button1) at the EXPERIMENTAL
 // warning drives ConfirmWarningScreen.Layout -> ConfirmNo, so the warning
 // returns false (abort). Mirrors TestChildSeedWarningAbort (NON-vacuous: the
