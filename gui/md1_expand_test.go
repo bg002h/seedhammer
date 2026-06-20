@@ -148,6 +148,35 @@ func TestExpandedToDescriptorShNesting(t *testing.T) {
 	}
 }
 
+// TestExpandedToDescriptorShWpkh (Task 2): a hand-built sh(wpkh) Template
+// (Root=ScriptSh, Policy=PolicySingle, InnerWpkh=true) with one xpub-present key
+// → expandOK + a P2SH_P2WPKH/Singlesig descriptor; address.Supported lights up.
+func TestExpandedToDescriptorShWpkh(t *testing.T) {
+	tpl := md.Template{N: 1, Root: md.ScriptSh, Policy: md.PolicySingle, Renderable: true, InnerWpkh: true}
+	keys := []md.ExpandedKey{expandedKey(0, [4]byte{0x5a, 0x8, 0x4, 0xe3})}
+	desc, status := expandedToDescriptor(tpl, keys)
+	if status != expandOK {
+		t.Fatalf("status = %v, want expandOK", status)
+	}
+	if desc.Script != bip380.P2SH_P2WPKH || desc.Type != bip380.Singlesig {
+		t.Fatalf("desc = {Script:%v Type:%v}, want P2SH_P2WPKH/Singlesig", desc.Script, desc.Type)
+	}
+	if !address.Supported(desc) {
+		t.Fatal("address.Supported(P2SH_P2WPKH singlesig) = false, want true (verify must light up)")
+	}
+	// The derived receive address round-trips and is a mainnet P2SH (3…).
+	addr, err := address.Receive(desc, 0)
+	if err != nil {
+		t.Fatalf("address.Receive: %v", err)
+	}
+	if len(addr) == 0 || addr[0] != '3' {
+		t.Fatalf("receive addr = %q, want a mainnet P2SH (3…) address", addr)
+	}
+	if _, _, found, err := address.Find(desc, addr, 20); err != nil || !found {
+		t.Fatalf("Find(%s) found=%v err=%v", addr, found, err)
+	}
+}
+
 // TestExpandedToDescriptorUnsortedMultiUnsupported (Task 3.c, D2): an unsorted
 // multi / multi_a / sortedmulti_a / complex template → expandUnsupported (NEVER
 // a descriptor).

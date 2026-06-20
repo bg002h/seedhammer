@@ -92,9 +92,15 @@ func scriptForTemplate(tpl md.Template) (bip380.Script, bip380.MultisigType, boo
 			return bip380.P2PKH, bip380.Singlesig, true
 		case md.ScriptTr:
 			return bip380.P2TR, bip380.Singlesig, true
+		case md.ScriptSh:
+			// sh(wpkh) — BIP-49 P2SH-P2WPKH single-sig. Keyed on the InnerWpkh
+			// discriminant, symmetric with the InnerWsh sorted-multi sh arm below.
+			// Disjoint from PolicySortedMulti, so it can never collide with the
+			// P2SH_P2WSH / bare-P2SH multisig arms.
+			if tpl.InnerWpkh {
+				return bip380.P2SH_P2WPKH, bip380.Singlesig, true
+			}
 		}
-		// NOTE: there is deliberately NO ScriptSh+singlesig (P2SH_P2WPKH) arm —
-		// classifyPolicy never renders sh-wpkh on the Go side (R0-Minor).
 	case md.PolicySortedMulti:
 		switch tpl.Root {
 		case md.ScriptWsh:
