@@ -169,15 +169,30 @@ func frontSideSeed(params engrave.Params, plate Seed, qrc *engrave.ConstantQRCmd
 			Y: params.F(85),
 		}
 		t := engrave.NewTransform(yield)
-		pfs := params.F(plateFontSize)
-		constant := engrave.NewConstantStringer(plate.Font, params, pfs)
 
 		const (
 			maxCol1 = 16
 			maxCol2 = 4
+			// largeN is the inclusive upper bound of the legacy
+			// 16+4+4 two-block column-2 layout. Word counts above
+			// largeN use the rebalanced single-block layout.
+			largeN = 24
 		)
-		endCol1 := min(maxCol1, len(plate.Mnemonic))
+		n := len(plate.Mnemonic)
+		// pfs is the plate font size, endCol1 the number of rows in
+		// column 1, and col1Height the height of column 1. For N<=24
+		// these are the legacy values; for N>24 column 1 is rebalanced
+		// to ceil(N/2) rows and the font is shrunk just enough to keep
+		// those rows within the legacy column envelope (16 rows at the
+		// full font).
+		pfs := params.F(plateFontSize)
+		endCol1 := min(maxCol1, n)
+		if n > largeN {
+			endCol1 = (n + 1) / 2 // ceil(N/2)
+			pfs = min(pfs, maxCol1*params.F(plateFontSize)/endCol1)
+		}
 		col1Height := pfs * endCol1
+		constant := engrave.NewConstantStringer(plate.Font, params, pfs)
 
 		// Engrave master fingerprint.
 		innerMargin := params.I(innerMargin)
@@ -195,25 +210,32 @@ func frontSideSeed(params engrave.Params, plate Seed, qrc *engrave.ConstantQRCmd
 		off := t.Offset(innerMargin, (plateDims.Y-col1Height)/2)
 		wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, 0, endCol1)
 
-		// Engrave (top of) column 2.
-		endCol2 := min(endCol1+maxCol2, len(plate.Mnemonic))
-		off = t.Offset(params.I(44), (plateDims.Y-col1Height)/2)
-		wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, endCol1, endCol2)
+		if n > largeN {
+			// Column 2 is a single contiguous block (rows endCol1..N)
+			// anchored at the shared top, eliminating the legacy
+			// two-block collision. The large-N path is SLIP-39 only
+			// (qrc==nil), so no QR is engraved here.
+			off := t.Offset(params.I(44), (plateDims.Y-col1Height)/2)
+			wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, endCol1, n)
+		} else {
+			// Engrave (top of) column 2.
+			endCol2 := min(endCol1+maxCol2, n)
+			off := t.Offset(params.I(44), (plateDims.Y-col1Height)/2)
+			wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, endCol1, endCol2)
 
-		// Engrave seed QR.
-		if qrc != nil {
-			const qrScale = 3
-			qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, qrScale)
-			qrsz := qrc.Size * params.StrokeWidth * qrScale
-			t.Offset(params.I(60)-qrsz/2, (plateDims.Y-qrsz)/2)
-			qrCmd(t.Yield)
-		}
+			// Engrave seed QR.
+			if qrc != nil {
+				const qrScale = 3
+				qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, qrScale)
+				qrsz := qrc.Size * params.StrokeWidth * qrScale
+				t.Offset(params.I(60)-qrsz/2, (plateDims.Y-qrsz)/2)
+				qrCmd(t.Yield)
+			}
 
-		{
 			// Engrave bottom of column 2.
-			height := (len(plate.Mnemonic) - endCol2) * pfs
-			off := t.Offset(params.I(44), (plateDims.Y+col1Height)/2-height)
-			wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, endCol2, len(plate.Mnemonic))
+			height := (n - endCol2) * pfs
+			off = t.Offset(params.I(44), (plateDims.Y+col1Height)/2-height)
+			wordColumn(off, constant, plate.Font, pfs, plate.Mnemonic, plate.ShortestWord, plate.LongestWord, endCol2, n)
 		}
 
 		// Engrave title.
