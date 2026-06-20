@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -264,5 +265,44 @@ func TestAssembleBuildPolicy_Wrapper(t *testing.T) {
 	}
 	if len(card.Stubs) != 1 || card.Stubs[0] != stub {
 		t.Fatalf("mk1 stub = %v, want [%x] (I-STUB)", card.Stubs, stub)
+	}
+}
+
+// TestBuildReviewLines: the review reflects the stub, each @N->fp(+present), the
+// chosen homogeneous fp-presence, and the M1 note that fp-presence affects the
+// policy id. Drive both Omit and Include. The Include stub here is an
+// illustrative literal (any 4 bytes); the encoder is never asserted to produce
+// it (see the Include-differs test, which only asserts != 7b716421).
+func TestBuildReviewLines(t *testing.T) {
+	stub := [4]byte{0x7b, 0x71, 0x64, 0x21}
+	slotsOmit := []md.SlotInfo{
+		{Index: 0, FpPresent: false},
+		{Index: 1, FpPresent: false},
+		{Index: 2, FpPresent: false},
+	}
+	lines := buildReviewLines(stub, slotsOmit, false)
+	joined := strings.ToLower(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "7b716421") {
+		t.Fatalf("review missing stub 7b716421:\n%s", joined)
+	}
+	if !strings.Contains(joined, "@0") || !strings.Contains(joined, "@2") {
+		t.Fatalf("review missing per-slot @N lines:\n%s", joined)
+	}
+	if !strings.Contains(joined, "fingerprint") {
+		t.Fatalf("review missing the fp-presence note:\n%s", joined)
+	}
+
+	// Illustrative Include stub (e.g. ceadba4d) — NOT asserted against the encoder.
+	slotsInc := []md.SlotInfo{
+		{Index: 0, Fingerprint: [4]byte{0x73, 0xc5, 0xda, 0x0a}, FpPresent: true},
+		{Index: 1, Fingerprint: [4]byte{0x01, 0x02, 0x03, 0x04}, FpPresent: true},
+	}
+	linesInc := buildReviewLines([4]byte{0xce, 0xad, 0xba, 0x4d}, slotsInc, true)
+	joinedInc := strings.ToLower(strings.Join(linesInc, "\n"))
+	if !strings.Contains(joinedInc, "ceadba4d") {
+		t.Fatalf("include review missing stub ceadba4d:\n%s", joinedInc)
+	}
+	if !strings.Contains(joinedInc, "73c5da0a") {
+		t.Fatalf("include review missing slot @0 fp 73c5da0a:\n%s", joinedInc)
 	}
 }

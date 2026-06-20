@@ -4,10 +4,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip32"
 	"seedhammer.com/bip39"
+	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/op"
+	"seedhammer.com/gui/widget"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
 )
@@ -241,4 +245,92 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 		SharedOrigin: originComponents(multisigSharedOrigin()),
 	}
 	return md.EncodeMultisig(req)
+}
+
+// buildReviewLines renders the (stub, slots) ordering-verification handle
+// (I-ORDER): the 4-byte policy stub, each slot @N -> fingerprint (or "no fp"
+// under the homogeneous Omit choice), and the M1 note that the fp-presence
+// choice changes the WalletPolicyId — so the operator records/matches the right
+// id against their coordinator BEFORE funding.
+func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool) []string {
+	lines := []string{
+		fmt.Sprintf("Policy stub: %x", stub),
+		"Slots:",
+	}
+	for _, s := range slots {
+		if s.FpPresent {
+			lines = append(lines, fmt.Sprintf("@%d  fp %x", s.Index, s.Fingerprint))
+		} else {
+			lines = append(lines, fmt.Sprintf("@%d  (no fp)", s.Index))
+		}
+	}
+	if includeFp {
+		lines = append(lines, "Fingerprints INCLUDED on every slot.")
+	} else {
+		lines = append(lines, "Fingerprints OMITTED on every slot.")
+	}
+	lines = append(lines, "Fingerprint choice changes the policy id — match your coordinator.")
+	return lines
+}
+
+// buildReviewFlow displays the read-only (stub, slots) review and lets the
+// operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
+// paged read-only restore-doc screen idiom.
+func buildReviewFlow(ctx *Context, th *Colors, stub [4]byte, slots []md.SlotInfo, includeFp bool) bool {
+	lines := buildReviewLines(stub, slots, includeFp)
+	return confirmReviewScreen(ctx, th, "Policy Review", lines)
+}
+
+// confirmReviewScreen is a paged, read-only confirm screen: Button3 -> true
+// (continue), Button1 -> false (back), Button2 pages. Mirrors bundleReviewFlow.
+func confirmReviewScreen(ctx *Context, th *Colors, title string, lines []string) bool {
+	backBtn := &Clickable{Button: Button1}
+	contBtn := &Clickable{Button: Button3, AltButton: Center}
+	pageBtn := &Clickable{Button: Button2}
+	dims := ctx.Platform.DisplaySize()
+	lineWidth := dims.X - 2*8
+	contentTop := leadingSize + 8
+	contentBottom := dims.Y - leadingSize
+	start := 0
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return false
+		}
+		if contBtn.Clicked(ctx) {
+			return true
+		}
+		shown := 0
+		y := contentTop
+		body := make([]op.Op, 0, len(lines))
+		for i := start; i < len(lines); i++ {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, lines[i])
+			if i > start && y+sz.Y > contentBottom {
+				break
+			}
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+			shown++
+			if y > contentBottom {
+				break
+			}
+		}
+		if pageBtn.Clicked(ctx) {
+			if start+shown < len(lines) {
+				start += shown
+			} else {
+				start = 0
+			}
+			continue
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight},
+			{Clickable: contBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return false
 }
