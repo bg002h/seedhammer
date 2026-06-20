@@ -326,3 +326,59 @@ func TestEncodeMultisigFullPolicyParity(t *testing.T) {
 		})
 	}
 }
+
+// t6bChunks is the vendored T6b multisig fixture (copied from
+// gui/testdata/t6b_multisig_full.md1.txt — the md package cannot import gui
+// testdata, so the 6 strings are inlined; they are guarded by A3 byte-equality
+// AND by the gui-side TestSuppliedMultisigFixtureIsFullPolicy).
+var t6bChunks = []string{
+	"md1fvgfqzspqjtvyyy4qqxppcgsc27rczqg3yyc5z5tpwxqergd3c8g7ruszzg3ryssjfstllhxufdm4",
+	"md1fvgfqzs2jvfeg9y4zktpd9chs82fefgh35nuevya8z62kep2q7md6duvfx8px8ygw3q3umhs2q3cu",
+	"md1fvgfqzss8ygdjvlt5pterdm5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5zq9ner9ltnl8fnz",
+	"md1fvgfqzsllphut2hvvpp5wl4l0mn058ndxfl63kufyfsjwlt2vkk2nlqmlvch5n4sk08xmsudrng93",
+	"md1fvgfqz3qhwf72vyq3zgf3g9gkzuvpjxsmrsw3u8eqyy3zxfp9ycnjs2f29vkz6ts908m9qqcmg97l",
+	"md1fvgfqz3f0qtrqglu5g8kh6mfsg4qxa9wq0nv9cauwfwxw70984wkqnw2uwz0w27h0f8nmf46cm8",
+}
+
+// TestEncodeMultisigT6bByteExact (A3): fed the three decoded T6b cosigners
+// (fp-ABSENT, k=2, shared origin m/48'/0'/0'/2', wsh) in @0/@1/@2 order,
+// EncodeMultisig reproduces the fixture chunk-for-chunk AND yields
+// WalletPolicyId 7b716421db8b9f462967d04e0f8a3fd5. This proves a device could
+// re-author the exact T6b card.
+func TestEncodeMultisigT6bByteExact(t *testing.T) {
+	cc0, pk0 := mkXpub65(t, "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "03a9394a2f1a4f99613a716956c8540f6dba6f18931c2639107221b267d740af23")
+	cc1, pk1 := mkXpub65(t, "bba0c7ca160a870efeb940ab90d0f4284fea1b5e0d2117677e823fc37e2d5763", "021a3bf5fbf737d0f36993fd46dc4913093beb532d654fe0dfd98bd27585dc9f29")
+	cc2, pk2 := mkXpub65(t, "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5")
+	req := EncodeMultisigRequest{
+		Cosigners: []MultisigCosigner{
+			{ChainCode: cc0, CompressedPubkey: pk0},
+			{ChainCode: cc1, CompressedPubkey: pk1},
+			{ChainCode: cc2, CompressedPubkey: pk2},
+		},
+		K: 2, Script: MultisigWsh, OriginMode: OriginShared, SharedOrigin: sharedOrigin4828(),
+	}
+	out, stub, slots, err := EncodeMultisig(req)
+	if err != nil {
+		t.Fatalf("EncodeMultisig: %v", err)
+	}
+	if len(out) != len(t6bChunks) {
+		t.Fatalf("chunk count: got %d want %d", len(out), len(t6bChunks))
+	}
+	for i := range out {
+		if out[i] != t6bChunks[i] {
+			t.Fatalf("chunk %d:\n got  %s\n want %s", i, out[i], t6bChunks[i])
+		}
+	}
+	id, _ := WalletPolicyIdChunks(out)
+	if hex.EncodeToString(id[:]) != "7b716421db8b9f462967d04e0f8a3fd5" {
+		t.Fatalf("WalletPolicyId = %x, want 7b716421db8b9f462967d04e0f8a3fd5", id)
+	}
+	if hex.EncodeToString(stub[:]) != "7b716421" {
+		t.Fatalf("stub = %x, want 7b716421", stub)
+	}
+	for i, s := range slots {
+		if s.FpPresent {
+			t.Fatalf("slot %d fp-present, want absent (T6b is fp-absent)", i)
+		}
+	}
+}
