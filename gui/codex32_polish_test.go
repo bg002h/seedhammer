@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
 )
 
@@ -320,5 +321,37 @@ func TestConfirmCorrectionFlow(t *testing.T) {
 	click(&ctx.Router, Button2, Button3)
 	if !confirmCorrectionFlow(ctx, &descriptorTheme, res, "md") {
 		t.Error("Button2 must be drained so Button3 still accepts")
+	}
+}
+
+// TestConfirmCodex32Flow_ShowSecretGate is the L1 regression+convention guard.
+// The probe entropy that the fix wipes (codex32_polish.go:103) is consumed and
+// scrubbed inside confirmCodex32Flow and unobservable seam-free (spec R0
+// Q1/Minor-2), so this is NOT a buffer-zeroed assertion. It proves the additive
+// wipeBytes(ent) does NOT perturb the showSecret decision: an unshared ms1
+// `entr` secret (msErr == nil && f.Unshared) must still offer "Show secret"
+// (Button2 opens the decode view). Mirrors TestConfirmShowSecretGate
+// (gui/ms1_decode_test.go:76).
+func TestConfirmCodex32Flow_ShowSecretGate(t *testing.T) {
+	const ms1 = "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f" // unshared entr secret (entropy 0*16)
+	s := mustCodex32T(t, ms1)
+	want := bip39.LabelFor(bip39.New(make([]byte, 16))[0]) // first decoded word label
+	ctx := NewContext(newPlatform())
+	click(&ctx.Router, Button2) // Show secret -> opens ms1DecodeFlow (only for unshared)
+	frame, quit := runUI(ctx, func() { confirmCodex32Flow(ctx, &descriptorTheme, s) })
+	defer quit()
+	seen := false
+	for i := 0; i < 10; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		if uiContains(c, want) {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatal("Show secret did not open the decode view on the unshared secret (showSecret gate perturbed?)")
 	}
 }
