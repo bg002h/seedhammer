@@ -132,25 +132,30 @@ func TestEngraveBip85Child_UsesChildFP(t *testing.T) {
 	}
 }
 
-// TestBip85ParamBounds asserts the picker's choice sets are exactly the in-spec
-// bounds (validated-by-construction): word count {12,18,24}, index {0..9}. Any
-// drift here (e.g. a 15 or a free-form index) would mint an out-of-spec child.
+// TestBip85ParamBounds asserts the picker's parameter contract: word count is
+// exactly {12,18,24}, and the typed index is whatever parseBip85Index accepts —
+// 0 and 2^31-1 in range, 2^31 / non-numeric rejected (the typed-entry contract
+// replaces the retired bounded 0..9 ChoiceScreen). Every (words, representative
+// accepted-index) pair derives a valid child.
 func TestBip85ParamBounds(t *testing.T) {
 	if len(bip85WordChoices) != 3 ||
 		bip85WordChoices[0] != 12 || bip85WordChoices[1] != 18 || bip85WordChoices[2] != 24 {
 		t.Fatalf("bip85WordChoices = %v, want [12 18 24]", bip85WordChoices)
 	}
-	if len(bip85IndexChoices) != 10 {
-		t.Fatalf("bip85IndexChoices len = %d, want 10 (0..9)", len(bip85IndexChoices))
-	}
-	for i, v := range bip85IndexChoices {
-		if v != i {
-			t.Fatalf("bip85IndexChoices[%d] = %d, want %d", i, v, i)
+	// The index axis is the validator's contract, not an enumerated slice.
+	for _, s := range []string{"0", "2147483647"} { // boundaries, both accepted
+		if _, err := parseBip85Index(s); err != nil {
+			t.Fatalf("parseBip85Index(%q) rejected an in-range index: %v", s, err)
 		}
 	}
-	// Every advertised (words,index) pair derives a valid child (no panic, no error).
+	for _, s := range []string{"2147483648", "abc", "-1", ""} { // out of range / non-numeric
+		if _, err := parseBip85Index(s); err == nil {
+			t.Fatalf("parseBip85Index(%q) accepted an out-of-contract index", s)
+		}
+	}
+	// Every (words, representative accepted-index) pair derives a valid child.
 	for _, w := range bip85WordChoices {
-		for _, idx := range bip85IndexChoices {
+		for _, idx := range []int{0, 1, 9, 1000000, 2147483647} {
 			child, err := deriveBip85Child(abandonAboutMnemonic(), "", w, idx)
 			if err != nil {
 				t.Fatalf("words=%d idx=%d: %v", w, idx, err)
@@ -233,10 +238,13 @@ func TestBip85DeriveFlow_ScrubsBothMnemonics(t *testing.T) {
 		}
 		click(&ctx.Router, Button3) // Skip
 		frame()
-		// Param picker: word count = 12 (index 0), child index = 0 (index 0).
-		// chooseEntry queues the Down presses, pumps a frame, confirms, pumps again.
-		chooseEntry(frame, &ctx.Router, 0) // word count 12
-		chooseEntry(frame, &ctx.Router, 0) // child index 0
+		// Param picker: word count = 12 (ChoiceScreen, index 0), then TYPE the child
+		// index "0" on the keyboard and press OK (the index is now typed, not chosen).
+		chooseEntry(frame, &ctx.Router, 0) // word count 12 (ChoiceScreen)
+		runes(&ctx.Router, "0")            // child index 0 (typed)
+		frame()
+		click(&ctx.Router, Button3) // OK on the index keyboard
+		frame()
 		// Child-seed warning: hold Button3 to confirm (ConfirmYes).
 		if c, ok := pumpUntil(frame, "Child Seed", 160); !ok {
 			t.Fatalf("did not reach the child-seed warning; got %q", c)

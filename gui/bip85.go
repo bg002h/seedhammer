@@ -137,15 +137,13 @@ func engraveBip85Child(params engrave.Params, child bip39.Mnemonic) (Plate, uint
 	return plate, mfp, nil
 }
 
-// bip85WordChoices / bip85IndexChoices are the picker's in-spec, validated-by-
-// construction bounds (R0-I-B): word count = biptool's {12,18,24}; index is a
-// bounded small set 0..9 (no free-form numeric entry — there is no reusable
-// numeric-entry widget; a larger index space is a FOLLOWUP). The application is
-// FIXED to BIP-39 (the only engrave-as-words-faithful BIP-85 app).
+// bip85WordChoices is the picker's in-spec, validated-by-construction word-count
+// set: biptool's {12,18,24}. The child index is now TYPED (bip85IndexEntryFlow +
+// parseBip85Index, range [0,2^31-1]) rather than a bounded ChoiceScreen. The
+// application is FIXED to BIP-39 (the only engrave-as-words-faithful BIP-85 app).
 var bip85WordChoices = []int{12, 18, 24}
-var bip85IndexChoices = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-// bip85ParamPickFlow picks the child BIP-39 word count then the bounded index.
+// bip85ParamPickFlow picks the child BIP-39 word count then the TYPED index.
 // Returns ok==false on Back from the FIRST screen; Back from the index screen
 // re-shows the word-count screen. The returned (words,index) are always in-spec.
 func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
@@ -159,16 +157,11 @@ func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
 		if !wok {
 			return 0, 0, false
 		}
-		idxCS := &ChoiceScreen{
-			Title:   "Child Seed",
-			Lead:    "Child index",
-			Choices: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-		}
-		isel, iok := idxCS.Choose(ctx, th)
+		index, iok := bip85IndexEntryFlow(ctx, th)
 		if !iok {
 			continue // Back from index -> re-pick the word count.
 		}
-		return bip85WordChoices[wsel], bip85IndexChoices[isel], true
+		return bip85WordChoices[wsel], index, true
 	}
 }
 
@@ -249,7 +242,7 @@ var bip85SeedHook func(master, child bip39.Mnemonic)
 
 // bip85DeriveFlow is the bip85Derive program: a hand-typed BIP-39 MASTER seed
 // (SECRET, typed-only — NEVER a scan) + optional passphrase ON THE MASTER -> pick
-// the child params (app fixed BIP-39, word count {12,18,24}, bounded index 0..9)
+// the child params (app fixed BIP-39, word count {12,18,24}, typed index 0..2^31-1)
 // -> derive the child BIP-39 mnemonic via BIP-85 -> unskippable child-seed warning
 // -> engrave the child (words + standard SeedQR) via the engraveSeed primitive,
 // stamping the CHILD's own bare fingerprint.
