@@ -1173,8 +1173,9 @@ const (
 	// ScriptShWpkh is APPENDED after ScriptTr (R0-M2): a BIP-49 nested-segwit
 	// sh(wpkh) single-sig wrapper. It is an EncodeSingleSig input discriminant
 	// only — the decoder summarizes an sh(wpkh) wire to Root==ScriptSh (the
-	// on-wire root tag is Sh). Appending (not inserting) preserves the existing
-	// values so rootScriptKind/#10b consumers are unaffected.
+	// on-wire root tag is Sh) and carries the Template.InnerWpkh discriminant so
+	// the projection picks P2SH_P2WPKH. Appending (not inserting) preserves the
+	// existing values so rootScriptKind/#10b consumers are unaffected.
 	ScriptShWpkh
 )
 
