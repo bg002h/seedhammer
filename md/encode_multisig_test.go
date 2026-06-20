@@ -282,7 +282,7 @@ func jsonUnmarshalStrict(b []byte, v any) error {
 	return dec.Decode(v)
 }
 
-var multisigFullSets = []string{"multisig_wsh_full", "multisig_sh_wsh_full", "multisig_sh_full"}
+var multisigFullSets = []string{"multisig_wsh_full", "multisig_sh_wsh_full", "multisig_sh_full", "multisig_wsh_fp", "multisig_wsh_divergent"}
 
 // TestEncodeMultisigFullPolicyParity (A2): EncodeMultisig fed the meta inputs
 // reproduces the vendored chunk strings byte-for-byte, the reassembled payload
@@ -401,5 +401,78 @@ func TestEncodeMultisigT6bByteExact(t *testing.T) {
 		if s.FpPresent {
 			t.Fatalf("slot %d fp-present, want absent (T6b is fp-absent)", i)
 		}
+	}
+}
+
+// TestEncodeMultisigRoundTrip (A4/I2/I6): EncodeMultisig output decodes back to
+// the same template (root/policy/k/n/innerWsh) and per-@N {xpub, fp(+presence),
+// origin, use-site} IN ORDER; and WalletPolicyIdChunks(out) == the returned stub
+// prefix and equals WalletPolicyId of Reassemble(out) (identity zero-change).
+func TestEncodeMultisigRoundTrip(t *testing.T) {
+	for _, name := range multisigFullSets {
+		t.Run(name, func(t *testing.T) {
+			m := loadMultisigMeta(t, name)
+			req := reqFromMeta(t, m)
+			out, stub, slots, err := EncodeMultisig(req)
+			if err != nil {
+				t.Fatalf("EncodeMultisig: %v", err)
+			}
+			tpl, keys, err := ExpandWalletPolicyChunks(out)
+			if err != nil {
+				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+			}
+			if tpl.K != int(req.K) || tpl.N != len(req.Cosigners) {
+				t.Fatalf("K/N = %d/%d, want %d/%d", tpl.K, tpl.N, req.K, len(req.Cosigners))
+			}
+			if len(keys) != len(req.Cosigners) {
+				t.Fatalf("recovered %d keys, want %d", len(keys), len(req.Cosigners))
+			}
+			for i, k := range keys {
+				if int(k.Index) != i {
+					t.Fatalf("key %d Index = %d (order not preserved)", i, k.Index)
+				}
+				var wantXpub [65]byte
+				copy(wantXpub[:32], req.Cosigners[i].ChainCode[:])
+				copy(wantXpub[32:], req.Cosigners[i].CompressedPubkey[:])
+				if k.Xpub != wantXpub {
+					t.Fatalf("key %d xpub mismatch", i)
+				}
+				if k.FingerprintPresent != req.Cosigners[i].FpPresent {
+					t.Fatalf("key %d fp-present = %v, want %v", i, k.FingerprintPresent, req.Cosigners[i].FpPresent)
+				}
+				if k.FingerprintPresent && k.Fingerprint != req.Cosigners[i].Fingerprint {
+					t.Fatalf("key %d fp = %x, want %x", i, k.Fingerprint, req.Cosigners[i].Fingerprint)
+				}
+				if !k.UseSite.HasMultipath || len(k.UseSite.Multipath) != 2 {
+					t.Fatalf("key %d use-site = %+v, want <0;1>", i, k.UseSite)
+				}
+			}
+			// Identity zero-change: chunks-id == descriptor-id; stub is its prefix.
+			idChunks, err := WalletPolicyIdChunks(out)
+			if err != nil {
+				t.Fatalf("WalletPolicyIdChunks: %v", err)
+			}
+			d, err := Reassemble(out)
+			if err != nil {
+				t.Fatalf("Reassemble: %v", err)
+			}
+			idDesc, err := WalletPolicyId(d)
+			if err != nil {
+				t.Fatalf("WalletPolicyId: %v", err)
+			}
+			if idChunks != idDesc {
+				t.Fatalf("WalletPolicyIdChunks %x != WalletPolicyId(Reassemble) %x", idChunks, idDesc)
+			}
+			if [4]byte(idChunks[:4]) != stub {
+				t.Fatalf("stub %x != id prefix %x", stub, idChunks[:4])
+			}
+			// slots reflect order + fp presence.
+			for i, s := range slots {
+				if int(s.Index) != i || s.FpPresent != req.Cosigners[i].FpPresent {
+					t.Fatalf("slot %d = %+v inconsistent with cosigner", i, s)
+				}
+			}
+			_ = tpl
+		})
 	}
 }

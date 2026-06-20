@@ -1,0 +1,16 @@
+{
+  "script": "wsh_sortedmulti",
+  "k": 2,
+  "n": 3,
+  "origin_mode": "divergent",
+  "shared_origin": "",
+  "fp_present": false,
+  "cosigners": [
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false, "origin": "m/48'/0'/0'/2'"},
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false, "origin": "m/48'/0'/0'/3'"},
+    {"chaincode": "4a53a0ab21b9dc95869c4e92a161194e03c0ef3ff5014ac692f433c4765490fc", "compressed_pubkey": "02707a62fdacc26ea9b63b1c197906f56ee0180d0bcf1966e1a2da34f5f3a09a9b", "fingerprint": "", "fp_present": false, "origin": "m/48'/0'/0'/4'"}
+  ],
+  "payload_hex": "a092d8421292d84212d2d842139000c10e110c2bc3c2529d05590dcee4ac34e274950b08ca701e0779ffa80a563497a19e23b2a487e01383d317ed6613754db1d8e0cbc837ab7700c0685e78cb370d16d1a7af9d04d4da94a741564373b92b0d389d2542c2329c0781de7fea02958d25e86788eca921f804e0f4c5fb5984dd536c763832f20deaddc0301a179e32cdc345b469ebe74135372529d05590dcee4ac34e274950b08ca701e0779ffa80a563497a19e23b2a487e01383d317ed6613754db1d8e0cbc837ab7700c0685e78cb370d16d1a7af9d04d4d80",
+  "wallet_policy_id": "1a52b34ea0318ff668cff5ada5afd5ae",
+  "wallet_policy_id_stub": "1a52b34e"
+}
