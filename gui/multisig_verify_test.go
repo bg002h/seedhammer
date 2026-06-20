@@ -161,3 +161,27 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 		}
 	})
 }
+
+// TestMultisigVerifyNoticeIsHonest (L2): the multisig success notice must scope
+// its guarantee honestly — "operator key + secret verified; other cosigners'
+// keys taken as supplied" — and must NOT carry the bare full-bundle over-claim
+// ("the engraved bundle matches the seed"). We drive showNotice directly with the
+// production copy and assert the rendered text via uiContains (which strips
+// spaces). This guards against the over-claim silently returning.
+func TestMultisigVerifyNoticeIsHonest(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() {
+		showNotice(ctx, &descriptorTheme, multisigVerifyOKTitle, multisigVerifyOKBody)
+	})
+	defer quit()
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame from showNotice")
+	}
+	if !uiContains(content, "taken as supplied") {
+		t.Errorf("notice lacks the scoped wording; got %q", content)
+	}
+	if uiContains(content, "matches the seed") {
+		t.Errorf("notice still carries the over-claim; got %q", content)
+	}
+}

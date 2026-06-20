@@ -7,6 +7,17 @@ import (
 	"seedhammer.com/md"
 )
 
+// Multisig verify success copy (L2). HONEST scoping: on an air-gapped device the
+// only cross-checkable facts are the operator's own key card (mk1, H1) + xpub/
+// origin (findUserSlot) + the secret (ms1 entropy/language, M1). The md1 policy
+// string is the supplied input compared to a clone of itself, and foreign
+// cosigners' xpubs have no source of truth — so we do NOT claim a full-bundle
+// guarantee.
+const (
+	multisigVerifyOKTitle = "Verify OK"
+	multisigVerifyOKBody  = "Operator key and secret verified. Other cosigners' keys are taken as supplied."
+)
+
 // ─── T6b: verify-bundle for a SUPPLIED multisig bundle (user's slot only) ────
 //
 // verifyMultisig assembles the read-back bundle and runs the deterministic
@@ -108,5 +119,5 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		return
 	}
-	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
+	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKBody)
 }
