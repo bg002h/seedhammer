@@ -132,25 +132,30 @@ func TestEngraveBip85Child_UsesChildFP(t *testing.T) {
 	}
 }
 
-// TestBip85ParamBounds asserts the picker's choice sets are exactly the in-spec
-// bounds (validated-by-construction): word count {12,18,24}, index {0..9}. Any
-// drift here (e.g. a 15 or a free-form index) would mint an out-of-spec child.
+// TestBip85ParamBounds asserts the picker's parameter contract: word count is
+// exactly {12,18,24}, and the typed index is whatever parseBip85Index accepts —
+// 0 and 2^31-1 in range, 2^31 / non-numeric rejected (the typed-entry contract
+// replaces the retired bounded 0..9 ChoiceScreen). Every (words, representative
+// accepted-index) pair derives a valid child.
 func TestBip85ParamBounds(t *testing.T) {
 	if len(bip85WordChoices) != 3 ||
 		bip85WordChoices[0] != 12 || bip85WordChoices[1] != 18 || bip85WordChoices[2] != 24 {
 		t.Fatalf("bip85WordChoices = %v, want [12 18 24]", bip85WordChoices)
 	}
-	if len(bip85IndexChoices) != 10 {
-		t.Fatalf("bip85IndexChoices len = %d, want 10 (0..9)", len(bip85IndexChoices))
-	}
-	for i, v := range bip85IndexChoices {
-		if v != i {
-			t.Fatalf("bip85IndexChoices[%d] = %d, want %d", i, v, i)
+	// The index axis is the validator's contract, not an enumerated slice.
+	for _, s := range []string{"0", "2147483647"} { // boundaries, both accepted
+		if _, err := parseBip85Index(s); err != nil {
+			t.Fatalf("parseBip85Index(%q) rejected an in-range index: %v", s, err)
 		}
 	}
-	// Every advertised (words,index) pair derives a valid child (no panic, no error).
+	for _, s := range []string{"2147483648", "abc", "-1", ""} { // out of range / non-numeric
+		if _, err := parseBip85Index(s); err == nil {
+			t.Fatalf("parseBip85Index(%q) accepted an out-of-contract index", s)
+		}
+	}
+	// Every (words, representative accepted-index) pair derives a valid child.
 	for _, w := range bip85WordChoices {
-		for _, idx := range bip85IndexChoices {
+		for _, idx := range []int{0, 1, 9, 1000000, 2147483647} {
 			child, err := deriveBip85Child(abandonAboutMnemonic(), "", w, idx)
 			if err != nil {
 				t.Fatalf("words=%d idx=%d: %v", w, idx, err)
@@ -233,10 +238,13 @@ func TestBip85DeriveFlow_ScrubsBothMnemonics(t *testing.T) {
 		}
 		click(&ctx.Router, Button3) // Skip
 		frame()
-		// Param picker: word count = 12 (index 0), child index = 0 (index 0).
-		// chooseEntry queues the Down presses, pumps a frame, confirms, pumps again.
-		chooseEntry(frame, &ctx.Router, 0) // word count 12
-		chooseEntry(frame, &ctx.Router, 0) // child index 0
+		// Param picker: word count = 12 (ChoiceScreen, index 0), then TYPE the child
+		// index "0" on the keyboard and press OK (the index is now typed, not chosen).
+		chooseEntry(frame, &ctx.Router, 0) // word count 12 (ChoiceScreen)
+		runes(&ctx.Router, "0")            // child index 0 (typed)
+		frame()
+		click(&ctx.Router, Button3) // OK on the index keyboard
+		frame()
 		// Child-seed warning: hold Button3 to confirm (ConfirmYes).
 		if c, ok := pumpUntil(frame, "Child Seed", 160); !ok {
 			t.Fatalf("did not reach the child-seed warning; got %q", c)
@@ -294,21 +302,198 @@ func FuzzDeriveBip85Child(f *testing.F) {
 	f.Add(12, 0)
 	f.Add(18, 5)
 	f.Add(24, 9)
-	f.Add(15, 0)  // out-of-spec word count
-	f.Add(12, -1) // negative index
+	f.Add(15, 0)             // out-of-spec word count
+	f.Add(12, -1)            // negative index
 	f.Add(0, 0)
+	f.Add(12, 1<<31)         // = 2147483648: would wrap uint32 -> unhardened element 0 (R0-M1)
+	f.Add(12, 1<<31+1)       // = 2147483649: would wrap to unhardened element 1 (R0-M1)
+	f.Add(12, 2147483647)    // = 2^31-1: the accepted boundary
 	f.Fuzz(func(t *testing.T, words, index int) {
 		// Must not panic. Errors are fine for out-of-spec inputs.
 		child, err := deriveBip85Child(abandonAboutMnemonic(), "", words, index)
 		if err != nil {
 			return
 		}
-		// On success the inputs were in-spec; the child must be valid.
-		if !validBip85Words(words) || index < 0 {
+		// On success the inputs were in-spec; the child must be valid AND the index
+		// must be a valid hardened index (0..2^31-1) — accepting index>2^31-1 means
+		// the uint32 truncation guard failed (R0-M1).
+		if !validBip85Words(words) || index < 0 || index > bip85MaxIndex {
 			t.Fatalf("deriveBip85Child accepted out-of-spec words=%d index=%d", words, index)
 		}
 		if len(child) != words || !child.Valid() {
 			t.Fatalf("words=%d index=%d: invalid child (%d words, valid=%v)", words, index, len(child), child.Valid())
 		}
+	})
+}
+
+// TestParseBip85Index pins the width-safe typed-index validator: it parses base-10
+// via strconv.ParseUint (never a bare int), accepts leading zeros, and rejects
+// anything > 2^31-1 (the BIP-85 hardened max), non-[0-9] runes, signs, whitespace,
+// 0x, and empty input. The >2^31-1 reject is the validator's job, NOT a length cap
+// (R0-M2): "9999999999" is 10 digits but still out of range.
+func TestParseBip85Index(t *testing.T) {
+	ok := []struct {
+		in   string
+		want int
+	}{
+		{"0", 0},
+		{"7", 7},
+		{"007", 7},          // leading zeros ACCEPTED (R0 adjudication #1)
+		{"1000000", 1000000},
+		{"2147483647", 2147483647}, // = 2^31-1, the boundary, ACCEPTED
+	}
+	for _, tc := range ok {
+		got, err := parseBip85Index(tc.in)
+		if err != nil {
+			t.Fatalf("parseBip85Index(%q): unexpected error %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("parseBip85Index(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+	bad := []string{
+		"",            // empty
+		"12a",         // trailing letter
+		"a12",         // leading letter
+		"-1",          // sign
+		"+1",          // sign
+		" 1",          // leading whitespace
+		"1 ",          // trailing whitespace
+		"0x10",        // hex prefix
+		"1.0",         // decimal point
+		"2147483648",  // = 2^31, first out-of-range value
+		"9999999999",  // 10 digits but > 2^31-1 (range, not length, is the authority)
+		"9223372036854775808", // > 2^63, ParseUint(…,64) itself overflows
+	}
+	for _, in := range bad {
+		if got, err := parseBip85Index(in); err == nil {
+			t.Fatalf("parseBip85Index(%q) = %d, want an error", in, got)
+		}
+	}
+}
+
+// TestDeriveBip85Child_RejectsHighIndex pins the defense-in-depth upper-bound
+// guard: an index > 2^31-1 MUST error, never silently truncate. On this 64-bit
+// host, 1<<31 and 1<<31+1 fit an int and would otherwise wrap through
+// uint32(index)+h into an UNHARDENED element with no error (the R0-reproduced
+// bug). The lower bound (-1) still errors with its distinct message (R0-M3).
+func TestDeriveBip85Child_RejectsHighIndex(t *testing.T) {
+	for _, idx := range []int{1 << 31, 1<<31 + 1} { // 2147483648, 2147483649
+		if _, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, idx); err == nil {
+			t.Fatalf("index=%d: expected an error (silent uint32 truncation), got nil", idx)
+		}
+	}
+	// Lower bound still errors (retained).
+	if _, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, -1); err == nil {
+		t.Fatal("index=-1: expected an error, got nil")
+	}
+}
+
+// TestDeriveBip85Child_HighIndexGolden pins the boundary child at index 2^31-1.
+// PROBE-VERIFIED at HEAD 8459654 two independent ways (in-tree derive + biptool's
+// bip32.ParsePath path); re-probe-verify at impl time (Task 4 has the command).
+// Index 0 stays byte-unchanged vs the shipped golden (typed path is additive).
+func TestDeriveBip85Child_HighIndexGolden(t *testing.T) {
+	child, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, 2147483647) // = 2^31-1
+	if err != nil {
+		t.Fatalf("index=2147483647: %v", err)
+	}
+	const want = "jewel solution patient quarter elite grace quarter dinosaur taste parent dial clump"
+	if got := child.String(); got != want {
+		t.Fatalf("high-index child mismatch:\n got %q\nwant %q", got, want)
+	}
+	if len(child) != 12 || !child.Valid() {
+		t.Fatalf("high-index child: %d words, valid=%v", len(child), child.Valid())
+	}
+	// Index 0 unchanged vs the shipped golden.
+	c0, err := deriveBip85Child(abandonAboutMnemonic(), "", 12, 0)
+	if err != nil {
+		t.Fatalf("index=0: %v", err)
+	}
+	const want0 = "prosper short ramp prepare exchange stove life snack client enough purpose fold"
+	if got := c0.String(); got != want0 {
+		t.Fatalf("index-0 child changed:\n got %q\nwant %q", got, want0)
+	}
+}
+
+// TestBip85IndexEntryFlow drives the typed child-index keyboard flow: a valid
+// decimal returns (idx,true); a non-numeric/empty Fragment shows an error and
+// RE-PROMPTS (no abort, no silent 0); Back returns (0,false). Mirrors
+// TestTypeAddressCasePreserved (runes -> kbd.Update; Button3=OK, Button1=Back).
+func TestBip85IndexEntryFlow(t *testing.T) {
+	// Valid high index -> (2147483647, true).
+	t.Run("valid_high_index", func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var idx int
+		var ok bool
+		frame, quit := runUI(ctx, func() { idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme) })
+		defer quit()
+		frame()
+		runes(&ctx.Router, "2147483647")
+		frame()
+		click(&ctx.Router, Button3) // OK
+		frame()
+		if !ok || idx != 2147483647 {
+			t.Fatalf("typed 2147483647 -> (%d,%v); want (2147483647,true)", idx, ok)
+		}
+	})
+
+	// Back from an empty keyboard -> (0,false).
+	t.Run("back_exits", func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		var idx int
+		var ok bool
+		frame, quit := runUI(ctx, func() { idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme) })
+		defer quit()
+		frame()
+		click(&ctx.Router, Button1) // Back
+		frame()
+		if ok || idx != 0 {
+			t.Fatalf("Back -> (%d,%v); want (0,false)", idx, ok)
+		}
+	})
+
+	// Non-numeric input on OK -> error + re-prompt (NOT a silent 0, NOT an abort).
+	// After the error, the flow loops back to the keyboard; clearing the bad runes
+	// and typing a valid index then succeeds.
+	t.Run("nonnumeric_reprompts_then_valid", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx := NewContext(newPlatform())
+			var idx int
+			var ok bool
+			done := false
+			frame, quit := runUI(ctx, func() {
+				idx, ok = bip85IndexEntryFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			frame()
+			runes(&ctx.Router, "abc")
+			frame()
+			click(&ctx.Router, Button3) // OK on a non-numeric Fragment -> error screen
+			// The flow must NOT have returned: it shows the error, then re-prompts.
+			if done {
+				t.Fatal("flow returned on a non-numeric index; want error + re-prompt")
+			}
+			// Dismiss the error screen (Back/OK), then type a valid index and confirm.
+			if c, ok := pumpUntil(frame, "index", 16); !ok {
+				t.Fatalf("error screen not shown after non-numeric input; got %q", c)
+			}
+			click(&ctx.Router, Button3) // dismiss showError -> back to the keyboard
+			frame()
+			// Backspace the 3 stale runes, then type a valid index.
+			runes(&ctx.Router, "5")
+			frame()
+			click(&ctx.Router, Button3) // OK
+			for i := 0; i < 16 && !done; i++ {
+				frame()
+			}
+			if !done {
+				t.Fatal("flow did not return after a valid re-entry")
+			}
+			if !ok {
+				t.Fatalf("re-entered a valid index -> ok=false; want true (idx=%d)", idx)
+			}
+		})
 	})
 }

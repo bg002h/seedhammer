@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -10,6 +11,7 @@ import (
 	"seedhammer.com/bip85"
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
 )
 
@@ -17,6 +19,32 @@ import (
 // supports (biptool's guard n<12||24<n||n%3!=0 -> exactly {12,18,24}).
 func validBip85Words(n int) bool {
 	return n == 12 || n == 18 || n == 24
+}
+
+// bip85MaxIndex is the BIP-85 / BIP-32 hardened-child ceiling: an un-hardened
+// index in [0, 2^31-1]. It equals hdkeychain.HardenedKeyStart-1; biptool rejects
+// anything >= HardenedKeyStart with "bip32: path element out of range".
+const bip85MaxIndex = hdkeychain.HardenedKeyStart - 1 // = 2147483647 = 2^31-1
+
+// parseBip85Index parses a typed decimal child index, WIDTH-SAFE on every target.
+// It uses strconv.ParseUint(s,10,64) — NEVER a bare int — so a value > the 64-bit
+// host's int is still caught, not wrapped. It rejects empty input, any non-[0-9]
+// rune (sign, whitespace, '.', "0x", letters — all typeable on the keyboard), and
+// any value > 2^31-1 (the hardened max). Leading zeros are accepted ("007" -> 7),
+// matching base-10 ParseUint. The returned value is guaranteed in [0, 2^31-1], so
+// it fits an int on every target.
+func parseBip85Index(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("bip85: empty index")
+	}
+	v, err := strconv.ParseUint(s, 10, 64) // base 10; rejects sign/whitespace/0x/letters/overflow
+	if err != nil {
+		return 0, fmt.Errorf("bip85: invalid index %q", s)
+	}
+	if v > bip85MaxIndex {
+		return 0, fmt.Errorf("bip85: index %s exceeds the maximum %d", s, bip85MaxIndex)
+	}
+	return int(v), nil // safe: v <= 2^31-1
 }
 
 // deriveBip85Child re-creates biptool's `derive bip39` (cmd/biptool/main.go:137-189)
@@ -35,6 +63,12 @@ func deriveBip85Child(m bip39.Mnemonic, passphrase string, words, index int) (bi
 	}
 	if index < 0 {
 		return nil, fmt.Errorf("bip85: invalid index: %d", index)
+	}
+	if index > bip85MaxIndex {
+		// Defense-in-depth (independent of the picker's parseBip85Index): a 64-bit
+		// host int > 2^31-1 would otherwise be silently truncated/wrapped by the
+		// uint32(index)+h cast below into a different/UNHARDENED element. Reject it.
+		return nil, fmt.Errorf("bip85: index %d exceeds the maximum %d", index, bip85MaxIndex)
 	}
 
 	const h = hdkeychain.HardenedKeyStart
@@ -103,15 +137,13 @@ func engraveBip85Child(params engrave.Params, child bip39.Mnemonic) (Plate, uint
 	return plate, mfp, nil
 }
 
-// bip85WordChoices / bip85IndexChoices are the picker's in-spec, validated-by-
-// construction bounds (R0-I-B): word count = biptool's {12,18,24}; index is a
-// bounded small set 0..9 (no free-form numeric entry — there is no reusable
-// numeric-entry widget; a larger index space is a FOLLOWUP). The application is
-// FIXED to BIP-39 (the only engrave-as-words-faithful BIP-85 app).
+// bip85WordChoices is the picker's in-spec, validated-by-construction word-count
+// set: biptool's {12,18,24}. The child index is now TYPED (bip85IndexEntryFlow +
+// parseBip85Index, range [0,2^31-1]) rather than a bounded ChoiceScreen. The
+// application is FIXED to BIP-39 (the only engrave-as-words-faithful BIP-85 app).
 var bip85WordChoices = []int{12, 18, 24}
-var bip85IndexChoices = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 
-// bip85ParamPickFlow picks the child BIP-39 word count then the bounded index.
+// bip85ParamPickFlow picks the child BIP-39 word count then the TYPED index.
 // Returns ok==false on Back from the FIRST screen; Back from the index screen
 // re-shows the word-count screen. The returned (words,index) are always in-spec.
 func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
@@ -125,17 +157,56 @@ func bip85ParamPickFlow(ctx *Context, th *Colors) (words, index int, ok bool) {
 		if !wok {
 			return 0, 0, false
 		}
-		idxCS := &ChoiceScreen{
-			Title:   "Child Seed",
-			Lead:    "Child index",
-			Choices: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
-		}
-		isel, iok := idxCS.Choose(ctx, th)
+		index, iok := bip85IndexEntryFlow(ctx, th)
 		if !iok {
 			continue // Back from index -> re-pick the word count.
 		}
-		return bip85WordChoices[wsel], bip85IndexChoices[isel], true
+		return bip85WordChoices[wsel], index, true
 	}
+}
+
+// bip85IndexEntryFlow lets the operator TYPE the child index on a cleartext
+// keyboard (the index is public, not a secret). It clones typeAddressFlow
+// (gui/verify_address.go:44-71): Back (Button1) -> (0,false); OK (Button3) parses
+// kbd.Fragment via parseBip85Index. On a parse error it shows the message and
+// RE-PROMPTS (clears the keyboard, re-loops) — it NEVER returns a silent 0 and
+// NEVER aborts. Only a valid index in [0,2^31-1] returns (idx,true).
+func bip85IndexEntryFlow(ctx *Context, th *Colors) (int, bool) {
+	kbd := NewAddressKeyboard(ctx)
+	backBtn := &Clickable{Button: Button1}
+	okBtn := &Clickable{Button: Button3}
+	for !ctx.Done {
+		for kbd.Update(ctx) {
+		}
+		if backBtn.Clicked(ctx) {
+			return 0, false
+		}
+		if okBtn.Clicked(ctx) {
+			idx, err := parseBip85Index(kbd.Fragment)
+			if err != nil {
+				showError(ctx, th, "Child index", "Enter a whole number 0 to 2147483647.")
+				// R0-m1: keep the readout CLEARTEXT on re-prompt (the index is
+				// public). kbd.Clear() resets revealed=false, so re-create the
+				// cleartext keyboard rather than just clearing it.
+				kbd = NewAddressKeyboard(ctx)
+				continue
+			}
+			return idx, true
+		}
+		dims := ctx.Platform.DisplaySize()
+		screen := layout.Rectangle{Max: dims}
+		_, content := screen.CutTop(leadingSize)
+		content, _ = content.CutBottom(8)
+		kbdOp, kbdsz := kbd.Layout(ctx, th)
+		kbdOp = kbdOp.Offset(content.S(kbdsz))
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Child index")
+		ctx.Frame(op.Layer(kbdOp, nav, title, op.Color(&ctx.B, th.Background)))
+	}
+	return 0, false
 }
 
 // childSeedWarning shows the MANDATORY, operator-acknowledged warning that the
@@ -171,7 +242,7 @@ var bip85SeedHook func(master, child bip39.Mnemonic)
 
 // bip85DeriveFlow is the bip85Derive program: a hand-typed BIP-39 MASTER seed
 // (SECRET, typed-only — NEVER a scan) + optional passphrase ON THE MASTER -> pick
-// the child params (app fixed BIP-39, word count {12,18,24}, bounded index 0..9)
+// the child params (app fixed BIP-39, word count {12,18,24}, typed index 0..2^31-1)
 // -> derive the child BIP-39 mnemonic via BIP-85 -> unskippable child-seed warning
 // -> engrave the child (words + standard SeedQR) via the engraveSeed primitive,
 // stamping the CHILD's own bare fingerprint.
