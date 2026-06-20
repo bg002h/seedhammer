@@ -2,6 +2,10 @@ package md
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"seedhammer.com/codex32"
@@ -177,6 +181,147 @@ func TestEncodeMultisigTemplateParity(t *testing.T) {
 			// silently-rewritten .bytes.hex can't make the test vacuously pass.
 			if hex.EncodeToString(got) != tc.wantHex {
 				t.Fatalf("template bytes != pinned wantHex:\n got  %x\n want %s", got, tc.wantHex)
+			}
+		})
+	}
+}
+
+type multisigMeta struct {
+	Script       string `json:"script"`
+	K            uint8  `json:"k"`
+	N            int    `json:"n"`
+	OriginMode   string `json:"origin_mode"`
+	SharedOrigin string `json:"shared_origin"`
+	FpPresent    bool   `json:"fp_present"`
+	Cosigners    []struct {
+		ChainCode        string `json:"chaincode"`
+		CompressedPubkey string `json:"compressed_pubkey"`
+		Fingerprint      string `json:"fingerprint"`
+		FpPresent        bool   `json:"fp_present"`
+		Origin           string `json:"origin"`
+	} `json:"cosigners"`
+	PayloadHex string `json:"payload_hex"`
+	WPID       string `json:"wallet_policy_id"`
+	Stub       string `json:"wallet_policy_id_stub"`
+}
+
+func loadMultisigMeta(t *testing.T, name string) multisigMeta {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "vectors", name+".meta.json"))
+	if err != nil {
+		t.Fatalf("read %s.meta.json: %v", name, err)
+	}
+	var m multisigMeta
+	if err := jsonUnmarshalStrict(raw, &m); err != nil {
+		t.Fatalf("unmarshal %s.meta.json: %v", name, err)
+	}
+	return m
+}
+
+func loadMultisigChunks(t *testing.T, name string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "vectors", name+".md1.txt"))
+	if err != nil {
+		t.Fatalf("read %s.md1.txt: %v", name, err)
+	}
+	var chunks []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			chunks = append(chunks, l)
+		}
+	}
+	return chunks
+}
+
+func multisigScriptFromName(t *testing.T, s string) MultisigScript {
+	t.Helper()
+	switch s {
+	case "wsh_sortedmulti":
+		return MultisigWsh
+	case "sh_wsh_sortedmulti":
+		return MultisigShWsh
+	case "sh_sortedmulti":
+		return MultisigSh
+	default:
+		t.Fatalf("unknown multisig script %q", s)
+		return 0
+	}
+}
+
+// reqFromMeta builds the EncodeMultisigRequest the meta.json describes.
+func reqFromMeta(t *testing.T, m multisigMeta) EncodeMultisigRequest {
+	t.Helper()
+	req := EncodeMultisigRequest{K: m.K, Script: multisigScriptFromName(t, m.Script)}
+	if m.OriginMode == "divergent" {
+		req.OriginMode = OriginDivergent
+	} else {
+		req.OriginMode = OriginShared
+		req.SharedOrigin = parsePathComponents(t, m.SharedOrigin)
+	}
+	for _, c := range m.Cosigners {
+		cc, pk := mkXpub65(t, c.ChainCode, c.CompressedPubkey)
+		mc := MultisigCosigner{ChainCode: cc, CompressedPubkey: pk, FpPresent: c.FpPresent}
+		if c.FpPresent {
+			fb, err := hex.DecodeString(c.Fingerprint)
+			if err != nil || len(fb) != 4 {
+				t.Fatalf("bad fp %q", c.Fingerprint)
+			}
+			copy(mc.Fingerprint[:], fb)
+		}
+		if req.OriginMode == OriginDivergent {
+			mc.Origin = parsePathComponents(t, c.Origin)
+		}
+		req.Cosigners = append(req.Cosigners, mc)
+	}
+	return req
+}
+
+func jsonUnmarshalStrict(b []byte, v any) error {
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+var multisigFullSets = []string{"multisig_wsh_full"}
+
+// TestEncodeMultisigFullPolicyParity (A2): EncodeMultisig fed the meta inputs
+// reproduces the vendored chunk strings byte-for-byte, the reassembled payload
+// equals payload_hex, and the WalletPolicyId/stub match.
+func TestEncodeMultisigFullPolicyParity(t *testing.T) {
+	for _, name := range multisigFullSets {
+		t.Run(name, func(t *testing.T) {
+			m := loadMultisigMeta(t, name)
+			req := reqFromMeta(t, m)
+			out, stub, _, err := EncodeMultisig(req)
+			if err != nil {
+				t.Fatalf("EncodeMultisig: %v", err)
+			}
+			want := loadMultisigChunks(t, name)
+			if len(out) != len(want) {
+				t.Fatalf("chunk count: got %d want %d", len(out), len(want))
+			}
+			for i := range out {
+				if out[i] != want[i] {
+					t.Fatalf("chunk %d:\n got  %s\n want %s", i, out[i], want[i])
+				}
+			}
+			d, err := Reassemble(out)
+			if err != nil {
+				t.Fatalf("Reassemble: %v", err)
+			}
+			gotPayload, _, err := encodePayload(d)
+			if err != nil {
+				t.Fatalf("encodePayload: %v", err)
+			}
+			if hex.EncodeToString(gotPayload) != m.PayloadHex {
+				t.Fatalf("payload:\n got  %x\n want %s", gotPayload, m.PayloadHex)
+			}
+			id, _ := WalletPolicyIdChunks(out)
+			if hex.EncodeToString(id[:]) != m.WPID {
+				t.Fatalf("WalletPolicyId: got %x want %s", id, m.WPID)
+			}
+			if hex.EncodeToString(stub[:]) != m.Stub {
+				t.Fatalf("stub: got %x want %s", stub, m.Stub)
 			}
 		})
 	}
