@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"seedhammer.com/md"
 )
 
 // The 6 chunks of a wsh(sortedmulti(2,3)) md1 with real xpubs + fingerprints
@@ -163,5 +165,75 @@ func TestGatheredDescriptorFlowCSIDMismatch(t *testing.T) {
 	}
 	if !uiContains(content, "match") && !uiContains(content, "tampered") {
 		t.Errorf("csid-mismatch set must show a distinct 'chunks don't match' message; got %q", content)
+	}
+}
+
+// T-H2 (verify-cluster H2): collected() must return chunks in ChunkIndex order
+// regardless of arrival order. The gatherer keys by parsed ChunkIndex, so we
+// vary ARRIVAL order; the canonical wshSortedmultiChunks slice IS index-ordered.
+// Proven on 3a23dbb: collected() ranges the Go map (random order) → non-index
+// order on 10/10 shuffled trials (FALSE-FAIL at the positional comparator).
+// After the index-walk fix it is index-ordered deterministically every time.
+func TestMD1GathererCollectedIndexOrder(t *testing.T) {
+	orders := [][]int{
+		{5, 0, 3, 1, 4, 2},
+		{2, 1, 0, 5, 4, 3},
+		{0, 1, 2, 3, 4, 5},
+		{3, 5, 1, 0, 2, 4},
+	}
+	for _, order := range orders {
+		// Repeat to defeat Go's randomized map iteration (a single run could
+		// coincidentally agree; 10 runs makes a map-order regression observable).
+		for trial := 0; trial < 10; trial++ {
+			g := &md1Gatherer{}
+			for _, i := range order {
+				if st := g.offer(wshSortedmultiChunks[i]); st != gatherAdded {
+					t.Fatalf("order %v: offer chunk %d status %v", order, i, st)
+				}
+			}
+			if !g.complete() {
+				t.Fatalf("order %v: not complete", order)
+			}
+			got := g.collected()
+			if len(got) != len(wshSortedmultiChunks) {
+				t.Fatalf("order %v: collected len %d, want %d", order, len(got), len(wshSortedmultiChunks))
+			}
+			for i := range wshSortedmultiChunks {
+				if got[i] != wshSortedmultiChunks[i] {
+					t.Fatalf("order %v trial %d: collected()[%d]=%q, want index order %q",
+						order, trial, i, got[i], wshSortedmultiChunks[i])
+				}
+			}
+		}
+	}
+}
+
+// TestMD1GathererShuffledGatherExpands (end-to-end flavour): a complete
+// multi-chunk md1 gathered in shuffled order must reassemble + expand the SAME
+// descriptor as the canonical index-ordered set (collected() → the production
+// gather-completion consumer), confirming the ordering fix reaches the real
+// gather→consume path, not just collected() in isolation.
+func TestMD1GathererShuffledGatherExpands(t *testing.T) {
+	g := &md1Gatherer{}
+	for _, i := range []int{5, 0, 3, 1, 4, 2} {
+		g.offer(wshSortedmultiChunks[i])
+	}
+	if !g.complete() {
+		t.Fatal("not complete after shuffled gather")
+	}
+	tpl, keys, err := md.ExpandWalletPolicyChunks(g.collected())
+	if err != nil {
+		t.Fatalf("expand shuffled-gather collected(): %v", err)
+	}
+	tplC, keysC, err := md.ExpandWalletPolicyChunks(wshSortedmultiChunks)
+	if err != nil {
+		t.Fatalf("expand canonical: %v", err)
+	}
+	if tpl.Root != tplC.Root || tpl.Policy != tplC.Policy || tpl.K != tplC.K || tpl.N != tplC.N {
+		t.Fatalf("shuffled-gather template %v/%v/%d-of-%d != canonical %v/%v/%d-of-%d",
+			tpl.Root, tpl.Policy, tpl.K, tpl.N, tplC.Root, tplC.Policy, tplC.K, tplC.N)
+	}
+	if len(keys) != len(keysC) {
+		t.Fatalf("shuffled-gather %d keys != canonical %d", len(keys), len(keysC))
 	}
 }
