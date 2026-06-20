@@ -113,10 +113,15 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full bool) {
 			showError(ctx, th, "Verify Bundle", "That isn't an ms1 secret share.")
 			return
 		}
-		if _, _, _, err := codex32.DecodeMS1(s); err != nil {
+		// L1: capture + scrub the probe's secret entropy (codebase convention,
+		// gui/ms1_decode.go:29) — DecodeMS1 allocates a fresh entropy slice we
+		// otherwise abandon to the GC.
+		_, _, ent, err := codex32.DecodeMS1(s)
+		if err != nil {
 			showError(ctx, th, "Verify Bundle", "That isn't a valid ms1 secret share.")
 			return
 		}
+		wipeBytes(ent)
 		ms1Readback = s.String()
 	}
 
