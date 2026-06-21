@@ -96,6 +96,31 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		return
 	}
 
+	// (6b) Wallet-policy form: default FULL policy (recommended); opt-in
+	// TEMPLATE-only behind the per-shape consent + recovery estimate (DD5/S4/S6).
+	// On template, STRIP the assembled md1 to keyless; deriveMultisigLeg then
+	// auto-binds the self mk1 to the WDT-Id (form-aware, C2). The supply
+	// seed-cross-match flow is left untouched (D1).
+	engraveMd1 := assembledMd1
+	template := false
+	formChoice := &ChoiceScreen{
+		Title:   "Engrave wallet policy",
+		Lead:    "Which md1?",
+		Choices: []string{"Full policy md1", "Template-only md1"},
+	}
+	if sel, ok := formChoice.Choose(ctx, th); ok && sel == 1 {
+		tmplMd1, terr := md.StripToTemplate(assembledMd1)
+		if terr != nil {
+			showError(ctx, th, "Build Policy", "Couldn't build the template bundle.")
+			return
+		}
+		if !templateConsentFlow(ctx, th, tmplMd1) {
+			return
+		}
+		engraveMd1 = tmplMd1
+		template = true
+	}
+
 	// (7) The MANDATORY unskippable EXPERIMENTAL warning (I-WARN). Abort the
 	// engrave on Back/ConfirmNo.
 	if !multisigBuildExperimentalWarning(ctx, th) {
@@ -110,9 +135,11 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 	full := modeSel == 0
 
-	// (9) Derive the operator's leg over the ASSEMBLED md1 (flows EXACTLY like a
-	// supplied md1; binds mk1.Stubs to `stub`, I-STUB) and engrave.
-	b, err := deriveMultisigLeg(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin(), assembledMd1, full)
+	// (9) Derive the operator's leg over the engrave md1 (full policy OR the
+	// stripped template; flows EXACTLY like a supplied md1; deriveMultisigLeg
+	// binds mk1.Stubs form-aware — WalletPolicyId for full, WDT-Id for template,
+	// C2) and engrave.
+	b, err := deriveMultisigLeg(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin(), engraveMd1, full)
 	if err != nil {
 		showError(ctx, th, "Build Policy", "Couldn't derive the bundle from the seed.")
 		return
@@ -120,19 +147,53 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	cardsOut := multisigEngraveCards(b.MS1, b.MK1, b.MD1, full)
 	bundleEngrave(ctx, th, cardsOut)
 
-	// (10) Offer verify-bundle.
-	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, b, full)
+	// (10) Offer verify-bundle — full policy only. The verify re-derives via the
+	// xpub seed-cross-match (findUserSlot), which a KEYLESS template has no xpub
+	// to match (D1); the template's binding is the device's own form-aware
+	// readback, already established at engrave. So a template engrave skips the
+	// cross-match verify offer.
+	if !template {
+		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
+		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
+			multisigVerifyFlow(ctx, th, b, full)
+		}
 	}
 
-	// (11) Restore doc (display-only, PUBLIC) over the assembled md1.
-	tpl, keys, err := md.ExpandWalletPolicyChunks(assembledMd1)
-	if err != nil {
-		showError(ctx, th, "Build Policy", "Couldn't decode the assembled policy.")
-		return
+	// (11) Restore doc (display-only, PUBLIC). A full policy expands to per-key
+	// origins; a keyless template has no xpubs to render, so the restore doc is
+	// skipped for the template form (the template-id consent already shown).
+	if !template {
+		tpl, keys, err := md.ExpandWalletPolicyChunks(assembledMd1)
+		if err != nil {
+			showError(ctx, th, "Build Policy", "Couldn't decode the assembled policy.")
+			return
+		}
+		multisigRestoreDocFlow(ctx, th, tpl, keys)
 	}
-	multisigRestoreDocFlow(ctx, th, tpl, keys)
+}
+
+// templateConsentFlow shows the per-shape consent surface (classifiable k-of-N
+// OR honest-minimal complex + depth-≥2 experimental gate) for a stripped
+// template md1, then the loud warning. Returns false on Back/abort (fall back to
+// full policy / cancel). It classifies the template via md.DecodeChunks +
+// md.TapTreeDepthChunks and roots the displayed template-id on the WDT-Id stub.
+func templateConsentFlow(ctx *Context, th *Colors, tmplMd1 []string) bool {
+	tmpl, err := md.DecodeChunks(tmplMd1)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't classify the template policy.")
+		return false
+	}
+	depth, err := md.TapTreeDepthChunks(tmplMd1)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't classify the template policy.")
+		return false
+	}
+	stub, err := md.FormAwareStubChunks(tmplMd1)
+	if err != nil {
+		showError(ctx, th, "Build Policy", "Couldn't compute the template id.")
+		return false
+	}
+	return confirmReviewScreen(ctx, th, "Template-only md1", templateConsentLines(tmpl, stub, depth))
 }
 
 // multisigBuildExperimentalWarning is the MANDATORY, unskippable, operator-

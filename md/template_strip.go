@@ -49,3 +49,47 @@ func StripToTemplate(md1Chunks []string) ([]string, error) {
 	// backed) — the same chunker the encoders use.
 	return split(d)
 }
+
+// TapTreeDepthChunks reports the taproot script-tree branch DEPTH of a (chunked)
+// md1, counting nested TapTree branch nodes along the deepest path:
+//   - 0 = not taproot, a key-path-only tr (no tree), OR a single-leaf tree
+//   - 1 = a single {A,B} branch (one branch level)
+//   - ≥2 = a NESTED taptree (e.g. {{A,B},C}) — the DD6 EXPERIMENTAL gate
+//
+// The fork's wire codec encodes any depth (no taptree-depth refusal); the
+// experimental framing is about off-device recovery via shipped rust-miniscript
+// (PR #953), not the on-device encode.
+func TapTreeDepthChunks(strs []string) (int, error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return 0, err
+	}
+	if d.tree.tag != tagTr {
+		return 0, nil
+	}
+	b, ok := d.tree.body.(trBody)
+	if !ok || b.tree == nil {
+		return 0, nil // key-path-only taproot
+	}
+	return tapBranchDepth(*b.tree), nil
+}
+
+// tapBranchDepth returns the nesting depth of tagTapTree BRANCH nodes: a script
+// leaf = 0, a single {A,B} branch = 1, a nested {{A,B},C} = 2. The tr root that
+// has any script tree is at least depth 1 (a bare-leaf tree).
+func tapBranchDepth(n node) int {
+	if n.tag != tagTapTree {
+		return 0 // a script leaf contributes no branch level
+	}
+	cb, ok := n.body.(childrenBody)
+	if !ok {
+		return 0
+	}
+	deepest := 0
+	for _, c := range cb.children {
+		if dch := tapBranchDepth(c); dch > deepest {
+			deepest = dch
+		}
+	}
+	return deepest + 1
+}

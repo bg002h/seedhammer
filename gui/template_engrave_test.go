@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -128,4 +130,123 @@ func TestEngraveSingleSigFlowTemplate(t *testing.T) {
 			t.Fatalf("template engrave did not reach the 3-card engrave; got %q", c)
 		}
 	})
+}
+
+// TestMultisigBuildTemplateBinding (C2, build path): assemble a 2-of-3
+// wsh-sortedmulti on-device, strip it to a keyless template, derive the
+// operator's self leg over the TEMPLATE md1 (as buildMultisigPolicyFlow does),
+// and confirm the self mk1 binds to the template's WDT-Id (NOT the full
+// WalletPolicyId). This is the multisig build-path own-readback.
+func TestMultisigBuildTemplateBinding(t *testing.T) {
+	chunks := suppliedMultisigMd1(t)
+	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+	self := abandonAboutMnemonic()
+	selfXpub, selfMasterFP, err := deriveAccountXpub(self, "", &chaincfg.MainNetParams, multisigSharedOrigin())
+	if err != nil {
+		t.Fatalf("deriveAccountXpub(self): %v", err)
+	}
+	card0 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[0]), Stubs: [][4]byte{{0, 0, 0, 0}}}
+	card2 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[2]), Stubs: [][4]byte{{0, 0, 0, 0}}}
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: false}
+	assembled, fullStub, _, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, []mk.Card{card0, card2})
+	if err != nil {
+		t.Fatalf("assembleBuildPolicy: %v", err)
+	}
+
+	// Strip to the keyless template, then derive the self leg over it (the build
+	// flow passes the stripped md1 to deriveMultisigLeg).
+	tmplMd1, err := md.StripToTemplate(assembled)
+	if err != nil {
+		t.Fatalf("StripToTemplate: %v", err)
+	}
+	b, err := deriveMultisigLeg(self, "", &chaincfg.MainNetParams, multisigSharedOrigin(), tmplMd1, false)
+	if err != nil {
+		t.Fatalf("deriveMultisigLeg(template): %v", err)
+	}
+
+	tmplStub, err := md.FormAwareStubChunks(tmplMd1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmplStub == fullStub {
+		t.Error("template stub equals the full WalletPolicyId stub; strip did not change id space")
+	}
+	card, err := mk.Decode(b.MK1)
+	if err != nil {
+		t.Fatalf("mk.Decode: %v", err)
+	}
+	if len(card.Stubs) != 1 || card.Stubs[0] != tmplStub {
+		t.Fatalf("self mk1 stubs = %v, want [%x] (WDT-Id, C2)", card.Stubs, tmplStub)
+	}
+	// The template md1 is keyless.
+	dt, err := md.DecodeChunks(tmplMd1)
+	if err != nil {
+		t.Fatalf("DecodeChunks(template): %v", err)
+	}
+	if dt.Policy != md.PolicySortedMulti || dt.N != 3 {
+		t.Errorf("template classify Policy=%d N=%d, want sortedmulti N=3", dt.Policy, dt.N)
+	}
+}
+
+// TestTemplateConsentLines: a classifiable sortedmulti shows the full k-of-N +
+// slot count; a PolicyComplex depth-≥2 taptree shows the honest-minimal consent
+// + the EXPERIMENTAL >13.1.0/PR #953 warning (C3/S5).
+func TestTemplateConsentLines(t *testing.T) {
+	// Classifiable: wsh-sortedmulti 2-of-2.
+	wsh := mustTemplateMD1(t, "../md/testdata/template/wsh_sortedmulti.tmpl.md1.txt")
+	tmplWsh, err := md.DecodeChunks(wsh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub, _ := md.FormAwareStubChunks(wsh)
+	lines := templateConsentLines(tmplWsh, stub, 0)
+	if !containsLineSubstr(lines, "sortedmulti") {
+		t.Errorf("classifiable consent missing k-of-N label: %v", lines)
+	}
+	if containsLineSubstr(lines, "EXPERIMENTAL") {
+		t.Errorf("non-taproot consent must NOT show the experimental gate: %v", lines)
+	}
+
+	// Complex depth-≥2: tr4.
+	tr4 := mustTemplateMD1(t, "../md/testdata/template/tr4_depth2.tmpl.md1.txt")
+	tmplTr4, err := md.DecodeChunks(tr4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmplTr4.Renderable {
+		t.Fatal("tr4 must be PolicyComplex / non-renderable")
+	}
+	depth, _ := md.TapTreeDepthChunks(tr4)
+	stub4, _ := md.FormAwareStubChunks(tr4)
+	lines4 := templateConsentLines(tmplTr4, stub4, depth)
+	if !containsLineSubstr(lines4, "COMPLEX POLICY") {
+		t.Errorf("complex consent missing honest-minimal header: %v", lines4)
+	}
+	if !containsLineSubstr(lines4, "Key slots") {
+		t.Errorf("complex consent missing slot count: %v", lines4)
+	}
+	if !containsLineSubstr(lines4, "EXPERIMENTAL") || !containsLineSubstr(lines4, "13.1.0") || !containsLineSubstr(lines4, "953") {
+		t.Errorf("depth-2 consent missing the EXPERIMENTAL >13.1.0/PR#953 warning: %v", lines4)
+	}
+}
+
+func containsLineSubstr(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func mustTemplateMD1(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.Fields(string(raw))
 }

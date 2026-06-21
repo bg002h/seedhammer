@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"fmt"
+
 	"seedhammer.com/bundle"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
@@ -44,6 +46,79 @@ func reStubMk1(mk1 []string, stub [4]byte) ([]string, error) {
 	}
 	card.Stubs = [][4]byte{stub}
 	return mk.Encode(card)
+}
+
+// templateConsentLines builds the per-shape consent surface shown before a
+// multisig/general template engrave (S4/S5/C3/DD7):
+//   - a CLASSIFIABLE shape (single/multi/sortedmulti) → full type + k-of-N + the
+//     N-slot count + template-id, then the loud warning.
+//   - a PolicyComplex shape (general miniscript / multi-leaf taptree) → the
+//     HONEST-MINIMAL consent {script family, key-slot count N, template-id}: the
+//     device cannot break it down; verify against the off-device toolkit (C3).
+//   - a depth-≥2 taptree → additionally the EXPERIMENTAL warning naming the
+//     unreleased rust-miniscript >13.1.0 / PR #953 (S5).
+//
+// templateID is the 4-byte WDT-Id stub of the (stripped) template; tapDepth is
+// md.TapTreeDepthChunks of the template.
+func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int) []string {
+	var lines []string
+	if tmpl.Renderable && tmpl.Policy != md.PolicyComplex {
+		lines = append(lines,
+			"TEMPLATE-ONLY md1 (advanced)",
+			fmt.Sprintf("Policy: %s", policyTypeLabel(tmpl)),
+			fmt.Sprintf("Key slots: %d", tmpl.N),
+			fmt.Sprintf("Template-ID: %x", templateID),
+		)
+	} else {
+		// C3 honest-minimal: no k-of-N computable on-device.
+		lines = append(lines,
+			"COMPLEX POLICY (advanced)",
+			"Cannot fully display on-device.",
+			fmt.Sprintf("Script: %s", complexScriptFamily(tmpl, tapDepth)),
+			fmt.Sprintf("Key slots: %d", tmpl.N),
+			fmt.Sprintf("Template-ID: %x", templateID),
+			"VERIFY against your coordinator /",
+			"toolkit BEFORE funding.",
+		)
+	}
+	// The shared loud warning + estimate.
+	lines = append(lines, templateWarningLines()...)
+	// The depth-≥2 taproot EXPERIMENTAL gate (S5).
+	if tapDepth >= 2 {
+		lines = append(lines,
+			"EXPERIMENTAL: taproot depth >= 2",
+			"The shipped toolkit CANNOT reconstruct",
+			"this taptree (rust-miniscript PR #953).",
+			"Recovery needs an UNRELEASED",
+			"rust-miniscript >13.1.0.",
+			"DO NOT use for real funds until that ships.",
+		)
+	}
+	return lines
+}
+
+// policyTypeLabel renders a short k-of-N label for a classifiable multisig/
+// single-sig template.
+func policyTypeLabel(tmpl md.Template) string {
+	switch tmpl.Policy {
+	case md.PolicySingle:
+		return "single-sig"
+	case md.PolicyMulti:
+		return fmt.Sprintf("multi %d-of-%d", tmpl.K, tmpl.M)
+	case md.PolicySortedMulti:
+		return fmt.Sprintf("sortedmulti %d-of-%d", tmpl.K, tmpl.M)
+	default:
+		return "wallet policy"
+	}
+}
+
+// complexScriptFamily names the script family for a non-classifiable shape
+// (honest-minimal — no breakdown).
+func complexScriptFamily(tmpl md.Template, tapDepth int) string {
+	if tapDepth >= 1 {
+		return fmt.Sprintf("tr + script tree (depth %d)", tapDepth)
+	}
+	return "general miniscript"
 }
 
 // templateWarningLines are the loud opt-in warning + recovery-time estimate

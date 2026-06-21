@@ -87,3 +87,27 @@ func TestStripToTemplateGolden(t *testing.T) {
 		})
 	}
 }
+
+// TestTapTreeDepthChunks: a depth-≥2 taptree template (tr4 from the toolkit's
+// examples-build, {{...},...}) reports depth 2 (the DD6 EXPERIMENTAL gate); a
+// non-taproot template reports 0.
+func TestTapTreeDepthChunks(t *testing.T) {
+	tr4 := loadTemplateMD1(t, "tr4_depth2.tmpl.md1.txt")
+	d, err := TapTreeDepthChunks(tr4)
+	if err != nil {
+		t.Fatalf("TapTreeDepthChunks(tr4): %v", err)
+	}
+	if d < 2 {
+		t.Fatalf("tr4 depth = %d, want >= 2 (nested taptree)", d)
+	}
+
+	// A non-taproot template (wsh-sortedmulti) → 0.
+	wsh := loadTemplateMD1(t, "wsh_sortedmulti.tmpl.md1.txt")
+	d2, err := TapTreeDepthChunks(wsh)
+	if err != nil {
+		t.Fatalf("TapTreeDepthChunks(wsh): %v", err)
+	}
+	if d2 != 0 {
+		t.Fatalf("wsh-sortedmulti depth = %d, want 0 (not taproot)", d2)
+	}
+}
