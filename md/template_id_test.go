@@ -69,6 +69,57 @@ func TestWalletDescriptorTemplateId_Golden(t *testing.T) {
 	}
 }
 
+// TestWalletDescriptorTemplateId_OverrideGolden pins the full-16B golden for the
+// SAME keyless wsh(sortedmulti(2,@0,@1,@2)) template WITH a per-cosigner use-site
+// override on @1 (<2;3>/* instead of the shared <0;1>/*). This exercises the
+// UseSitePathOverrides-TLV branch of the WDT-Id preimage (template_id.go:61-88 /
+// Rust identity.rs:79-98) — the no-override golden above never reaches it.
+//
+// Golden from md inspect (descriptor-mnemonic@54dd765, md-codec v0.37.0):
+//
+//	$ md encode 'wsh(sortedmulti(2,@0/<0;1>/*,@1/<2;3>/*,@2/<0;1>/*))' --group-size 0
+//	md1yzpqqxppcgscpdtq2zcknf8ygsz0m039
+//	$ md inspect --json md1yzpqqxppcgscpdtq2zcknf8ygsz0m039  → wallet_descriptor_template_id
+//	ca812f8fc0bfea0fd1329ebfd34e5b07
+//
+// The codec stores the override as use_site_path_overrides = [(1, <2;3>/*)] with
+// the shared use_site_path left at <0;1>/* (verified via md inspect --json). The
+// in-package descriptor below reproduces that exact stored form: identical to
+// keylessWshSortedmulti2of3() plus the @1 override.
+func TestWalletDescriptorTemplateId_OverrideGolden(t *testing.T) {
+	const want = "ca812f8fc0bfea0fd1329ebfd34e5b07"
+
+	withOverride := keylessWshSortedmulti2of3()
+	withOverride.tlv.useSitePresent = true
+	withOverride.tlv.useSiteOverrides = []idxUseSite{{
+		idx: 1,
+		path: useSitePath{
+			hasMultipath: true,
+			multipath:    []alternative{{value: 2}, {value: 3}},
+		},
+	}}
+
+	got, err := WalletDescriptorTemplateId(withOverride)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got[:]) != want {
+		t.Fatalf("WDT-Id (with override) = %x, want %s", got, want)
+	}
+
+	// Non-vacuous: the SAME template WITHOUT the override must produce a DIFFERENT
+	// id (the no-override golden b02b4403…). A regression that dropped the
+	// override-TLV from the preimage would make these collide and FAIL here.
+	noOverride, err := WalletDescriptorTemplateId(keylessWshSortedmulti2of3())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(noOverride[:]) == want {
+		t.Fatalf("no-override WDT-Id %x must differ from the with-override golden %s "+
+			"(the override-TLV is not entering the preimage)", noOverride, want)
+	}
+}
+
 // TestWalletDescriptorTemplateId_OriginInvariant: the id is identical under three
 // different origins (no origin/path-decl bits enter the preimage — identity.rs).
 func TestWalletDescriptorTemplateId_OriginInvariant(t *testing.T) {
