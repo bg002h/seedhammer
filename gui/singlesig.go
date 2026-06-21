@@ -3,6 +3,7 @@ package gui
 import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
+	"seedhammer.com/md"
 )
 
 // ─── T6a-2: the single-sig flagship orchestrator ─────────────────────────────
@@ -91,6 +92,12 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 		Choices: []string{"Full policy md1", "Template-only md1"},
 	}
 	if sel, ok := formChoice.Choose(ctx, th); ok && sel == 1 {
+		// Refuse render-gap shapes BEFORE engrave (C4). Single-sig is always a
+		// recoverable shape, but the guard is the single template-engrave gate.
+		if gerr := md.TemplateEngraveShapeGuardChunks(b.MD1); gerr != nil {
+			showError(ctx, th, "Engrave Single-Sig", "This wallet shape can't be safely engraved as a template (unrecoverable with the shipped toolkit). Use the full policy.")
+			return
+		}
 		if confirmReviewScreen(ctx, th, "Template-only md1", templateWarningLines()) {
 			tb, terr := templateizeBundle(b)
 			if terr != nil {

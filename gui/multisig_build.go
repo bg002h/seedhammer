@@ -109,6 +109,12 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		Choices: []string{"Full policy md1", "Template-only md1"},
 	}
 	if sel, ok := formChoice.Choose(ctx, th); ok && sel == 1 {
+		// Refuse render-gap shapes BEFORE engrave (C4). The build path only
+		// authors sortedmulti (admitted), but the guard is the single gate.
+		if gerr := md.TemplateEngraveShapeGuardChunks(assembledMd1); gerr != nil {
+			showError(ctx, th, "Build Policy", "This policy shape can't be safely engraved as a template (unrecoverable with the shipped toolkit). Use the full policy.")
+			return
+		}
 		tmplMd1, terr := md.StripToTemplate(assembledMd1)
 		if terr != nil {
 			showError(ctx, th, "Build Policy", "Couldn't build the template bundle.")
