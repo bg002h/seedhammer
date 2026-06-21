@@ -155,7 +155,8 @@ func EncodeMultisig(req EncodeMultisigRequest) (out []string, stub [4]byte, slot
 	if err != nil {
 		return nil, [4]byte{}, nil, err
 	}
-	stub, err = WalletPolicyIDStub(d)
+	// Form-aware stub (C2): keyed → WalletPolicyId, keyless template → WDT-Id.
+	stub, err = FormAwareStub(d)
 	if err != nil {
 		return nil, [4]byte{}, nil, err
 	}

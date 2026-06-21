@@ -63,8 +63,9 @@ func deriveSingleSigBundle(m bip39.Mnemonic, passphrase string, net *chaincfg.Pa
 		return bundle.Bundle{}, 0, 0, "", err
 	}
 
-	// (4) Policy-id stub from the md1 strings (POLICY-BOUND, non-zero).
-	stub, err := md.WalletPolicyIDStubChunks(md1)
+	// (4) Form-aware policy-id stub from the md1 strings (POLICY-BOUND,
+	// non-zero) — keyed → WalletPolicyId, keyless template → WDT-Id (C2).
+	stub, err := md.FormAwareStubChunks(md1)
 	if err != nil {
 		return bundle.Bundle{}, 0, 0, "", err
 	}

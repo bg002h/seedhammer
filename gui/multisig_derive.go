@@ -39,7 +39,8 @@ func deriveMultisigLeg(m bip39.Mnemonic, passphrase string, net *chaincfg.Params
 		return bundle.Bundle{}, err
 	}
 
-	stub, err := md.WalletPolicyIDStubChunks(suppliedMd1)
+	// Form-aware stub (C2): keyed → WalletPolicyId, keyless template → WDT-Id.
+	stub, err := md.FormAwareStubChunks(suppliedMd1)
 	if err != nil {
 		return bundle.Bundle{}, err
 	}

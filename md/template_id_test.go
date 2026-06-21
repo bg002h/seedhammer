@@ -223,3 +223,34 @@ func TestFormAwareStub(t *testing.T) {
 		t.Fatalf("keyed FormAwareStub %x != WalletPolicyIDStub %x", g2, w2)
 	}
 }
+
+// TestFormAwareStubOwnReadback (C2): the stub minted from a descriptor at an
+// emit site (FormAwareStub) MUST equal the stub recomputed from that
+// descriptor's own engraved+re-decoded md1 at the verify site
+// (FormAwareStubChunks(split(d))). This is the device's own-readback invariant
+// at the codec layer — for a keyless template AND a keyed policy.
+func TestFormAwareStubOwnReadback(t *testing.T) {
+	cases := map[string]*descriptor{
+		"keyless template": keylessWshSortedmulti2of3(),
+		"keyed policy":     cell7WpkhDescriptor(),
+	}
+	for name, d := range cases {
+		t.Run(name, func(t *testing.T) {
+			emitStub, err := FormAwareStub(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chunks, err := split(d)
+			if err != nil {
+				t.Fatalf("split: %v", err)
+			}
+			verifyStub, err := FormAwareStubChunks(chunks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if emitStub != verifyStub {
+				t.Fatalf("own-readback mismatch: emit %x != verify %x (C2)", emitStub, verifyStub)
+			}
+		})
+	}
+}
