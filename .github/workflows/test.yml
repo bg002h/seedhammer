@@ -25,5 +25,5 @@ jobs:
       with:
         nix_path: nixpkgs=channel:nixos-25.11
     - uses: DeterminateSystems/magic-nix-cache-action@v14
-    - name: TinyGo device build (covers codex32) + size report
-      run: nix develop --command tinygo build -size full -o /dev/null -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks ./cmd/controller
+    - name: TinyGo device build (covers codex32) + size & stack report
+      run: nix develop --command tinygo build -size full -print-stacks -o /dev/null -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks ./cmd/controller
