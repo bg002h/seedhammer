@@ -157,3 +157,69 @@ func TestWalletDescriptorTemplateIdStub(t *testing.T) {
 		t.Fatalf("stub = %x, want b02b4403", stub)
 	}
 }
+
+// ─── Task 3: form-aware stub selector (is_wallet_policy ? WPID : WDT-Id) ─────
+
+// FormAwareStubChunks takes the FORK's own wire strings (the format split()
+// emits and Reassemble accepts — distinct from the descriptor-mnemonic CLI's
+// single-string dialect). We therefore encode the goldens with the fork's own
+// split() and assert the selector picks the right id space, mirroring Rust
+// mk-cli derive_stub_from_md1 (mod.rs:72-82). The WDT-Id / WalletPolicyId values
+// themselves are pinned to the CLI goldens in the descriptor-form tests above.
+func TestFormAwareStubChunks(t *testing.T) {
+	// keyless template → WDT-Id top4 (b02b4403, the CLI golden).
+	tmplChunks, err := split(keylessWshSortedmulti2of3())
+	if err != nil {
+		t.Fatalf("split template: %v", err)
+	}
+	got, err := FormAwareStubChunks(tmplChunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != ([4]byte{0xb0, 0x2b, 0x44, 0x03}) {
+		t.Fatalf("template stub = %x, want b02b4403", got)
+	}
+
+	// keyed policy → WalletPolicyId top4 (byte-identical to today's selector).
+	keyedChunks, err := split(cell7WpkhDescriptor())
+	if err != nil {
+		t.Fatalf("split keyed: %v", err)
+	}
+	g2, err := FormAwareStubChunks(keyedChunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := WalletPolicyIDStubChunks(keyedChunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g2 != w2 {
+		t.Fatalf("keyed FormAwareStub %x != WalletPolicyIDStub %x (must select WalletPolicyId)", g2, w2)
+	}
+}
+
+// TestFormAwareStub exercises the *descriptor form directly.
+func TestFormAwareStub(t *testing.T) {
+	// keyless template descriptor → WDT-Id.
+	got, err := FormAwareStub(keylessWshSortedmulti2of3())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != ([4]byte{0xb0, 0x2b, 0x44, 0x03}) {
+		t.Fatalf("template FormAwareStub = %x, want b02b4403", got)
+	}
+
+	// keyed descriptor → WalletPolicyId (must equal WalletPolicyIDStub).
+	keyed := cell7WpkhDescriptor()
+	g2, err := FormAwareStub(keyed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := WalletPolicyIDStub(keyed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g2 != w2 {
+		t.Fatalf("keyed FormAwareStub %x != WalletPolicyIDStub %x", g2, w2)
+	}
+}

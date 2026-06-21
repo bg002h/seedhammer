@@ -102,3 +102,27 @@ func WalletDescriptorTemplateIdStub(d *descriptor) ([4]byte, error) {
 	copy(stub[:], id[:4])
 	return stub, nil
 }
+
+// FormAwareStub mints the mk1 policy_id_stub for a descriptor, selecting the id
+// space by FORM (port of Rust mk-cli derive_stub_from_md1, mod.rs:72-82): a
+// keyed wallet-policy roots on WalletPolicyId; a keyless template roots on
+// WalletDescriptorTemplateId. Routed through every stub-mint + verify site so a
+// template binds (and the device's own readback verifies) and a keyed policy is
+// byte-identical to the prior WalletPolicyId-only behaviour.
+func FormAwareStub(d *descriptor) ([4]byte, error) {
+	if isWalletPolicy(d) {
+		return WalletPolicyIDStub(d)
+	}
+	return WalletDescriptorTemplateIdStub(d)
+}
+
+// FormAwareStubChunks is the chunked-md1-input form of FormAwareStub: it
+// reassembles the wire strings (the same Reassemble decode WalletPolicyIDStubChunks
+// uses) and selects by form. Reassemble errors surface unchanged.
+func FormAwareStubChunks(strs []string) ([4]byte, error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return [4]byte{}, err
+	}
+	return FormAwareStub(d)
+}
