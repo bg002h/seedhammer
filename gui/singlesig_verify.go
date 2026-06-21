@@ -62,7 +62,7 @@ func verifySingleSig(derived bundle.Bundle, ms1Readback string, mk1, md1 []strin
 // re-derives the seed (the comparator baseline is re-derived internally, NOT
 // passed in), reads back the public cards over NFC, optionally hand-types the
 // ms1, and reports PASS/FAIL.
-func singleSigVerifyFlow(ctx *Context, th *Colors, full bool) {
+func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool) {
 	// Re-type the seed (fresh residency) and re-derive deterministically.
 	reMnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
@@ -88,6 +88,15 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full bool) {
 	if err != nil {
 		showError(ctx, th, "Verify Bundle", "Couldn't re-derive the bundle from the seed.")
 		return
+	}
+	// For a TEMPLATE engrave the readback plates are the keyless template; the
+	// re-derived comparator baseline must be templateized to match (C2).
+	if template {
+		reDerived, err = templateizeBundle(reDerived)
+		if err != nil {
+			showError(ctx, th, "Verify Bundle", "Couldn't re-build the template bundle.")
+			return
+		}
 	}
 
 	// Read back the PUBLIC mk1 + md1 over NFC via the T5 gatherer.
