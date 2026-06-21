@@ -3,6 +3,7 @@ package gui
 import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
+	"seedhammer.com/md"
 )
 
 // ─── T6a-2: the single-sig flagship orchestrator ─────────────────────────────
@@ -80,6 +81,34 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 		return
 	}
 
+	// Wallet-policy form: default FULL policy (recommended); opt-in TEMPLATE-only
+	// behind the loud warning + recovery estimate (DD5/S4/S6). Single-sig always
+	// classifies PolicySingle (no complex/depth consent here — I3). Aborting the
+	// warning falls back to the full policy.
+	template := false
+	formChoice := &ChoiceScreen{
+		Title:   "Engrave wallet policy",
+		Lead:    "Which md1?",
+		Choices: []string{"Full policy md1", "Template-only md1"},
+	}
+	if sel, ok := formChoice.Choose(ctx, th); ok && sel == 1 {
+		// Refuse render-gap shapes BEFORE engrave (C4). Single-sig is always a
+		// recoverable shape, but the guard is the single template-engrave gate.
+		if gerr := md.TemplateEngraveShapeGuardChunks(b.MD1); gerr != nil {
+			showError(ctx, th, "Engrave Single-Sig", "This wallet shape can't be safely engraved as a template (unrecoverable with the shipped toolkit). Use the full policy.")
+			return
+		}
+		if confirmReviewScreen(ctx, th, "Template-only md1", templateWarningLines()) {
+			tb, terr := templateizeBundle(b)
+			if terr != nil {
+				showError(ctx, th, "Engrave Single-Sig", "Couldn't build the template bundle.")
+				return
+			}
+			b = tb
+			template = true
+		}
+	}
+
 	// Engrave (full = ms1+mk1+md1; watch-only = mk1+md1, + the ms1 reminder via
 	// bundleEngrave's cards-derived gate).
 	cards := singleSigEngraveCards(b, full)
@@ -88,7 +117,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, full)
+		singleSigVerifyFlow(ctx, th, full, template)
 	}
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).

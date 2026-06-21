@@ -70,6 +70,11 @@ func TestEngraveSingleSigFlowFull(t *testing.T) {
 		}
 		// Engrave mode: Full (choice 0).
 		click(&ctx.Router, Button3)
+		if c, ok := pumpUntil(frame, "Engrave wallet policy", 64); !ok {
+			t.Fatalf("did not reach the wallet-policy form choice; got %q", c)
+		}
+		// Wallet policy: Full policy md1 (choice 0, default).
+		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 1 of 3", 64); !ok {
 			t.Fatalf("full mode did not reach engrave with 3 cards; got %q", c)
 		}
@@ -103,6 +108,11 @@ func TestEngraveSingleSigFlowWatchOnly(t *testing.T) {
 		// Engrave mode: Watch-only (choice 1 → 1 Down then confirm).
 		click(&ctx.Router, Down)
 		frame()
+		click(&ctx.Router, Button3)
+		if c, ok := pumpUntil(frame, "Engrave wallet policy", 64); !ok {
+			t.Fatalf("did not reach the wallet-policy form choice; got %q", c)
+		}
+		// Wallet policy: Full policy md1 (choice 0, default).
 		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 1 of 2", 64); !ok {
 			t.Fatalf("watch-only mode did not reach engrave with 2 cards; got %q", c)

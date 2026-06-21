@@ -271,3 +271,49 @@ func TestVerifyBundleLanguageEnglishNotOverRejected(t *testing.T) {
 		t.Fatalf("English/entr readback over-rejected: %v (want PASS)", err)
 	}
 }
+
+// ─── Task 5: form-aware stub binding (C2) ────────────────────────────────────
+//
+// A KEYLESS-TEMPLATE bundle from mnemonic-toolkit@6de53879
+// (bundle --template bip84 --md1-form=template, abandon-about seed): the mk1
+// stub roots on the WalletDescriptorTemplateId of the keyless md1 — NOT its
+// WalletPolicyId. Verify must select the id space by form (FormAwareStubChunks);
+// today it is unconditionally WalletPolicyId-derived → a template mis-binds.
+func templateBundle() Bundle {
+	return Bundle{
+		MS1: wpkhMS1, // same abandon seed → same ms1 entropy
+		MK1: []string{
+			"mk1qpg4m4pqqsq52a6af4eutks2qvzg3vs70mejhk622ws2kgdemj2cd8zwj2skzx2wq0qw70l4q99vdyh5x0z8v4yslsp8qjuq3c9tru385fac",
+			"mk1qpg4m4pp0f30mtxzd65mvwcur9usdatwuqvq6z70r9nwrgk6xn6l8gy6nvzwz8qpm4xs9a0men698",
+		},
+		MD1: []string{"md1fvwrwqqpqqgqpsqqq3uaau4ctxyl7"}, // keyless bip84 template
+	}
+}
+
+// TestVerifyTemplateBundleBinds: the engraved template bundle's mk1 (rooting on
+// the WDT-Id) VERIFIES. Fails today (verify.go uses WalletPolicyIDStubChunks →
+// the keyless template's WalletPolicyId ≠ the WDT-Id stub the mk1 carries).
+func TestVerifyTemplateBundleBinds(t *testing.T) {
+	b := templateBundle()
+	if err := Verify(b, b); err != nil {
+		t.Fatalf("template bundle (mk1 on WDT-Id) rejected: %v (want PASS)", err)
+	}
+}
+
+// TestVerifyTemplateBundleForeignMk1Fails: the same template md1 paired with a
+// FOREIGN mk1 (the wpkh full-policy card, whose stub roots on a WalletPolicyId)
+// → stub mismatch FAIL. The security negative.
+func TestVerifyTemplateBundleForeignMk1Fails(t *testing.T) {
+	foreign := Bundle{
+		MS1: wpkhMS1,
+		MK1: append([]string(nil), wpkhMK1...),            // full-policy card, foreign stub
+		MD1: []string{"md1fvwrwqqpqqgqpsqqq3uaau4ctxyl7"}, // keyless template md1
+	}
+	err := Verify(foreign, foreign)
+	if err == nil {
+		t.Fatal("template md1 + foreign full-policy mk1 accepted, want FAIL")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "stub") {
+		t.Errorf("error %q does not name stub", err)
+	}
+}

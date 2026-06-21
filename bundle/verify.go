@@ -107,13 +107,15 @@ func Verify(derived, readback Bundle) error {
 }
 
 // checkStubBinding asserts the bundle's mk1 carries a policy_id_stub equal to
-// md.WalletPolicyIDStub(md1) — the cards belong to one policy.
+// the md1's FORM-AWARE stub — a keyed wallet-policy roots on its WalletPolicyId,
+// a keyless template on its WalletDescriptorTemplateId (md.FormAwareStubChunks,
+// C2). The cards belong to one policy.
 func checkStubBinding(which string, b Bundle) error {
 	card, err := mk.Decode(b.MK1)
 	if err != nil {
 		return fmt.Errorf("verify: %s mk1 decode: %w", which, err)
 	}
-	stub, err := md.WalletPolicyIDStubChunks(b.MD1)
+	stub, err := md.FormAwareStubChunks(b.MD1)
 	if err != nil {
 		return fmt.Errorf("verify: %s md1 stub: %w", which, err)
 	}
