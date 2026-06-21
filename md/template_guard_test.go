@@ -52,6 +52,22 @@ func wshOrISortedMultiGuard() *descriptor {
 	}
 }
 
+// wshOrILegacyMultiGuard: wsh(or_i(multi(2,@0,@1), multi(1,@0,@1))) — LEGACY
+// multi nested under a combinator (or_i). ADMITTED (C1 regression: legacy multi
+// renders fine inside combinators; only sortedmulti is the render-gap shape).
+func wshOrILegacyMultiGuard() *descriptor {
+	o := originPath{components: []pathComponent{{true, 48}, {true, 0}, {true, 0}, {true, 2}}}
+	m := node{tag: tagMulti, body: multiKeysBody{k: 2, indices: []uint8{0, 1}}}
+	other := node{tag: tagMulti, body: multiKeysBody{k: 1, indices: []uint8{0, 1}}}
+	orI := node{tag: tagOrI, body: childrenBody{children: []node{m, other}}}
+	return &descriptor{
+		n:        2,
+		pathDecl: pathDecl{n: 2, shared: &o},
+		useSite:  useSitePath{hasMultipath: true, multipath: []alternative{{value: 0}, {value: 1}}},
+		tree:     node{tag: tagWsh, body: childrenBody{children: []node{orI}}},
+	}
+}
+
 // canonicalWshSortedMultiGuard: wsh(sortedmulti(2,@0,@1,@2)) — sortedmulti
 // DIRECTLY under wsh (the canonical shape). ADMITTED.
 func canonicalWshSortedMultiGuard() *descriptor {
@@ -79,6 +95,7 @@ func TestTemplateEngraveShapeGuard(t *testing.T) {
 	admitted := map[string]*descriptor{
 		"tr(NUMS, multi_a)":          trNumsMultiAGuard(),
 		"wsh(sortedmulti) canonical": canonicalWshSortedMultiGuard(),
+		"wsh(or_i(multi,...)) legacy": wshOrILegacyMultiGuard(),
 		"single-sig wpkh":            keylessWpkhGuard(),
 	}
 	for name, d := range admitted {
@@ -116,5 +133,18 @@ func TestTemplateGuardHardenedUseSiteStrips(t *testing.T) {
 	}
 	if _, err := StripToTemplate(chunks); err != nil {
 		t.Fatalf("StripToTemplate of a hardened use-site template must succeed; got %v", err)
+	}
+}
+
+// TestTemplateGuardAdmitsDegrade2: the §5 degrade2 11-key general-miniscript
+// wallet (wsh(or_i(and_v(...multi(3,...)),...))) uses LEGACY multi inside
+// combinators — which the shipped toolkit ADMITS (its bundle --md1-form=template
+// produced the committed degrade2_11key.tmpl golden). The guard MUST admit it
+// (C1 exec-review regression: an over-broad multi-in-combinator refusal would
+// reject this SPEC-in-scope wallet — DD3/DD7).
+func TestTemplateGuardAdmitsDegrade2(t *testing.T) {
+	tmpl := loadTemplateMD1(t, "degrade2_11key.tmpl.md1.txt")
+	if err := TemplateEngraveShapeGuardChunks(tmpl); err != nil {
+		t.Fatalf("template guard must ADMIT the §5 degrade2 general-miniscript wallet (legacy multi in a combinator is admissible); got %v", err)
 	}
 }

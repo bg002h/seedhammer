@@ -4,7 +4,9 @@ package md
 // 1180-1212) ─────────────────────────────────────────────────────────────────
 //
 // StripToTemplate converts a DEVICE-BUILT full keyed wallet-policy md1 into the
-// keyless template md1 by applying the toolkit's mutations on a decoded clone
+// keyless template md1 by applying the toolkit's mutations IN PLACE on the
+// freshly-decoded descriptor (M1: Reassemble returns a NEW descriptor per call,
+// so the mutation is local — the caller passed wire strings, not a descriptor)
 // and re-emitting via split(). It is golden-locked byte-for-byte to
 // `toolkit bundle --md1-form=template`.
 //
