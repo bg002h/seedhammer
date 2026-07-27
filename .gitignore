@@ -1,2 +1,6 @@
 seedhammerii-*.uf2
 _artifacts
+
+# Boot-signing keys and OTP json must NEVER be committed -- this remote is public.
+*.pem
+*-otp*.json
