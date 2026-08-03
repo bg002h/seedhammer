@@ -93,8 +93,17 @@
             build-firmware = pkgs.writeShellScriptBin "build-firmware" ''
               set -eu -o pipefail
 
+              # Fork builds are versioned v0.0.0-g<sha>, NOT by `git describe
+              # --tags`. The fork inherits upstream's release tags, so describe
+              # yielded e.g. "v1.4.3-244-g86e0da9" -- which reads on the device
+              # home screen as though this were official SeedHammer v1.4.3. It is
+              # not. The -g<sha> suffix keeps each build traceable to a commit.
+              # Override with VERSION=... to stamp something else.
               if [ -z "''${VERSION:-}" ]; then
-                VERSION=$(${pkgs.git}/bin/git describe --tags --always --dirty)
+                SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
+                DIRTY=""
+                ${pkgs.git}/bin/git diff --quiet HEAD || DIRTY="-dirty"
+                VERSION="v0.0.0-g''${SHA}''${DIRTY}"
               fi
               WORKDIR="$(mktemp -d)"
               OUTPUT="seedhammerii-$VERSION.uf2"
@@ -114,7 +123,12 @@
               set -eu -o pipefail
 
               VERB="$1"; shift
-              VERSION=$(${pkgs.git}/bin/git describe --dirty)
+              if [ -z "''${VERSION:-}" ]; then
+                SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
+                DIRTY=""
+                ${pkgs.git}/bin/git diff --quiet HEAD || DIRTY="-dirty"
+                VERSION="v0.0.0-g''${SHA}''${DIRTY}"
+              fi
               ${pkgs.tinygo}/bin/tinygo "$VERB" -ldflags="-X main.Version=$VERSION" ${tinygo-flags} \
                 -programmer=cmsis-dap -ocd-commands "adapter speed 10000" \
                 -serial=uart "$@" \
