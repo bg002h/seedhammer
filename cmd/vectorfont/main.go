@@ -764,6 +764,12 @@ func mapChar(id string) (rune, bool) {
 			r = '<'
 		case "gt":
 			r = '>'
+		case "space_mark":
+			// Visible-space mark. Lives at a control codepoint so 0x20 stays a
+			// blank advance -- backup.TitleString and EngraveText paragraphs
+			// already engrave literal spaces, and remapping 0x20 would silently
+			// change existing plates (spec 3.3).
+			r = 0x1F
 		default:
 			return 0, false
 		}
