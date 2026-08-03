@@ -34,15 +34,21 @@ These formats back up arbitrary wallet descriptors across multiple plates. The
 air-gapped device via the CODEX32 flow above; only the public `md1`/`mk1` strings
 are pushed and engraved.
 
-> **Flashing a fork on retail hardware:** retail SeedHammer II units ship with
-> secure boot **locked**, so running self-built firmware requires provisioning
-> your own boot key into an OTP slot — an advanced and **irreversible** procedure
-> that permanently costs the device's `(UNLOCKED)`-free version line.
-> **[docs/custom-firmware.md](docs/custom-firmware.md)** documents it step by
-> step, including the rehearsal on a disposable Pico 2 that should precede it;
-> the procedure has been executed end to end on a real machine. It is not an
-> official SeedHammer procedure and is not supported by SeedHammer AB. The
-> upstream install and reproducible-build steps below are otherwise unchanged.
+> **Flashing a fork on retail hardware — read the warning first.** This is
+> **untested by humans in meat space and almost entirely AI generated.** You are
+> expected to test its output yourself, and you have no excuse not to: proving
+> the backup works *is* part of making the backup. Either a very useful tool or a
+> cleverly designed foot gun — if you shoot yourself in the foot, that's on you,
+> and I'm not your tech support staff.
+>
+> Retail SeedHammer II units ship with secure boot **locked**, so running
+> self-built firmware means burning your own boot key into an OTP slot —
+> advanced, **irreversible**, and it costs the device's `(UNLOCKED)`-free version
+> line permanently. **[docs/custom-firmware.md](docs/custom-firmware.md)** has the
+> full warning and the step-by-step, including the mandatory rehearsal on a
+> disposable Pico 2. Not an official SeedHammer procedure; not supported by
+> SeedHammer AB. The upstream install and reproducible-build steps below are
+> unchanged.
 
 ## Installation
 
