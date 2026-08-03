@@ -1,7 +1,6 @@
 package constant
 
 import (
-	"os"
 	"testing"
 )
 
@@ -16,11 +15,18 @@ func TestPrintableASCIICoverage(t *testing.T) {
 			missing = append(missing, r)
 		}
 	}
-	if os.Getenv("SH_FONT_COVERAGE_STRICT") == "" && len(missing) == 43 {
-		t.Skipf("known baseline: %d runes missing, pending glyph authoring (Task 3)", len(missing))
-	}
 	if len(missing) > 0 {
 		t.Errorf("face cannot decode %d of 95 printable ASCII runes: %q",
 			len(missing), string(missing))
+	}
+}
+
+// TestSpaceMarkPresent guards the visible-space mark. TestPrintableASCIICoverage
+// spans 0x20-0x7E only and the glyph-rule tests skip runes the face cannot
+// decode, so a forgotten space_mark would otherwise surface as a construction
+// panic in the passphrase ConstantStringer rather than here.
+func TestSpaceMarkPresent(t *testing.T) {
+	if _, _, ok := Font.Decode(0x1F); !ok {
+		t.Fatal("visible-space mark (0x1F) missing from the face")
 	}
 }

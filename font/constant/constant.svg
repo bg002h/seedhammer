@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <svg version="1.1" id="SEEDHAMMER_Constant_Font" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-	 x="0px" y="0px" viewBox="0 0 306 9" style="enable-background:new 0 0 306 9;" xml:space="preserve">
+	 x="0px" y="0px" viewBox="0 0 570 9" style="enable-background:new 0 0 570 9;" xml:space="preserve">
 <style type="text/css">
 	.st0{fill:none;stroke:#000000;stroke-width:0.1;stroke-miterlimit:10;}
 </style>
@@ -68,6 +68,81 @@
 </g>
 <polyline id="at" class="st0" points="299,7 298,8 296,8 295,7 295,3 296,2 298,2 299,3 299,6 298,5 298,4 297,3 296,4 296,6 297,7 298,6 "/>
 <line id="dash" class="st0" x1="301" y1="5" x2="305" y2="5"/>
+<polyline id="a" class="st0" points="311,4 311,8 307,8 307,6 311,6 "/>
+<polyline id="b" class="st0" points="313,2 313,8 317,8 317,5 313,5 "/>
+<polyline id="c" class="st0" points="323,4 319,4 319,8 323,8 "/>
+<polyline id="d" class="st0" points="329,2 329,8 325,8 325,5 329,5 "/>
+<polyline id="e" class="st0" points="331,6 335,6 335,4 331,4 331,8 335,8 "/>
+<polyline id="f" class="st0" points="341,3 341,2 339,2 339,4 337,4 340,4 339,4 339,8 "/>
+<polyline id="g" class="st0" points="344,9 347,9 347,4 343,4 343,7 347,7 "/>
+<polyline id="h" class="st0" points="349,2 349,8 349,4 353,4 353,8 "/>
+<g id="i">
+	<polyline class="st0" points="356.5,3 357.5,3 357.5,4 356.5,4 356.5,3 "/>
+	<polyline class="st0" points="357,5 357,8 "/>
+</g>
+<g id="j">
+	<polyline class="st0" points="363.5,3 364.5,3 364.5,4 363.5,4 363.5,3 "/>
+	<polyline class="st0" points="364,5 364,9 362,9 "/>
+</g>
+<polyline id="k" class="st0" points="367,2 367,8 367,6 371,4 367,6 371,8 "/>
+<polyline id="l" class="st0" points="375,2 375,7 377,8 "/>
+<polyline id="m" class="st0" points="379,8 379,4 381,4 381,8 381,4 383,4 383,8 "/>
+<polyline id="n" class="st0" points="385,8 385,4 389,4 389,8 "/>
+<polyline id="o" class="st0" points="391,4 395,4 395,8 391,8 391,4 "/>
+<polyline id="p" class="st0" points="397,9 397,4 401,4 401,7 397,7 "/>
+<polyline id="q" class="st0" points="407,9 407,4 403,4 403,7 407,7 "/>
+<polyline id="r" class="st0" points="409,8 409,4 411,4 412,5 "/>
+<polyline id="s" class="st0" points="419,4 415,4 415,6 419,6 419,8 415,8 "/>
+<polyline id="t" class="st0" points="424,4 421,4 422,4 422,2 422,8 424,8 "/>
+<polyline id="u" class="st0" points="427,4 427,8 431,8 431,4 "/>
+<polyline id="v" class="st0" points="433,4 433,5 435,8 437,5 437,4 "/>
+<polyline id="w" class="st0" points="439,4 439,5 440,8 441,5 442,8 443,5 443,4 "/>
+<g id="x">
+	<polyline class="st0" points="445,4 445,5 449,7 449,8 "/>
+	<polyline class="st0" points="449,4 449,5 445,7 445,8 "/>
+</g>
+<polyline id="y" class="st0" points="451,4 453,7 455,4 453,7 452,9 "/>
+<polyline id="z" class="st0" points="457,4 461,4 459,6 458,6 460,6 459,6 457,8 461,8 "/>
+<g id="!">
+	<polyline class="st0" points="465,2 465,6 "/>
+	<polyline class="st0" points="464.5,7 465.5,7 465.5,8 464.5,8 464.5,7 "/>
+</g>
+<g id="&quot;">
+	<polyline class="st0" points="471,2 470,4 "/>
+	<polyline class="st0" points="473,2 472,4 "/>
+</g>
+<g id="$">
+	<polyline class="st0" points="479,3 478,2 476,2 475,3 475,4 476,5 478,5 479,6 479,7 478,8 476,8 475,7 "/>
+	<polyline class="st0" points="477,1 477,9 "/>
+</g>
+<g id="%">
+	<polyline class="st0" points="485,2 481,8 "/>
+	<polyline class="st0" points="481,2 482,2 482,3 481,3 481,2 "/>
+	<polyline class="st0" points="484,7 485,7 485,8 484,8 484,7 "/>
+</g>
+<polyline id="&amp;" class="st0" points="491,8 488,4 488,3 489,2 490,3 490,4 487,6 487,7 488,8 490,8 491,7 "/>
+<polyline id="+" class="st0" points="493,5 497,5 495,5 495,3 495,7 "/>
+<g id="semicolon">
+	<polyline class="st0" points="500,3 501,3 501,4 500,4 500,3 "/>
+	<polyline class="st0" points="501,7 500,8 "/>
+</g>
+<polyline id="lt" class="st0" points="509,3 505,5 509,7 "/>
+<g id="=">
+	<polyline class="st0" points="511,4 515,4 "/>
+	<polyline class="st0" points="511,6 515,6 "/>
+</g>
+<polyline id="gt" class="st0" points="517,3 521,5 517,7 "/>
+<g id="?">
+	<polyline class="st0" points="523,3 524,2 526,2 527,3 527,4 525,5 525,6 "/>
+	<polyline class="st0" points="524.5,7 525.5,7 525.5,8 524.5,8 524.5,7 "/>
+</g>
+<polyline id="\" class="st0" points="530,2 532,8 "/>
+<polyline id="^" class="st0" points="535,4 537,2 539,4 "/>
+<polyline id="_" class="st0" points="541,9 545,9 "/>
+<polyline id="`" class="st0" points="548,2 549,4 "/>
+<polyline id="|" class="st0" points="555,1 555,9 "/>
+<polyline id="~" class="st0" points="559,5.5 560,4.5 562,5.5 563,4.5 "/>
+<polyline id="space_mark" class="st0" points="565,3 565,9 569,9 569,3 "/>
 <line id="height" class="st0" x1="6" y1="0" x2="6" y2="9"/>
 <line id="advance" class="st0" x1="0" y1="8" x2="6" y2="8"/>
 <line id="baseline" class="st0" x1="2" y1="8" x2="4" y2="8"/>
