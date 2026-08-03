@@ -1598,8 +1598,15 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 			}
 		}()
 	}
-	inp := new(InputTracker)
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}
+	// The program pager must be driveable by TOUCH, not just by Left/Right
+	// button events: SeedHammer II has no directional buttons at all -- its
+	// only production input is the ft6x36 capacitive panel, which emits
+	// PointerEvents. Clickable.Next routes both ButtonFilter(c.Button) and
+	// PointerFilter(c), so binding the arrows to Left/Right keeps the button
+	// path (and the existing tests) working while making them touchable.
+	prevBtn := &Clickable{Button: Left}
+	nextBtn := &Clickable{Button: Right}
 	for !ctx.Done {
 		if selectBtn.Clicked(ctx) {
 			return startScreenAction{prog: m.prog}, true
@@ -1636,46 +1643,29 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 			}
 		default:
 		}
-		for {
-			e, ok := inp.Next(ctx,
-				ButtonFilter(Left),
-				ButtonFilter(Right),
-			)
-			if !ok {
-				break
+		for prevBtn.Clicked(ctx) {
+			m.prog--
+			if m.prog < 0 {
+				m.prog = bip85Derive
 			}
-			if e, ok := e.AsButton(); ok {
-				switch e.Button {
-				case Left:
-					if !e.Pressed {
-						break
-					}
-					m.prog--
-					if m.prog < 0 {
-						m.prog = bip85Derive
-					}
-				case Right:
-					if !e.Pressed {
-						break
-					}
-					m.prog++
-					if m.prog > bip85Derive {
-						m.prog = 0
-					}
-				}
+		}
+		for nextBtn.Clicked(ctx) {
+			m.prog++
+			if m.prog > bip85Derive {
+				m.prog = 0
 			}
 		}
 		dims := ctx.Platform.DisplaySize()
 		nav, _ := layoutNavigation(&ctx.B, th, dims,
 			NavButton{Clickable: selectBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
 		)
-		content := m.draw(ctx, th, dims)
+		content := m.draw(ctx, th, dims, prevBtn, nextBtn)
 		ctx.Frame(op.Layer(nav, content))
 	}
 	return startScreenAction{}, false
 }
 
-func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
+func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, nextBtn *Clickable) op.Op {
 	var titleTxt string
 	switch m.prog {
 	case backupWallet:
@@ -1695,7 +1685,7 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 	title, _ := layoutTitle(ctx, dims.X, th.Text, titleTxt)
 
 	r := layout.Rectangle{Max: dims}
-	content, sz := m.layout(&ctx.B, th, dims.X)
+	content, sz := m.layout(&ctx.B, th, dims.X, prevBtn, nextBtn)
 	content = content.Offset(r.Center(sz))
 
 	inner, sz := layoutMainPager(&ctx.B, th, m.prog)
@@ -1842,7 +1832,7 @@ func layoutNavigation(buf *op.Buffer, th *Colors, dims image.Point, btns ...NavB
 	return content, r
 }
 
-func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, image.Point) {
+func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nextBtn *Clickable) (op.Op, image.Point) {
 	const margin = 16
 
 	left := op.Compose(
@@ -1851,14 +1841,16 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 	)
 	var h layout.Align
 	leftsz := h.Add(assets.ArrowLeft.Bounds().Size())
-	left = left.Offset(image.Pt(margin, h.Y(leftsz)))
+	leftPos := image.Pt(margin, h.Y(leftsz))
+	left = left.Offset(leftPos)
 
 	right := op.Compose(
 		op.Color(buf, th.Text),
 		op.Mask(buf, assets.ArrowRight),
 	)
 	rightsz := h.Add(assets.ArrowRight.Bounds().Size())
-	right = right.Offset(image.Pt(width-margin-rightsz.X, h.Y(rightsz)))
+	rightPos := image.Pt(width-margin-rightsz.X, h.Y(rightsz))
+	right = right.Offset(rightPos)
 
 	plates, sz := layoutMainPlates(buf, m.prog)
 	contentsz := h.Add(sz)
@@ -1866,7 +1858,22 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int) (op.Op, imag
 	content := plates.Offset(image.Pt((width-contentsz.X)/2, 8+h.Y(contentsz)))
 	const npage = int(bip85Derive) + 1
 	if npage > 1 {
-		content = op.Layer(content, left, right)
+		// The arrow glyphs are only a few pixels wide -- far too small to hit
+		// with a fingertip, and on SeedHammer II touch is the ONLY input. Give
+		// each arrow a touch target spanning the full height of the pager row
+		// and running out to the screen edge, so the whole left/right margin
+		// steps the program.
+		leftHit := image.Rectangle{
+			Max: image.Pt(leftPos.X+leftsz.X+margin, h.Size.Y),
+		}
+		rightHit := image.Rectangle{
+			Min: image.Pt(rightPos.X-margin, 0),
+			Max: image.Pt(width, h.Size.Y),
+		}
+		content = op.Layer(content,
+			left, op.Input(buf, prevBtn).Clip(leftHit),
+			right, op.Input(buf, nextBtn).Clip(rightHit),
+		)
 	}
 
 	return content, image.Pt(width, h.Size.Y)
