@@ -36,9 +36,13 @@ are pushed and engraved.
 
 > **Flashing a fork on retail hardware:** retail SeedHammer II units ship with
 > secure boot **locked**, so running self-built firmware requires provisioning
-> your own boot key into an OTP slot — an advanced and **irreversible** procedure.
-> Consult the SeedHammer documentation before attempting it. The upstream install
-> and reproducible-build steps below are otherwise unchanged.
+> your own boot key into an OTP slot — an advanced and **irreversible** procedure
+> that permanently costs the device's `(UNLOCKED)`-free version line.
+> **[docs/custom-firmware.md](docs/custom-firmware.md)** documents it step by
+> step, including the rehearsal on a disposable Pico 2 that should precede it;
+> the procedure has been executed end to end on a real machine. It is not an
+> official SeedHammer procedure and is not supported by SeedHammer AB. The
+> upstream install and reproducible-build steps below are otherwise unchanged.
 
 ## Installation
 
