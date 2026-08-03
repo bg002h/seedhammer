@@ -1,5 +1,26 @@
 # Running your own firmware on a SeedHammer II
 
+> ## ⚠ READ THIS FIRST
+>
+> **This software is untested and almost entirely AI generated.** You are
+> expected to test any output of this software yourself, and you have no excuse
+> for not testing — because a necessary part of making any backup is **proving
+> that the backup works!**
+>
+> Because you must test the output yourself and prove that it works, it is
+> perfectly acceptable if this software outputs complete garbage: your testing
+> will reveal it, and you will know not to rely on its output.
+>
+> If you require a guarantee or a warranty of any kind before using this sort of
+> backup software, **you have not met your own requirements by selecting this
+> untested software.**
+>
+> Long story short: you have been handed either a very useful tool or a cleverly
+> designed foot gun. If you shoot yourself in the foot, you have only yourself to
+> blame, and I'm not your tech support staff.
+
+---
+
 This guide walks through burning your own secp256k1 boot key into a retail
 SeedHammer II so the machine will boot firmware **you** built and signed.
 
@@ -8,10 +29,15 @@ that **the central step is permanent**. There is no undo, no factory reset, and
 no support path that puts the chip back the way it was.
 
 > **Status of this document.** Every command here was executed end to end
-> against a real SeedHammer II (hardware v1.5 / RP2350B) on 2026-08-03, and
-> against a disposable Raspberry Pi Pico 2 before that. The procedure completed
-> successfully: the machine now boots self-signed firmware and displays
+> **once**, against **one** SeedHammer II (hardware v1.5 / RP2350B) on
+> 2026-08-03, and against a disposable Raspberry Pi Pico 2 before that. That run
+> completed successfully: the machine now boots self-signed firmware and displays
 > `(UNLOCKED)`.
+>
+> A single successful run on a single machine is **not** testing in any sense
+> that should reassure you — see the warning above. It means the procedure is not
+> obviously wrong. It does not mean it is right for your unit, your host, or your
+> firmware.
 
 > **This is not an official SeedHammer procedure.** It is not endorsed by or
 > supported by SeedHammer AB. You are modifying a device that holds bitcoin
