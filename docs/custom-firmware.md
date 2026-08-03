@@ -2,10 +2,10 @@
 
 > ## ⚠ READ THIS FIRST
 >
-> **This software is untested and almost entirely AI generated.** You are
-> expected to test any output of this software yourself, and you have no excuse
-> for not testing — because a necessary part of making any backup is **proving
-> that the backup works!**
+> **This software is untested by humans in meat space and almost entirely AI
+> generated.** You are expected to test any output of this software yourself,
+> and you have no excuse for not testing — because a necessary part of making
+> any backup is **proving that the backup works!**
 >
 > Because you must test the output yourself and prove that it works, it is
 > perfectly acceptable if this software outputs complete garbage: your testing
@@ -34,10 +34,16 @@ no support path that puts the chip back the way it was.
 > completed successfully: the machine now boots self-signed firmware and displays
 > `(UNLOCKED)`.
 >
-> A single successful run on a single machine is **not** testing in any sense
-> that should reassure you — see the warning above. It means the procedure is not
-> obviously wrong. It does not mean it is right for your unit, your host, or your
-> firmware.
+> Be precise about what that does and does not cover. **The boot-key procedure
+> in this guide** has been run, once, by a human, on real hardware. **The
+> firmware it lets you run has not been** — nobody has taken a plate engraved by
+> a self-built build and checked the words on it against the seed they came
+> from. That is the meat-space testing the warning above is about, and it is
+> yours to do.
+>
+> A single successful run on a single machine is not testing in any sense that
+> should reassure you. It means the procedure is not obviously wrong. It does not
+> mean it is right for your unit, your host, or your firmware.
 
 > **This is not an official SeedHammer procedure.** It is not endorsed by or
 > supported by SeedHammer AB. You are modifying a device that holds bitcoin
