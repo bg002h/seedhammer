@@ -72,6 +72,22 @@ type PassphraseKeyboard struct {
 // rows + a shared-shape function row) with per-key positions, adapting
 // NewKeyboard's cell-sizing + row-centering.
 func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
+	return newPPKeyboard(ctx, false)
+}
+
+// NewTextKeyboard is NewPassphraseKeyboard plus a newline key, for the
+// free-text plate.
+//
+// The key is a PER-INSTANCE opt-in, not a fourth shared page entry, because
+// PassphraseKeyboard is also NewAddressKeyboard and BIP-85 index entry, and
+// passphrase.ValidatePassphrase rejects '\n' with ErrNonASCII -- an
+// unconditional key would give the passphrase program a key that types
+// something OK then refuses.
+func NewTextKeyboard(ctx *Context) *PassphraseKeyboard {
+	return newPPKeyboard(ctx, true)
+}
+
+func newPPKeyboard(ctx *Context, newline bool) *PassphraseKeyboard {
 	k := new(PassphraseKeyboard)
 	style := ctx.Styles.keyboard
 	cell := style.Measure(math.MaxInt, "W") // uniform letter-cell glyph extent
@@ -94,6 +110,16 @@ func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
 			{r: ' ', label: "space", action: ppRune},
 			{label: "show", action: ppReveal}, // label re-derived from revealed in Layout
 			{action: ppBackspace},
+		}
+		if newline {
+			// APPENDED, never inserted: passphrase_keyboard_test.go:200 asserts
+			// the reveal key is at index 2, and that assertion is worth more
+			// than the key ordering.
+			//
+			// Labelled "nl". NOT "\u21b5": measured, that rune is 0px wide in
+			// ctx.Styles.keyboard, which leaves an 8px tap target a synthetic
+			// touch test would still pass and a finger would not find.
+			fr = append(fr, ppKey{r: '\n', label: "nl", action: ppRune})
 		}
 		for i := range fr {
 			fr[i].size = ppKeyExtent(ctx, fr[i], cell)
