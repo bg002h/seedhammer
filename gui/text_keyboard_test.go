@@ -2,9 +2,13 @@ package gui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"seedhammer.com/font/sh"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
@@ -228,5 +232,64 @@ func TestNewlineKeyTypesANewlineByTouch(t *testing.T) {
 		cyc := ppTagFor(k, func(key ppKey) bool { return key.action == ppPageCycle })
 		h.tapAt(h.point(cyc, "page-cycle key"))
 		h.next("after cycling page")
+	}
+}
+
+// TestTextKeyboardRunesAllDecodeInTheEngravingFace binds the two halves of the
+// panic guard. engrave.String PANICS on a rune the face lacks
+// (engrave/engrave.go:1531), so "the face covers printable ASCII" and "the
+// keyboard emits only printable ASCII" are each only half an answer: this
+// asserts every rune THIS keyboard can actually emit is engravable.
+func TestTextKeyboardRunesAllDecodeInTheEngravingFace(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	k := NewTextKeyboard(ctx)
+	seen := 0
+	for p := range len(ppPages) {
+		for _, row := range k.pages[p] {
+			for _, key := range row {
+				if key.action != ppRune {
+					continue
+				}
+				seen++
+				switch key.r {
+				case ' ':
+					continue // advance-only; inks nothing
+				case '\n':
+					continue // a control character, never a glyph (spec 3)
+				}
+				if _, _, ok := sh.Font.Decode(key.r); !ok {
+					t.Errorf("page %d key %q does not decode in font/sh; engrave.String would panic on it", p, string(key.r))
+				}
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no rune keys found; the test walked nothing")
+	}
+}
+
+// TestOnlyTheFreeTextProgramBuildsATextKeyboard: the anti-leak guard at the
+// call sites, not just at construction. NewTextKeyboard must appear in exactly
+// one file.
+func TestOnlyTheFreeTextProgramBuildsATextKeyboard(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var callers []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") || f == "passphrase_keyboard.go" {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "NewTextKeyboard(") {
+			callers = append(callers, f)
+		}
+	}
+	if !slices.Equal(callers, []string{"freetext_flow.go"}) {
+		t.Errorf("NewTextKeyboard is constructed in %v, want only freetext_flow.go", callers)
 	}
 }

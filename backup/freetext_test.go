@@ -331,3 +331,69 @@ func TestFreeTextStaysOnThePlate(t *testing.T) {
 		}
 	}
 }
+
+// TestBlankLinesCostExactlyOneRow is spec 5.3, and it is the reason the
+// free-text plate renders ONE flat list of lines instead of mapping wrap blocks
+// onto backup.Paragraph values.
+//
+// Measured on that mapping, it is wrong twice over: a blank paragraph advances
+// offy by 1mm rather than a full row, so a blank line the operator saw in the
+// preview becomes a 1mm gap and everything below shifts up; and every '\n'
+// costs an extra 1mm the uniform model does not account for. At 3.0mm, where
+// the bottom line already sits at 81mm against an 82mm bound, two newlines
+// would push the plate off the machine AFTER the confirm screen.
+func TestBlankLinesCostExactlyOneRow(t *testing.T) {
+	P := prodParams
+	for _, size := range FontSizes {
+		row := P.F(size)
+		for _, blanks := range []int{0, 1, 2, 5} {
+			lines := []string{"A"}
+			for range blanks {
+				lines = append(lines, "")
+			}
+			lines = append(lines, "B")
+			b := ftBounds(t, size, "", lines, "", nil)
+			// The last line sits `blanks+1` rows below the first, whatever the
+			// blanks contain -- N blank lines cost N rows and not one
+			// millimetre more.
+			plain := ftBounds(t, size, "", []string{"A", "B"}, "", nil)
+			if got, want := b.Max.Y-plain.Max.Y, blanks*row; got != want {
+				t.Errorf("%.1fmm: %d blank lines moved the last line by %d, want %d (%d rows of %d)",
+					size, blanks, got, want, blanks, row)
+			}
+			// And never by a millimetre-quantised amount, which is the
+			// Paragraph model's signature.
+			if blanks > 0 && b.Max.Y-plain.Max.Y == blanks*P.I(1) && row != P.I(1) {
+				t.Errorf("%.1fmm: %d blank lines advanced by %dmm, the inter-paragraph gap, not a row",
+					size, blanks, blanks)
+			}
+		}
+	}
+}
+
+// TestWrappedBlankLinesReachThePlate closes the loop: the blank line comes out
+// of WrapText, survives Fit, and occupies a row on the engraved plate.
+func TestWrappedBlankLinesReachThePlate(t *testing.T) {
+	P := prodParams
+	const withBlanks = "one\n\n\ntwo"
+	const without = "one\ntwo"
+	sizeA, linesA, _, err := Fit(P, withBlanks, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sizeB, linesB, _, err := Fit(P, without, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linesA) != len(linesB)+2 {
+		t.Fatalf("two newlines produced %d lines against %d; the blank rows were dropped", len(linesA), len(linesB))
+	}
+	if sizeA != sizeB {
+		t.Fatalf("this test needs both compositions at the same rung; got %.1f and %.1f", sizeA, sizeB)
+	}
+	a := ftBounds(t, sizeA, "", linesA, "", nil)
+	b := ftBounds(t, sizeB, "", linesB, "", nil)
+	if got, want := a.Max.Y-b.Max.Y, 2*P.F(sizeA); got != want {
+		t.Errorf("two blank lines moved the last row by %d, want %d", got, want)
+	}
+}
