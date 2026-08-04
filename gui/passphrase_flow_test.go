@@ -480,9 +480,9 @@ func TestFingerprintPreviewString(t *testing.T) {
 		{"a1b2c3d4", "A1B2 C3D4"},
 		{"A1B2C3D4", "A1B2 C3D4"},
 		{"a1b2 c3d4", "A1B2 C3D4"},
-		{"1234567", ""},  // incomplete: nothing to show yet
+		{"1234567", ""},                          // incomplete: nothing to show yet
 		{"12345678901234567890123456789012", ""}, // over-length: never shown
-		{"G1B2C3D4", ""}, // non-hex
+		{"G1B2C3D4", ""},                         // non-hex
 	} {
 		if got := ppFingerprintPreview(tc.typed); got != tc.want {
 			t.Errorf("ppFingerprintPreview(%q) = %q, want %q", tc.typed, got, tc.want)
