@@ -1108,3 +1108,55 @@ func TestPassphraseFlowNeverLogs(t *testing.T) {
 		}
 	})
 }
+
+// TestPassphrasePlateBuildsWorstCase: the flow must be able to engrave the
+// worst case it accepts. If it cannot, the operator types 100 characters, both
+// fingerprints and a QR, proof-reads the confirm screen, and is then told the
+// passphrase "does not fit a plate" -- with nothing to do about it.
+func TestPassphrasePlateBuildsWorstCase(t *testing.T) {
+	secret := []byte(strings.Repeat("ab c", 25)) // 100 chars, spaces throughout
+	if len(secret) != passphrase.MaxLen {
+		t.Fatalf("test vector is %d chars, want %d", len(secret), passphrase.MaxLen)
+	}
+	for _, qr := range []bool{false, true} {
+		plate, err := ppBuildPlate(engraverParams, secret, "A1B2C3D4", "99887766", qr)
+		if err != nil {
+			t.Fatalf("qr=%v: the worst case the flow accepts does not build: %v", qr, err)
+		}
+		if plate.Duration == 0 {
+			t.Fatalf("qr=%v: built an empty plate", qr)
+		}
+	}
+}
+
+// TestPassphrasePlateCarriesEveryField: each field the flow collects must
+// actually reach backup.Passphrase. Engraving is constant-time for a given
+// length, so a field that changed nothing about the plan would be a field that
+// was dropped on the way.
+func TestPassphrasePlateCarriesEveryField(t *testing.T) {
+	build := func(t *testing.T, secret, seedFP, combFP string, qr bool) uint {
+		t.Helper()
+		p, err := ppBuildPlate(engraverParams, []byte(secret), seedFP, combFP, qr)
+		if err != nil {
+			t.Fatalf("build(%q, %q, %q, qr=%v): %v", secret, seedFP, combFP, qr, err)
+		}
+		return p.Duration
+	}
+	base := build(t, "hunter2", "", "", false)
+	if d := build(t, "hunter2xy", "", "", false); d == base {
+		t.Error("a longer passphrase engraves identically: the passphrase is not reaching the plate")
+	}
+	if d := build(t, "hunter2", "A1B2C3D4", "", false); d == base {
+		t.Error("the seed fingerprint is not reaching the plate")
+	}
+	if d := build(t, "hunter2", "", "99887766", false); d == base {
+		t.Error("the combined fingerprint is not reaching the plate")
+	}
+	if d := build(t, "hunter2", "", "", true); d == base {
+		t.Error("the QR choice is not reaching the plate")
+	}
+	// The two fingerprints are distinct fields, not one written twice.
+	if a, b := build(t, "hunter2", "A1B2C3D4", "", false), build(t, "hunter2", "", "A1B2C3D4", false); a == b {
+		t.Error("the two fingerprint fields produce the same plate: they are wired to the same slot")
+	}
+}
