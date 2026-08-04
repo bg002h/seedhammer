@@ -766,7 +766,7 @@ func TestConfirmFitsPanel(t *testing.T) {
 	marked := make([]byte, len(worst))
 	ppMarkSpaces(marked, worst)
 	_, sz := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
-		ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true)
+		ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true, true)
 	if sz.Y > area.Dy() {
 		t.Errorf("the confirm screen needs %dpx of height but only %dpx is available on a %v panel; "+
 			"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
@@ -1158,5 +1158,49 @@ func TestPassphrasePlateCarriesEveryField(t *testing.T) {
 	// The two fingerprints are distinct fields, not one written twice.
 	if a, b := build(t, "hunter2", "A1B2C3D4", "", false), build(t, "hunter2", "", "A1B2C3D4", false); a == b {
 		t.Error("the two fingerprint fields produce the same plate: they are wired to the same slot")
+	}
+}
+
+// TestConfirmLegendGatesOnRealSpaces pins Phase D review I1.
+//
+// The legend was gated on the SUBSTITUTED buffer, which carries the mark for a
+// literal '_' exactly as it does for a space. So "hunter_2" confirmed as
+// `hunter_2 / 8 chars, no spaces / _ = SPACE` -- asserting there are no spaces
+// while simultaneously claiming every '_' is one, and promising a legend the
+// plate does not engrave (backup gates on a real space).
+func TestConfirmLegendGatesOnRealSpaces(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	area := ppConfirmArea(ctx.Platform.DisplaySize())
+	for _, tc := range []struct {
+		secret string
+		want   bool
+	}{
+		{"hunter_2", false}, // underscores only -- NO legend
+		{"a b", true},       // a real space -- legend
+		{"a_b c_d", true},   // both -- legend
+		{"plain", false},    // neither
+	} {
+		secret := []byte(tc.secret)
+		marked := make([]byte, len(secret))
+		ppMarkSpaces(marked, secret)
+		body, _ := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
+			ppPassphraseCounts(secret), "", "", false,
+			bytes.IndexByte(secret, ' ') >= 0)
+		// The body is returned un-offset, so extract over a generous rect
+		// rather than the panel -- otherwise text drawn outside it is missed
+		// and every case reads as "no legend", which would pass the two cases
+		// this test exists to catch and hide the other two.
+		d := new(op.Drawer)
+		// Match against the SPACE-STRIPPED legend: a rendered space inks
+		// nothing, so ExtractText yields "_=SPACE", never "_ = SPACE".
+		// Comparing to the raw constant reads as "no legend" for every case,
+		// which would pass the two rows this test exists to catch.
+		got := uiHas(d.ExtractText(image.Rect(-2000, -2000, 2000, 2000), body),
+			strings.ReplaceAll(ppSpaceLegend, " ", ""))
+		if got != tc.want {
+			t.Errorf("%q: legend shown = %v, want %v", tc.secret, got, tc.want)
+		}
 	}
 }

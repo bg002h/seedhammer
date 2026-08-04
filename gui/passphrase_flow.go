@@ -96,14 +96,24 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int) (int, bool
 		screen := layout.Rectangle{Max: dims}
 		_, content := screen.CutTop(leadingSize)
 		content, _ = content.CutBottom(8)
-		kbdOp, kbdsz := kbd.Layout(ctx, th)
-		kbdOp = kbdOp.Offset(content.S(kbdsz))
 		// Live counter. Over-length is shown rather than clamped: silently
 		// dropping keystrokes at 100 would leave the operator believing a
 		// longer passphrase had been entered.
 		cntOp, cntsz := widget.Labelf(&ctx.B, ctx.Styles.subtitle, th.Text,
 			"%d/%d", utf8.RuneCountInString(kbd.Fragment), passphrase.MaxLen)
-		cntOp = cntOp.Offset(content.N(cntsz))
+		// RESERVE the counter's band before laying out the keyboard. The
+		// keyboard block is readout+grid, and the readout's height grows with
+		// the passphrase, so an unreserved band let the block rise INTO and
+		// above the counter -- and op.Layer draws the keyboard on top, so from
+		// ~70 characters the counter was hidden in exactly the revealed state a
+		// user proof-reads in. Measured at the real 480x320 panel; the
+		// over-length "101/100" signal was obscured too. ExtractText collects
+		// runes regardless of occlusion, so no text-based test could see it --
+		// TestPassphraseEntryFitsPanel measures rectangles instead.
+		counterBand, content := content.CutTop(cntsz.Y)
+		cntOp = cntOp.Offset(counterBand.N(cntsz))
+		kbdOp, kbdsz := kbd.Layout(ctx, th)
+		kbdOp = kbdOp.Offset(content.S(kbdsz))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
 			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
@@ -381,14 +391,21 @@ func ppFingerprintClaim(label, canonical string) string {
 // marked is the passphrase with spaces already replaced by ppSpaceMark; it is
 // passed as a []byte and rendered with a %s verb, which text.Formatter accepts
 // directly -- no string copy of the secret is made here.
-func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, seedFP, combinedFP string, qr bool) (op.Op, image.Point) {
+func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, seedFP, combinedFP string, qr, hasSpace bool) (op.Op, image.Point) {
 	var rt richText
 	// The passphrase itself, revealed: a masked readout cannot be proof-read,
 	// and this is the last moment before a permanent plate (spec 5.1).
 	rt.Addf(&ctx.B, ctx.Styles.body, width, th.Text, "%s", marked)
 	rt.Y += 4
 	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, counts)
-	if bytes.ContainsRune(marked, ppSpaceMark) {
+	// Gate on a REAL space, never on the substituted buffer. `marked` contains
+	// the mark for a literal '_' just as much as for a space, so gating on it
+	// printed "_ = SPACE" for a passphrase with no spaces at all -- e.g.
+	// "hunter_2" rendered as `hunter_2 / 8 chars, no spaces / _ = SPACE`, which
+	// says there are no spaces and simultaneously asserts every '_' is one, and
+	// promises a legend the plate will not engrave. backup.passphraseLayoutFor
+	// gates on strings.ContainsRune(plate.Passphrase, ' '); match it.
+	if hasSpace {
 		rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppSpaceLegend)
 	}
 	rt.Y += 4
@@ -422,6 +439,8 @@ func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP s
 	defer wipeBytes(marked)
 	ppMarkSpaces(marked, secret)
 	counts := ppPassphraseCounts(secret)
+	// Derived from the RAW secret, never from `marked` -- see the gate below.
+	hasSpace := bytes.IndexByte(secret, ' ') >= 0
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			return false
@@ -431,7 +450,7 @@ func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP s
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ppConfirmBody(ctx, th, area.Dx(), marked, counts, seedFP, combinedFP, qr)
+		body, _ := ppConfirmBody(ctx, th, area.Dx(), marked, counts, seedFP, combinedFP, qr, hasSpace)
 		body = body.Offset(image.Point(area.Min))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
