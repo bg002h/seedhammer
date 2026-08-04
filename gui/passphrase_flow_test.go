@@ -455,7 +455,7 @@ func startPPFingerprint(t *testing.T, which ppFingerprintStep) (*ppHarness, *ppF
 	h := newPPHarness(t)
 	r := new(ppFPRun)
 	h.start(func() {
-		r.fp, r.ok = fingerprintEntryFlow(h.ctx, &descriptorTheme, which)
+		r.fp, r.ok = fingerprintEntryFlow(h.ctx, &descriptorTheme, which, "")
 		r.done = true
 	})
 	return h, r
@@ -785,7 +785,7 @@ func TestQRChoiceDefaultsOff(t *testing.T) {
 	h := newPPHarness(t)
 	var qr, ok, done bool
 	h.start(func() {
-		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme)
+		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme, false)
 		done = true
 	})
 	if !uiContains(h.content, "machine-readable") {
@@ -810,7 +810,7 @@ func TestQRChoiceCanBeTurnedOn(t *testing.T) {
 	h := newPPHarness(t)
 	var qr, ok, done bool
 	h.start(func() {
-		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme)
+		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme, false)
 		done = true
 	})
 	cs, isCS := h.widget("qr").(*ChoiceScreen)
