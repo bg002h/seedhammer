@@ -17,8 +17,14 @@ func TestValidatorAgreesWithFace(t *testing.T) {
 	for r := rune(0x20); r <= 0x7E; r++ {
 		accepted := passphrase.ValidatePassphrase(string(r)) == nil
 		_, _, decodable := constant.Font.Decode(r)
-		if accepted != decodable {
-			t.Errorf("rune %q: validator accepts=%v, face decodes=%v", r, accepted, decodable)
+		// Assert BOTH sides positively. Checking only "accepted == decodable"
+		// would still pass if the validator rejected everything and the face
+		// decoded nothing -- agreement is not correctness.
+		if !accepted {
+			t.Errorf("rune %q: validator rejects a printable-ASCII rune", r)
+		}
+		if !decodable {
+			t.Errorf("rune %q: face cannot decode a printable-ASCII rune", r)
 		}
 	}
 }

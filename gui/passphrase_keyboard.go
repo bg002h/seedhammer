@@ -32,7 +32,7 @@ type ppAction int
 
 const (
 	ppRune      ppAction = iota // commit k.r (space is ppRune with r==' ')
-	ppPageCycle                 // page = (page+1)%3
+	ppPageCycle                 // page = (page+1) % len(ppPages)
 	ppReveal                    // toggle revealed
 	ppBackspace                 // delete last rune
 )
@@ -58,7 +58,7 @@ type PassphraseKeyboard struct {
 	inp      InputTracker
 }
 
-// NewPassphraseKeyboard builds the 3 page grids (each = the page's letter/symbol
+// NewPassphraseKeyboard builds the page grids (each = the page's letter/symbol
 // rows + a shared-shape function row) with per-key positions, adapting
 // NewKeyboard's cell-sizing + row-centering.
 func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {

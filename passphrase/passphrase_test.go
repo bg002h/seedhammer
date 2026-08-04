@@ -17,6 +17,10 @@ func TestValidatePassphrase(t *testing.T) {
 		{"single", "a", nil},
 		{"exactly 100", long, nil},
 		{"101 chars", long + "a", ErrTooLong},
+		// Pins the ORDERING when both faults apply. Without this row the
+		// implementation can be rewritten to count length first and the whole
+		// suite still passes -- verified by mutation in the Phase B review.
+		{"too long AND non-ascii", long + "aé", ErrNonASCII},
 		{"space is legal", "correct horse", nil},
 		{"leading space", " x", nil},
 		{"trailing space", "x ", nil},
@@ -65,6 +69,9 @@ func TestValidateFingerprint(t *testing.T) {
 		wantErr        error
 	}{
 		{"empty is allowed", "", "", nil},
+		// All-whitespace is treated as absent, same as empty. Deliberate: the
+		// field is optional and " " is not a fingerprint.
+		{"all whitespace is absent", "   ", "", nil},
 		{"lowercase", "a1b2c3d4", "A1B2C3D4", nil},
 		{"uppercase", "A1B2C3D4", "A1B2C3D4", nil},
 		{"grouped 4-4", "A1B2 C3D4", "A1B2C3D4", nil},
