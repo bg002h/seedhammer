@@ -71,9 +71,10 @@ func advDur(s *ConstantStringer) uint {
 // disclosure §3.5.0 accepts, and must be a deliberate edit here.
 //
 // NOTE: spec §3.5.0's "Reduce k before quantizing" requires '#', '*', '$' and
-// 'x' to be single strokes, so that max k = 2 and the worst case is 2L. '*'
-// and 'x' were reduced; '#' is still FOUR runs and '$' still two, so max k = 4
-// and the 2L bound does not hold yet. See the Task 4 report.
+// 'x' to be single strokes, so that max k = 2 and the worst case is 2L. '*',
+// 'x' and '#' are now single strokes; '$' remains two, so max k = 2 and the 2L
+// bound holds. The empty entries below are the load-bearing half of this pin:
+// a regression that puts any glyph back at 3 or 4 runs breaks the bound.
 func TestPassphraseRunPartition(t *testing.T) {
 	s := NewPassphraseStringer(constant.Font, params(), 4*mm)
 	byRuns := map[int]string{}
@@ -83,14 +84,15 @@ func TestPassphraseRunPartition(t *testing.T) {
 	want := map[int]string{
 		0: " ",
 		2: "!\"$%:;=?ij",
-		4: "#",
+		3: "",
+		4: "",
 	}
 	for k, w := range want {
 		if got := byRuns[k]; got != w {
 			t.Errorf("glyphs with %d runs: got %q, want %q", k, got, w)
 		}
 	}
-	if got, want := len(byRuns[1]), 96-1-10-1; got != want {
+	if got, want := len(byRuns[1]), 96-1-10; got != want {
 		t.Errorf("single-run glyphs: got %d, want %d", got, want)
 	}
 	if !s.hasMultiRun {
@@ -157,7 +159,7 @@ func TestPassphrasePerRunTiming(t *testing.T) {
 			s.String(yield, txt)
 		}))
 	}
-	// Run counts 1,2,2,1,4 in all four, over disjoint two-run glyph sets.
+	// Run counts 1,2,2,1,1 in all four, over disjoint two-run glyph sets.
 	ref := profile("Ai:B#")
 	for _, txt := range []string{
 		"Cj;D#", // i->j, :->;
@@ -185,8 +187,14 @@ func TestPassphrasePerRunTiming(t *testing.T) {
 		t.Errorf("a 1-run + 2-run pair costs %d ticks, three 1-run glyphs %d: "+
 			"the inter-run move is not padded to advDur", got, want)
 	}
-	if got, want := planTicks(s, "#"), planTicks(s, "AAAA"); got != want {
-		t.Errorf("the four-run '#' costs %d ticks, four 1-run glyphs %d", got, want)
+	// '#' was four runs and cost four units; it is now one continuous stroke
+	// and must cost exactly one, like any other 1-run glyph. '$' is the
+	// surviving worst case at k = 2, so pin there that a k-run glyph costs k.
+	if got, want := planTicks(s, "#"), planTicks(s, "A"); got != want {
+		t.Errorf("the single-run '#' costs %d ticks, one 1-run glyph %d", got, want)
+	}
+	if got, want := planTicks(s, "$"), planTicks(s, "AA"); got != want {
+		t.Errorf("the two-run '$' costs %d ticks, two 1-run glyphs %d", got, want)
 	}
 }
 
