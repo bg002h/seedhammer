@@ -329,7 +329,11 @@ func TestTitleString(t *testing.T) {
 		{"Anø de:Æby09 . asd asd asd as das d asd asdf sdf s fd", "AN DE:BY09 . ASD A"},
 		{"Æg", "G"},
 		{"🤡 💩", " "},
-		{"$€#,", "#,"},
+		// '$' used to be dropped only because the engraving face had no glyph
+		// for it; it is printable ASCII and is kept now that the face covers
+		// all of it. '€' is still dropped -- TitleString's actual contract is
+		// "keep what the face can engrave", and that is what this case checks.
+		{"$€#,", "$#,"},
 	}
 	for _, test := range tests {
 		s := TitleString(constant.Font, test.test)

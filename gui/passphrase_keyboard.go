@@ -19,18 +19,20 @@ const (
 	ppPageLower   = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 	ppPageUpper   = "QWERTYUIOP\nASDFGHJKL\nZXCVBNM"
 	ppPageSymbols = "1234567890\n-/:;()&$@\"\n.,?!'+=_#"
+	// The 13 printable-ASCII symbols the first three pages omit.
+	ppPageSymbols2 = "%*<>[]{}\n\\^`|~"
 )
 
-var ppPages = [3]string{ppPageLower, ppPageUpper, ppPageSymbols}
+var ppPages = [4]string{ppPageLower, ppPageUpper, ppPageSymbols, ppPageSymbols2}
 
 // ppPageCycleLabel[p] is the cap shown on page p (it names the NEXT page).
-var ppPageCycleLabel = [3]string{"ABC", "?123", "abc"}
+var ppPageCycleLabel = [4]string{"ABC", "?123", "#+=", "abc"}
 
 type ppAction int
 
 const (
 	ppRune      ppAction = iota // commit k.r (space is ppRune with r==' ')
-	ppPageCycle                 // page = (page+1)%3
+	ppPageCycle                 // page = (page+1) % len(ppPages)
 	ppReveal                    // toggle revealed
 	ppBackspace                 // delete last rune
 )
@@ -46,17 +48,27 @@ type ppKey struct {
 
 type PassphraseKeyboard struct {
 	Fragment string
-	page     int
-	revealed bool
 
-	pages [3][][]ppKey
-	size  [3]image.Point
+	// MaxHeight bounds the whole block (readout + gap + grid). The readout's
+	// height grows with the passphrase, so without a bound the block is simply
+	// taller than the space the caller reserved -- and since it is bottom-
+	// aligned and drawn by op.Layer ON TOP, the overflow silently covers
+	// whatever is above it. Reserving a band in the CALLER cannot prevent this:
+	// bottom alignment is Max.Y-size.Y, and CutTop leaves Max.Y untouched, so
+	// the reservation does not move the block by even a pixel. The bound has to
+	// reach the thing whose height varies. 0 means unbounded.
+	MaxHeight int
+	page      int
+	revealed  bool
+
+	pages [4][][]ppKey
+	size  [4]image.Point
 
 	row, col int
 	inp      InputTracker
 }
 
-// NewPassphraseKeyboard builds the 3 page grids (each = the page's letter/symbol
+// NewPassphraseKeyboard builds the page grids (each = the page's letter/symbol
 // rows + a shared-shape function row) with per-key positions, adapting
 // NewKeyboard's cell-sizing + row-centering.
 func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
@@ -67,7 +79,7 @@ func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
 	letterW := cell.X + 2*keyPadX + margin
 	rowH := cell.Y + 2*keyPadY + margin
 
-	for p := 0; p < 3; p++ {
+	for p := 0; p < len(ppPages); p++ {
 		var rows [][]ppKey
 		for _, line := range strings.Split(ppPages[p], "\n") {
 			var row []ppKey
@@ -196,7 +208,7 @@ func (k *PassphraseKeyboard) commit(key ppKey) {
 			k.Fragment = k.Fragment[:len(k.Fragment)-n]
 		}
 	case ppPageCycle:
-		k.page = (k.page + 1) % 3
+		k.page = (k.page + 1) % len(ppPages)
 		rows := k.pages[k.page]
 		k.row = len(rows) / 2
 		k.col = len(rows[k.row]) / 2
@@ -352,8 +364,42 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 	if !k.revealed {
 		shown = strings.Repeat("*", utf8.RuneCountInString(k.Fragment))
 	}
-	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, math.MaxInt, th.Text, shown)
+	// The readout wraps at the GRID width. Unbounded (math.MaxInt) it grows
+	// wider than the grid, and since Layout reports max(readout, grid) as its
+	// size while drawing the grid at x=0, a caller centring on that size slides
+	// the GRID sideways. Measured, not reasoned: at 100 characters -- exactly
+	// what passphrase.MaxLen permits -- the combined width reached 600px and
+	// the grid's left edge landed at x=-60 on the 480px SeedHammer II panel,
+	// taking q/a/z and the page-cycle key off the glass. Touch is the only
+	// input the machine has, so those keys were simply gone. See
+	// TestPassphraseKeyboardStaysOnPanel.
 	const readoutGap = 8
+	// Clamp the readout to the height that actually exists, keeping the TAIL:
+	// the tail is what was just typed, and it is the end of a passphrase that
+	// an operator is checking as they enter it. Dropping the head is safe only
+	// because the n/100 counter -- which this clamp is what keeps visible --
+	// reports the true length, and the confirm screen shows the value whole.
+	if k.MaxHeight > 0 {
+		avail := k.MaxHeight - k.size[k.page].Y - readoutGap
+		w := k.size[k.page].X
+		if ctx.Styles.word.Measure(w, "%s", shown).Y > avail {
+			// Binary search the number of leading runes to drop. Height is
+			// monotonic in that count, and Measure allocates nothing, so this
+			// stays off the frame's allocation budget.
+			r := []rune(shown)
+			lo, hi := 0, len(r)
+			for lo < hi {
+				mid := (lo + hi) / 2
+				if ctx.Styles.word.Measure(w, "%s", string(r[mid:])).Y > avail {
+					lo = mid + 1
+				} else {
+					hi = mid
+				}
+			}
+			shown = string(r[lo:])
+		}
+	}
+	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, k.size[k.page].X, th.Text, shown)
 
 	gridY := readoutSz.Y + readoutGap
 	var content op.Op

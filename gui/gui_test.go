@@ -335,6 +335,11 @@ type testPlatform struct {
 	events   []Event
 	wakeups  chan struct{}
 	engraver *testEngraver
+	// display overrides DisplaySize when non-zero. The 240x240 default is
+	// SMALLER than any panel this firmware ships on, so a widget wider than
+	// 240px is drawn partly off-canvas and its keys become untappable in a way
+	// the real machine never sees. Touch tests set this to sh2DisplaySize.
+	display image.Point
 }
 
 const (
@@ -363,7 +368,16 @@ var (
 	}
 )
 
-func (*testPlatform) DisplaySize() image.Point {
+// sh2DisplaySize is the panel a SeedHammer II actually has:
+// cmd/controller/platform_sh2.go's lcdWidth x lcdHeight. Screens whose
+// reachability is under test must be laid out at this size -- the 240x240
+// default is a fiction that no shipped device has.
+var sh2DisplaySize = image.Pt(480, 320)
+
+func (p *testPlatform) DisplaySize() image.Point {
+	if p.display != (image.Point{}) {
+		return p.display
+	}
 	return image.Pt(testDisplayDim, testDisplayDim)
 }
 
@@ -764,5 +778,29 @@ func TestEngraveFingerprintChoiceMapping(t *testing.T) {
 	sel, ok := cs.Choose(ctx, &descriptorTheme)
 	if !ok || sel != 1 {
 		t.Errorf("Choose = (%d,%v), want (1,true)", sel, ok)
+	}
+}
+
+// TestPassphraseProgramReachable pins the BIP-39 Password program at menu
+// position 2 of 7 (spec D7/§6), driven the way the hardware drives it: one tap
+// on the right arrow from Backup Wallet. A button-driven variant of this test
+// would pass even if the arrows had no hit area at all -- see
+// start_screen_touch_test.go's preamble.
+func TestPassphraseProgramReachable(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	m := new(StartScreen)
+	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
+	defer quit()
+	if _, ok := frame(); !ok {
+		t.Fatal("no frame")
+	}
+	_, right := arrowPoints(ctx)
+	tap(&ctx.Router, drawer(), right) // one step from Backup Wallet
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame after tap")
+	}
+	if !uiContains(content, "BIP-39 Password") {
+		t.Fatalf("second program is not the passphrase program; got %q", content)
 	}
 }

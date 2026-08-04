@@ -2,19 +2,23 @@ package gui
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
 func TestPassphraseKeyboardConstruction(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	k := NewPassphraseKeyboard(ctx)
-	if len(k.pages) != 3 {
-		t.Fatalf("pages = %d, want 3", len(k.pages))
+	if len(k.pages) != 4 {
+		t.Fatalf("pages = %d, want 4", len(k.pages))
 	}
-	for p := 0; p < 3; p++ {
+	for p := 0; p < len(k.pages); p++ {
 		rows := k.pages[p]
-		if len(rows) != 4 { // 3 letter/symbol rows + 1 function row
-			t.Errorf("page %d: %d rows, want 4", p, len(rows))
+		// Content rows vary per page (the 4th page is only 2 lines); derive the
+		// expected count from ppPages rather than hardcoding a uniform row count.
+		wantRows := strings.Count(ppPages[p], "\n") + 1 + 1 // content rows + function row
+		if len(rows) != wantRows {
+			t.Errorf("page %d: %d rows, want %d", p, len(rows), wantRows)
 		}
 		fr := rows[len(rows)-1]
 		if len(fr) != 4 {
@@ -75,8 +79,8 @@ func TestPassphraseActions(t *testing.T) {
 	}
 	pg := k.page
 	k.commit(ppKey{action: ppPageCycle})
-	if k.page != (pg+1)%3 {
-		t.Errorf("page-cycle: page=%d, want %d", k.page, (pg+1)%3)
+	if k.page != (pg+1)%len(ppPages) {
+		t.Errorf("page-cycle: page=%d, want %d", k.page, (pg+1)%len(ppPages))
 	}
 	rev := k.revealed
 	k.commit(ppKey{action: ppReveal})
@@ -162,9 +166,10 @@ func TestPassphraseMaskReveal(t *testing.T) {
 
 func TestPassphrasePageCycleRender(t *testing.T) {
 	// Render the symbols page (page 2) directly and assert its content: a digit key
-	// '1' (symbols page) + the page-cycle cap "abc" are rendered. (Driving the
-	// page-cycle key itself via D-pad is exercised by TestPassphraseActions'
-	// commit(ppPageCycle); this test covers the per-page render.)
+	// '1' (symbols page) + the page-cycle cap "#+=" (page 2 now cycles on to the
+	// 4th page, the extra-symbols page) are rendered. (Driving the page-cycle key
+	// itself via D-pad is exercised by TestPassphraseActions' commit(ppPageCycle);
+	// this test covers the per-page render.)
 	ctx := NewContext(newPlatform())
 	k := NewPassphraseKeyboard(ctx)
 	k.page = 2
@@ -181,8 +186,8 @@ func TestPassphrasePageCycleRender(t *testing.T) {
 	if !ok {
 		t.Fatal("no frame")
 	}
-	if !uiContains(got, "1") || !uiContains(got, "abc") { // page 2 has digit '1' + the page-cycle cap "abc"
-		t.Errorf("symbols page render: want '1' and the 'abc' page-cap; got %q", got)
+	if !uiContains(got, "1") || !uiContains(got, "#+=") { // page 2 has digit '1' + the page-cycle cap "#+="
+		t.Errorf("symbols page render: want '1' and the '#+=' page-cap; got %q", got)
 	}
 }
 
@@ -204,5 +209,48 @@ func TestPassphraseRevealKeyFitsBothLabels(t *testing.T) {
 	}
 	if reveal.size.X < want {
 		t.Errorf("reveal key size.X = %d, want >= %d (max of show/hide widths)", reveal.size.X, want)
+	}
+}
+
+// Every printable ASCII character the spec promises must be typeable.
+func TestKeyboardCoversPrintableASCII(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	k := NewPassphraseKeyboard(ctx)
+	seen := map[rune]bool{}
+	for p := range k.pages {
+		for _, row := range k.pages[p] {
+			for _, key := range row {
+				if key.action == ppRune {
+					seen[key.r] = true
+				}
+			}
+		}
+	}
+	var missing []rune
+	for r := rune(0x20); r <= 0x7E; r++ {
+		if !seen[r] {
+			missing = append(missing, r)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("keyboard cannot type %d of 95 printable ASCII: %q",
+			len(missing), string(missing))
+	}
+}
+
+func TestKeyboardPageCycleVisitsAllPages(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	k := NewPassphraseKeyboard(ctx)
+	start := k.page
+	seen := map[int]bool{start: true}
+	for i := 0; i < len(ppPages)*2; i++ {
+		k.commit(ppKey{action: ppPageCycle})
+		seen[k.page] = true
+	}
+	if len(seen) != len(ppPages) {
+		t.Errorf("cycle visited %d of %d pages", len(seen), len(ppPages))
+	}
+	if k.page != start {
+		t.Errorf("after %d cycles page is %d, want %d", len(ppPages)*2, k.page, start)
 	}
 }
