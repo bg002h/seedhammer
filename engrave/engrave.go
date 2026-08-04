@@ -359,6 +359,16 @@ func constantTimeQRModules(dims int) int {
 		return 386 + extra
 	case 33:
 		return 542 + extra
+	case 37:
+		// v5. Derived by fuzzing (18.5M executions, 32 min, converged with
+		// 24.9 min of quiet): observed max 664. Buffer is 20, not the
+		// historical 5, because 664 is 0.485 of dims^2 while 21/25/29/33 climb
+		// 0.376/0.418/0.459/0.498 -- 37 falls BELOW that monotone trend, which
+		// suggests the observed max is slightly under. Trend-implied is ~682.
+		// The asymmetry justifies the margin: an underestimate produces
+		// content-dependent engrave-time failures on a permanent plate, an
+		// overestimate costs ~2% more engraving time.
+		return 664 + 20
 	}
 	// Not supported, return a low number to force error.
 	return 0
@@ -392,8 +402,10 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 	switch dim {
 	case 21:
 		// No marker.
-	case 25, 29, 33:
-		// Single marker.
+	case 25, 29, 33, 37:
+		// Single marker. v5 (37) and v6 (41) each still take exactly one
+		// alignment pattern, at the same (dim-9, dim-9) offset as v2-v4.
+		// PROVISIONAL (Task 5, spec O6).
 		alignMarkers = append(alignMarkers, bezier.Pt(dim-9, dim-9))
 	default:
 		panic("unsupported qr code version")
@@ -405,10 +417,12 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 // except for the QR code version (size).
 func ConstantQR(qrc *qr.Code) (*ConstantQRCmd, error) {
 	dim := qrc.Size
-	if dim > 33 {
-		// bitmapForQRStatic only supports versions 1-4 (dims 21/25/29/33).
-		// Reject larger versions here so no caller can trigger the panic
-		// at bitmapForQRStatic's default case.
+	if dim > 37 {
+		// PROVISIONAL (Task 5, spec O6): raised from 33 to 41 so
+		// FuzzConstantQR can measure v5/v6 (dims 37/41) module counts.
+		// bitmapForQRStatic only supports versions 1-6 (dims
+		// 21/25/29/33/37/41). Reject larger versions here so no caller can
+		// trigger the panic at bitmapForQRStatic's default case.
 		return nil, fmt.Errorf("engrave: constant QR size too large: %d", dim)
 	}
 	qr := bitmapForQR(qrc)

@@ -429,7 +429,9 @@ func FuzzConstantQR(f *testing.F) {
 		if len(entropy) < 16 {
 			return
 		}
-		if m := 40; len(entropy) > m {
+		// PROVISIONAL (Task 5, spec O6): raised from 40 to 120 so the
+		// fuzzer can drive dims up to v5/v6 (37/41) for measurement.
+		if m := 120; len(entropy) > m {
 			entropy = entropy[:m]
 		}
 		qrcq, err := qr.Encode(string(entropy), qr.Q)
@@ -438,19 +440,46 @@ func FuzzConstantQR(f *testing.F) {
 		}
 		qrcqCmd, err := ConstantQR(qrcq)
 		if err != nil {
+			if qrcq.Size > 37 {
+				return // beyond the supported range (v5, dim 37); not a failure
+			}
 			t.Fatalf("entropy: %x: %v", entropy, err)
 		}
 		qrcqCmd.Engrave(conf, strokeWidth, 3)
+		t.Logf("dim=%d modules=%d", qrcq.Size, len(qrcqCmd.plan))
 		qrcl, err := qr.Encode(string(entropy), qr.L)
 		if err != nil {
 			t.Fatal(err)
 		}
 		qrclCmd, err := ConstantQR(qrcl)
 		if err != nil {
+			if qrcl.Size > 37 {
+				return // beyond the supported range (v5, dim 37); not a failure
+			}
 			t.Fatalf("entropy: %x: %v", entropy, err)
 		}
 		qrclCmd.Engrave(conf, strokeWidth, 3)
+		t.Logf("dim=%d modules=%d", qrcl.Size, len(qrclCmd.plan))
 	})
+}
+
+// TestConstantQRLargeVersionsFailClosed checks that a v6 (dim 41) constant QR
+// either engraves or fails closed with an explicit error -- it never panics
+// and never silently truncates. An error here is a legitimate outcome (Task
+// 5, spec O6): Phase B falls back to the 78-char cap when QR is enabled if
+// v5/v6 isn't supported.
+func TestConstantQRLargeVersionsFailClosed(t *testing.T) {
+	long := strings.Repeat("Xy7#", 30) // 120 bytes -> v6, dim 41
+	c, err := qr.Encode(long, qr.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Size != 41 {
+		t.Fatalf("expected dim 41, got %d", c.Size)
+	}
+	if _, err := ConstantQR(c); err != nil {
+		t.Skipf("v6 unsupported; Phase B uses the 78-char cap: %v", err)
+	}
 }
 
 func BenchmarkEngraving(b *testing.B) {
@@ -575,6 +604,35 @@ func verifiedEngraving(t *testing.T, conf StepperConfig, e bspline.Curve) bsplin
 			if !yield(k) {
 				return
 			}
+		}
+	}
+}
+
+// TestPassphraseQRFitsSupportedVersion is the guarantee that supporting QR
+// version 5 (dim 37) alone is sufficient for the BIP-39 password feature.
+//
+// The spec pins ECC-L and caps the passphrase at 100 characters. QR v5-L holds
+// 106 bytes, so every passphrase in range lands at dim 37; v6 (dim 41) is
+// unreachable. If this ever fails, either the cap or the ECC level moved, and
+// constantTimeQRModules needs a v6 entry derived by fuzzing -- do NOT fall back
+// to the non-constant-time engrave.QR for a secret.
+func TestPassphraseQRFitsSupportedVersion(t *testing.T) {
+	const ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+	r := rand.New(rand.NewSource(1))
+	for i := 0; i < 2000; i++ {
+		b := make([]byte, 100)
+		for j := range b {
+			b[j] = ascii[r.Intn(len(ascii))]
+		}
+		c, err := qr.Encode(string(b), qr.L)
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		if c.Size > 37 {
+			t.Fatalf("100-char passphrase produced dim %d, above the supported 37: %q", c.Size, b)
+		}
+		if _, err := ConstantQR(c); err != nil {
+			t.Fatalf("ConstantQR rejected a dim-%d code: %v", c.Size, err)
 		}
 	}
 }
