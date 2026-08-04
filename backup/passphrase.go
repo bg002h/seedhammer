@@ -168,7 +168,6 @@ func passphraseLayoutFor(params engrave.Params, plate Passphrase, qrDim int) pas
 		smallEm: params.F(plateSmallFontSize),
 		topY:    params.F(outerMargin),
 	}
-	glyphs := l.glyphs
 	// The bands are the 10mm margins, matching existing practice: the master
 	// fingerprint and title already sit in exactly those bands. At most two
 	// lines fit -- a band offers innerMargin 10 - outerMargin 3 = 7mm, and
@@ -194,7 +193,7 @@ func passphraseLayoutFor(params engrave.Params, plate Passphrase, qrDim int) pas
 		l.qrSize = qrDim * params.StrokeWidth * passphraseQRScale
 		gap = params.I(passphraseQRGap)
 	}
-	l.rows = (len(glyphs) + l.rowLen - 1) / l.rowLen
+	l.rows = (len(l.glyphs) + l.rowLen - 1) / l.rowLen
 	// blockW is the width of a FULL row, not of the longest row: every row is
 	// left-aligned on the same edge, so a short final row must not shift the
 	// block.
