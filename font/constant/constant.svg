@@ -68,7 +68,7 @@
 </g>
 <polyline id="at" class="st0" points="299,7 298,8 296,8 295,7 295,3 296,2 298,2 299,3 299,6 298,5 298,4 297,3 296,4 296,6 297,7 298,6 "/>
 <line id="dash" class="st0" x1="301" y1="5" x2="305" y2="5"/>
-<polyline id="a" class="st0" points="311,4 311,8 307,8 307,6 311,6 "/>
+<polyline id="a" class="st0" points="307,4 310,4 311,5 311,8 307,8 307,6 311,6 "/>
 <polyline id="b" class="st0" points="313,2 313,8 317,8 317,5 313,5 "/>
 <polyline id="c" class="st0" points="323,4 319,4 319,8 323,8 "/>
 <polyline id="d" class="st0" points="329,2 329,8 325,8 325,5 329,5 "/>
