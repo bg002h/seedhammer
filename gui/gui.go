@@ -146,7 +146,10 @@ type program int
 
 const (
 	backupWallet program = iota
-	engravePassphrase // spec D7/§6: position 2 of 7.
+	// engravePassphrase is position 2 of 7 (spec D7/§6). Inserted here, not
+	// appended, so bip85Derive stays the last navigable program and the
+	// wrap/pager sites keyed to it need no change.
+	engravePassphrase
 	engraveXpub
 	engraveBundle
 	engraveSingleSig
