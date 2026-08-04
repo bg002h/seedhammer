@@ -116,9 +116,8 @@
 	<polyline class="st0" points="477,1 477,9 "/>
 </g>
 <g id="%">
-	<polyline class="st0" points="485,2 481,8 "/>
-	<polyline class="st0" points="481,2 482,2 482,3 481,3 481,2 "/>
-	<polyline class="st0" points="484,7 485,7 485,8 484,8 484,7 "/>
+	<polyline class="st0" points="483,4 483,2 481,2 481,4 483,4 483,2 485,2 481,8 "/>
+	<polyline class="st0" points="483,6 485,6 485,8 483,8 483,6 "/>
 </g>
 <polyline id="&amp;" class="st0" points="491,8 488,4 488,3 489,2 490,3 490,4 487,6 487,7 488,8 490,8 491,7 "/>
 <polyline id="+" class="st0" points="493,5 497,5 495,5 495,3 495,7 "/>
