@@ -4,6 +4,7 @@ import (
 	"image"
 	"strings"
 
+	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/vector"
 )
@@ -30,9 +31,9 @@ type Passphrase struct {
 	Font *vector.Face
 }
 
-// Layout constants, pinned per spec 4.1. The em is fixed per layout mode and
-// does NOT scale with passphrase length: a 20-character passphrase occupies 2
-// rows at the same em as a 100-character one.
+// Layout constants, pinned per spec 4.1 and 4.2. The em is fixed per layout
+// mode and does NOT scale with passphrase length: a 20-character passphrase
+// occupies 2 rows at the same em as a 100-character one.
 const (
 	// passphraseFontSize gives a lowercase x-height of ~9 stroke widths,
 	// comparable to what uppercase gets at today's 4.1mm.
@@ -40,6 +41,20 @@ const (
 	// passphraseRowLen is one 10-character group per row: position implies
 	// index, and there are no intra-row gaps to confuse with the space mark.
 	passphraseRowLen = 10
+
+	// With a QR the text reflows smaller: text and QR cannot both be full
+	// size within the ~65mm of usable height.
+	passphraseFontSizeQR = 4.5
+	passphraseRowLenQR   = 20
+	// passphraseQRScale matches the other plate types.
+	passphraseQRScale = 3
+	// passphraseQREnvelope is the reserved module count. The QR size is
+	// VARIABLE -- 33 or 37 modules at ECC-L within the 100-character cap, and
+	// smaller for short passphrases -- so the layout reserves the worst case
+	// and centres the actual code inside it rather than assuming a size.
+	passphraseQREnvelope = 37
+	// passphraseQRGap separates the text block from the QR, in millimetres.
+	passphraseQRGap = 2
 )
 
 // passphraseGlyphs maps the passphrase to the glyph sequence that gets
@@ -59,8 +74,33 @@ func passphraseGlyphs(s string) string {
 	return b.String()
 }
 
+// passphraseQRCode encodes the passphrase EXACTLY as entered: the same bytes,
+// the same case, real 0x20 spaces and never SpaceMark. The mark is a rendering
+// device for the text block only; a scanner that saw it would hand a wallet
+// different bytes, silently opening a different wallet (spec 4.2).
+//
+// ECC-L is pinned, not M: the engraved text is the authoritative copy and the
+// QR is convenience, so four fewer modules is the better trade.
+func passphraseQRCode(plate Passphrase) (*qr.Code, error) {
+	return qr.Encode(plate.Passphrase, qr.L)
+}
+
 func EngravePassphrase(params engrave.Params, plate Passphrase) (engrave.Engraving, error) {
-	return engravePassphrase(params, plate), nil
+	var qrc *engrave.ConstantQRCmd
+	if plate.QR {
+		code, err := passphraseQRCode(plate)
+		if err != nil {
+			return nil, err
+		}
+		// ConstantQR, never engrave.QR: the latter engraves in a
+		// content-dependent pattern and would leak the secret through timing
+		// (spec 3.5.2).
+		qrc, err = engrave.ConstantQR(code)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return engravePassphrase(params, plate, qrc), nil
 }
 
 // passphraseLayout is the geometry of one passphrase plate, in machine units.
@@ -75,6 +115,12 @@ type passphraseLayout struct {
 	// textX, textY is the top-left of the text block, blockW x blockH its size.
 	textX, textY   int
 	blockW, blockH int
+	// qrDim is the QR's module count, or 0 when no QR is engraved. qrX, qrY
+	// and qrSize describe the code itself; envX, envY and envSize describe the
+	// fixed 37-module envelope it is centred in.
+	qrDim               int
+	qrX, qrY, qrSize    int
+	envX, envY, envSize int
 }
 
 // passphraseAdvance is the per-character advance of the (fixed-width)
@@ -87,11 +133,22 @@ func passphraseAdvance(font *vector.Face, em int) int {
 	return adv * em / font.Metrics().Height
 }
 
-func passphraseLayoutFor(params engrave.Params, font *vector.Face, glyphs string) passphraseLayout {
+// passphraseLayoutFor lays out glyphs, reserving room for a qrDim-module QR.
+// qrDim of 0 means no QR.
+func passphraseLayoutFor(params engrave.Params, font *vector.Face, glyphs string, qrDim int) passphraseLayout {
 	plateDims := image.Point{X: params.F(85), Y: params.F(85)}
 	l := passphraseLayout{
 		rowLen: passphraseRowLen,
 		em:     params.F(passphraseFontSize),
+		qrDim:  qrDim,
+	}
+	gap := 0
+	if qrDim > 0 {
+		l.rowLen = passphraseRowLenQR
+		l.em = params.F(passphraseFontSizeQR)
+		l.envSize = passphraseQREnvelope * params.StrokeWidth * passphraseQRScale
+		l.qrSize = qrDim * params.StrokeWidth * passphraseQRScale
+		gap = params.I(passphraseQRGap)
 	}
 	l.rows = (len(glyphs) + l.rowLen - 1) / l.rowLen
 	// blockW is the width of a FULL row, not of the longest row: every row is
@@ -99,20 +156,40 @@ func passphraseLayoutFor(params engrave.Params, font *vector.Face, glyphs string
 	// block.
 	l.blockW = l.rowLen * passphraseAdvance(font, l.em)
 	l.blockH = l.rows * l.em
+
+	// Centre text block, gap and QR envelope as one group. innerMargin is
+	// symmetric, so centring on the plate is centring in the usable area.
+	total := l.blockH + gap + l.envSize
 	l.textX = (plateDims.X - l.blockW) / 2
-	l.textY = (plateDims.Y - l.blockH) / 2
+	l.textY = (plateDims.Y - total) / 2
+	if qrDim > 0 {
+		l.envX = (plateDims.X - l.envSize) / 2
+		l.envY = l.textY + l.blockH + gap
+		l.qrX = l.envX + (l.envSize-l.qrSize)/2
+		l.qrY = l.envY + (l.envSize-l.qrSize)/2
+	}
 	return l
 }
 
-func engravePassphrase(params engrave.Params, plate Passphrase) engrave.Engraving {
+func engravePassphrase(params engrave.Params, plate Passphrase, qrc *engrave.ConstantQRCmd) engrave.Engraving {
+	glyphs := passphraseGlyphs(plate.Passphrase)
+	qrDim := 0
+	if qrc != nil {
+		qrDim = qrc.Size
+	}
+	l := passphraseLayoutFor(params, plate.Font, glyphs, qrDim)
 	// NewPassphraseStringer, never NewConstantStringer: the shared alphabet is
 	// 36 characters and panics on lowercase (spec 3.5.1).
-	glyphs := passphraseGlyphs(plate.Passphrase)
-	l := passphraseLayoutFor(params, plate.Font, glyphs)
 	constant := engrave.NewPassphraseStringer(plate.Font, params, l.em)
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
 		off := t.Offset(l.textX, l.textY)
 		stringColumn(off, constant, plate.Font, l.em, glyphs, l.rowLen, 0, l.rows)
+
+		if qrc != nil {
+			qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, passphraseQRScale)
+			t.Offset(l.qrX, l.qrY)
+			qrCmd(t.Yield)
+		}
 	}
 }
