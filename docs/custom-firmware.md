@@ -19,6 +19,27 @@
 > designed foot gun. If you shoot yourself in the foot, you have only yourself to
 > blame, and I'm not your tech support staff.
 
+> ## Who this is for
+>
+> People who are willing to own the outcome.
+>
+> The Raspberry Pi Pico 2 rehearsal in §2 is not hand-holding. **It is the
+> filter.** It costs about $5 and twenty minutes, and it is where you find out
+> whether you actually understand what you are about to do while a mistake is
+> still worth $5 instead of a SeedHammer II. It is also where the author's own
+> mistake surfaced — a check that demanded an all-zero page-lock value, which on
+> a real RP2350 would have declared a perfectly good machine unusable. The
+> rehearsal caught it. That is what it is for.
+>
+> If that step reads to you as an inconvenience to skip rather than the obvious
+> thing to do, this firmware is not for you, and that is fine.
+>
+> Whatever you choose to do with this software is your own business. If you break
+> your stuff with it, **you** broke your stuff — not me. There is no support, no
+> warranty, and no obligation on anyone's part to help you put it back. It is
+> dual-licensed MIT OR Unlicense precisely so that you are free to do as you
+> like, entirely at your own risk.
+
 ---
 
 This guide walks through burning your own secp256k1 boot key into a retail
