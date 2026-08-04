@@ -170,7 +170,7 @@ func (h *ppHarness) tapNav(b Button) {
 		h.t.Fatalf("nav %v: the target at %v is %v, not a Clickable bound to %v", b, pos, tag, b)
 	}
 	h.tapAt(pos)
-	h.next("after tapping nav %v", b)
+	h.step()
 }
 
 func (h *ppHarness) navPoint(b Button) image.Point {
@@ -592,5 +592,213 @@ func TestFingerprintStepFitsPanel(t *testing.T) {
 			t.Errorf("%s: heading %q is %dpx tall and wraps out of the %dpx title band",
 				name, head, headSz.Y, leadingSize-8)
 		}
+	}
+}
+
+// --- Task 4: QR choice and the confirm screen ---------------------------------
+
+type ppConfirmRun struct {
+	ok   bool
+	done bool
+}
+
+func startPPConfirm(t *testing.T, secret string, seedFP, combinedFP string, qr bool) (*ppHarness, *ppConfirmRun) {
+	t.Helper()
+	h := newPPHarness(t)
+	r := new(ppConfirmRun)
+	h.start(func() {
+		r.ok = ppConfirmFlow(h.ctx, &descriptorTheme, []byte(secret), seedFP, combinedFP, qr)
+		r.done = true
+	})
+	return h, r
+}
+
+// TestConfirmRendersSpacesVisibly: revealing the text is NOT enough. A space
+// inks nothing -- on screen exactly as on metal -- so a revealed readout of
+// " a b  c " proof-reads as "abc", and "hunter2 " proof-reads as "hunter2"
+// while opening a different wallet.
+//
+// ExtractText models this precisely: it collects the runes of glyphs that
+// actually inked, and a space never does. So asserting the marked form is
+// present AND the unmarked form is not is a direct test of the property.
+func TestConfirmRendersSpacesVisibly(t *testing.T) {
+	const secret = " a b  c " // leading, interior, repeated and trailing
+	h, _ := startPPConfirm(t, secret, "", "", false)
+	if !uiHas(h.content, "_a_b__c_") {
+		t.Fatalf("the confirm screen does not mark spaces; got %q", h.content)
+	}
+	if uiHas(h.content, "abc") {
+		t.Fatalf("the confirm screen rendered raw spaces, which ink nothing: %q", h.content)
+	}
+	// The mark means nothing without a legend saying so.
+	if !uiContains(h.content, "= SPACE") {
+		t.Fatalf("the space mark is not explained; got %q", h.content)
+	}
+}
+
+// TestConfirmMarksSurviveWrapping: a 100-character passphrase wraps, and
+// text.Layout SWALLOWS the space it breaks a line at -- which would hide
+// exactly the spaces adjacent to a break. Marking before layout is what makes
+// wrapping safe, so this asserts the whole marked string is present even when
+// it spans lines.
+func TestConfirmMarksSurviveWrapping(t *testing.T) {
+	secret := strings.Repeat("ab c", 25) // 100 chars, 25 spaces, spread across every line
+	if len(secret) != passphrase.MaxLen {
+		t.Fatalf("test vector is %d chars, want %d", len(secret), passphrase.MaxLen)
+	}
+	h, _ := startPPConfirm(t, secret, "", "", false)
+	marked := strings.ReplaceAll(secret, " ", "_")
+	if !uiHas(h.content, marked) {
+		t.Fatalf("the wrapped passphrase lost characters or marks.\nwant %q\n got %q", marked, h.content)
+	}
+}
+
+// TestConfirmShowsDerivedCounts: leading and trailing spaces are called out BY
+// NAME, not folded into a total. A count is checkable against intent in a way
+// a wall of characters is not.
+func TestConfirmShowsDerivedCounts(t *testing.T) {
+	h, _ := startPPConfirm(t, " a b  c ", "", "", false)
+	// Rendered spaces ink nothing, so the extracted form of
+	// "8 chars, 5 spaces, 1 leading, 1 trailing" has its spaces removed.
+	const want = "8chars,5spaces,1leading,1trailing"
+	if !uiHas(h.content, want) {
+		t.Fatalf("derived counts missing or wrong.\nwant %q inside\n got %q", want, h.content)
+	}
+}
+
+// TestPassphraseCountsString pins the count strings themselves, including the
+// cases the screen test cannot reach one at a time. A single-fault table would
+// let a mis-ordered or mis-labelled clause through, so each row varies more
+// than one thing.
+func TestPassphraseCountsString(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"a", "1 char, no spaces"},
+		{"hunter2", "7 chars, no spaces"},
+		{"hunter2 ", "8 chars, 1 space, 1 trailing"},
+		{" hunter2", "8 chars, 1 space, 1 leading"},
+		{" a b  c ", "8 chars, 5 spaces, 1 leading, 1 trailing"},
+		{"a  b", "4 chars, 2 spaces"},
+		{"  ab  ", "6 chars, 4 spaces, 2 leading, 2 trailing"},
+	} {
+		if got := ppPassphraseCounts([]byte(tc.in)); got != tc.want {
+			t.Errorf("ppPassphraseCounts(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestConfirmShowsFingerprintsGrouped: both claims appear grouped as the plate
+// groups them, both are labelled, and a skipped field says so rather than
+// vanishing -- a missing line is indistinguishable from a screen that forgot to
+// draw it.
+func TestConfirmShowsFingerprintsGrouped(t *testing.T) {
+	h, _ := startPPConfirm(t, "hunter2", "A1B2C3D4", "99887766", false)
+	for _, want := range []string{"A1B2C3D4", "99887766"} {
+		if !uiHas(h.content, want) {
+			t.Fatalf("confirm screen omits fingerprint %q; got %q", want, h.content)
+		}
+	}
+	if !uiContains(h.content, "not verified") {
+		t.Fatalf("confirm screen does not warn the fingerprints are unverified; got %q", h.content)
+	}
+	h2, _ := startPPConfirm(t, "hunter2", "", "", false)
+	if !uiContains(h2.content, "not recorded") {
+		t.Fatalf("a skipped fingerprint is not called out; got %q", h2.content)
+	}
+}
+
+// TestConfirmShowsQRState: whether the plate carries a machine-readable copy of
+// the secret is the most consequential thing on it, so the confirm screen says
+// which way the toggle landed.
+func TestConfirmShowsQRState(t *testing.T) {
+	on, _ := startPPConfirm(t, "hunter2", "", "", true)
+	if !uiContains(on.content, "QR: yes") {
+		t.Fatalf("confirm screen does not report the QR is ON; got %q", on.content)
+	}
+	off, _ := startPPConfirm(t, "hunter2", "", "", false)
+	if !uiContains(off.content, "QR: no") {
+		t.Fatalf("confirm screen does not report the QR is OFF; got %q", off.content)
+	}
+}
+
+// TestConfirmFitsPanel: the confirm screen must fit WITHOUT scrolling. The
+// codebase's only scroller (Warning.Layout) is bound to ButtonFilter(Up/Down),
+// which no production path on SeedHammer II emits -- content below the fold
+// would be unreadable on the machine. Measured against the worst case the
+// feature accepts: 100 characters with spaces, both fingerprints, QR on.
+func TestConfirmFitsPanel(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	dims := ctx.Platform.DisplaySize()
+	area := ppConfirmArea(dims)
+	worst := []byte(strings.Repeat("ab c", 25))
+	marked := make([]byte, len(worst))
+	ppMarkSpaces(marked, worst)
+	_, sz := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
+		ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true)
+	if sz.Y > area.Dy() {
+		t.Errorf("the confirm screen needs %dpx of height but only %dpx is available on a %v panel; "+
+			"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
+			sz.Y, area.Dy(), dims)
+	}
+	if sz.X > area.Dx() {
+		t.Errorf("the confirm screen is %dpx wide in a %dpx area", sz.X, area.Dx())
+	}
+}
+
+// TestQRChoiceDefaultsOff: accepting the QR step without touching anything must
+// leave the QR OFF (spec D8). A default that silently added a machine-readable
+// copy of the secret to the plate would be the worst possible way to get this
+// wrong.
+func TestQRChoiceDefaultsOff(t *testing.T) {
+	h := newPPHarness(t)
+	var qr, ok, done bool
+	h.start(func() {
+		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme)
+		done = true
+	})
+	if !uiContains(h.content, "machine-readable") {
+		t.Fatalf("the QR step does not say the QR is a machine-readable copy of the secret; got %q", h.content)
+	}
+	h.tapNav(Button3)
+	for i := 0; i < 8 && !done; i++ {
+		h.frame()
+	}
+	if !done || !ok {
+		t.Fatalf("the QR step did not complete (done=%v ok=%v)", done, ok)
+	}
+	if qr {
+		t.Fatal("the QR defaults to ON; spec D8 requires OFF")
+	}
+}
+
+// TestQRChoiceCanBeTurnedOn: the opt-in is reachable by touch. Without this,
+// "defaults off" would also pass on a screen where the other choice cannot be
+// selected at all.
+func TestQRChoiceCanBeTurnedOn(t *testing.T) {
+	h := newPPHarness(t)
+	var qr, ok, done bool
+	h.start(func() {
+		qr, ok = ppQRChoiceFlow(h.ctx, &descriptorTheme)
+		done = true
+	})
+	cs, isCS := h.widget("qr").(*ChoiceScreen)
+	if !isCS {
+		t.Fatal("widget \"qr\" is not a *ChoiceScreen")
+	}
+	if len(cs.children) < 2 {
+		t.Fatalf("the QR step offers %d choices, want 2", len(cs.children))
+	}
+	h.tapAt(h.point(&cs.children[1].click, "the \"add QR\" choice"))
+	h.next("after choosing to add a QR")
+	h.tapNav(Button3)
+	for i := 0; i < 8 && !done; i++ {
+		h.frame()
+	}
+	if !done || !ok {
+		t.Fatalf("the QR step did not complete (done=%v ok=%v)", done, ok)
+	}
+	if !qr {
+		t.Fatal("choosing the QR option did not turn the QR on")
 	}
 }

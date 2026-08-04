@@ -1,7 +1,10 @@
 package gui
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"strconv"
 	"unicode/utf8"
 
 	"seedhammer.com/gui/assets"
@@ -234,6 +237,207 @@ func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep) (st
 		ctx.Frame(op.Layer(kbdOp, leadOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return "", false
+}
+
+// ppSpaceMark is the on-screen stand-in for the plate's visible-space mark.
+//
+// The plate engraves backup.SpaceMark (0x1F), a glyph authored for the
+// engraving face. The GUI's bitmap faces index printable ASCII only
+// (cmd/bitmapfont's alphabet, plus whitespace runes whose rasters are empty),
+// so 0x1F inks nothing on screen -- it would be exactly as invisible as the
+// space it exists to expose. '_' is the closest ASCII stand-in the face
+// actually draws.
+//
+// KNOWN LIMIT: a literal '_' in the passphrase renders identically. The plate
+// has no such ambiguity, since it engraves '_' and 0x1F as different glyphs.
+// On screen it is resolved by the two things drawn beside the readout -- the
+// legend naming the mark, and the space COUNT, which pins how many of the
+// marks are spaces. This is exactly why spec 5.1 demands counts as well as
+// marks.
+const ppSpaceMark = '_'
+
+// ppSpaceLegend names the mark. Without it the mark is a private convention:
+// a reader has no way to know whether to type a space, an underscore or
+// nothing, and each guess opens a different wallet. It mirrors
+// backup.passphraseLegend, which does the same job on the steel.
+const ppSpaceLegend = string(ppSpaceMark) + " = SPACE"
+
+// ppMarkSpaces copies s into dst with every 0x20 replaced by ppSpaceMark, and
+// returns dst[:len(s)]. dst is the CALLER's buffer so the marked copy of the
+// secret is a []byte that can be wiped, not a string that cannot (spec 5.3).
+func ppMarkSpaces(dst, s []byte) []byte {
+	dst = dst[:len(s)]
+	for i, c := range s {
+		if c == ' ' {
+			c = ppSpaceMark
+		}
+		dst[i] = c
+	}
+	return dst
+}
+
+func ppPlural(n int, noun string) string {
+	if n == 1 {
+		return strconv.Itoa(n) + " " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
+}
+
+// ppPassphraseCounts describes the passphrase in numbers, because a count is
+// checkable against intent in a way a wall of characters is not (spec 5.1).
+//
+// Leading and trailing spaces are named rather than folded into the total: a
+// fat-fingered trailing space is invisible on screen and on metal, and
+// "hunter2 " is a different wallet from "hunter2". "no spaces" is stated
+// affirmatively so that the absence of a space clause cannot be mistaken for a
+// screen that forgot to count.
+//
+// The returned string contains only numbers and fixed words -- never the
+// passphrase (spec 5.3).
+func ppPassphraseCounts(s []byte) string {
+	spaces := 0
+	for _, c := range s {
+		if c == ' ' {
+			spaces++
+		}
+	}
+	leading := 0
+	for leading < len(s) && s[leading] == ' ' {
+		leading++
+	}
+	trailing := 0
+	for trailing < len(s) && s[len(s)-1-trailing] == ' ' {
+		trailing++
+	}
+	out := ppPlural(len(s), "char")
+	if spaces == 0 {
+		out += ", no spaces"
+	} else {
+		out += ", " + ppPlural(spaces, "space")
+	}
+	if leading > 0 {
+		out += ", " + strconv.Itoa(leading) + " leading"
+	}
+	if trailing > 0 {
+		out += ", " + strconv.Itoa(trailing) + " trailing"
+	}
+	return out
+}
+
+// ppQRChoiceFlow is step 4 of spec 5. The QR is OPT-IN and defaults to OFF
+// (spec D8): it is a machine-readable copy of the secret itself, so a default
+// that quietly added one would be the worst way to get this wrong.
+func ppQRChoiceFlow(ctx *Context, th *Colors) (bool, bool) {
+	cs := &ChoiceScreen{
+		Title:   "QR Code",
+		Lead:    "A QR is a machine-readable copy of the passphrase.",
+		Choices: []string{"No QR", "Add QR"},
+	}
+	hookPPWidget("qr", cs)
+	// ChoiceScreen.choice starts at 0, which is "No QR" -- the default is a
+	// property of this ordering, so do not reorder the choices.
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return false, false
+	}
+	return sel == 1, true
+}
+
+// ppConfirmArea is the region the confirm screen's body may use: below the
+// title, inboard of the nav column, with a small margin. Named so the fit test
+// measures the same budget the layout spends.
+func ppConfirmArea(dims image.Point) layout.Rectangle {
+	const margin = 6
+	navW := assets.NavBtnPrimary.Bounds().Dx() + 4
+	return layout.Rectangle{
+		Min: image.Pt(margin, leadingSize),
+		Max: image.Pt(dims.X-navW, dims.Y-margin),
+	}
+}
+
+func ppYesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// ppFingerprintClaim renders one fingerprint line. A skipped field says "not
+// recorded" rather than vanishing: a missing line is indistinguishable from a
+// screen that forgot to draw it.
+func ppFingerprintClaim(label, canonical string) string {
+	if canonical == "" {
+		return label + ": not recorded"
+	}
+	return label + ": " + passphrase.GroupFingerprint(canonical)
+}
+
+// ppConfirmBody lays out the confirm screen's content and returns it with its
+// measured size, so a test can assert the worst case fits without scrolling.
+//
+// marked is the passphrase with spaces already replaced by ppSpaceMark; it is
+// passed as a []byte and rendered with a %s verb, which text.Formatter accepts
+// directly -- no string copy of the secret is made here.
+func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, seedFP, combinedFP string, qr bool) (op.Op, image.Point) {
+	var rt richText
+	// The passphrase itself, revealed: a masked readout cannot be proof-read,
+	// and this is the last moment before a permanent plate (spec 5.1).
+	rt.Addf(&ctx.B, ctx.Styles.body, width, th.Text, "%s", marked)
+	rt.Y += 4
+	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, counts)
+	if bytes.ContainsRune(marked, ppSpaceMark) {
+		rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppSpaceLegend)
+	}
+	rt.Y += 4
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFingerprintClaim("Seed FP", seedFP))
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFingerprintClaim("Expected comb FP", combinedFP))
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, "QR: "+ppYesNo(qr))
+	rt.Y += 4
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppConfirmWarning)
+	return rt.Content, image.Pt(width, rt.Y)
+}
+
+// ppConfirmWarning is spec 5.1's statement that nothing here has been checked.
+// The passphrase is the dangerous one: a wrong fingerprint is a wrong label,
+// but a wrong passphrase is a different wallet, and it fails silently.
+// The fingerprint clause deliberately echoes the plate's own footer,
+// backup.passphraseFooter ("FINGERPRINTS TYPED, NOT VERIFIED"), so the screen
+// and the steel say the same thing.
+const ppConfirmWarning = "Fingerprints are typed, not verified. " +
+	"A wrong passphrase does not fail: it opens a DIFFERENT wallet."
+
+// ppConfirmFlow is step 5 of spec 5: the last checkpoint before a permanent
+// plate. It returns true to engrave, false to go back.
+func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP string, qr bool) bool {
+	backBtn := &Clickable{Button: Button1}
+	okBtn := &Clickable{Button: Button3}
+	hookPPWidget("back", backBtn)
+	hookPPWidget("ok", okBtn)
+	// The marked copy is a []byte, wiped on return, so proof-reading the
+	// passphrase adds no unwipeable copy of it (spec 5.3).
+	marked := make([]byte, len(secret))
+	defer wipeBytes(marked)
+	ppMarkSpaces(marked, secret)
+	counts := ppPassphraseCounts(secret)
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return false
+		}
+		if okBtn.Clicked(ctx) {
+			return true
+		}
+		dims := ctx.Platform.DisplaySize()
+		area := ppConfirmArea(dims)
+		body, _ := ppConfirmBody(ctx, th, area.Dx(), marked, counts, seedFP, combinedFP, qr)
+		body = body.Offset(image.Point(area.Min))
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+		}...)
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Confirm")
+		ctx.Frame(op.Layer(body, nav, title, op.Color(&ctx.B, th.Background)))
+	}
+	return false
 }
 
 // engravePassphraseFlow is the engravePassphrase program (spec 5): enter a
