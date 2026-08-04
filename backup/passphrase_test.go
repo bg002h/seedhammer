@@ -9,6 +9,7 @@ import (
 	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/constant"
+	"seedhammer.com/passphrase"
 )
 
 // plateKnot is one commanded point of an engraving.
@@ -42,13 +43,6 @@ func passphrasePoints(t *testing.T, plate Passphrase) []plateKnot {
 		out = append(out, plateKnot{P: k.Knot, Engrave: k.Engrave})
 	}
 	return out
-}
-
-// passphrasePlan plans plate and returns every knot the machine will visit,
-// including its timing.
-func passphrasePlan(t *testing.T, plate Passphrase) []bspline.Knot {
-	t.Helper()
-	return slices.Collect(engrave.PlanEngraving(conf, passphraseEngraving(t, plate)))
 }
 
 // knotBounds is the bounding box of pts.
@@ -663,5 +657,94 @@ func TestSpaceFidelity(t *testing.T) {
 			t.Errorf("%q: the engraved text block is not the mark-substituted glyph sequence (%d vs %d ink points)",
 				tc.in, len(got), len(want))
 		}
+	}
+}
+
+func TestPassphraseGolden(t *testing.T) {
+	const words = "correct horse battery staple"
+	tests := []struct {
+		name  string
+		plate Passphrase
+	}{
+		{"0-plain", Passphrase{
+			Passphrase: words,
+			SeedFP:     "A1B2C3D4",
+			CombinedFP: "5E6F7A8B",
+			Font:       constant.Font,
+		}},
+		{"1-qr", Passphrase{
+			Passphrase: words,
+			SeedFP:     "A1B2C3D4",
+			CombinedFP: "5E6F7A8B",
+			QR:         true,
+			Font:       constant.Font,
+		}},
+		{"2-no-metadata", Passphrase{
+			// No space, no fingerprints: neither band is engraved.
+			Passphrase: "Hunter2!",
+			Font:       constant.Font,
+		}},
+		{"3-max-qr", Passphrase{
+			// The worst case the plate must survive.
+			Passphrase: strings.Repeat("a b", 33) + "a",
+			SeedFP:     "FFFFFFFF",
+			CombinedFP: "00000000",
+			QR:         true,
+			Font:       constant.Font,
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			compareGolden(t, "passphrase-"+test.name, passphraseEngraving(t, test.plate))
+		})
+	}
+}
+
+// Every string ValidatePassphrase accepts must lay out through the REAL entry
+// point without panicking -- not through engrave.String in isolation, which is
+// what made an earlier draft's guarantee hollow. This exercises the passphrase
+// ConstantStringer and, with QR on, ConstantQR.
+func TestPassphraseNoPanicOverCharset(t *testing.T) {
+	var cases []string
+	for r := rune(0x20); r <= 0x7E; r++ {
+		// Each character on its own, and padded out to a full plate so every
+		// row length from 1 to rowLen is exercised.
+		cases = append(cases, string(r), strings.Repeat(string(r), 100))
+	}
+	cases = append(cases, allPrintableASCII(), strings.Repeat(allPrintableASCII(), 2)[:100])
+	for _, in := range cases {
+		if err := passphrase.ValidatePassphrase(in); err != nil {
+			t.Fatalf("test is void: %q is not a valid passphrase: %v", in, err)
+		}
+		for _, withQR := range []bool{false, true} {
+			plate := Passphrase{Passphrase: in, SeedFP: "A1B2C3D4", CombinedFP: "5E6F7A8B",
+				QR: withQR, Font: constant.Font}
+			eng, err := EngravePassphrase(params, plate)
+			if err != nil {
+				t.Fatalf("%q (qr=%v): %v", in, withQR, err)
+			}
+			for range eng {
+			}
+		}
+	}
+}
+
+// A passphrase too long for a constant-time QR must return an error, never
+// panic and never fall back to the content-timed engraver.
+func TestPassphraseQRTooLong(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("EngravePassphrase panicked instead of returning an error: %v", r)
+		}
+	}()
+	plate := Passphrase{Passphrase: strings.Repeat("a", 200), QR: true, Font: constant.Font}
+	if _, err := EngravePassphrase(params, plate); err == nil {
+		t.Error("want an error for a QR beyond ConstantQR's reach, got nil")
+	}
+	// Without the QR the same passphrase still lays out: the limit is the QR's,
+	// not the plate's.
+	if _, err := EngravePassphrase(params, Passphrase{Passphrase: plate.Passphrase, Font: constant.Font}); err != nil {
+		t.Errorf("no-QR plate returned %v", err)
 	}
 }
