@@ -425,6 +425,21 @@ func TestSafePointerNoUnderflow(t *testing.T) {
 }
 
 func FuzzConstantQR(f *testing.F) {
+	// The restructuring above (each level tried independently) fixes the
+	// STRUCTURE, but without a seed corpus entry in the right length band,
+	// a plain `go test` run (which only exercises f.Add seeds plus any saved
+	// testdata/fuzz corpus, not actual randomized fuzzing) still never drove
+	// ECC-L to dim 37: none of the existing regression seeds reach 79 bytes.
+	// ECC-L needs n in [79,106] to sit at dim 37 -- below 79 it's dim <= 33,
+	// above 106 it's dim >= 41 (unsupported, skipped by the c.Size > 37
+	// check). The three seeds below are printable ASCII (mixed case and
+	// symbols, so QR's byte-mode encoding is forced rather than the more
+	// compact alphanumeric mode) at 79, 90, and 106 bytes -- measured to
+	// land at ECC-L dim 37 (and ECC-Q dim 45/49/49, so the Q half of each
+	// still exercises its own skip path). (Phase A review M2.)
+	f.Add([]byte(`Y/ ,m%x{+-N?#$#Mur_q]4,8~/!ca@)xh])oy,dm&Cj)uG_NC@v:[fx#d* K3}^wQ6'*nb5*j<3$M/f`))                            // 79 bytes
+	f.Add([]byte(`3xH[&VDw&7C4G4]&kRMbLm]^&^o6YeYFD08VX0f.aQwAu9M.||5mC4JZ*+S<'E%=c,|IH[)mA*{W:-S9}[c?O;d|V7`))                 // 90 bytes
+	f.Add([]byte(`m;G(Ng4bi^K21'r63h)~J6 xy(t,3<&XSJ;yQDgsGWIzl4g,BDUTkDf/|QD<G~nS'MY>a6QH *_SGWz_8Ts_5EnPvoM;6ek[x^w$]w.$O^`)) // 106 bytes
 	f.Fuzz(func(t *testing.T, entropy []byte) {
 		if len(entropy) < 16 {
 			return
