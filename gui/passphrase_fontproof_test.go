@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -58,18 +59,27 @@ func TestFontProofPatternIsEvery95PrintableASCII(t *testing.T) {
 	for r := rune(0x20); r <= 0x7E; r++ {
 		want.WriteRune(r)
 	}
-	if ppFontProofPassphrase != want.String() {
-		t.Fatalf("the pattern is not 0x20-0x7E in codepoint order.\n got %q\nwant %q",
-			ppFontProofPassphrase, want.String())
+	sweep := strings.TrimSuffix(ppFontProofPassphrase, ppFontProofConfusables)
+	if sweep == ppFontProofPassphrase {
+		t.Fatalf("the pattern does not end with the confusable suffix %q", ppFontProofConfusables)
 	}
-	if n := utf8.RuneCountInString(ppFontProofPassphrase); n != 95 {
-		t.Fatalf("the pattern is %d runes, want 95", n)
+	if sweep != want.String() {
+		t.Fatalf("the sweep is not 0x20-0x7E in codepoint order.\n got %q\nwant %q",
+			sweep, want.String())
+	}
+	if n := utf8.RuneCountInString(sweep); n != 95 {
+		t.Fatalf("the sweep is %d runes, want 95", n)
+	}
+	// The whole pattern must still be a legal passphrase: the suffix is free to
+	// grow, but not past the cap the flow enforces.
+	if err := passphrase.ValidatePassphrase(ppFontProofPassphrase); err != nil {
+		t.Fatalf("the pattern is not a valid passphrase: %v", err)
 	}
 	// Order and coverage, stated independently of the builder above so a bug in
 	// BOTH would have to be the same bug.
 	seen := make(map[rune]bool, 95)
 	prev := rune(0x1F)
-	for _, r := range ppFontProofPassphrase {
+	for _, r := range sweep {
 		if r <= prev {
 			t.Fatalf("the pattern is not in ascending codepoint order at %q (after %q)", r, prev)
 		}
@@ -286,7 +296,8 @@ func driveToConfirm(t *testing.T, trigger ppStep, answerYes bool) (*ppFlowRun, p
 
 	// Step 1: the passphrase.
 	if trigger == ppStepEntry {
-		triggerProof(t, h, answerYes, "95/100")
+		triggerProof(t, h, answerYes, fmt.Sprintf("%d/%d",
+			utf8.RuneCountInString(ppFontProofPassphrase), passphrase.MaxLen))
 	} else {
 		r.enterPassphrase("hunter2")
 	}
@@ -368,15 +379,19 @@ func TestFontProofTriggersFromEveryField(t *testing.T) {
 			// pattern (0x20) appears as ppSpaceMark.
 			wantMarked := strings.Replace(ppFontProofPassphrase, " ", string(ppSpaceMark), 1)
 			if !uiHas(got.confirm, wantMarked) {
-				t.Errorf("the confirm screen does not carry the 95-character pattern.\nwant %q inside\n got %q",
-					wantMarked, got.confirm)
+				t.Errorf("the confirm screen does not carry the %d-character pattern.\nwant %q inside\n got %q",
+					utf8.RuneCountInString(ppFontProofPassphrase), wantMarked, got.confirm)
 			}
 			// The counts line is derived from the raw secret, so it is
 			// independent evidence the buffer -- not just the display -- holds
-			// 95 characters with exactly one space.
-			if !uiHas(got.confirm, "95chars,1space,1leading") {
+			// the whole pattern with exactly one space. Derived from the
+			// constant, not hardcoded, so extending ppFontProofConfusables
+			// does not require editing this assertion.
+			wantCounts := fmt.Sprintf("%dchars,1space,1leading",
+				utf8.RuneCountInString(ppFontProofPassphrase))
+			if !uiHas(got.confirm, wantCounts) {
 				t.Errorf("the confirm screen's counts do not describe the pattern "+
-					"(95 chars, 1 space, 1 leading); got %q", got.confirm)
+					"(want %q); got %q", wantCounts, got.confirm)
 			}
 			// Both fingerprints. Only the space-stripped form is observable.
 			for _, fp := range []string{ppFontProofSeedFP, ppFontProofCombFP} {

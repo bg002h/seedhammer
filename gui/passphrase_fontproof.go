@@ -53,13 +53,25 @@ import (
 const ppFontProofTrigger = "FONTPROOF!"
 
 // ppFontProofPassphrase is all 95 printable ASCII, 0x20-0x7E, in codepoint
-// order, one each. It begins with a literal space, which is the point: the
-// plate must show the substituted space MARK beside a real '_' and beside the
-// genuine 0x20 the metadata bands engrave.
+// order, one each -- followed by ppFontProofConfusables. It begins with a
+// literal space, which is the point: the plate must show the substituted space
+// MARK beside a real '_' and beside the genuine 0x20 the metadata bands
+// engrave.
 //
-// TestFontProofPatternIsEvery95PrintableASCII derives this string from the
-// codepoint range and compares, so a typo in the literal cannot survive.
-const ppFontProofPassphrase = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+// TestFontProofPatternIsEvery95PrintableASCII derives the first 95 runes from
+// the codepoint range and compares, so a typo in the literal cannot survive.
+const ppFontProofPassphrase = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" +
+	ppFontProofConfusables
+
+// ppFontProofConfusables is appended to the codepoint sweep so the letters sit
+// ADJACENT on the plate. Codepoint order separates them -- 'm' and 'n' are
+// neighbours but 'r' is two cells away -- and a confusable pair can only be
+// judged side by side. "rn" against "m" is the classic single-stroke hazard:
+// at plate scale they differ mainly by the r's short diagonal.
+//
+// Anything added here must keep the pattern within passphrase.MaxLen and must
+// not change what the sweep itself covers.
+const ppFontProofConfusables = "rnm"
 
 // The two fingerprints. Both are valid hex, canonicalise unchanged, and render
 // grouped as "DEAD BEEF" / "CAFE BABE" -- which is how they supply the last
@@ -92,7 +104,7 @@ const (
 	ppFontProofAsk = "Load the font-proof test pattern?"
 
 	ppFontProofReplaces = "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
-		"Passphrase becomes all 95 printable ASCII, " +
+		"Passphrase becomes all 95 printable ASCII plus rnm, " +
 		"Seed FP becomes DEAD BEEF, " +
 		"Expected Comb FP becomes CAFE BABE."
 
