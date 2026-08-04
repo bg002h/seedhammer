@@ -16,7 +16,7 @@ repo would be **false**.
 | Firmware base | [`seedhammer/seedhammer`](https://github.com/seedhammer/seedhammer) | Unlicense | none |
 | Everything written for this fork | this repo | Unlicense | none |
 | `font/constant/` | upstream, extended here | Unlicense | none |
-| `font/sh/` | upstream | Unlicense | none |
+| `font/sh/` | upstream, plus 14 glyphs from a fork — see *Imports* | Unlicense | none |
 | **`font/comfortaa/`** | [Comfortaa](https://github.com/alexeiva/comfortaa) | **SIL OFL 1.1** | **yes — see below** |
 | **`font/poppins/`** | [Poppins](https://github.com/itfoundry/Poppins) | **SIL OFL 1.1** | **yes — see below** |
 
@@ -63,4 +63,56 @@ from another face before relying on the dedication.
 
 ## Imports
 
-*(none yet)*
+### `font/sh/` — 14 printable-ASCII glyphs
+
+1. **Source** — [`Gangleri42/seedhammer`](https://github.com/Gangleri42/seedhammer),
+   commit `cc7538d76cd64c545da96aa70f86bf755d929ea3` (`main`, "docs: the engrave
+   screen is the plate confirm now"), file `font/sh/sh.svg`
+   (sha256 `08eb541e92e25f9d91529f99471737160e6bebd73b09bfa8ae56f193097e685a`).
+2. **License** — Unlicense. Read from that repo's root `LICENSE`, and checked
+   the way this file demands: `font/sh/` there carries **no** `LICENSE` of its
+   own, so the root terms do govern it. (`font/comfortaa/` and `font/poppins/`
+   are the only per-directory licences in that tree, exactly as here.)
+3. **What was taken** — 14 glyph elements, appended after `semicolon`, for the
+   codepoints `font/sh` was missing:
+
+   | rune | our element id | upstream element id |
+   |---|---|---|
+   | `!` | `exclam` | `exclamation` |
+   | `"` | `quotedbl` | `quote` |
+   | `$` | `dollar` | `dollar` |
+   | `%` | `percent` | `percent` |
+   | `&` | `ampersand` | `ampersand` |
+   | `+` | `plus` | `plus` |
+   | `=` | `equal` | `equals` |
+   | `?` | `question` | `question` |
+   | `\` | `backslash` | `backslash` |
+   | `^` | `asciicircum` | `caret` |
+   | `_` | `_` | `underscore` |
+   | `` ` `` | `grave` | `grave` |
+   | `\|` | `bar` | `bar` |
+   | `~` | `asciitilde` | `tilde` |
+
+   Six ids were renamed to the convention `cmd/vectorfont`'s `mapChar` already
+   uses and `font/constant/constant.svg` already follows; the geometry is
+   upstream's, untouched, except for `!` and `?` — see below.
+
+   **The base glyphs were verified byte-identical to what this repo already
+   had**: all 81 pre-existing glyphs decode to identical advances and identical
+   B-spline knot lists, face metrics unchanged, 0 changed and 0 removed. The
+   procedure, hashes and result are in `font/sh/import-check.md`.
+
+   **Two glyphs were redrawn after import.** Upstream's `!` and `?` draw their
+   baseline dot with a control point the motion planner turns into a 2638 mm/s³
+   jerk against the machine's 2600 limit — the import landed red on
+   `engrave.TestFonts`. Their dot is now drawn exactly as this face's own
+   `period` is, which puts both at 2600.79, in line with `.` at 2600.39. Same
+   artwork, smoother path. Details in `import-check.md`.
+
+   **Deliberately NOT taken** from the same upstream file: its rework of the
+   existing `e o q s w O S W nine zero star at` glyphs, and (from
+   `backup/backup.go`) its removal of the `qrc.Size > 33` guard on the seed
+   path.
+4. **Obligations** — none. Unlicense is a public-domain dedication; nothing to
+   reproduce, attribute or preserve. This entry exists for traceability, not
+   because the licence demands it.
