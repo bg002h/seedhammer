@@ -517,6 +517,19 @@ func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP s
 // nil in production; mirrors bip85SeedHook.
 var passphraseSecretHook func(secret []byte)
 
+// passphrasePlateHook receives exactly what ppBuildPlate was handed. nil in
+// production; mirrors freetextPlateHook. Without it there is no way to bind
+// what the confirm screen showed to what was actually engraved: secret here
+// is whatever the CALLER passed -- correctly, engravePassphraseFlow passes
+// secret[:n] -- but secret's backing array can be up to passphrase.MaxLen
+// bytes and, after the FONTPROOF! pattern shrinks n, the bytes past n can
+// still hold a printable tail of a longer passphrase typed earlier in the
+// same flow. A caller that passed the whole buffer instead of secret[:n]
+// would leak that tail onto the plate, and nothing short of observing the
+// exact slice handed here catches it -- a unit test of ppBuildPlate cannot,
+// because the defect would be in the caller, not this function.
+var passphrasePlateHook func(secret []byte, seedFP, combinedFP string, qr bool)
+
 // ppBuildPlate turns the collected fields into an engravable plate.
 //
 // RESIDUAL COPY (spec 5.3): backup.Passphrase.Passphrase is a Go string, so
@@ -530,6 +543,9 @@ var passphraseSecretHook func(secret []byte)
 // SeedFP and CombinedFP arrive canonical from fingerprintEntryFlow, which is
 // the precondition backup.Passphrase documents but does not check.
 func ppBuildPlate(params engrave.Params, secret []byte, seedFP, combinedFP string, qr bool) (Plate, error) {
+	if passphrasePlateHook != nil {
+		passphrasePlateHook(secret, seedFP, combinedFP, qr)
+	}
 	desc := backup.Passphrase{
 		Passphrase: string(secret),
 		SeedFP:     seedFP,
