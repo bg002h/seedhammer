@@ -766,3 +766,27 @@ func TestEngraveFingerprintChoiceMapping(t *testing.T) {
 		t.Errorf("Choose = (%d,%v), want (1,true)", sel, ok)
 	}
 }
+
+// TestPassphraseProgramReachable pins the BIP-39 Password program at menu
+// position 2 of 7 (spec D7/§6), driven the way the hardware drives it: one tap
+// on the right arrow from Backup Wallet. A button-driven variant of this test
+// would pass even if the arrows had no hit area at all -- see
+// start_screen_touch_test.go's preamble.
+func TestPassphraseProgramReachable(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	m := new(StartScreen)
+	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
+	defer quit()
+	if _, ok := frame(); !ok {
+		t.Fatal("no frame")
+	}
+	_, right := arrowPoints(ctx)
+	tap(&ctx.Router, drawer(), right) // one step from Backup Wallet
+	content, ok := frame()
+	if !ok {
+		t.Fatal("no frame after tap")
+	}
+	if !uiContains(content, "BIP-39 Password") {
+		t.Fatalf("second program is not the passphrase program; got %q", content)
+	}
+}

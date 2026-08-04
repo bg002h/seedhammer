@@ -86,8 +86,8 @@ func TestStartScreenPagerTouchable(t *testing.T) {
 		t.Fatalf("tapping the right arrow did not advance the program; still %q.\n"+
 			"The pager is unreachable by touch, which is the only input SeedHammer II has.", content)
 	}
-	if !uiContains(content, "Account Xpub") {
-		t.Fatalf("right arrow should advance to Account Xpub; got %q", content)
+	if !uiContains(content, "BIP-39 Password") {
+		t.Fatalf("right arrow should advance to the BIP-39 Password program; got %q", content)
 	}
 }
 
@@ -131,6 +131,7 @@ func TestStartScreenPagerTouchReachesEveryProgram(t *testing.T) {
 
 	// Titles in pager order, starting one step to the right of backupWallet.
 	want := []string{
+		"BIP-39 Password",
 		"Account Xpub",
 		"Engrave Bundle",
 		"Engrave Single-Sig",

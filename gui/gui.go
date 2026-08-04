@@ -146,6 +146,7 @@ type program int
 
 const (
 	backupWallet program = iota
+	engravePassphrase // spec D7/§6: position 2 of 7.
 	engraveXpub
 	engraveBundle
 	engraveSingleSig
@@ -1518,6 +1519,9 @@ func uiFlow(ctx *Context, version string) {
 			case bip85Derive:
 				bip85DeriveFlow(ctx, th)
 				continue
+			case engravePassphrase:
+				engravePassphraseFlow(ctx, th)
+				continue
 			case backupWallet:
 				mnemonic, ok := newInputFlow(ctx, th)
 				if !ok {
@@ -1670,6 +1674,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 	switch m.prog {
 	case backupWallet:
 		titleTxt = "Backup Wallet"
+	case engravePassphrase:
+		titleTxt = "BIP-39 Password"
 	case engraveXpub:
 		titleTxt = "Account Xpub"
 	case engraveBundle:
@@ -1881,7 +1887,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
+	case backupWallet, engravePassphrase, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()

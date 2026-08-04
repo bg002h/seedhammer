@@ -23,23 +23,32 @@ func TestEngraveBundleProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right → engraveXpub.
+	// Right → engravePassphrase (position 2 of 7).
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after Right")
 	}
-	if !uiContains(content, "Account Xpub") {
-		t.Fatalf("engraveXpub not reachable after Right; got %q", content)
+	if !uiContains(content, "BIP-39 Password") {
+		t.Fatalf("engravePassphrase not reachable after Right; got %q", content)
 	}
-	// Right → engraveBundle (the new program), titled non-blank.
+	// Right → engraveXpub.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after second Right")
 	}
+	if !uiContains(content, "Account Xpub") {
+		t.Fatalf("engraveXpub not reachable after second Right; got %q", content)
+	}
+	// Right → engraveBundle (the new program), titled non-blank.
+	click(&ctx.Router, Right)
+	content, ok = frame()
+	if !ok {
+		t.Fatal("no frame after third Right")
+	}
 	if !uiContains(content, "Bundle") {
-		t.Fatalf("engraveBundle not reachable/titled after second Right; got %q", content)
+		t.Fatalf("engraveBundle not reachable/titled after third Right; got %q", content)
 	}
 	// Right again reaches engraveSingleSig; bip85Derive is now the navigable
 	// upper bound (inserted before qaProgram by T7b), so the wrap-to-backupWallet
@@ -48,9 +57,9 @@ func TestEngraveBundleProgramNavigable(t *testing.T) {
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after third Right")
+		t.Fatal("no frame after fourth Right")
 	}
 	if !uiContains(content, "Single-Sig") {
-		t.Fatalf("engraveSingleSig not reachable after third Right; got %q", content)
+		t.Fatalf("engraveSingleSig not reachable after fourth Right; got %q", content)
 	}
 }
