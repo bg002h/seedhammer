@@ -112,6 +112,13 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int) (int, bool
 		// TestPassphraseEntryFitsPanel measures rectangles instead.
 		counterBand, content := content.CutTop(cntsz.Y)
 		cntOp = cntOp.Offset(counterBand.N(cntsz))
+		// BOUND the block, do not merely reserve around it. Cutting the band
+		// off `content` does not move the keyboard at all -- it is bottom-
+		// aligned (Max.Y-size.Y) and CutTop leaves Max.Y unchanged -- so the
+		// reservation alone left the readout growing up over the counter from
+		// ~70 characters and over the title past ~90, exactly as before.
+		// TestPassphraseEntryFitsPanel measures the block against this bound.
+		kbd.MaxHeight = content.Dy()
 		kbdOp, kbdsz := kbd.Layout(ctx, th)
 		kbdOp = kbdOp.Offset(content.S(kbdsz))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{

@@ -48,8 +48,18 @@ type ppKey struct {
 
 type PassphraseKeyboard struct {
 	Fragment string
-	page     int
-	revealed bool
+
+	// MaxHeight bounds the whole block (readout + gap + grid). The readout's
+	// height grows with the passphrase, so without a bound the block is simply
+	// taller than the space the caller reserved -- and since it is bottom-
+	// aligned and drawn by op.Layer ON TOP, the overflow silently covers
+	// whatever is above it. Reserving a band in the CALLER cannot prevent this:
+	// bottom alignment is Max.Y-size.Y, and CutTop leaves Max.Y untouched, so
+	// the reservation does not move the block by even a pixel. The bound has to
+	// reach the thing whose height varies. 0 means unbounded.
+	MaxHeight int
+	page      int
+	revealed  bool
 
 	pages [4][][]ppKey
 	size  [4]image.Point
@@ -363,8 +373,33 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 	// taking q/a/z and the page-cycle key off the glass. Touch is the only
 	// input the machine has, so those keys were simply gone. See
 	// TestPassphraseKeyboardStaysOnPanel.
-	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, k.size[k.page].X, th.Text, shown)
 	const readoutGap = 8
+	// Clamp the readout to the height that actually exists, keeping the TAIL:
+	// the tail is what was just typed, and it is the end of a passphrase that
+	// an operator is checking as they enter it. Dropping the head is safe only
+	// because the n/100 counter -- which this clamp is what keeps visible --
+	// reports the true length, and the confirm screen shows the value whole.
+	if k.MaxHeight > 0 {
+		avail := k.MaxHeight - k.size[k.page].Y - readoutGap
+		w := k.size[k.page].X
+		if ctx.Styles.word.Measure(w, "%s", shown).Y > avail {
+			// Binary search the number of leading runes to drop. Height is
+			// monotonic in that count, and Measure allocates nothing, so this
+			// stays off the frame's allocation budget.
+			r := []rune(shown)
+			lo, hi := 0, len(r)
+			for lo < hi {
+				mid := (lo + hi) / 2
+				if ctx.Styles.word.Measure(w, "%s", string(r[mid:])).Y > avail {
+					lo = mid + 1
+				} else {
+					hi = mid
+				}
+			}
+			shown = string(r[lo:])
+		}
+	}
+	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, k.size[k.page].X, th.Text, shown)
 
 	gridY := readoutSz.Y + readoutGap
 	var content op.Op

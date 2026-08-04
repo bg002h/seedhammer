@@ -462,9 +462,10 @@ func FuzzConstantQR(f *testing.F) {
 
 // TestConstantQRLargeVersionsFailClosed checks that a v6 (dim 41) constant QR
 // either engraves or fails closed with an explicit error -- it never panics
-// and never silently truncates. An error here is a legitimate outcome (Task
-// 5, spec O6): Phase B falls back to the 78-char cap when QR is enabled if
-// v5/v6 isn't supported.
+// and never silently truncates. An error here is the EXPECTED outcome: spec O6
+// resolved to v5 only, so v6 is out of range by design. (An earlier draft of
+// this comment described a Phase B "78-char cap fallback" for the unsupported
+// case; O6 resolved that as unnecessary and it was never built.)
 func TestConstantQRLargeVersionsFailClosed(t *testing.T) {
 	// v6 (dim 41) is deliberately unsupported -- spec O6 resolved to v5 only,
 	// because ECC-L caps at 106 bytes and the passphrase caps at 100.

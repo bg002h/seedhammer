@@ -1212,17 +1212,122 @@ func TestConfirmLegendGatesOnRealSpaces(t *testing.T) {
 // screens were rebuilt empty. A cleared field is indistinguishable from one
 // never filled, and it contradicts the flow's own promise that Back walks
 // backwards rather than abandoning.
+// The version of this test that shipped with the M2 fix asserted
+// GroupFingerprint("DEADBEEF") == "DEAD BEEF" and that a ChoiceScreen whose
+// choice field was set to 1 still held 1. It invoked neither flow, and the
+// whole-feature review proved it vacuous by deleting BOTH M2 fixes and watching
+// the entire gui suite stay green. This drives the real flow instead: back up
+// two steps from Confirm, walk forward again, and require every value to have
+// survived the round trip.
 func TestBackPreservesEnteredValues(t *testing.T) {
-	prior := "DEADBEEF"
-	got := passphrase.GroupFingerprint(prior)
-	if got != "DEAD BEEF" {
-		t.Fatalf("seeded fragment = %q, want %q", got, "DEAD BEEF")
-	}
-	// The QR opt-in maps to choice index 1; index 0 is "No QR" and is the
-	// default. Preserving `true` must select 1, not fall back to 0.
-	cs := &ChoiceScreen{Choices: []string{"No QR", "Add QR"}}
-	cs.choice = 1
-	if cs.choice != 1 {
-		t.Error("a preserved QR opt-in did not select the second choice")
+	synctest.Test(t, func(t *testing.T) {
+		r := startPPFlow(t)
+		r.enterPassphrase("a b")
+		r.h.mustReach("Seed FP")
+		r.enterFingerprint("DEADBEEF")
+		r.h.mustReach("Expected Comb FP")
+		r.enterFingerprint("CAFEBABE")
+		r.h.mustReach("QR Code")
+		r.chooseQR(true)
+		r.h.mustReach("Confirm")
+
+		// Back to the QR step. The prior opt-in must still be selected --
+		// re-showing the screen defaulted to "No QR", which silently drops a
+		// QR the operator had already asked for.
+		r.h.tapNav(Button1)
+		r.h.mustReach("QR Code")
+		cs, ok := r.h.widget("qr").(*ChoiceScreen)
+		if !ok {
+			t.Fatal("widget \"qr\" is not a *ChoiceScreen")
+		}
+		if cs.choice != 1 {
+			t.Errorf("stepping Back to the QR screen reset the choice to %d; the "+
+				"operator had opted in, and index 0 is \"No QR\"", cs.choice)
+		}
+
+		// Back once more, to the combined fingerprint. Its field must still
+		// hold what was typed: a cleared field is indistinguishable from one
+		// deliberately left blank.
+		r.h.tapNav(Button1)
+		r.h.mustReach("Expected Comb FP")
+		if !uiHas(r.h.content, "CAFEBABE") {
+			t.Errorf("stepping Back to the combined fingerprint lost it; got %q", r.h.content)
+		}
+
+		// Forward again, touching nothing: every value must arrive at Confirm.
+		r.h.tapWidget("ok")
+		r.h.mustReach("QR Code")
+		r.h.tapNav(Button3)
+		r.h.mustReach("Confirm")
+		for _, want := range []string{"a_b", "DEADBEEF", "CAFEBABE"} {
+			if !uiHas(r.h.content, want) {
+				t.Errorf("after Back and forward the confirm screen lost %q; got %q",
+					want, r.h.content)
+			}
+		}
+		if !uiContains(r.h.content, "QR: yes") {
+			t.Errorf("after Back and forward the confirm screen lost the QR opt-in; got %q",
+				r.h.content)
+		}
+	})
+}
+
+// TestPassphraseEntryFitsPanel is the test gui/passphrase_flow.go's counter
+// comment claimed existed. It did not -- the whole-feature review found the
+// citation dangling, and measuring the layout showed the cited fix was a NO-OP:
+// the keyboard block is bottom-aligned (Max.Y-size.Y) and CutTop leaves Max.Y
+// unchanged, so reserving the counter's band did not move the block by a pixel.
+// The occlusion the fix claimed to remove was still there, at exactly the
+// lengths its own commit message named -- covering the counter from ~70
+// characters and the title past ~90.
+//
+// It must measure RECTANGLES. op.Drawer.ExtractText collects runes from every
+// drawn text op regardless of occlusion, so a text assertion reads "101/100"
+// perfectly well while the keyboard is drawn on top of it by op.Layer. That is
+// why the defect survived a phase review, a fix, and an integration review.
+func TestPassphraseEntryFitsPanel(t *testing.T) {
+	// 100 = MaxLen; 101 = the over-length signal, the state whose counter
+	// matters most and the tallest the readout ever gets. Revealed only:
+	// a masked readout is shorter, so it never exercises the bug.
+	for _, n := range []int{70, 90, passphrase.MaxLen, passphrase.MaxLen + 1} {
+		h := newPPHarness(t)
+		dst := make([]byte, passphrase.MaxLen+8)
+		h.start(func() { passphraseEntryFlow(h.ctx, &descriptorTheme, dst, 0) })
+
+		kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
+		if !ok {
+			t.Fatal("widget \"kbd\" is not a *PassphraseKeyboard")
+		}
+		kbd.Fragment = strings.Repeat("W", n)
+		kbd.revealed = true
+		content := h.next("after filling to %d chars revealed", n)
+
+		// The flow must BOUND the block, not merely reserve around it.
+		if kbd.MaxHeight <= 0 {
+			t.Fatalf("%d chars: the entry flow left the keyboard block unbounded "+
+				"(MaxHeight=%d); the readout is free to grow over the counter and title",
+				n, kbd.MaxHeight)
+		}
+		_, kbdsz := kbd.Layout(h.ctx, &descriptorTheme)
+		if kbdsz.Y > kbd.MaxHeight {
+			t.Errorf("%d chars revealed: the keyboard block is %d tall but only %d was "+
+				"available below the counter -- it overflows upward by %d and op.Layer "+
+				"draws it ON TOP, covering the %d/%d counter and the over-length signal "+
+				"in exactly the state a user proof-reads in",
+				n, kbdsz.Y, kbd.MaxHeight, kbdsz.Y-kbd.MaxHeight, n, passphrase.MaxLen)
+		}
+		// The clamp must keep the counter legible WITHOUT emptying the readout:
+		// dropping every rune would satisfy the bound and show the operator
+		// nothing of what they typed.
+		// A RUN, not a single "W": every key cap is drawn too, so a one-character
+		// check matches the keyboard itself and passes even when the readout is
+		// empty. Ten in a row can only have come from the readout.
+		if !uiContains(content, strings.Repeat("W", 10)) {
+			t.Errorf("%d chars revealed: the readout shows no run of passphrase text; "+
+				"the height clamp emptied it instead of keeping the tail. frame=%q", n, content)
+		}
+		if !uiContains(content, fmt.Sprintf("%d/%d", n, passphrase.MaxLen)) {
+			t.Errorf("%d chars: the counter is not drawn at all; got %q", n, content)
+		}
 	}
 }

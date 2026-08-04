@@ -418,11 +418,11 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 func ConstantQR(qrc *qr.Code) (*ConstantQRCmd, error) {
 	dim := qrc.Size
 	if dim > 37 {
-		// raised from 33 to 41 so
-		// FuzzConstantQR can measure v5/v6 (dims 37/41) module counts.
-		// bitmapForQRStatic only supports versions 1-6 (dims
-		// 21/25/29/33/37/41). Reject larger versions here so no caller can
-		// trigger the panic at bitmapForQRStatic's default case.
+		// The bound is v5 (dim 37), which is what the passphrase plate needs:
+		// ECC-L caps at 106 bytes and the passphrase caps at 100 (spec O6).
+		// bitmapForQRStatic tabulates 21/25/29/33/37 only, so rejecting here
+		// is what keeps a larger version from reaching its default case and
+		// panicking. Raise both together or not at all.
 		return nil, fmt.Errorf("engrave: constant QR size too large: %d", dim)
 	}
 	qr := bitmapForQR(qrc)
@@ -769,10 +769,12 @@ const constantAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 //
 // It is deliberately SEPARATE from constantAlphabet. NewConstantStringer
 // derives runeDuration, startEndDist and center from whichever alphabet it is
-// given, accumulating bounds over every glyph. The lowercase descenders push
-// bounds.Max.Y positive, which would move center and startEndDist for every
-// constant-time string the machine engraves -- changing the goldens for seed,
-// SLIP-39 and codex32 plates. Widening constantAlphabet is forbidden.
+// given, accumulating bounds over every glyph, so widening constantAlphabet
+// would change the goldens for seed, SLIP-39 and codex32 plates. Note the
+// operative quantity is startEndDist, not center: on this face the descenders
+// were MEASURED not to move center (spec 3.5.1), so the "descenders move the
+// center" story -- which an earlier draft of this comment told -- is false
+// here. Widening constantAlphabet is forbidden regardless.
 const passphraseAlphabet = "\x1f !\"#$%&'()*+,-./0123456789:;<=>?@" +
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
 	"abcdefghijklmnopqrstuvwxyz{|}~"

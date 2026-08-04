@@ -730,7 +730,14 @@ func TestPassphraseNoPanicOverCharset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%q (qr=%v): %v", in, withQR, err)
 			}
-			for range eng {
+			// Drain through the PLANNER, not the raw command stream.
+			// The panic class spec 3.4 checks 7-8 names as the dangerous one --
+			// unaligned delay, scale already in effect, delay during spline --
+			// fires inside PlanEngraving, so iterating `eng` alone stops one
+			// layer ABOVE the panics this test exists to catch. Proven by the
+			// whole-feature review: a plan-time defect injected for '=' left
+			// this test, the whole backup suite AND the whole gui suite green.
+			for range engrave.PlanEngraving(params.StepperConfig, eng) {
 			}
 		}
 	}
@@ -752,5 +759,56 @@ func TestPassphraseQRTooLong(t *testing.T) {
 	// not the plate's.
 	if _, err := EngravePassphrase(params, Passphrase{Passphrase: plate.Passphrase, Font: constant.Font}); err != nil {
 		t.Errorf("no-QR plate returned %v", err)
+	}
+}
+
+// TestPassphraseQRIgnoresFingerprints pins the rule that the QR carries the
+// passphrase and NOTHING else. A QR that swept in the fingerprints would put
+// two fields the user was warned are unverified -- and which they typed from
+// memory -- into a machine-readable blob that any scanner will trust, on a
+// plate whose whole point is that the passphrase is the secret.
+//
+// This is asserted at MODULE level rather than by decoding, because a decoder
+// that ignored trailing data would pass while the modules differed. Identical
+// module grids is the strongest available statement: the fingerprints changed
+// nothing about what gets engraved.
+func TestPassphraseQRIgnoresFingerprints(t *testing.T) {
+	const secret = "correct horse battery staple"
+	base, err := passphraseQRCode(Passphrase{Passphrase: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name               string
+		seedFP, combinedFP string
+	}{
+		{"seed only", "DEADBEEF", ""},
+		{"combined only", "", "CAFEBABE"},
+		{"both", "DEADBEEF", "CAFEBABE"},
+		{"both, different values", "01234567", "89ABCDEF"},
+	} {
+		got, err := passphraseQRCode(Passphrase{
+			Passphrase: secret, SeedFP: tc.seedFP, CombinedFP: tc.combinedFP,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got.Size != base.Size {
+			t.Fatalf("%s: QR size changed from %d to %d -- the fingerprints are "+
+				"being encoded", tc.name, base.Size, got.Size)
+		}
+		diff := 0
+		for y := 0; y < base.Size; y++ {
+			for x := 0; x < base.Size; x++ {
+				if base.Black(x, y) != got.Black(x, y) {
+					diff++
+				}
+			}
+		}
+		if diff != 0 {
+			t.Errorf("%s: %d of %d QR modules differ from the passphrase-only code -- "+
+				"the fingerprints are reaching the QR, which must carry the passphrase alone",
+				tc.name, diff, base.Size*base.Size)
+		}
 	}
 }
