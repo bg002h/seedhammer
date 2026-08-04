@@ -132,6 +132,7 @@ func TestStartScreenPagerTouchReachesEveryProgram(t *testing.T) {
 	// Titles in pager order, starting one step to the right of backupWallet.
 	want := []string{
 		"BIP-39 Password",
+		"Engrave Text",
 		"Account Xpub",
 		"Engrave Bundle",
 		"Engrave Single-Sig",

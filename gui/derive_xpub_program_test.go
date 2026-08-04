@@ -18,7 +18,8 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right → engravePassphrase (position 2 of 7), then Right → engraveXpub.
+	// Right → engravePassphrase (position 2 of 8), Right → engraveText
+	// (position 3 of 8), then Right → engraveXpub.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
@@ -26,6 +27,10 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 	}
 	if !uiContains(content, "BIP-39 Password") {
 		t.Fatalf("engravePassphrase not reachable/titled after Right; got %q", content)
+	}
+	click(&ctx.Router, Right) // engraveText, position 3 of 8
+	if _, ok := frame(); !ok {
+		t.Fatal("StartScreen produced no frame after the engraveText step")
 	}
 	click(&ctx.Router, Right)
 	content, ok = frame()

@@ -33,6 +33,20 @@ type SeedString struct {
 type Text struct {
 	Paragraphs []Paragraph
 	Font       *vector.Face
+	// FontSize is the text size in millimeters. Zero means
+	// plateFontSizeUR, which is what every descriptor and mdmk caller
+	// constructs, and is why their goldens are unaffected by the
+	// free-text plate's size ladder.
+	FontSize float32
+}
+
+// fontMM resolves FontSize, applying the zero-means-plateFontSizeUR rule in one
+// place so no caller can forget it.
+func (t Text) fontMM() float32 {
+	if t.FontSize == 0 {
+		return plateFontSizeUR
+	}
+	return t.FontSize
 }
 
 type Paragraph struct {
@@ -45,6 +59,41 @@ const MaxTitleLen = 18
 
 const outerMargin = 3
 const innerMargin = 10
+
+// plateSize is the width and height of a plate in millimeters.
+const plateSize = 85
+
+// FontSizes is the descending ladder of free-text plate sizes in millimeters.
+// Auto-fit walks it largest-first and engraves at the first rung the whole
+// composition fits, so it MUST stay sorted descending: an out-of-order entry
+// does not fail, it silently engraves smaller than necessary.
+var FontSizes = []float32{6.0, 5.0, 4.4, 3.8, 3.4, 3.0}
+
+// CharsPerLine returns how many fixed-width characters fit on one unobstructed
+// plate line at the given text size. Lines crossing a screw-hole band hold
+// fewer; see the widthAt band predicate in fit.go.
+func CharsPerLine(params engrave.Params, fnt *vector.Face, fontMM float32) int {
+	width := params.F(plateSize) - 2*params.I(outerMargin)
+	return width / fixedCharWidth(fnt, params.F(fontMM))
+}
+
+// LinesPerPlate returns how many text lines fit a plate at the given text size.
+func LinesPerPlate(params engrave.Params, fontMM float32) int {
+	height := params.F(plateSize) - 2*params.I(outerMargin)
+	return height / params.F(fontMM)
+}
+
+// fixedCharWidth is the character advance at fontSize machine units, assuming a
+// fixed-width face. Verified by TestFixedCharWidthIsExactForEveryGlyph: every
+// font/sh advance is 4000 with Metrics{Ascent:5000, Height:6700}, so 'W' is
+// exact for all glyphs.
+func fixedCharWidth(fnt *vector.Face, fontSize int) int {
+	w, _, ok := fnt.Decode('W')
+	if !ok {
+		panic("W not in font")
+	}
+	return int(float32(w*fontSize) / float32(fnt.Metrics().Height))
+}
 
 func TitleString(face *vector.Face, s string) string {
 	s = strings.ToUpper(s)
@@ -281,78 +330,63 @@ func stringColumn(t engrave.Transform, constant *engrave.ConstantStringer, font 
 func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
-		fontSize := params.F(plateFontSizeUR)
+		fontSize := params.F(plate.fontMM())
 		fnt := plate.Font
 
-		// Compute character width, assuming the font is fixed width.
-		charWidthf, _, ok := fnt.Decode('W')
-		if !ok {
-			panic("W not in font")
-		}
-		charWidth := int(float32(charWidthf*fontSize) / float32(fnt.Metrics().Height))
 		margin := params.I(outerMargin)
-		innerMargin := params.I(innerMargin)
-		holeChars := int(math.Ceil(float64(innerMargin-margin) / float64(charWidth)))
-		holeLines := int(math.Ceil(float64(innerMargin-margin) / float64(fontSize)))
 		plateDims := image.Point{
-			X: params.F(85),
-			Y: params.F(85),
+			X: params.F(plateSize),
+			Y: params.F(plateSize),
 		}
-		width := plateDims.X - 2*margin
-		charPerLine := int(width / charWidth)
 		offy := params.I(outerMargin)
 		for i, p := range plate.Paragraphs {
-			qrLines := 0
-			charPerQRLine := 0
 			qrsz := 0
 			qrBorder := params.I(2)
+			qrScale := p.QRScale
+			if qrScale == 0 {
+				qrScale = 2
+			}
 			var qr engrave.Engraving
 			if p.QR != nil {
-				qrScale := p.QRScale
-				if qrScale == 0 {
-					qrScale = 2
-				}
 				qr = engrave.QR(params.StrokeWidth, qrScale, p.QR)
 				qrsz = p.QR.Size * params.StrokeWidth * qrScale
-				charPerQRLine = (width - 2*qrBorder - qrsz) / charWidth
-				qrLines = (qrsz + 2*qrBorder + fontSize - 1) / fontSize
 			}
-			lineno := 0
-			txt := p.Text
-			for len(txt) > 0 {
-				n := charPerLine
-				offx := 0
-				isQRLine := holeLines <= lineno && lineno < holeLines+qrLines
-				if isQRLine {
-					n = charPerQRLine
-				}
-				// Avoid screw holes on the smaller plates on the first and last lines.
-				holeLine := offy+lineno*fontSize < innerMargin ||
-					offy+(lineno+1)*fontSize > plateDims.Y-innerMargin
-				if holeLine {
-					if !isQRLine {
-						// End of line.
-						n -= holeChars
-					}
-					// Beginning of line.
-					n -= holeChars
-					offx = holeChars * charWidth
-				}
-				if n < 1 {
-					n = 1
-				}
-				if l := len(txt); n > l {
-					n = l
-				}
-				s := txt[:n]
-				txt = txt[n:]
-				t.Offset(offx+margin, offy+lineno*fontSize)
+			// baseY is this paragraph's top edge in DEVICE units. widthAt is
+			// indexed by output line, so the plate-row offset has to live
+			// inside the layout -- and for the descriptor path that offset is
+			// not row-aligned, because paragraphs after the first advance offy
+			// by lineno*fontSize + 1mm.
+			lay := textLayout(params, fnt, fontSize, offy, p.QR, qrScale)
+			var lines []string
+			if len(p.Text) > 0 {
+				// The descriptor and mdmk callers keep an UNBOUNDED path:
+				// their TEXT+QR -> TEXT-ONLY -> QR-ONLY fallback depends on
+				// toPlate rejecting overflow, so a maxLines refusal here would
+				// silently change which variants they offer.
+				//
+				// Empty text is special-cased rather than wrapped, because
+				// spec 5.2's empty-block rule returns ONE empty line and that
+				// rule serves the free-text plate only. Here zero characters
+				// must mean zero rows, which is what the QR-ONLY variant --
+				// and text-2-shards-1.bin -- depends on.
+				lines, _ = WrapText(p.Text, func(i int) int {
+					n, _ := lay.at(i)
+					return n
+				}, math.MaxInt)
+			}
+			for lineno, s := range lines {
+				_, offx := lay.at(lineno)
+				t.Offset(offx+margin, lay.baseY+lineno*fontSize)
 				engrave.String(fnt, fontSize, s).Engrave(t.Yield)
-				lineno++
 			}
+			lineno := len(lines)
 			if qr != nil {
 				qrx := plateDims.X - qrsz - margin - qrBorder
-				qry := offy + holeLines*fontSize + (qrLines*fontSize-qrsz)/2
+				qry := lay.baseY + lay.holeLines*lay.fontSize + (lay.qrLines*lay.fontSize-qrsz)/2
+				// Keyed to the ORIGINAL text, never to len(lines): under
+				// spec 5.2 an empty string wraps to one empty line, and
+				// keying this to the line count displaces the QR-ONLY plate
+				// by (6.450, 2.300)mm at production stroke.
 				if len(p.Text) == 0 {
 					// Center QR.
 					qrx, qry = (plateDims.X-qrsz)/2, (plateDims.Y-qrsz)/2

@@ -467,3 +467,31 @@ func pointsNearlyEqual(a, b []bezier.Point) bool {
 	}
 	return true
 }
+
+// TestBoundsEmpty pins the degenerate cases. Empty() compared Max.Y against
+// Min.X, which reported a perfectly good box as empty whenever its height was
+// less than its left edge -- true of essentially every engraving, since the
+// axes are unrelated quantities. It had no production caller, so nothing broke;
+// the first caller would have been the one to find out.
+func TestBoundsEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Bounds
+		want bool
+	}{
+		{"zero value", Bounds{}, false},
+		{"real box", Bounds{Min: bezier.Pt(79816, 23194), Max: bezier.Pt(89617, 37350)}, false},
+		{"tall and far right", Bounds{Min: bezier.Pt(500, 0), Max: bezier.Pt(600, 10)}, false},
+		{"inverted x", Bounds{Min: bezier.Pt(10, 0), Max: bezier.Pt(5, 10)}, true},
+		{"inverted y", Bounds{Min: bezier.Pt(0, 10), Max: bezier.Pt(10, 5)}, true},
+		{"the sentinel Measure starts from", Bounds{
+			Min: bezier.Pt(math.MaxInt32, math.MaxInt32),
+			Max: bezier.Pt(math.MinInt32, math.MinInt32),
+		}, true},
+	}
+	for _, tc := range tests {
+		if got := tc.b.Empty(); got != tc.want {
+			t.Errorf("%s: %+v.Empty() = %v, want %v", tc.name, tc.b, got, tc.want)
+		}
+	}
+}

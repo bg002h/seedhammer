@@ -150,6 +150,10 @@ const (
 	// appended, so bip85Derive stays the last navigable program and the
 	// wrap/pager sites keyed to it need no change.
 	engravePassphrase
+	// engraveText is position 3 of 8 (spec 7.2). Inserted here, not appended,
+	// so bip85Derive stays the last navigable program and the wrap/pager sites
+	// keyed to it need no change.
+	engraveText
 	engraveXpub
 	engraveBundle
 	engraveSingleSig
@@ -1496,7 +1500,12 @@ func uiFlow(ctx *Context, version string) {
 	s := &StartScreen{
 		Version: version,
 	}
-	for {
+	// !ctx.Done, not a bare loop. ctx.Done is set exactly when the frame
+	// consumer stops ranging, and StartScreen.Flow then returns immediately
+	// without drawing -- so a bare loop spins at full tilt and never yields
+	// another frame, which hangs the shutdown instead of ending it. Every
+	// other flow in this file already reads !ctx.Done.
+	for !ctx.Done {
 		act, ok := s.Flow(ctx, th)
 		if !ok {
 			continue
@@ -1524,6 +1533,9 @@ func uiFlow(ctx *Context, version string) {
 				continue
 			case engravePassphrase:
 				engravePassphraseFlow(ctx, th)
+				continue
+			case engraveText:
+				engraveTextFlow(ctx, th)
 				continue
 			case backupWallet:
 				mnemonic, ok := newInputFlow(ctx, th)
@@ -1679,6 +1691,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Backup Wallet"
 	case engravePassphrase:
 		titleTxt = "BIP-39 Password"
+	case engraveText:
+		titleTxt = "Engrave Text"
 	case engraveXpub:
 		titleTxt = "Account Xpub"
 	case engraveBundle:
@@ -1890,7 +1904,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
