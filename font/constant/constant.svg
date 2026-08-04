@@ -90,44 +90,44 @@
 <polyline id="x" class="st0" points="445,4 445,5 447,6 449,7 449,8 449,7 447,6 449,5 449,4 449,5 447,6 445,7 445,8 "/>
 <polyline id="y" class="st0" points="451,4 453,7 455,4 453,7 452,9 "/>
 <polyline id="z" class="st0" points="457,4 461,4 459,6 458,6 460,6 459,6 457,8 461,8 "/>
-<g id="!">
+<g id="exclam">
 	<polyline class="st0" points="465,2 465,6 "/>
 	<polyline class="st0" points="464.5,7 465.5,7 465.5,8 464.5,8 464.5,7 "/>
 </g>
-<g id="&quot;">
+<g id="quotedbl">
 	<polyline class="st0" points="471,2 470,4 "/>
 	<polyline class="st0" points="473,2 472,4 "/>
 </g>
-<g id="$">
+<g id="dollar">
 	<polyline class="st0" points="479,3 478,2 476,2 475,3 475,4 476,5 478,5 479,6 479,7 478,8 476,8 475,7 "/>
 	<polyline class="st0" points="477,1 477,9 "/>
 </g>
-<g id="%">
+<g id="percent">
 	<polyline class="st0" points="483,4 483,2 481,2 481,4 483,4 483,2 485,2 481,8 "/>
 	<polyline class="st0" points="483,6 485,6 485,8 483,8 483,6 "/>
 </g>
-<polyline id="&amp;" class="st0" points="491,8 488,4 488,3 489,2 490,3 490,4 487,6 487,7 488,8 490,8 491,7 "/>
-<polyline id="+" class="st0" points="493,5 497,5 495,5 495,3 495,7 "/>
+<polyline id="ampersand" class="st0" points="491,8 488,4 488,3 489,2 490,3 490,4 487,6 487,7 488,8 490,8 491,7 "/>
+<polyline id="plus" class="st0" points="493,5 497,5 495,5 495,3 495,7 "/>
 <g id="semicolon">
 	<polyline class="st0" points="500,3 501,3 501,4 500,4 500,3 "/>
 	<polyline class="st0" points="501,7 500,8 "/>
 </g>
 <polyline id="lt" class="st0" points="509,3 505,5 509,7 "/>
-<g id="=">
+<g id="equal">
 	<polyline class="st0" points="511,4 515,4 "/>
 	<polyline class="st0" points="511,6 515,6 "/>
 </g>
 <polyline id="gt" class="st0" points="517,3 521,5 517,7 "/>
-<g id="?">
+<g id="question">
 	<polyline class="st0" points="523,3 524,2 526,2 527,3 527,4 525,5 525,6 "/>
 	<polyline class="st0" points="524.5,7 525.5,7 525.5,8 524.5,8 524.5,7 "/>
 </g>
-<polyline id="\" class="st0" points="530,2 532,8 "/>
-<polyline id="^" class="st0" points="535,4 537,2 539,4 "/>
+<polyline id="backslash" class="st0" points="530,2 532,8 "/>
+<polyline id="asciicircum" class="st0" points="535,4 537,2 539,4 "/>
 <polyline id="_" class="st0" points="541,9 545,9 "/>
-<polyline id="`" class="st0" points="548,2 549,4 "/>
-<polyline id="|" class="st0" points="555,1 555,9 "/>
-<polyline id="~" class="st0" points="559,5.5 560,4.5 562,5.5 563,4.5 "/>
+<polyline id="grave" class="st0" points="548,2 549,4 "/>
+<polyline id="bar" class="st0" points="555,1 555,9 "/>
+<polyline id="asciitilde" class="st0" points="559,5.5 560,4.5 562,5.5 563,4.5 "/>
 <polyline id="space_mark" class="st0" points="565,9 567,9 567,6 567,9 569,9 "/>
 <line id="height" class="st0" x1="6" y1="0" x2="6" y2="9"/>
 <line id="advance" class="st0" x1="0" y1="8" x2="6" y2="8"/>

@@ -764,6 +764,32 @@ func mapChar(id string) (rune, bool) {
 			r = '<'
 		case "gt":
 			r = '>'
+		case "exclam":
+			r = '!'
+		case "quotedbl":
+			r = '"'
+		case "dollar":
+			r = '$'
+		case "percent":
+			r = '%'
+		case "ampersand":
+			r = '&'
+		case "plus":
+			r = '+'
+		case "equal":
+			r = '='
+		case "question":
+			r = '?'
+		case "backslash":
+			r = '\\'
+		case "asciicircum":
+			r = '^'
+		case "grave":
+			r = '`'
+		case "bar":
+			r = '|'
+		case "asciitilde":
+			r = '~'
 		case "space_mark":
 			// Visible-space mark. Lives at a control codepoint so 0x20 stays a
 			// blank advance -- backup.TitleString and EngraveText paragraphs
