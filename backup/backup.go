@@ -33,6 +33,20 @@ type SeedString struct {
 type Text struct {
 	Paragraphs []Paragraph
 	Font       *vector.Face
+	// FontSize is the text size in millimeters. Zero means
+	// plateFontSizeUR, which is what every descriptor and mdmk caller
+	// constructs, and is why their goldens are unaffected by the
+	// free-text plate's size ladder.
+	FontSize float32
+}
+
+// fontMM resolves FontSize, applying the zero-means-plateFontSizeUR rule in one
+// place so no caller can forget it.
+func (t Text) fontMM() float32 {
+	if t.FontSize == 0 {
+		return plateFontSizeUR
+	}
+	return t.FontSize
 }
 
 type Paragraph struct {
@@ -45,6 +59,41 @@ const MaxTitleLen = 18
 
 const outerMargin = 3
 const innerMargin = 10
+
+// plateSize is the width and height of a plate in millimeters.
+const plateSize = 85
+
+// FontSizes is the descending ladder of free-text plate sizes in millimeters.
+// Auto-fit walks it largest-first and engraves at the first rung the whole
+// composition fits, so it MUST stay sorted descending: an out-of-order entry
+// does not fail, it silently engraves smaller than necessary.
+var FontSizes = []float32{6.0, 5.0, 4.4, 3.8, 3.4, 3.0}
+
+// CharsPerLine returns how many fixed-width characters fit on one unobstructed
+// plate line at the given text size. Lines crossing a screw-hole band hold
+// fewer; see the widthAt band predicate in fit.go.
+func CharsPerLine(params engrave.Params, fnt *vector.Face, fontMM float32) int {
+	width := params.F(plateSize) - 2*params.I(outerMargin)
+	return width / fixedCharWidth(fnt, params.F(fontMM))
+}
+
+// LinesPerPlate returns how many text lines fit a plate at the given text size.
+func LinesPerPlate(params engrave.Params, fontMM float32) int {
+	height := params.F(plateSize) - 2*params.I(outerMargin)
+	return height / params.F(fontMM)
+}
+
+// fixedCharWidth is the character advance at fontSize machine units, assuming a
+// fixed-width face. Verified by TestFixedCharWidthIsExactForEveryGlyph: every
+// font/sh advance is 4000 with Metrics{Ascent:5000, Height:6700}, so 'W' is
+// exact for all glyphs.
+func fixedCharWidth(fnt *vector.Face, fontSize int) int {
+	w, _, ok := fnt.Decode('W')
+	if !ok {
+		panic("W not in font")
+	}
+	return int(float32(w*fontSize) / float32(fnt.Metrics().Height))
+}
 
 func TitleString(face *vector.Face, s string) string {
 	s = strings.ToUpper(s)
@@ -281,15 +330,10 @@ func stringColumn(t engrave.Transform, constant *engrave.ConstantStringer, font 
 func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
-		fontSize := params.F(plateFontSizeUR)
+		fontSize := params.F(plate.fontMM())
 		fnt := plate.Font
 
-		// Compute character width, assuming the font is fixed width.
-		charWidthf, _, ok := fnt.Decode('W')
-		if !ok {
-			panic("W not in font")
-		}
-		charWidth := int(float32(charWidthf*fontSize) / float32(fnt.Metrics().Height))
+		charWidth := fixedCharWidth(fnt, fontSize)
 		margin := params.I(outerMargin)
 		innerMargin := params.I(innerMargin)
 		holeChars := int(math.Ceil(float64(innerMargin-margin) / float64(charWidth)))
