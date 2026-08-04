@@ -1304,7 +1304,9 @@ func TestPassphraseEntryFitsPanel(t *testing.T) {
 	for _, n := range []int{70, 90, passphrase.MaxLen, passphrase.MaxLen + 1} {
 		h := newPPHarness(t)
 		dst := make([]byte, passphrase.MaxLen+8)
-		h.start(func() { passphraseEntryFlow(h.ctx, &descriptorTheme, dst, 0) })
+		// nil loader: ppFontProofOffer is inert without one, so the font-proof
+		// trigger cannot interfere with a pure layout measurement.
+		h.start(func() { passphraseEntryFlow(h.ctx, &descriptorTheme, dst, 0, nil) })
 
 		kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
 		if !ok {
