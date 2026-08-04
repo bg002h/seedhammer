@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"seedhammer.com/backup"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/passphrase"
@@ -249,7 +250,7 @@ func startPPEntry(t *testing.T) (*ppHarness, *ppEntryRun) {
 	h := newPPHarness(t)
 	r := &ppEntryRun{dst: make([]byte, passphrase.MaxLen)}
 	h.start(func() {
-		r.n, r.ok = passphraseEntryFlow(h.ctx, &descriptorTheme, r.dst)
+		r.n, r.ok = passphraseEntryFlow(h.ctx, &descriptorTheme, r.dst, 0)
 		r.done = true
 	})
 	return h, r
@@ -406,6 +407,190 @@ func TestPassphraseKeyboardStaysOnPanel(t *testing.T) {
 			}
 			h.tapAt(h.point(cyc, "page-cycle key"))
 			h.next("after cycling page")
+		}
+	}
+}
+
+// --- Task 3: the two fingerprint steps ---------------------------------------
+
+type ppFPRun struct {
+	fp   string
+	ok   bool
+	done bool
+}
+
+func startPPFingerprint(t *testing.T, which ppFingerprintStep) (*ppHarness, *ppFPRun) {
+	t.Helper()
+	h := newPPHarness(t)
+	r := new(ppFPRun)
+	h.start(func() {
+		r.fp, r.ok = fingerprintEntryFlow(h.ctx, &descriptorTheme, which)
+		r.done = true
+	})
+	return h, r
+}
+
+// TestFingerprintStepsSkippable: both fields are optional. Accepting an empty
+// screen skips the field and leaves it EMPTY -- not "00000000", and not a
+// refusal.
+func TestFingerprintStepsSkippable(t *testing.T) {
+	for _, which := range []ppFingerprintStep{ppSeedFP, ppCombinedFP} {
+		t.Run(ppFingerprintTitle(which), func(t *testing.T) {
+			h, r := startPPFingerprint(t, which)
+			if !uiContains(h.content, "Optional") {
+				t.Fatalf("the step does not say it is optional; got %q", h.content)
+			}
+			h.tapWidget("ok")
+			for i := 0; i < 8 && !r.done; i++ {
+				h.frame()
+			}
+			if !r.done || !r.ok {
+				t.Fatalf("accepting an empty fingerprint did not skip the step (done=%v ok=%v)", r.done, r.ok)
+			}
+			if r.fp != "" {
+				t.Fatalf("skipped fingerprint stored %q, want empty", r.fp)
+			}
+		})
+	}
+}
+
+// TestFingerprintDisplayCanonical: the screen echoes the CANONICAL value, so
+// what the operator proof-reads is what the plate will carry.
+//
+// The 4-and-4 grouping itself is not observable here: a rendered space inks
+// nothing, so ExtractText never sees it (that is precisely why the passphrase
+// needs a visible mark). What IS observable -- and what a missing
+// canonicalisation would break -- is the case: typing lowercase must display
+// uppercase. TestFingerprintPreviewString pins the grouping and the separator.
+func TestFingerprintDisplayCanonical(t *testing.T) {
+	h, _ := startPPFingerprint(t, ppSeedFP)
+	h.typeString("a1b2c3d4")
+	if !uiHas(h.content, "A1B2C3D4") {
+		t.Fatalf("the screen does not echo the canonical fingerprint; got %q", h.content)
+	}
+}
+
+// TestFingerprintPreviewString pins the exact string the fingerprint screens
+// display. It is a helper test and says so -- it proves the grouping and the
+// separator, not that any screen calls it; TestFingerprintDisplayCanonical
+// covers the screen.
+func TestFingerprintPreviewString(t *testing.T) {
+	for _, tc := range []struct{ typed, want string }{
+		{"", ""},
+		{"a1b2c3d4", "A1B2 C3D4"},
+		{"A1B2C3D4", "A1B2 C3D4"},
+		{"a1b2 c3d4", "A1B2 C3D4"},
+		{"1234567", ""},  // incomplete: nothing to show yet
+		{"12345678901234567890123456789012", ""}, // over-length: never shown
+		{"G1B2C3D4", ""}, // non-hex
+	} {
+		if got := ppFingerprintPreview(tc.typed); got != tc.want {
+			t.Errorf("ppFingerprintPreview(%q) = %q, want %q", tc.typed, got, tc.want)
+		}
+	}
+	// The separator is a plain 0x20 and NEVER the visible-space mark: the mark
+	// means "a literal space in the passphrase", and a fingerprint has none.
+	got := ppFingerprintPreview("a1b2c3d4")
+	if !strings.Contains(got, " ") {
+		t.Errorf("grouped fingerprint %q has no separator", got)
+	}
+	if strings.ContainsRune(got, backup.SpaceMark) {
+		t.Errorf("grouped fingerprint %q uses the visible-space mark as a separator", got)
+	}
+}
+
+// TestFingerprintRejectsBadInput: 7 digits and a non-hex character are refused
+// and the step does not advance. A fail-open validator would let either through
+// and put an unparseable claim on a permanent plate.
+func TestFingerprintRejectsBadInput(t *testing.T) {
+	for _, typed := range []string{"1234567", "G1B2C3D4", "123456789"} {
+		t.Run(typed, func(t *testing.T) {
+			h, r := startPPFingerprint(t, ppSeedFP)
+			h.typeString(typed)
+			h.tapWidget("ok")
+			if r.done {
+				t.Fatalf("the step accepted %q as a fingerprint (returned %q)", typed, r.fp)
+			}
+			if !uiContains(h.content, "8 hex digits") {
+				t.Fatalf("refusing %q gave no explanation; got %q", typed, h.content)
+			}
+		})
+	}
+}
+
+// TestFingerprintStoresCanonicalNotTyped is the guard for the precondition
+// backup.Passphrase DOCUMENTS but does not enforce: SeedFP/CombinedFP are
+// "canonical 8-hex-digit or empty". passphrase.GroupFingerprint fails OPEN --
+// it returns anything that is not 8 characters unchanged -- so a raw typed
+// string reaching the plate is engraved verbatim. Measured downstream
+// consequence: a 32-hex-digit SeedFP renders the top band as an 82mm line,
+// over spec §4.3's 64mm cap and through both corner screw-hole bands, with no
+// error and no panic.
+//
+// So: non-canonical input must come back canonical, and input that cannot be
+// canonicalised must not come back at all.
+func TestFingerprintStoresCanonicalNotTyped(t *testing.T) {
+	canonical := []struct{ typed, want string }{
+		{"a1b2c3d4", "A1B2C3D4"},
+		{"A1b2C3d4", "A1B2C3D4"},
+		{"a1b2 c3d4", "A1B2C3D4"},
+	}
+	for _, tc := range canonical {
+		t.Run("canonical/"+tc.typed, func(t *testing.T) {
+			h, r := startPPFingerprint(t, ppSeedFP)
+			h.typeString(tc.typed)
+			h.tapWidget("ok")
+			for i := 0; i < 8 && !r.done; i++ {
+				h.frame()
+			}
+			if !r.done || !r.ok {
+				t.Fatalf("the step refused %q (done=%v ok=%v)", tc.typed, r.done, r.ok)
+			}
+			if r.fp != tc.want {
+				t.Fatalf("typed %q stored %q, want the canonical %q", tc.typed, r.fp, tc.want)
+			}
+		})
+	}
+	// The over-length case that produced the 82mm band.
+	t.Run("refuses/32-hex", func(t *testing.T) {
+		h, r := startPPFingerprint(t, ppSeedFP)
+		h.typeString("0123456789ABCDEF0123456789ABCDEF")
+		h.tapWidget("ok")
+		if r.done {
+			t.Fatalf("the step accepted a 32-digit fingerprint (returned %q)", r.fp)
+		}
+	})
+}
+
+// TestFingerprintStepFitsPanel: the warning must fit above the keyboard, and
+// the heading (label plus the grouped value) must fit its band, on the panel
+// the machine actually has. Text grows silently -- a longer warning is simply
+// drawn under the keyboard, and a longer heading wraps down over the warning,
+// neither of which anything else would notice -- so the budget is asserted
+// from the same measurements the layout spends.
+func TestFingerprintStepFitsPanel(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	dims := ctx.Platform.DisplaySize()
+	kbd := NewAddressKeyboard(ctx)
+	kbd.Fragment = "A1B2C3D4"
+	_, kbdsz := kbd.Layout(ctx, &descriptorTheme)
+	avail := dims.Y - leadingSize - ppBottomMargin - kbdsz.Y
+	for _, which := range []ppFingerprintStep{ppSeedFP, ppCombinedFP} {
+		name := ppFingerprintTitle(which)
+		leadH := ctx.Styles.lead.Measure(dims.X-2*ppSideMargin, "%s", ppFingerprintLead(which)).Y
+		if leadH > avail {
+			t.Errorf("%s: the warning needs %dpx but only %dpx sits above the keyboard on a %v panel",
+				name, leadH, avail, dims)
+		}
+		// layoutTitle wraps at width-32 and draws at y=8 inside the
+		// leadingSize band.
+		head := ppFingerprintHeading(which, "A1B2C3D4")
+		headSz := ctx.Styles.title.Measure(dims.X-32, "%s", head)
+		if headSz.Y > leadingSize-8 {
+			t.Errorf("%s: heading %q is %dpx tall and wraps out of the %dpx title band",
+				name, head, headSz.Y, leadingSize-8)
 		}
 	}
 }
