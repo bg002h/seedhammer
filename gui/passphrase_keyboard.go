@@ -19,12 +19,14 @@ const (
 	ppPageLower   = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 	ppPageUpper   = "QWERTYUIOP\nASDFGHJKL\nZXCVBNM"
 	ppPageSymbols = "1234567890\n-/:;()&$@\"\n.,?!'+=_#"
+	// The 13 printable-ASCII symbols the first three pages omit.
+	ppPageSymbols2 = "%*<>[]{}\n\\^`|~"
 )
 
-var ppPages = [3]string{ppPageLower, ppPageUpper, ppPageSymbols}
+var ppPages = [4]string{ppPageLower, ppPageUpper, ppPageSymbols, ppPageSymbols2}
 
 // ppPageCycleLabel[p] is the cap shown on page p (it names the NEXT page).
-var ppPageCycleLabel = [3]string{"ABC", "?123", "abc"}
+var ppPageCycleLabel = [4]string{"ABC", "?123", "#+=", "abc"}
 
 type ppAction int
 
@@ -49,8 +51,8 @@ type PassphraseKeyboard struct {
 	page     int
 	revealed bool
 
-	pages [3][][]ppKey
-	size  [3]image.Point
+	pages [4][][]ppKey
+	size  [4]image.Point
 
 	row, col int
 	inp      InputTracker
@@ -67,7 +69,7 @@ func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
 	letterW := cell.X + 2*keyPadX + margin
 	rowH := cell.Y + 2*keyPadY + margin
 
-	for p := 0; p < 3; p++ {
+	for p := 0; p < len(ppPages); p++ {
 		var rows [][]ppKey
 		for _, line := range strings.Split(ppPages[p], "\n") {
 			var row []ppKey
@@ -196,7 +198,7 @@ func (k *PassphraseKeyboard) commit(key ppKey) {
 			k.Fragment = k.Fragment[:len(k.Fragment)-n]
 		}
 	case ppPageCycle:
-		k.page = (k.page + 1) % 3
+		k.page = (k.page + 1) % len(ppPages)
 		rows := k.pages[k.page]
 		k.row = len(rows) / 2
 		k.col = len(rows[k.row]) / 2
