@@ -611,28 +611,42 @@ func verifiedEngraving(t *testing.T, conf StepperConfig, e bspline.Curve) bsplin
 // TestPassphraseQRFitsSupportedVersion is the guarantee that supporting QR
 // version 5 (dim 37) alone is sufficient for the BIP-39 password feature.
 //
-// The spec pins ECC-L and caps the passphrase at 100 characters. QR v5-L holds
-// 106 bytes, so every passphrase in range lands at dim 37; v6 (dim 41) is
-// unreachable. If this ever fails, either the cap or the ECC level moved, and
-// constantTimeQRModules needs a v6 entry derived by fuzzing -- do NOT fall back
-// to the non-constant-time engrave.QR for a secret.
+// The version depends only on (mode, length, ECC) -- NOT on which characters a
+// string contains within a mode. So the worst case is deterministic: any
+// 100-character string that forces byte mode. No sampling is needed or useful
+// here. (Module COUNT does vary with content at a fixed version, substantially --
+// 578..664 measured at dim 37 -- but that is what constantTimeQRModules bounds,
+// and it was derived by fuzzing, not by this test.)
+//
+// If this fails, either the 100-char cap or the ECC-L pin moved, and
+// constantTimeQRModules needs a v6 entry derived by fuzzing. Do NOT fall back to
+// the non-constant-time engrave.QR for a secret.
 func TestPassphraseQRFitsSupportedVersion(t *testing.T) {
-	const ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-	r := rand.New(rand.NewSource(1))
-	for i := 0; i < 2000; i++ {
-		b := make([]byte, 100)
-		for j := range b {
-			b[j] = ascii[r.Intn(len(ascii))]
-		}
-		c, err := qr.Encode(string(b), qr.L)
+	// Lowercase is outside QR's alphanumeric subset, so this forces byte mode --
+	// the densest encoding a passphrase can require, hence the largest version.
+	worst := strings.Repeat("a", 100)
+	c, err := qr.Encode(worst, qr.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Size > 37 {
+		t.Fatalf("100-char byte-mode passphrase produced dim %d, above the supported 37", c.Size)
+	}
+	if _, err := ConstantQR(c); err != nil {
+		t.Fatalf("ConstantQR rejected a dim-%d code: %v", c.Size, err)
+	}
+	// Boundary: v5-L holds 106 bytes, so the 100-char cap has 6 chars of
+	// headroom and 107 is where dim 41 -- which is deliberately unsupported --
+	// would begin.
+	for _, tc := range []struct {
+		n, want int
+	}{{78, 33}, {79, 37}, {106, 37}, {107, 41}} {
+		c, err := qr.Encode(strings.Repeat("a", tc.n), qr.L)
 		if err != nil {
-			t.Fatalf("encode: %v", err)
+			t.Fatal(err)
 		}
-		if c.Size > 37 {
-			t.Fatalf("100-char passphrase produced dim %d, above the supported 37: %q", c.Size, b)
-		}
-		if _, err := ConstantQR(c); err != nil {
-			t.Fatalf("ConstantQR rejected a dim-%d code: %v", c.Size, err)
+		if c.Size != tc.want {
+			t.Errorf("len %d: dim %d, want %d", tc.n, c.Size, tc.want)
 		}
 	}
 }
