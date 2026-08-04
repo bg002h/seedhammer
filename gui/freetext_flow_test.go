@@ -615,3 +615,51 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 		}
 	}
 }
+
+// TestFTConfirmCarriesTheSafetyCopy is spec 9. A free-text box is where someone
+// will type a seed phrase: it bypasses the wordlist, the checksum and the verify
+// flow, and the confirm screen is the only place that says so.
+func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
+	for _, useQR := range []bool{false, true} {
+		name := "without a QR"
+		if useQR {
+			name = "with a QR"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, _ := startFT(t)
+			ftPastQR(h, useQR)
+			h.typeString("hi")
+			ftOK(h)
+			h.mustReach("Title")
+			ftOK(h)
+			h.mustReach("Footer")
+			ftOK(h)
+			h.mustReach("Confirm")
+
+			// Nothing here is checked.
+			if !uiContains(h.content, "not a validated backup") {
+				t.Errorf("the confirm screen does not say this is not a validated backup; frame %q", h.content)
+			}
+			// Duration leaks content.
+			if !uiContains(h.content, "not constant-time") {
+				t.Errorf("the confirm screen does not warn that engraving is not constant-time; frame %q", h.content)
+			}
+			// The QR clause is GATED. The needle is a phrase this screen uses
+			// nowhere else -- uiContains strips spaces from its needle, so a
+			// vaguer one ("readable") would match "machine-readable" and pass
+			// vacuously.
+			hasQRWarning := uiContains(h.content, "readable by any camera")
+			if hasQRWarning != useQR {
+				t.Errorf("QR warning present = %v, want %v; frame %q", hasQRWarning, useQR, h.content)
+			}
+			// And the QR state itself is stated either way.
+			want := "QR: no"
+			if useQR {
+				want = "QR: yes"
+			}
+			if !uiContains(h.content, want) {
+				t.Errorf("the confirm screen does not state %q; frame %q", want, h.content)
+			}
+		})
+	}
+}

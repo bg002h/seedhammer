@@ -22,7 +22,7 @@ func TestEngraveSingleSigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right → engravePassphrase (position 2 of 7).
+	// Right → engravePassphrase (position 2 of 8).
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
@@ -30,6 +30,10 @@ func TestEngraveSingleSigProgramNavigable(t *testing.T) {
 	}
 	if !uiContains(content, "BIP-39 Password") {
 		t.Fatalf("engravePassphrase not reachable after Right; got %q", content)
+	}
+	click(&ctx.Router, Right) // engraveText, position 3 of 8
+	if _, ok := frame(); !ok {
+		t.Fatal("no frame after the engraveText step")
 	}
 	// Right → engraveXpub.
 	click(&ctx.Router, Right)
