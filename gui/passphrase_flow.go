@@ -93,7 +93,7 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof 
 			// verification share. Declining loads nothing and falls through to
 			// the validation below, so FONTPROOF! remains a typeable
 			// passphrase.
-			if ppFontProofOffer(ctx, th, kbd.Fragment, loadProof) {
+			if ppFontProofOffer(ctx, th, kbd.Fragment, true, loadProof) {
 				// Stay on this screen: the operator sees the 95 characters
 				// that landed before choosing to advance.
 				kbd.Fragment = ppFontProofPassphrase
@@ -262,7 +262,7 @@ func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, pri
 			// Declining falls through to ValidateFingerprint, which refuses
 			// FONTPROOF! -- it is not hex -- so the "no" branch is honest here
 			// too: the operator is told what a fingerprint field wants.
-			if ppFontProofOffer(ctx, th, kbd.Fragment, loadProof) {
+			if ppFontProofOffer(ctx, th, kbd.Fragment, false, loadProof) {
 				// Stay on this screen, showing the loaded value grouped
 				// exactly as the plate will carry it.
 				kbd.Fragment = ppFontProofFragment(which)

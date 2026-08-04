@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/passphrase"
 )
@@ -150,7 +151,8 @@ func TestFontProofFingerprintsCanonicalAndGrouped(t *testing.T) {
 // It also pins the "no" branch's explanation, without which an operator whose
 // real passphrase IS FONTPROOF! has no way to know what to answer.
 func TestFontProofPromptStatesAllThreeFields(t *testing.T) {
-	body := ppFontProofAsk + " " + ppFontProofReplaces + " " + ppFontProofKeep
+	body := ppFontProofAsk + " " + ppFontProofReplaces + " " + ppFontProofKeep(true) +
+		" " + ppFontProofKeep(false)
 	for _, want := range []string{
 		"ALL THREE",        // the count, said plainly
 		"REPLACES",         // that it destroys, not merely fills
@@ -195,7 +197,13 @@ func TestFontProofPromptFitsPanel(t *testing.T) {
 		t.Fatalf("the fit test is running at %v, not the real %v panel", dims, sh2DisplaySize)
 	}
 	area := ppConfirmArea(dims)
-	_, sz := ppFontProofBody(ctx, &descriptorTheme, area.Dx())
+	_, szP := ppFontProofBody(ctx, &descriptorTheme, area.Dx(), true)
+	_, szF := ppFontProofBody(ctx, &descriptorTheme, area.Dx(), false)
+	// Both wordings must fit; measure the taller one.
+	sz := szP
+	if szF.Y > sz.Y {
+		sz = szF
+	}
 	if sz.Y > area.Dy() {
 		t.Errorf("the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
 			"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
@@ -218,7 +226,7 @@ func TestFontProofPromptButtonsReachable(t *testing.T) {
 	h := newPPHarness(t)
 	var answered, answer bool
 	h.start(func() {
-		answer = ppFontProofPrompt(h.ctx, &descriptorTheme)
+		answer = ppFontProofPrompt(h.ctx, &descriptorTheme, true)
 		answered = true
 	})
 	if !ppProofShown(h.content) {
@@ -242,7 +250,7 @@ func TestFontProofPromptNoAnswersNo(t *testing.T) {
 	h := newPPHarness(t)
 	var answered, answer bool
 	h.start(func() {
-		answer = ppFontProofPrompt(h.ctx, &descriptorTheme)
+		answer = ppFontProofPrompt(h.ctx, &descriptorTheme, true)
 		answered = true
 	})
 	h.tapWidget("proofNo")
@@ -671,7 +679,7 @@ func TestFontProofOfferIgnoresOtherText(t *testing.T) {
 	ctx := newCtx(&drew)
 	load := func() { called = true }
 	for _, typed := range []string{"", "hunter2", "FONTPROOF", ppFontProofTrigger + " "} {
-		if ppFontProofOffer(ctx, &descriptorTheme, typed, load) {
+		if ppFontProofOffer(ctx, &descriptorTheme, typed, true, load) {
 			t.Errorf("%q triggered the offer", typed)
 		}
 	}
@@ -684,7 +692,7 @@ func TestFontProofOfferIgnoresOtherText(t *testing.T) {
 	// A nil loader disables the trigger; it must not prompt and must not panic.
 	drew = false
 	nilCtx := newCtx(&drew)
-	if ppFontProofOffer(nilCtx, &descriptorTheme, ppFontProofTrigger, nil) {
+	if ppFontProofOffer(nilCtx, &descriptorTheme, ppFontProofTrigger, true, nil) {
 		t.Error("a nil loader still reported the pattern as loaded")
 	}
 	if drew {
@@ -703,7 +711,7 @@ func TestFontProofBodyDrawsSomething(t *testing.T) {
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	area := ppConfirmArea(ctx.Platform.DisplaySize())
-	body, sz := ppFontProofBody(ctx, &descriptorTheme, area.Dx())
+	body, sz := ppFontProofBody(ctx, &descriptorTheme, area.Dx(), true)
 	if sz.Y == 0 {
 		t.Fatal("the prompt body measured zero height")
 	}
@@ -716,6 +724,84 @@ func TestFontProofBodyDrawsSomething(t *testing.T) {
 	for _, want := range []string{"Load", "REPLACES", "Back"} {
 		if !uiContains(txt, want) {
 			t.Errorf("the prompt body omits the line beginning %q; drew %q", want, txt)
+		}
+	}
+}
+
+// TestFontProofKeepLineMatchesTheField pins the declining branch's sentence to
+// what declining ACTUALLY does in each field. The first version of this prompt
+// said "Back = no: continue with FONTPROOF! exactly as typed" everywhere, which
+// is true only in the passphrase field: a fingerprint field cannot continue with
+// it, because ValidateFingerprint refuses a non-hex value and asks again.
+//
+// This is the one prompt in the feature whose whole justification is honesty --
+// it exists so an operator whose real passphrase IS FONTPROOF! knows what to
+// answer -- so a sentence that is false in two of the three fields it appears in
+// is worth a test of its own.
+func TestFontProofKeepLineMatchesTheField(t *testing.T) {
+	pass := ppFontProofKeep(true)
+	fing := ppFontProofKeep(false)
+
+	if pass == fing {
+		t.Fatal("the declining sentence is identical in both fields; it cannot be true in both")
+	}
+	// The passphrase field is the only one that continues with the value.
+	if !strings.Contains(pass, "continue with") {
+		t.Errorf("the passphrase wording no longer promises to continue with the typed value: %q", pass)
+	}
+	// The fingerprint field must NOT promise that, and must say what happens.
+	if strings.Contains(fing, "continue with") {
+		t.Errorf("the fingerprint wording promises to continue with FONTPROOF!, which "+
+			"ValidateFingerprint refuses to do: %q", fing)
+	}
+	if !strings.Contains(fing, "hex") {
+		t.Errorf("the fingerprint wording does not say the field will ask again for hex: %q", fing)
+	}
+	// Both must name the constant, so the operator can tell which text is meant.
+	for _, s := range []string{pass, fing} {
+		if !strings.Contains(s, ppFontProofTrigger) {
+			t.Errorf("declining sentence does not name %q: %q", ppFontProofTrigger, s)
+		}
+	}
+}
+
+// TestFontProofPromptIconsNotSwapped pins which ICON sits on which answer.
+//
+// layoutNavigation places a button by its Clickable.Button and draws whatever
+// Icon it was given, so the two are independent: swapping the icons leaves every
+// tap target where it was, and every other test taps by registered tag rather
+// than by glyph. The full suite passes with them swapped. An operator, though,
+// reads the glyph -- and a back arrow that means "load the pattern and discard
+// the passphrase I just typed" is precisely the outcome the prompt exists to
+// prevent.
+func TestFontProofPromptIconsNotSwapped(t *testing.T) {
+	noBtn := &Clickable{Button: Button1}
+	yesBtn := &Clickable{Button: Button3}
+	nav := ppFontProofNav(noBtn, yesBtn)
+	if len(nav) != 2 {
+		t.Fatalf("the prompt offers %d answers, want 2", len(nav))
+	}
+	for _, tc := range []struct {
+		clk  *Clickable
+		icon image.Image
+		what string
+	}{
+		{noBtn, assets.IconBack, "NO (declines; changes nothing)"},
+		{yesBtn, assets.IconCheckmark, "YES (loads the pattern, discarding all three fields)"},
+	} {
+		var found *NavButton
+		for i := range nav {
+			if nav[i].Clickable == tc.clk {
+				found = &nav[i]
+			}
+		}
+		if found == nil {
+			t.Fatalf("%s is not among the prompt's answers", tc.what)
+		}
+		if found.Icon != tc.icon {
+			t.Errorf("%s carries the wrong icon. The operator reads the glyph, not the "+
+				"tag, so swapping these inverts the prompt on screen while every "+
+				"tap-by-tag test keeps passing", tc.what)
 		}
 	}
 }

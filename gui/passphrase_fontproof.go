@@ -96,9 +96,27 @@ const (
 		"Seed FP becomes DEAD BEEF, " +
 		"Expected Comb FP becomes CAFE BABE."
 
-	ppFontProofKeep = "Back = no: continue with FONTPROOF! exactly as typed. " +
+	// The declining branch differs by FIELD, and saying otherwise makes the one
+	// prompt in this feature whose entire purpose is honesty tell a small lie.
+	// In the passphrase field, "no" really does continue with FONTPROOF! as the
+	// passphrase. In either fingerprint field it CANNOT: ValidateFingerprint
+	// refuses a non-hex value, so "no" returns to the field with the text still
+	// there. Pinned by TestFontProofNoBranchInFingerprintFieldRefuses, which
+	// asserts the refusal, and by TestFontProofKeepLineMatchesTheField.
+	ppFontProofKeepPassphrase = "Back = no: continue with FONTPROOF! exactly as typed. " +
 		"Any text can be a real passphrase, including this one."
+
+	ppFontProofKeepFingerprint = "Back = no: keep FONTPROOF! in this field. " +
+		"It is not hex, so this field will ask again for 8 hex digits."
 )
+
+// ppFontProofKeep is the declining-branch sentence for a field.
+func ppFontProofKeep(isPassphrase bool) string {
+	if isPassphrase {
+		return ppFontProofKeepPassphrase
+	}
+	return ppFontProofKeepFingerprint
+}
 
 // ppFontProofBody lays out the prompt's text and returns it with its measured
 // size, so TestFontProofPromptFitsPanel can assert it fits the real 480x320
@@ -106,13 +124,13 @@ const (
 // it collects the runes of every drawn text op regardless of occlusion, so a
 // label drawn under the keyboard, off the panel, or past the bottom edge reads
 // as present.
-func ppFontProofBody(ctx *Context, th *Colors, width int) (op.Op, image.Point) {
+func ppFontProofBody(ctx *Context, th *Colors, width int, isPassphrase bool) (op.Op, image.Point) {
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFontProofAsk)
 	rt.Y += 4
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFontProofReplaces)
 	rt.Y += 4
-	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFontProofKeep)
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFontProofKeep(isPassphrase))
 	return rt.Content, image.Pt(width, rt.Y)
 }
 
@@ -122,7 +140,7 @@ func ppFontProofBody(ctx *Context, th *Colors, width int) (op.Op, image.Point) {
 //
 // It borrows ppConfirmArea -- below the title, inboard of the nav column -- so
 // the prompt and the confirm screen spend the same measured budget.
-func ppFontProofPrompt(ctx *Context, th *Colors) bool {
+func ppFontProofPrompt(ctx *Context, th *Colors, isPassphrase bool) bool {
 	noBtn := &Clickable{Button: Button1}
 	yesBtn := &Clickable{Button: Button3}
 	hookPPWidget("proofNo", noBtn)
@@ -136,16 +154,25 @@ func ppFontProofPrompt(ctx *Context, th *Colors) bool {
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ppFontProofBody(ctx, th, area.Dx())
+		body, _ := ppFontProofBody(ctx, th, area.Dx(), isPassphrase)
 		body = body.Offset(image.Point(area.Min))
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: noBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: yesBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
-		}...)
+		nav, _ := layoutNavigation(&ctx.B, th, dims, ppFontProofNav(noBtn, yesBtn)...)
 		title, _ := layoutTitle(ctx, dims.X, th.Text, ppFontProofTitle)
 		ctx.Frame(op.Layer(body, nav, title, op.Color(&ctx.B, th.Background)))
 	}
 	return false
+}
+
+// ppFontProofNav is the prompt's two answers. It is a named function purely so
+// TestFontProofPromptIconsNotSwapped can assert WHICH ICON sits on WHICH answer:
+// layoutNavigation positions a button by its Clickable.Button and draws whatever
+// Icon it was handed, so the two are independent, and every test taps by
+// registered tag rather than by glyph. The operator has only the glyph.
+func ppFontProofNav(noBtn, yesBtn *Clickable) []NavButton {
+	return []NavButton{
+		{Clickable: noBtn, Style: StyleSecondary, Icon: assets.IconBack},
+		{Clickable: yesBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
+	}
 }
 
 // ppFontProofOffer is the trigger check for ONE field, and the only place it
@@ -165,11 +192,11 @@ func ppFontProofPrompt(ctx *Context, th *Colors) bool {
 // It returns true when the pattern was loaded, which the caller must treat as
 // "stay on this screen": the operator has to see what landed before advancing.
 // False means proceed exactly as if the constant were any other string.
-func ppFontProofOffer(ctx *Context, th *Colors, typed string, load func()) bool {
+func ppFontProofOffer(ctx *Context, th *Colors, typed string, isPassphrase bool, load func()) bool {
 	if typed != ppFontProofTrigger || load == nil {
 		return false
 	}
-	if !ppFontProofPrompt(ctx, th) {
+	if !ppFontProofPrompt(ctx, th, isPassphrase) {
 		return false
 	}
 	load()
