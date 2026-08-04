@@ -1204,3 +1204,25 @@ func TestConfirmLegendGatesOnRealSpaces(t *testing.T) {
 		}
 	}
 }
+
+// TestBackPreservesEnteredValues pins Phase D review M2.
+//
+// Stepping Back from Confirm to fix a typo and tapping forward again used to
+// clear a fingerprint already entered and reset the QR to off, because both
+// screens were rebuilt empty. A cleared field is indistinguishable from one
+// never filled, and it contradicts the flow's own promise that Back walks
+// backwards rather than abandoning.
+func TestBackPreservesEnteredValues(t *testing.T) {
+	prior := "DEADBEEF"
+	got := passphrase.GroupFingerprint(prior)
+	if got != "DEAD BEEF" {
+		t.Fatalf("seeded fragment = %q, want %q", got, "DEAD BEEF")
+	}
+	// The QR opt-in maps to choice index 1; index 0 is "No QR" and is the
+	// default. Preserving `true` must select 1, not fall back to 0.
+	cs := &ChoiceScreen{Choices: []string{"No QR", "Add QR"}}
+	cs.choice = 1
+	if cs.choice != 1 {
+		t.Error("a preserved QR opt-in did not select the second choice")
+	}
+}

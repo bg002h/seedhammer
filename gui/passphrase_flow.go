@@ -211,8 +211,15 @@ func ppFingerprintPreview(typed string) string {
 //
 // The keyboard is the CLEARTEXT one: a fingerprint is public, and masking it
 // would only stop the operator proof-reading it.
-func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep) (string, bool) {
+// prior is the value already entered for this field, if any. Stepping Back
+// from a later screen and forward again must NOT silently discard it: the flow
+// promises Back walks backwards rather than abandoning, and a cleared field
+// looks identical to one that was never filled. (Phase D review M2.)
+func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, prior string) (string, bool) {
 	kbd := NewAddressKeyboard(ctx)
+	// Re-seed from the value already entered, so Back-then-forward preserves it.
+	// Grouped for display, exactly as the field renders while being typed.
+	kbd.Fragment = passphrase.GroupFingerprint(prior)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
 	hookPPWidget("kbd", kbd)
@@ -340,11 +347,17 @@ func ppPassphraseCounts(s []byte) string {
 // ppQRChoiceFlow is step 4 of spec 5. The QR is OPT-IN and defaults to OFF
 // (spec D8): it is a machine-readable copy of the secret itself, so a default
 // that quietly added one would be the worst way to get this wrong.
-func ppQRChoiceFlow(ctx *Context, th *Colors) (bool, bool) {
+// prior is the choice already made, if the operator is arriving here a second
+// time via Back. Resetting it to off would silently undo a deliberate opt-in
+// (Phase D review M2).
+func ppQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 	cs := &ChoiceScreen{
 		Title:   "QR Code",
 		Lead:    "A QR is a machine-readable copy of the passphrase.",
 		Choices: []string{"No QR", "Add QR"},
+	}
+	if prior {
+		cs.choice = 1 // preserve a deliberate opt-in across Back
 	}
 	hookPPWidget("qr", cs)
 	// ChoiceScreen.choice starts at 0, which is "No QR" -- the default is a
@@ -555,21 +568,21 @@ func engravePassphraseFlow(ctx *Context, th *Colors) {
 			}
 			n = m
 		case ppStepSeedFP:
-			fp, ok := fingerprintEntryFlow(ctx, th, ppSeedFP)
+			fp, ok := fingerprintEntryFlow(ctx, th, ppSeedFP, seedFP)
 			if !ok {
 				step -= 2
 				break
 			}
 			seedFP = fp
 		case ppStepCombinedFP:
-			fp, ok := fingerprintEntryFlow(ctx, th, ppCombinedFP)
+			fp, ok := fingerprintEntryFlow(ctx, th, ppCombinedFP, combinedFP)
 			if !ok {
 				step -= 2
 				break
 			}
 			combinedFP = fp
 		case ppStepQR:
-			add, ok := ppQRChoiceFlow(ctx, th)
+			add, ok := ppQRChoiceFlow(ctx, th, qr)
 			if !ok {
 				step -= 2
 				break
