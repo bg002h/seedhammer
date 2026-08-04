@@ -18,8 +18,8 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right x3 -> engraveSingleSig.
-	for i := 0; i < 3; i++ {
+	// Right x4 -> engraveSingleSig (engravePassphrase was inserted at position 2).
+	for i := 0; i < 4; i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {
@@ -27,31 +27,31 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 		}
 	}
 	if !uiContains(content, "Single-Sig") {
-		t.Fatalf("engraveSingleSig not reachable after 3 Rights; got %q", content)
+		t.Fatalf("engraveSingleSig not reachable after 4 Rights; got %q", content)
 	}
 	// Right -> engraveMultisig (the new upper bound), titled non-blank.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after fourth Right")
+		t.Fatal("no frame after fifth Right")
 	}
 	if !uiContains(content, "Multisig") {
-		t.Fatalf("engraveMultisig not reachable/titled after fourth Right; got %q", content)
+		t.Fatalf("engraveMultisig not reachable/titled after fifth Right; got %q", content)
 	}
 	// Right -> bip85Derive (the navigable upper bound after T7b).
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after fifth Right")
+		t.Fatal("no frame after sixth Right")
 	}
 	if !uiContains(content, "BIP-85") {
-		t.Fatalf("bip85Derive not reachable after fifth Right; got %q", content)
+		t.Fatalf("bip85Derive not reachable after sixth Right; got %q", content)
 	}
 	// Right again wraps to backupWallet.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after sixth Right")
+		t.Fatal("no frame after seventh Right")
 	}
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("Right did not wrap to Backup Wallet; got %q", content)

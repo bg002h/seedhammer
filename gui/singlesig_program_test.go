@@ -22,42 +22,51 @@ func TestEngraveSingleSigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right → engraveXpub.
+	// Right → engravePassphrase (position 2 of 7).
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after Right")
 	}
-	if !uiContains(content, "Account Xpub") {
-		t.Fatalf("engraveXpub not reachable after Right; got %q", content)
+	if !uiContains(content, "BIP-39 Password") {
+		t.Fatalf("engravePassphrase not reachable after Right; got %q", content)
 	}
-	// Right → engraveBundle.
+	// Right → engraveXpub.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after second Right")
 	}
-	if !uiContains(content, "Bundle") {
-		t.Fatalf("engraveBundle not reachable after second Right; got %q", content)
+	if !uiContains(content, "Account Xpub") {
+		t.Fatalf("engraveXpub not reachable after second Right; got %q", content)
 	}
-	// Right → engraveSingleSig (the new program), titled non-blank.
+	// Right → engraveBundle.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
 		t.Fatal("no frame after third Right")
 	}
+	if !uiContains(content, "Bundle") {
+		t.Fatalf("engraveBundle not reachable after third Right; got %q", content)
+	}
+	// Right → engraveSingleSig (the new program), titled non-blank.
+	click(&ctx.Router, Right)
+	content, ok = frame()
+	if !ok {
+		t.Fatal("no frame after fourth Right")
+	}
 	if !uiContains(content, "Single-Sig") {
-		t.Fatalf("engraveSingleSig not reachable/titled after third Right; got %q", content)
+		t.Fatalf("engraveSingleSig not reachable/titled after fourth Right; got %q", content)
 	}
 	// Right again reaches engraveMultisig (the new navigable upper bound,
 	// inserted before qaProgram by T6b). qaProgram stays out of the carousel.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after fourth Right")
+		t.Fatal("no frame after fifth Right")
 	}
 	if !uiContains(content, "Multisig") {
-		t.Fatalf("engraveMultisig not reachable after fourth Right; got %q", content)
+		t.Fatalf("engraveMultisig not reachable after fifth Right; got %q", content)
 	}
 }
 

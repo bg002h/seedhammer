@@ -18,8 +18,8 @@ func TestBip85DeriveProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
-	// Right x4 -> engraveMultisig.
-	for i := 0; i < 4; i++ {
+	// Right x5 -> engraveMultisig (engravePassphrase was inserted at position 2).
+	for i := 0; i < 5; i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {
@@ -27,22 +27,22 @@ func TestBip85DeriveProgramNavigable(t *testing.T) {
 		}
 	}
 	if !uiContains(content, "Multisig") {
-		t.Fatalf("engraveMultisig not reachable after 4 Rights; got %q", content)
+		t.Fatalf("engraveMultisig not reachable after 5 Rights; got %q", content)
 	}
 	// Right -> bip85Derive (the new upper bound), titled non-blank.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after fifth Right")
+		t.Fatal("no frame after sixth Right")
 	}
 	if !uiContains(content, "BIP-85") {
-		t.Fatalf("bip85Derive not reachable/titled after fifth Right; got %q", content)
+		t.Fatalf("bip85Derive not reachable/titled after sixth Right; got %q", content)
 	}
 	// Right again wraps to backupWallet.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
-		t.Fatal("no frame after sixth Right")
+		t.Fatal("no frame after seventh Right")
 	}
 	if !uiContains(content, "Backup Wallet") {
 		t.Fatalf("Right did not wrap to Backup Wallet; got %q", content)

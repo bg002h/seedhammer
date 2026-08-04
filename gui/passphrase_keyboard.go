@@ -354,7 +354,16 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 	if !k.revealed {
 		shown = strings.Repeat("*", utf8.RuneCountInString(k.Fragment))
 	}
-	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, math.MaxInt, th.Text, shown)
+	// The readout wraps at the GRID width. Unbounded (math.MaxInt) it grows
+	// wider than the grid, and since Layout reports max(readout, grid) as its
+	// size while drawing the grid at x=0, a caller centring on that size slides
+	// the GRID sideways. Measured, not reasoned: at 100 characters -- exactly
+	// what passphrase.MaxLen permits -- the combined width reached 600px and
+	// the grid's left edge landed at x=-60 on the 480px SeedHammer II panel,
+	// taking q/a/z and the page-cycle key off the glass. Touch is the only
+	// input the machine has, so those keys were simply gone. See
+	// TestPassphraseKeyboardStaysOnPanel.
+	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, k.size[k.page].X, th.Text, shown)
 	const readoutGap = 8
 
 	gridY := readoutSz.Y + readoutGap
