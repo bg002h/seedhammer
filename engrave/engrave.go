@@ -405,7 +405,7 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 	case 25, 29, 33, 37:
 		// Single marker. v5 (37) and v6 (41) each still take exactly one
 		// alignment pattern, at the same (dim-9, dim-9) offset as v2-v4.
-		// PROVISIONAL (Task 5, spec O6).
+		//.
 		alignMarkers = append(alignMarkers, bezier.Pt(dim-9, dim-9))
 	default:
 		panic("unsupported qr code version")
@@ -418,7 +418,7 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 func ConstantQR(qrc *qr.Code) (*ConstantQRCmd, error) {
 	dim := qrc.Size
 	if dim > 37 {
-		// PROVISIONAL (Task 5, spec O6): raised from 33 to 41 so
+		// raised from 33 to 41 so
 		// FuzzConstantQR can measure v5/v6 (dims 37/41) module counts.
 		// bitmapForQRStatic only supports versions 1-6 (dims
 		// 21/25/29/33/37/41). Reject larger versions here so no caller can

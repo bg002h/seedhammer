@@ -425,3 +425,43 @@ func TestPassphraseStringerTiming(t *testing.T) {
 	t.Logf("shared center=%v  passphrase center=%v", shared.center, pass.center)
 	t.Logf("shared startEndDist=%d  passphrase startEndDist=%d", shared.startEndDist, pass.startEndDist)
 }
+
+// TestPassphraseRuneDurationPin pins BOTH the value and the glyph that sets it.
+//
+// This exists because a regression reached a post-implementation review instead
+// of a failing build. Spec 3.5.0's I2 clause requires that redrawing a glyph as
+// a single stroke must not inflate runeDuration -- every run on the plate is
+// padded to it, so one glyph raises the cost of all 96. The single-stroke '#'
+// (5f667dd) overtook '8' by 7.2% and nothing caught it: the only timing test
+// was a t.Logf that explicitly disclaimed proving anything.
+//
+// The 7.2% is accepted (user decision 2026-08-03) -- '#' at k=1 is what makes
+// max k = 2 and the disclosure bound hold. But it is pinned, so the NEXT font
+// edit that inflates the unit fails here rather than shipping.
+//
+// If this fails after a deliberate font change: re-measure, confirm the new cost
+// is acceptable, update both constants, and restate 3.5.0's absolute-time worst
+// case. Do not just bump the number.
+func TestPassphraseRuneDurationPin(t *testing.T) {
+	const (
+		wantDuration = 572245
+		wantGlyph    = '#'
+	)
+	s := NewPassphraseStringer(constant.Font, params(), 4*mm)
+	if s.runeDuration != wantDuration {
+		t.Errorf("runeDuration = %d, want %d -- a glyph edit changed the cost of EVERY glyph",
+			s.runeDuration, wantDuration)
+	}
+	var got rune
+	var maxDur uint
+	for _, cr := range s.alphabet {
+		for _, inf := range cr.Info {
+			if inf.Duration > maxDur {
+				maxDur, got = inf.Duration, cr.R
+			}
+		}
+	}
+	if got != wantGlyph {
+		t.Errorf("runeDuration is set by %q, want %q", got, wantGlyph)
+	}
+}
