@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"bytes"
 	"fmt"
 	"image"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -421,6 +423,110 @@ func TestFontProofBuildsAPlate(t *testing.T) {
 		if plate.Duration == 0 {
 			t.Fatalf("qr=%v: built an empty plate", qr)
 		}
+	}
+}
+
+// TestFontProofPlateExcludesResidualPastN closes
+// seedhammer-plate-carries-only-secret-prefix.
+//
+// ppFontProofLoader writes the pattern into secret and sets n = len(pattern)
+// (98, not the buffer's full passphrase.MaxLen = 100), via
+// *n = copy(dst, ppFontProofPassphrase). If a LONGER passphrase was typed
+// first, the bytes past n keep a PRINTABLE tail of it -- copy never zeroes
+// what it doesn't overwrite. Every call site is correct today
+// (ppBuildPlate(..., secret[:n], ...)), but nothing pinned that: mutating the
+// ppStepEngrave call site to pass the whole buffer instead of secret[:n] left
+// go test -run TestFontProof green, because no existing test ever created a
+// printable residue in the first place (TestFontProofLoaderWritesAllThree
+// starts from a fresh, zeroed buffer, and driveToConfirm always types the
+// short "hunter2" for the non-triggered passphrase step).
+//
+// This test types a passphrase LONGER than the pattern, triggers FONTPROOF!
+// from a LATER field (so the entry step is what leaves the residue, exactly
+// as the followup describes), and observes -- via passphrasePlateHook, the
+// only place the caller's actual argument is visible -- what the real
+// ppStepEngrave call site in engravePassphraseFlow was handed. A unit test of
+// ppBuildPlate alone cannot catch a mutated caller: the defect is in what the
+// caller passes, not in ppBuildPlate itself.
+func TestFontProofPlateExcludesResidualPastN(t *testing.T) {
+	// passphrase.MaxLen printable, non-NUL bytes -- long enough that its tail
+	// survives past n once FONTPROOF! shrinks the buffer's logical length.
+	long := strings.Repeat("Zx9#", passphrase.MaxLen/4)
+	if len(long) != passphrase.MaxLen {
+		t.Fatalf("test fixture is %d bytes, want %d (passphrase.MaxLen)", len(long), passphrase.MaxLen)
+	}
+	if len(ppFontProofPassphrase) >= len(long) {
+		t.Fatalf("the font-proof pattern (%d bytes) is not shorter than the fixture (%d bytes); "+
+			"this test needs a residue past n", len(ppFontProofPassphrase), len(long))
+	}
+
+	var gotSecret []byte
+	var gotSeedFP, gotCombinedFP string
+	var gotQR, gotPlate bool
+	passphrasePlateHook = func(secret []byte, seedFP, combinedFP string, qr bool) {
+		gotSecret = bytes.Clone(secret)
+		gotSeedFP, gotCombinedFP, gotQR, gotPlate = seedFP, combinedFP, qr, true
+	}
+	t.Cleanup(func() { passphrasePlateHook = nil })
+
+	r := startPPFlow(t)
+	h := r.h
+	r.enterPassphrase(long)
+	h.mustReach("Seed FP")
+	// Trigger from the SEED FP field, not the passphrase field: the residue
+	// this bug creates comes from the ENTRY step's own longer write, still
+	// sitting in the buffer once a LATER field shrinks n.
+	triggerProof(t, h, true, ppFontProofSeedFP)
+	h.mustReach("Expected Comb FP")
+	r.enterFingerprint("")
+	h.mustReach("QR Code")
+	r.chooseQR(false)
+	h.mustReach("Confirm")
+
+	// Sanity: the hazard this test exists for must actually be present in the
+	// flow's own buffer, or the guard below would pass for a reason that has
+	// nothing to do with it.
+	tail := r.secret[len(ppFontProofPassphrase):passphrase.MaxLen]
+	wantTail := []byte(long[len(ppFontProofPassphrase):])
+	if !bytes.Equal(tail, wantTail) {
+		t.Fatalf("test setup did not reproduce the residue: buffer holds %q past n, want %q (the longer passphrase's tail)",
+			tail, wantTail)
+	}
+	for _, b := range tail {
+		if b == 0 {
+			t.Fatalf("test setup produced a NUL residue, not the PRINTABLE one this bug uniquely creates: %q", tail)
+		}
+	}
+
+	// Accept Confirm: this is the step that runs the real ppStepEngrave case
+	// and its ppBuildPlate(..., secret[:n], ...) call.
+	h.tapWidget("ok")
+	for i := 0; i < 8 && !gotPlate; i++ {
+		h.step()
+	}
+	if !gotPlate {
+		t.Fatal("ppBuildPlate was never called after accepting Confirm")
+	}
+
+	if string(gotSecret) != ppFontProofPassphrase {
+		t.Fatalf("ppStepEngrave handed ppBuildPlate %d bytes, want exactly the %d-byte pattern -- "+
+			"the caller leaked the buffer's residue past n:\n got %q\nwant %q",
+			len(gotSecret), len(ppFontProofPassphrase), gotSecret, ppFontProofPassphrase)
+	}
+
+	// Require it to equal the plate built from the reference, not just the
+	// bytes: this is the artifact that would actually be engraved.
+	plate1, err := ppBuildPlate(engraverParams, gotSecret, gotSeedFP, gotCombinedFP, gotQR)
+	if err != nil {
+		t.Fatalf("building the plate from the flow's own (captured) buffer failed: %v", err)
+	}
+	plate2, err := ppBuildPlate(engraverParams, []byte(ppFontProofPassphrase), ppFontProofSeedFP, ppFontProofCombFP, gotQR)
+	if err != nil {
+		t.Fatalf("building the reference plate failed: %v", err)
+	}
+	if plate1.Duration != plate2.Duration || !slices.Equal(slices.Collect(plate1.Spline), slices.Collect(plate2.Spline)) {
+		t.Fatalf("the plate built from the flow's own buffer does not match the plate built from the %d-byte reference",
+			len(ppFontProofPassphrase))
 	}
 }
 
