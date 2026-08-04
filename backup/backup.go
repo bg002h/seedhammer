@@ -333,51 +333,30 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 		fontSize := params.F(plate.fontMM())
 		fnt := plate.Font
 
-		charWidth := fixedCharWidth(fnt, fontSize)
 		margin := params.I(outerMargin)
-		innerMargin := params.I(innerMargin)
-		holeChars := int(math.Ceil(float64(innerMargin-margin) / float64(charWidth)))
-		holeLines := int(math.Ceil(float64(innerMargin-margin) / float64(fontSize)))
 		plateDims := image.Point{
-			X: params.F(85),
-			Y: params.F(85),
+			X: params.F(plateSize),
+			Y: params.F(plateSize),
 		}
-		width := plateDims.X - 2*margin
-		charPerLine := int(width / charWidth)
 		offy := params.I(outerMargin)
 		for i, p := range plate.Paragraphs {
-			qrLines := 0
-			charPerQRLine := 0
 			qrsz := 0
 			qrBorder := params.I(2)
+			qrScale := p.QRScale
+			if qrScale == 0 {
+				qrScale = 2
+			}
 			var qr engrave.Engraving
 			if p.QR != nil {
-				qrScale := p.QRScale
-				if qrScale == 0 {
-					qrScale = 2
-				}
 				qr = engrave.QR(params.StrokeWidth, qrScale, p.QR)
 				qrsz = p.QR.Size * params.StrokeWidth * qrScale
-				charPerQRLine = (width - 2*qrBorder - qrsz) / charWidth
-				qrLines = (qrsz + 2*qrBorder + fontSize - 1) / fontSize
 			}
 			// baseY is this paragraph's top edge in DEVICE units. widthAt is
 			// indexed by output line, so the plate-row offset has to live
 			// inside the layout -- and for the descriptor path that offset is
 			// not row-aligned, because paragraphs after the first advance offy
 			// by lineno*fontSize + 1mm.
-			lay := lineLayout{
-				charPerLine:   charPerLine,
-				charPerQRLine: charPerQRLine,
-				holeChars:     holeChars,
-				holeLines:     holeLines,
-				qrLines:       qrLines,
-				charWidth:     charWidth,
-				fontSize:      fontSize,
-				baseY:         offy,
-				plateHeight:   plateDims.Y,
-				innerMargin:   innerMargin,
-			}
+			lay := textLayout(params, fnt, fontSize, offy, p.QR, qrScale)
 			var lines []string
 			if len(p.Text) > 0 {
 				// The descriptor and mdmk callers keep an UNBOUNDED path:
@@ -403,7 +382,7 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 			lineno := len(lines)
 			if qr != nil {
 				qrx := plateDims.X - qrsz - margin - qrBorder
-				qry := lay.baseY + holeLines*fontSize + (qrLines*fontSize-qrsz)/2
+				qry := lay.baseY + lay.holeLines*lay.fontSize + (lay.qrLines*lay.fontSize-qrsz)/2
 				// Keyed to the ORIGINAL text, never to len(lines): under
 				// spec 5.2 an empty string wraps to one empty line, and
 				// keying this to the line count displaces the QR-ONLY plate

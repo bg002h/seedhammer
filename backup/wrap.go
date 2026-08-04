@@ -2,7 +2,12 @@ package backup
 
 import (
 	"fmt"
+	"math"
 	"strings"
+
+	qr "github.com/seedhammer/kortschak-qr"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/vector"
 )
 
 // WrapText lays out s into engraved lines at a fixed pitch.
@@ -150,4 +155,32 @@ func (l lineLayout) at(i int) (n, offx int) {
 		n = 1
 	}
 	return n, offx
+}
+
+// textLayout builds the per-line character grid of a text block at fontSize,
+// starting at baseY. It is the ONE place the screw-hole band and the QR
+// narrowing are computed, so the fit check, the confirm screen and the engraver
+// cannot drift apart by a character.
+func textLayout(params engrave.Params, fnt *vector.Face, fontSize, baseY int, qrc *qr.Code, qrScale int) lineLayout {
+	charWidth := fixedCharWidth(fnt, fontSize)
+	margin := params.I(outerMargin)
+	inner := params.I(innerMargin)
+	width := params.F(plateSize) - 2*margin
+	l := lineLayout{
+		charPerLine: width / charWidth,
+		holeChars:   int(math.Ceil(float64(inner-margin) / float64(charWidth))),
+		holeLines:   int(math.Ceil(float64(inner-margin) / float64(fontSize))),
+		charWidth:   charWidth,
+		fontSize:    fontSize,
+		baseY:       baseY,
+		plateHeight: params.F(plateSize),
+		innerMargin: inner,
+	}
+	if qrc != nil {
+		qrBorder := params.I(2)
+		qrsz := qrc.Size * params.StrokeWidth * qrScale
+		l.charPerQRLine = (width - 2*qrBorder - qrsz) / charWidth
+		l.qrLines = (qrsz + 2*qrBorder + fontSize - 1) / fontSize
+	}
+	return l
 }
