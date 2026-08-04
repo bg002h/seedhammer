@@ -38,3 +38,58 @@ func ValidatePassphrase(s string) error {
 	}
 	return nil
 }
+
+// FingerprintLen is the canonical length: a BIP-32 master fingerprint is the
+// first 4 bytes of RIPEMD160(SHA256(pubkey)), i.e. exactly 8 hex digits. This
+// is the WHOLE fingerprint, not a truncation.
+const FingerprintLen = 8
+
+var ErrBadFingerprint = errors.New("fingerprint must be 8 hex digits")
+
+// ValidateFingerprint accepts an empty string (the field is optional) or 8 hex
+// digits with optional internal whitespace, and returns the canonical form:
+// whitespace stripped, uppercased.
+//
+// The canonical form is the ONLY value stored or compared. The 4-and-4 grouping
+// used on the plate and in the UI is presentation only -- see spec 4.3.
+func ValidateFingerprint(s string) (string, error) {
+	var buf [FingerprintLen]byte
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' {
+			continue
+		}
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+			c -= 'a' - 'A'
+		case c >= 'A' && c <= 'F':
+		default:
+			return "", ErrBadFingerprint
+		}
+		if n == FingerprintLen {
+			return "", ErrBadFingerprint
+		}
+		buf[n] = c
+		n++
+	}
+	if n == 0 {
+		return "", nil
+	}
+	if n != FingerprintLen {
+		return "", ErrBadFingerprint
+	}
+	return string(buf[:]), nil
+}
+
+// GroupFingerprint renders a canonical fingerprint for display and engraving,
+// as "A1B2 C3D4". The separator is a plain space, NEVER the visible-space mark:
+// the mark means "a literal space in the passphrase", and hex is 0-9A-F so a
+// gap cannot be misread as a digit.
+func GroupFingerprint(canonical string) string {
+	if len(canonical) != FingerprintLen {
+		return canonical
+	}
+	return canonical[:4] + " " + canonical[4:]
+}
