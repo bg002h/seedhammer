@@ -335,6 +335,11 @@ type testPlatform struct {
 	events   []Event
 	wakeups  chan struct{}
 	engraver *testEngraver
+	// display overrides DisplaySize when non-zero. The 240x240 default is
+	// SMALLER than any panel this firmware ships on, so a widget wider than
+	// 240px is drawn partly off-canvas and its keys become untappable in a way
+	// the real machine never sees. Touch tests set this to sh2DisplaySize.
+	display image.Point
 }
 
 const (
@@ -363,7 +368,16 @@ var (
 	}
 )
 
-func (*testPlatform) DisplaySize() image.Point {
+// sh2DisplaySize is the panel a SeedHammer II actually has:
+// cmd/controller/platform_sh2.go's lcdWidth x lcdHeight. Screens whose
+// reachability is under test must be laid out at this size -- the 240x240
+// default is a fiction that no shipped device has.
+var sh2DisplaySize = image.Pt(480, 320)
+
+func (p *testPlatform) DisplaySize() image.Point {
+	if p.display != (image.Point{}) {
+		return p.display
+	}
 	return image.Pt(testDisplayDim, testDisplayDim)
 }
 
