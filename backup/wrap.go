@@ -104,3 +104,50 @@ func WrapText(s string, widthAt func(line int) int, maxLines int) (lines []strin
 	}
 	return lines, true
 }
+
+// lineLayout is how the screw-hole bands and an optional QR narrow the lines of
+// one text block. It exists as a named type rather than a closure so the n < 1
+// clamp can be tested directly: no golden reaches it, because no descriptor
+// plate carries a QR wide enough to exhaust a line's budget, yet the clamp is
+// what stands between a wide QR and a panic in WrapText's width assertion.
+type lineLayout struct {
+	charPerLine   int // budget of an unobstructed line
+	charPerQRLine int // budget of a line running beside the QR
+	holeChars     int // characters lost to a screw-hole band, per side
+	holeLines     int // lines above the QR
+	qrLines       int // lines the QR spans
+	charWidth     int
+	fontSize      int
+	baseY         int // top of the block, device units
+	plateHeight   int
+	innerMargin   int
+}
+
+// at returns the character budget and left inset of output line i, reproducing
+// the arithmetic descriptor plates have always used -- including the clamp.
+func (l lineLayout) at(i int) (n, offx int) {
+	n = l.charPerLine
+	isQRLine := l.holeLines <= i && i < l.holeLines+l.qrLines
+	if isQRLine {
+		n = l.charPerQRLine
+	}
+	// Avoid screw holes on the smaller plates on the first and last lines.
+	holeLine := l.baseY+i*l.fontSize < l.innerMargin ||
+		l.baseY+(i+1)*l.fontSize > l.plateHeight-l.innerMargin
+	if holeLine {
+		if !isQRLine {
+			// End of line.
+			n -= l.holeChars
+		}
+		// Beginning of line.
+		n -= l.holeChars
+		offx = l.holeChars * l.charWidth
+	}
+	if n < 1 {
+		// A line always carries at least one character. Without this the
+		// budget goes non-positive beside a wide QR, and WrapText's
+		// widthAt >= 1 assertion turns a cramped plate into a panic.
+		n = 1
+	}
+	return n, offx
+}

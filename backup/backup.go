@@ -361,42 +361,53 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 				charPerQRLine = (width - 2*qrBorder - qrsz) / charWidth
 				qrLines = (qrsz + 2*qrBorder + fontSize - 1) / fontSize
 			}
-			lineno := 0
-			txt := p.Text
-			for len(txt) > 0 {
-				n := charPerLine
-				offx := 0
-				isQRLine := holeLines <= lineno && lineno < holeLines+qrLines
-				if isQRLine {
-					n = charPerQRLine
-				}
-				// Avoid screw holes on the smaller plates on the first and last lines.
-				holeLine := offy+lineno*fontSize < innerMargin ||
-					offy+(lineno+1)*fontSize > plateDims.Y-innerMargin
-				if holeLine {
-					if !isQRLine {
-						// End of line.
-						n -= holeChars
-					}
-					// Beginning of line.
-					n -= holeChars
-					offx = holeChars * charWidth
-				}
-				if n < 1 {
-					n = 1
-				}
-				if l := len(txt); n > l {
-					n = l
-				}
-				s := txt[:n]
-				txt = txt[n:]
-				t.Offset(offx+margin, offy+lineno*fontSize)
-				engrave.String(fnt, fontSize, s).Engrave(t.Yield)
-				lineno++
+			// baseY is this paragraph's top edge in DEVICE units. widthAt is
+			// indexed by output line, so the plate-row offset has to live
+			// inside the layout -- and for the descriptor path that offset is
+			// not row-aligned, because paragraphs after the first advance offy
+			// by lineno*fontSize + 1mm.
+			lay := lineLayout{
+				charPerLine:   charPerLine,
+				charPerQRLine: charPerQRLine,
+				holeChars:     holeChars,
+				holeLines:     holeLines,
+				qrLines:       qrLines,
+				charWidth:     charWidth,
+				fontSize:      fontSize,
+				baseY:         offy,
+				plateHeight:   plateDims.Y,
+				innerMargin:   innerMargin,
 			}
+			var lines []string
+			if len(p.Text) > 0 {
+				// The descriptor and mdmk callers keep an UNBOUNDED path:
+				// their TEXT+QR -> TEXT-ONLY -> QR-ONLY fallback depends on
+				// toPlate rejecting overflow, so a maxLines refusal here would
+				// silently change which variants they offer.
+				//
+				// Empty text is special-cased rather than wrapped, because
+				// spec 5.2's empty-block rule returns ONE empty line and that
+				// rule serves the free-text plate only. Here zero characters
+				// must mean zero rows, which is what the QR-ONLY variant --
+				// and text-2-shards-1.bin -- depends on.
+				lines, _ = WrapText(p.Text, func(i int) int {
+					n, _ := lay.at(i)
+					return n
+				}, math.MaxInt)
+			}
+			for lineno, s := range lines {
+				_, offx := lay.at(lineno)
+				t.Offset(offx+margin, lay.baseY+lineno*fontSize)
+				engrave.String(fnt, fontSize, s).Engrave(t.Yield)
+			}
+			lineno := len(lines)
 			if qr != nil {
 				qrx := plateDims.X - qrsz - margin - qrBorder
-				qry := offy + holeLines*fontSize + (qrLines*fontSize-qrsz)/2
+				qry := lay.baseY + holeLines*fontSize + (qrLines*fontSize-qrsz)/2
+				// Keyed to the ORIGINAL text, never to len(lines): under
+				// spec 5.2 an empty string wraps to one empty line, and
+				// keying this to the line count displaces the QR-ONLY plate
+				// by (6.450, 2.300)mm at production stroke.
 				if len(p.Text) == 0 {
 					// Center QR.
 					qrx, qry = (plateDims.X-qrsz)/2, (plateDims.Y-qrsz)/2
