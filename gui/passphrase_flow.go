@@ -67,7 +67,10 @@ func ppEntryError(err error) string {
 // The step refuses to advance until ValidatePassphrase accepts, so an empty
 // passphrase cannot pass; the refusal explains itself without echoing what was
 // typed.
-func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int) (int, bool) {
+//
+// loadProof populates all three of the program's fields with the fixed
+// font-proof test pattern; see ppFontProofOffer.
+func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof func()) (int, bool) {
 	kbd := NewPassphraseKeyboard(ctx)
 	if n > 0 {
 		kbd.Fragment = string(dst[:n])
@@ -84,6 +87,18 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int) (int, bool
 			return 0, false
 		}
 		if okBtn.Clicked(ctx) {
+			// The font-proof trigger, checked HERE -- on OK, on the whole
+			// field, in this program's own handler -- and not in
+			// PassphraseKeyboard, which BIP-85 index entry and address
+			// verification share. Declining loads nothing and falls through to
+			// the validation below, so FONTPROOF! remains a typeable
+			// passphrase.
+			if ppFontProofOffer(ctx, th, kbd.Fragment, loadProof) {
+				// Stay on this screen: the operator sees the 95 characters
+				// that landed before choosing to advance.
+				kbd.Fragment = ppFontProofPassphrase
+				continue
+			}
 			if err := passphrase.ValidatePassphrase(kbd.Fragment); err != nil {
 				showError(ctx, th, "Passphrase", ppEntryError(err))
 				continue
@@ -215,7 +230,10 @@ func ppFingerprintPreview(typed string) string {
 // from a later screen and forward again must NOT silently discard it: the flow
 // promises Back walks backwards rather than abandoning, and a cleared field
 // looks identical to one that was never filled. (Phase D review M2.)
-func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, prior string) (string, bool) {
+//
+// loadProof populates all three of the program's fields with the fixed
+// font-proof test pattern; see ppFontProofOffer.
+func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, prior string, loadProof func()) (string, bool) {
 	kbd := NewAddressKeyboard(ctx)
 	// Re-seed from the value already entered, so Back-then-forward preserves it.
 	// Grouped for display, exactly as the field renders while being typed.
@@ -233,6 +251,16 @@ func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, pri
 			return "", false
 		}
 		if okBtn.Clicked(ctx) {
+			// Same trigger as the entry step, in this program's own handler.
+			// Declining falls through to ValidateFingerprint, which refuses
+			// FONTPROOF! -- it is not hex -- so the "no" branch is honest here
+			// too: the operator is told what a fingerprint field wants.
+			if ppFontProofOffer(ctx, th, kbd.Fragment, loadProof) {
+				// Stay on this screen, showing the loaded value grouped
+				// exactly as the plate will carry it.
+				kbd.Fragment = ppFontProofFragment(which)
+				continue
+			}
 			canon, err := passphrase.ValidateFingerprint(kbd.Fragment)
 			if err != nil {
 				showError(ctx, th, title, "Enter 8 hex digits (0-9, A-F), or leave it blank to skip.")
@@ -558,24 +586,30 @@ func engravePassphraseFlow(ctx *Context, th *Colors) {
 	n := 0
 	var seedFP, combinedFP string
 	qr := false
+	// The font-proof trigger fires inside ONE field but must populate all
+	// three, and no field step owns the other two -- so the writer lives here,
+	// where the state does, and each step is handed it. A step wired with nil
+	// silently loses the trigger; TestFontProofTriggersFromEveryField drives
+	// this production flow from each field in turn, so that mutation fails.
+	loadProof := ppFontProofLoader(secret, &n, &seedFP, &combinedFP)
 	step := ppStepEntry
 	for !ctx.Done {
 		switch step {
 		case ppStepEntry:
-			m, ok := passphraseEntryFlow(ctx, th, secret, n)
+			m, ok := passphraseEntryFlow(ctx, th, secret, n, loadProof)
 			if !ok {
 				return // Back out of the first step leaves the program.
 			}
 			n = m
 		case ppStepSeedFP:
-			fp, ok := fingerprintEntryFlow(ctx, th, ppSeedFP, seedFP)
+			fp, ok := fingerprintEntryFlow(ctx, th, ppSeedFP, seedFP, loadProof)
 			if !ok {
 				step -= 2
 				break
 			}
 			seedFP = fp
 		case ppStepCombinedFP:
-			fp, ok := fingerprintEntryFlow(ctx, th, ppCombinedFP, combinedFP)
+			fp, ok := fingerprintEntryFlow(ctx, th, ppCombinedFP, combinedFP, loadProof)
 			if !ok {
 				step -= 2
 				break

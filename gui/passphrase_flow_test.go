@@ -274,14 +274,20 @@ type ppEntryRun struct {
 	n    int
 	ok   bool
 	done bool
+
+	// The font-proof trigger's sink, wired exactly as engravePassphraseFlow
+	// wires it, so a sub-flow test exercises the real loader rather than a
+	// stub that could not observe a partial write.
+	seedFP, combinedFP string
 }
 
 func startPPEntry(t *testing.T) (*ppHarness, *ppEntryRun) {
 	t.Helper()
 	h := newPPHarness(t)
 	r := &ppEntryRun{dst: make([]byte, passphrase.MaxLen)}
+	load := ppFontProofLoader(r.dst, &r.n, &r.seedFP, &r.combinedFP)
 	h.start(func() {
-		r.n, r.ok = passphraseEntryFlow(h.ctx, &descriptorTheme, r.dst, 0)
+		r.n, r.ok = passphraseEntryFlow(h.ctx, &descriptorTheme, r.dst, 0, load)
 		r.done = true
 	})
 	return h, r
@@ -448,14 +454,20 @@ type ppFPRun struct {
 	fp   string
 	ok   bool
 	done bool
+
+	// The font-proof trigger's sink, wired as engravePassphraseFlow wires it.
+	secret             []byte
+	n                  int
+	seedFP, combinedFP string
 }
 
 func startPPFingerprint(t *testing.T, which ppFingerprintStep) (*ppHarness, *ppFPRun) {
 	t.Helper()
 	h := newPPHarness(t)
-	r := new(ppFPRun)
+	r := &ppFPRun{secret: make([]byte, passphrase.MaxLen)}
+	load := ppFontProofLoader(r.secret, &r.n, &r.seedFP, &r.combinedFP)
 	h.start(func() {
-		r.fp, r.ok = fingerprintEntryFlow(h.ctx, &descriptorTheme, which, "")
+		r.fp, r.ok = fingerprintEntryFlow(h.ctx, &descriptorTheme, which, "", load)
 		r.done = true
 	})
 	return h, r
