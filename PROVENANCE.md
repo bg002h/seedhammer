@@ -105,11 +105,13 @@ from another face before relying on the dedication.
    **Two glyphs were redrawn after import.** Upstream's `!` and `?` draw their
    baseline dot with a control point the motion planner turns into a 2638 mm/s³
    jerk against the machine's 2600 limit — the import landed red on
-   `engrave.TestFonts`. Their dot is now drawn exactly as this face's own
-   a VARIANT of `period`'s form is (`C…,4.9 …,4.9 …,5`, not `period`'s own
-   `C…,5 …,4.9 …,5`), which puts both at 2600.79, in line with `.` at 2600.39.
-   Copying `period` verbatim instead restores the 2638.22 red build. Same
-   artwork, smoother path. Details in `import-check.md`.
+   `engrave.TestFonts`. Their dot is now drawn with a VARIANT of the form this
+   face's `period` uses (`C…,4.9 …,4.9 …,5`) — **not `period`'s own**
+   (`C…,5 …,4.9 …,5`), which is the shape upstream had. That puts both at
+   2600.79, in line with `.` at 2600.39. **Copying `period` verbatim instead
+   restores the 2638.22 red build**, so do not "simplify" this to match it. Same
+   artwork, smoother path: ink bounds are byte-identical and only 3 of 34 control
+   points move, by ≈2.7 µm at the 6.0 mm rung. Details in `import-check.md`.
 
    **Deliberately NOT taken** from the same upstream file: its rework of the
    existing `e o q s w O S W nine zero star at` glyphs, and (from
