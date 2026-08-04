@@ -793,11 +793,22 @@ type ConstantStringer struct {
 	em       int
 	alphabet []constantRune
 	conf     StepperConfig
+	// hasMultiRun reports whether any alphabet glyph engraves in more than
+	// one run. Padding is per run, so a multi-run alphabet makes the
+	// duration of a call depend on the runes engraved -- and, on the
+	// PaddedString path, on which runes get repeated to fill the padding.
+	// See PaddedString.
+	hasMultiRun bool
 }
 
 type constantRune struct {
-	R    rune
-	Info constantPlan
+	R rune
+	// Info holds one plan per engrave run of the glyph. Most glyphs are a
+	// single continuous run, but a glyph such as ':' or 'i' has a detached
+	// part that cannot be joined without changing the letterform. Each run
+	// is padded to runeDuration independently, so a k-run glyph costs k
+	// units.
+	Info []constantPlan
 }
 
 type constantPlan struct {
@@ -1179,27 +1190,39 @@ func timeScale(c StepperConfig, engrave bool, v, a, j uint) uint {
 	return uint(scale)
 }
 
-// timeConstantPath computes the engraving time in ticks along
-// with the start and end points.
-func timeConstantPath(s bspline.Curve) constantPlan {
+// timeConstantPath computes the engraving time in ticks along with the start
+// and end points, for every engrave run of the path. A run is a maximal
+// pen-down stretch; a glyph with a detached part such as ':' or 'i' yields
+// more than one.
+func timeConstantPath(s bspline.Curve) []constantPlan {
 	engraving := false
+	var plans []constantPlan
 	var inf constantPlan
+	// pos tracks the end point of the previous knot, which is where a run
+	// starts and where it ends.
+	var pos bezier.Point
 	var seg bspline.Segment
 	for k := range s {
 		c, ticks, engrave := seg.Knot(k)
 		switch {
 		case !engraving && engrave:
-			inf.Start = inf.End
+			inf = constantPlan{Start: pos}
 			engraving = true
 		case engraving && !engrave:
-			panic("broken path")
+			inf.End = pos
+			plans = append(plans, inf)
+			engraving = false
 		}
 		if engrave {
 			inf.Duration += ticks
 		}
-		inf.End = c.C3
+		pos = c.C3
 	}
-	return inf
+	if engraving {
+		inf.End = pos
+		plans = append(plans, inf)
+	}
+	return plans
 }
 
 func TimePlan(conf StepperConfig, p Engraving) time.Duration {
@@ -1233,6 +1256,7 @@ func newConstantStringer(face *vector.Face, params Params, em int, alphabet stri
 	var bounds bspline.Bounds
 	var adv int
 	var maxDur uint
+	var hasMultiRun bool
 	m := face.Metrics()
 	fh := m.Height
 	conf := params.StepperConfig
@@ -1255,18 +1279,40 @@ func newConstantStringer(face *vector.Face, params Params, em int, alphabet stri
 			panic("variable width font")
 		}
 		adv = a
-		inf := timeConstantPath(planEngraving(knotBuf, conf, func(yield func(c Command) bool) {
+		infs := timeConstantPath(planEngraving(knotBuf, conf, func(yield func(c Command) bool) {
 			engraveSpline(yield, bezier.Point{}, em, fh, spline)
 		}))
-		bounds.Min.X = min(bounds.Min.X, inf.Start.X, inf.End.X)
-		bounds.Min.Y = min(bounds.Min.Y, inf.Start.Y, inf.End.Y)
-		bounds.Max.X = max(bounds.Max.X, inf.Start.X, inf.End.X)
-		bounds.Max.Y = max(bounds.Max.Y, inf.Start.Y, inf.End.Y)
+		if len(infs) == 0 {
+			// A glyph with no engrave run at all. paddedString folds its
+			// whole rune unit into the padded move to its slot and emits no
+			// knots of its own; that is sound only if the glyph really has
+			// no path. 0x20 is the only such rune today: cmd/vectorfont
+			// gives it an advance but an empty spline. Note that 0x20 must
+			// never reach the stringer in production -- the layout
+			// substitutes the visible-space mark 0x1F for every space -- so
+			// this path is exercised by tests only.
+			probe := spline
+			if _, ok := probe.Next(); ok {
+				panic(fmt.Errorf("zero-run glyph with a non-empty path: %s", string(r)))
+			}
+		}
+		if len(infs) > 1 {
+			hasMultiRun = true
+		}
+		for _, inf := range infs {
+			// Every run's start and end must be bounded: startEndDist and
+			// center size the padded moves between runs as well as between
+			// glyphs.
+			bounds.Min.X = min(bounds.Min.X, inf.Start.X, inf.End.X)
+			bounds.Min.Y = min(bounds.Min.Y, inf.Start.Y, inf.End.Y)
+			bounds.Max.X = max(bounds.Max.X, inf.Start.X, inf.End.X)
+			bounds.Max.Y = max(bounds.Max.Y, inf.Start.Y, inf.End.Y)
+			maxDur = max(inf.Duration, maxDur)
+		}
 		runes = append(runes, constantRune{
 			R:    r,
-			Info: inf,
+			Info: infs,
 		})
-		maxDur = max(inf.Duration, maxDur)
 	}
 	startEndDist := ManhattanDist(bounds.Min, bounds.Max)
 	center := bounds.Max.Add(bounds.Min).Div(2)
@@ -1280,7 +1326,62 @@ func newConstantStringer(face *vector.Face, params Params, em int, alphabet stri
 		startEndDist: startEndDist,
 		conf:         params.StepperConfig,
 		advDist:      adv * em / fh,
+		hasMultiRun:  hasMultiRun,
 	}
+}
+
+// runSplitter walks a glyph spline one engrave run at a time.
+//
+// The runs of a multi-part glyph are separated by a Line-flag flip inside the
+// clamped control-point triples that bracket them. Measured on ':': the
+// leading triple of a run sits at the run's start point flagged F,F,T, and its
+// closing triple sits at the run's end point flagged T,T,T at the end of the
+// glyph, or T,T,F where another run follows.
+//
+// A run is therefore emitted as the knots strictly after its leading triple up
+// to and including the first knot past its last Line knot. The leading triple
+// is dropped because the caller's padded Move to the run start supplies the
+// clamping; the trailing flipped knot is kept because planEngraving needs the
+// third knot of a clamped triple to flush the segment -- withholding it leaves
+// the spline buffer four deep and the next Delay panics "delay during spline".
+type runSplitter struct {
+	sp   vector.UniformBSpline
+	cur  vector.Knot
+	more bool
+}
+
+func newRunSplitter(sp vector.UniformBSpline) runSplitter {
+	r := runSplitter{sp: sp}
+	r.cur, r.more = r.sp.Next()
+	return r
+}
+
+// engrave emits the next run's knots, offset and scaled to pos.
+func (r *runSplitter) engrave(yield func(Command) bool, pos bezier.Point, em, height int) bool {
+	// Skip to the run's leading clamped triple. This also skips the flipped
+	// knot that closed the previous run.
+	for r.more && !r.cur.Line {
+		r.cur, r.more = r.sp.Next()
+	}
+	if !r.more {
+		panic("unclamped spline")
+	}
+	// Drop the third knot of the leading triple.
+	r.cur, r.more = r.sp.Next()
+	for r.more && r.cur.Line {
+		if !yield(ControlPoint(r.cur.Line, addScale(pos, r.cur.Ctrl, em, height))) {
+			return false
+		}
+		r.cur, r.more = r.sp.Next()
+	}
+	if r.more {
+		// Complete the run's closing clamped triple.
+		if !yield(ControlPoint(r.cur.Line, addScale(pos, r.cur.Ctrl, em, height))) {
+			return false
+		}
+		r.cur, r.more = r.sp.Next()
+	}
+	return true
 }
 
 func (c *ConstantStringer) String(yield func(Command) bool, txt string) bool {
@@ -1291,6 +1392,16 @@ func (c *ConstantStringer) String(yield func(Command) bool, txt string) bool {
 func (c *ConstantStringer) PaddedString(yield func(Command) bool, txt string, shortest, longest int) bool {
 	if n := strlen(txt); n < shortest || longest < n {
 		panic("string length out of bounds")
+	}
+	// On a single-run alphabet every slot costs exactly one padded unit, so
+	// a padded call's duration is independent of the string, including its
+	// length within [shortest, longest]. With multi-run glyphs a slot costs
+	// as many units as the rune has runs, so the total depends on the
+	// content and on which runes are repeated to fill the padding: the
+	// guarantee no longer holds and padding to a range would leak. String
+	// (shortest == longest) remains sound and stays permitted.
+	if c.hasMultiRun && shortest != longest {
+		panic("multi-run alphabet: PaddedString requires shortest == longest")
 	}
 	return c.paddedString(yield, txt, shortest, longest)
 }
@@ -1328,21 +1439,37 @@ func (c *ConstantStringer) paddedString(yield func(Command) bool, txt string, sh
 			// only runes from f.
 			panic("unreachable")
 		}
-		inf := c.alphabet[idx].Info
-		// Skip starting move segment.
-		if inf.Start != (bezier.Point{}) {
-			for range 3 {
-				if _, ok := spline.Next(); !ok {
-					panic("unclamped spline")
-				}
+		infs := c.alphabet[idx].Info
+		if len(infs) == 0 {
+			// A glyph with no engrave run has no knots of its own, so it
+			// cannot absorb a Delay: the scaler would still hold the whole
+			// unit when the next move arrives and panic "scale already in
+			// effect". Fold the unit into the padded move to the slot
+			// instead, and let the move's own knots spend it. The
+			// destination is dot, the slot origin, which is inside bounds
+			// (bounds always contains the origin), so the move stays within
+			// what advDur and padDur cover.
+			cont = cont && DelayMove(yield, c.conf, totalDur+c.runeDuration, pen, dot)
+			pen = dot
+			totalDur = advDur
+		} else {
+			runs := newRunSplitter(spline)
+			for _, inf := range infs {
+				start := dot.Add(inf.Start)
+				cont = cont && DelayMove(yield, c.conf, totalDur, pen, start) &&
+					yield(Delay(inf.Duration, c.runeDuration)) &&
+					runs.engrave(yield, dot, c.em, fh)
+				pen = dot.Add(inf.End)
+				// Every move is padded to the same target, whether it steps
+				// between the runs of one glyph or on to the next glyph.
+				// Padding the intra-glyph move to anything else would
+				// disclose where in a row the multi-run glyphs sit, not
+				// merely how many there are.
+				totalDur = advDur
 			}
 		}
-		start := dot.Add(inf.Start)
-		cont = cont && DelayMove(yield, c.conf, totalDur, pen, start) &&
-			yield(Delay(inf.Duration, c.runeDuration)) &&
-			engraveSpline(yield, dot, c.em, fh, spline)
-		pen = dot.Add(inf.End)
-		totalDur = advDur
+		// dot advances once per glyph, never per run: the plate's "position
+		// implies index" property depends on it.
 		accum += len(txt)
 		if accum >= longest {
 			accum -= longest
