@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"seedhammer.com/backup"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/constant"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
@@ -440,47 +443,137 @@ func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP s
 	return false
 }
 
+// passphraseSecretHook is a test-only seam handing the flow's secret buffer to
+// a test, so it can assert the buffer really was wiped once the flow returned
+// -- on a completed engrave and on an abort alike (spec 5.3). The test keeps
+// the slice header and reads the backing array AFTER the wipe defer has run.
+// nil in production; mirrors bip85SeedHook.
+var passphraseSecretHook func(secret []byte)
+
+// ppBuildPlate turns the collected fields into an engravable plate.
+//
+// RESIDUAL COPY (spec 5.3): backup.Passphrase.Passphrase is a Go string, so
+// this conversion leaves a copy of the secret on the heap that cannot be
+// wiped. It is the single conversion on the engrave path and it is required by
+// the Phase C plate type; everything upstream of here -- entry, the confirm
+// screen's marked readout, the counts -- works on []byte. Mitigating context,
+// not an excuse: RAM is volatile, the device is air-gapped, and it powers down
+// between uses.
+//
+// SeedFP and CombinedFP arrive canonical from fingerprintEntryFlow, which is
+// the precondition backup.Passphrase documents but does not check.
+func ppBuildPlate(params engrave.Params, secret []byte, seedFP, combinedFP string, qr bool) (Plate, error) {
+	desc := backup.Passphrase{
+		Passphrase: string(secret),
+		SeedFP:     seedFP,
+		CombinedFP: combinedFP,
+		QR:         qr,
+		Font:       constant.Font,
+	}
+	side, err := backup.EngravePassphrase(params, desc)
+	if err != nil {
+		return Plate{}, err
+	}
+	return toPlate(side, params)
+}
+
+// The steps of spec 5, in order. Named so the Back transitions read as
+// movement through the flow rather than arithmetic.
+type ppStep int
+
+const (
+	ppStepEntry ppStep = iota
+	ppStepSeedFP
+	ppStepCombinedFP
+	ppStepQR
+	ppStepConfirm
+	ppStepEngrave
+)
+
 // engravePassphraseFlow is the engravePassphrase program (spec 5): enter a
 // BIP-39 passphrase, optionally record the two user-typed fingerprints, choose
 // whether to include a QR, review, and engrave.
 //
 // Back steps BACKWARDS through the flow rather than abandoning it, so a
-// mis-tap on step 3 does not throw away a 100-character passphrase; only Back
+// mis-tap on step 5 does not throw away a 100-character passphrase; only Back
 // on the first step leaves the program.
 //
-// Phase D Tasks 1-3 wire the menu entry and the first three steps; the QR
-// choice, confirm and engrave land in Tasks 4-5.
+// SECRET HANDLING (spec 5.3), stated honestly:
+//
+//   - The passphrase is accumulated in secret, a []byte wiped by a defer that
+//     runs on EVERY exit -- completed engrave, abort at any step, and
+//     ctx.Done. The confirm screen's mark-substituted copy is likewise a
+//     []byte, wiped when that screen returns.
+//   - It is never logged, never written to any store, and never sent over NFC.
+//     No error value on this path carries it either: the messages are
+//     constants, and the passphrase package's sentinels carry no input.
+//   - It CANNOT be fully wiped, and this code does not claim otherwise.
+//     PassphraseKeyboard.Fragment is a Go string grown by concatenation, so
+//     every keystroke leaves an unreachable heap copy of a prefix. Two further
+//     unwipeable copies exist by construction: seeding the keyboard when
+//     stepping back into entry, and backup.Passphrase.Passphrase in
+//     ppBuildPlate. Both are marked at their site. What is achievable is that
+//     the buffers this flow OWNS are zeroed, and that no additional string
+//     copy is made for display, counting or proof-reading.
 func engravePassphraseFlow(ctx *Context, th *Colors) {
 	secret := make([]byte, passphrase.MaxLen)
+	// The only scrub defer, and so the last to run: it zeroes the backing
+	// array after every other defer, on every return path.
 	defer wipeBytes(secret)
+	if passphraseSecretHook != nil {
+		passphraseSecretHook(secret)
+	}
 	n := 0
 	var seedFP, combinedFP string
-	step := 0
+	qr := false
+	step := ppStepEntry
 	for !ctx.Done {
 		switch step {
-		case 0:
+		case ppStepEntry:
 			m, ok := passphraseEntryFlow(ctx, th, secret, n)
 			if !ok {
-				return
+				return // Back out of the first step leaves the program.
 			}
 			n = m
-		case 1:
+		case ppStepSeedFP:
 			fp, ok := fingerprintEntryFlow(ctx, th, ppSeedFP)
 			if !ok {
 				step -= 2
 				break
 			}
 			seedFP = fp
-		case 2:
+		case ppStepCombinedFP:
 			fp, ok := fingerprintEntryFlow(ctx, th, ppCombinedFP)
 			if !ok {
 				step -= 2
 				break
 			}
 			combinedFP = fp
-		default:
-			_, _ = seedFP, combinedFP
-			return
+		case ppStepQR:
+			add, ok := ppQRChoiceFlow(ctx, th)
+			if !ok {
+				step -= 2
+				break
+			}
+			qr = add
+		case ppStepConfirm:
+			if !ppConfirmFlow(ctx, th, secret[:n], seedFP, combinedFP, qr) {
+				step -= 2
+				break
+			}
+		case ppStepEngrave:
+			plate, err := ppBuildPlate(ctx.Platform.EngraverParams(), secret[:n], seedFP, combinedFP, qr)
+			if err != nil {
+				// The message names no part of the passphrase.
+				showError(ctx, th, "Passphrase", "This passphrase does not fit a plate.")
+				step -= 2
+				break
+			}
+			if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+				return
+			}
+			// Backed out of the engrave: return to the confirm screen.
+			step -= 2
 		}
 		step++
 	}

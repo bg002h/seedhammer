@@ -1,10 +1,14 @@
 package gui
 
 import (
+	"bytes"
 	"fmt"
 	"image"
+	"log"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"seedhammer.com/backup"
 	"seedhammer.com/gui/assets"
@@ -84,6 +88,33 @@ func (h *ppHarness) pump(n int, want string) bool {
 		}
 	}
 	return false
+}
+
+// mustReach pumps frames until want appears, failing the test if it never
+// does. Every step of a flow test goes through this rather than a bare pump
+// whose false return could be dropped on the floor.
+func (h *ppHarness) mustReach(want string) {
+	h.t.Helper()
+	if !h.pump(32, want) {
+		h.t.Fatalf("never reached %q; last frame %q", want, h.content)
+	}
+}
+
+// backspace taps the keyboard's backspace key n times.
+func (h *ppHarness) backspace(n int) {
+	h.t.Helper()
+	kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
+	if !ok {
+		h.t.Fatal("widget \"kbd\" is not a *PassphraseKeyboard")
+	}
+	for range n {
+		tag := ppTagFor(kbd, func(k ppKey) bool { return k.action == ppBackspace })
+		if tag == nil {
+			h.t.Fatalf("no backspace key on page %d", kbd.page)
+		}
+		h.tapAt(h.point(tag, "backspace key"))
+		h.next("after backspace")
+	}
 }
 
 // point returns the centre of tag's hit area, failing the test if the target is
@@ -801,4 +832,279 @@ func TestQRChoiceCanBeTurnedOn(t *testing.T) {
 	if !qr {
 		t.Fatal("choosing the QR option did not turn the QR on")
 	}
+}
+
+// --- Tasks 5 and 6: the whole flow, by touch, and what happens to the secret --
+
+// ppFlowRun drives engravePassphraseFlow end to end by touch. Nothing here
+// synthesizes a ButtonEvent: every step is a PointerEvent aimed at a hit area
+// read back from the frame that was drawn.
+type ppFlowRun struct {
+	h        *ppHarness
+	engraver *testEngraver
+	platform *testPlatform
+	secret   []byte // the flow's own buffer, captured for the wipe assertions
+	done     bool
+}
+
+func startPPFlow(t *testing.T) *ppFlowRun {
+	t.Helper()
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	e := newEngraver()
+	p.engraver = e
+	h := &ppHarness{t: t, ctx: NewContext(p), widgets: make(map[string]any)}
+	passphraseWidgetHook = func(name string, w any) { h.widgets[name] = w }
+	r := &ppFlowRun{h: h, engraver: e, platform: p}
+	passphraseSecretHook = func(secret []byte) { r.secret = secret }
+	t.Cleanup(func() {
+		passphraseWidgetHook = nil
+		passphraseSecretHook = nil
+	})
+	h.start(func() {
+		engravePassphraseFlow(h.ctx, &descriptorTheme)
+		r.done = true
+	})
+	return r
+}
+
+// enterPassphrase types the passphrase and accepts it.
+func (r *ppFlowRun) enterPassphrase(s string) {
+	r.h.t.Helper()
+	r.h.typeString(s)
+	r.h.tapWidget("ok")
+}
+
+// enterFingerprint types a fingerprint (or nothing, to skip) and accepts it.
+func (r *ppFlowRun) enterFingerprint(s string) {
+	r.h.t.Helper()
+	if s != "" {
+		r.h.typeString(s)
+	}
+	r.h.tapWidget("ok")
+}
+
+// chooseQR accepts the QR step, optionally selecting the opt-in first.
+func (r *ppFlowRun) chooseQR(add bool) {
+	r.h.t.Helper()
+	if add {
+		cs, ok := r.h.widget("qr").(*ChoiceScreen)
+		if !ok {
+			r.h.t.Fatal("widget \"qr\" is not a *ChoiceScreen")
+		}
+		r.h.tapAt(r.h.point(&cs.children[1].click, "the \"add QR\" choice"))
+		r.h.next("after choosing to add a QR")
+	}
+	r.h.tapNav(Button3)
+}
+
+// hold presses a nav button and holds it past confirmDelay, which is how the
+// engrave screen is armed. Requires synctest for the sleep.
+func (r *ppFlowRun) hold(b Button) {
+	r.h.t.Helper()
+	pos := r.h.navPoint(b)
+	d := r.h.drawer()
+	tag, _, hit := d.Hit(pos)
+	if !hit {
+		r.h.t.Fatalf("hold %v: no touch target at %v", b, pos)
+	}
+	if c, ok := tag.(*Clickable); !ok || (c.Button != b && c.AltButton != b) {
+		r.h.t.Fatalf("hold %v: the target at %v is %v", b, pos, tag)
+	}
+	r.h.ctx.Router.Events(d, PointerEvent{Pressed: true, Entered: true, Pos: pos}.Event())
+	r.h.step()
+	time.Sleep(confirmDelay)
+	r.h.step()
+}
+
+// engrave drives the engrave screen to a completed job and dismisses it, which
+// is the only path that makes the flow return true and exit.
+func (r *ppFlowRun) engrave() {
+	r.h.t.Helper()
+	r.h.mustReach("Engrave Plate")
+	r.hold(Button3)
+loop:
+	for i := 0; i < 4096; i++ {
+		r.h.step()
+		select {
+		case <-r.engraver.closes:
+			break loop
+		case <-r.platform.wakeups:
+		}
+	}
+	// While the job runs, the nav column carries only a Back button; the
+	// dismiss button appears with the completion frame.
+	r.h.mustReach("completed successfully")
+	r.h.tapNav(Button3) // dismiss the success screen
+	synctest.Wait()
+	for i := 0; i < 64 && !r.done; i++ {
+		r.h.frame()
+	}
+}
+
+// TestPassphraseFlowByTouchEndToEnd is the Task 6 requirement: every step of
+// the flow -- entry, both fingerprints, the QR choice, confirm and engrave --
+// completed by PointerEvent alone, on the panel the machine has. If any step
+// could only be driven by a button, it would fail here, because no step below
+// sends one.
+func TestPassphraseFlowByTouchEndToEnd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := startPPFlow(t)
+		if !uiContains(r.h.content, "Passphrase") {
+			t.Fatalf("the flow did not open on the passphrase step; got %q", r.h.content)
+		}
+		r.enterPassphrase("a b")
+		r.h.mustReach("Seed FP")
+		r.enterFingerprint("a1b2c3d4")
+		r.h.mustReach("Expected Comb FP")
+		r.enterFingerprint("99887766")
+		r.h.mustReach("QR Code")
+		r.chooseQR(true)
+		r.h.mustReach("Confirm")
+		// The confirm screen must carry everything collected on the way here.
+		for _, want := range []string{"a_b", "A1B2C3D4", "99887766"} {
+			if !uiHas(r.h.content, want) {
+				t.Fatalf("the confirm screen lost %q; got %q", want, r.h.content)
+			}
+		}
+		if !uiContains(r.h.content, "QR: yes") {
+			t.Fatalf("the confirm screen lost the QR choice; got %q", r.h.content)
+		}
+		r.h.tapWidget("ok")
+		r.engrave()
+		if !r.done {
+			t.Fatal("the flow did not return after a completed engrave")
+		}
+	})
+}
+
+// TestPassphraseFlowWipesSecretOnExit: the []byte the flow accumulates into is
+// zeroed once it returns from a completed engrave (spec 5.3).
+func TestPassphraseFlowWipesSecretOnExit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := startPPFlow(t)
+		r.enterPassphrase("hunter2")
+		r.h.mustReach("Seed FP")
+		r.enterFingerprint("")
+		r.h.mustReach("Expected Comb FP")
+		r.enterFingerprint("")
+		r.h.mustReach("QR Code")
+		r.chooseQR(false)
+		r.h.mustReach("Confirm")
+		if !uiHas(r.h.content, "hunter2") {
+			t.Fatalf("the passphrase never reached the confirm screen; got %q", r.h.content)
+		}
+		// Prove the buffer under test is the one actually holding the secret,
+		// so the wipe assertion below cannot pass against a buffer that was
+		// always zero.
+		assertHolds(t, r.secret, "hunter2")
+		r.h.tapWidget("ok")
+		r.engrave()
+		if !r.done {
+			t.Fatal("the flow did not return after a completed engrave")
+		}
+		assertWiped(t, r.secret, "after a completed engrave")
+	})
+}
+
+// TestPassphraseFlowWipesSecretOnAbort: the same buffer is zeroed when the
+// operator backs out instead of engraving. An abort is the likelier exit, and
+// a wipe that only runs on success is the easiest one to get wrong.
+func TestPassphraseFlowWipesSecretOnAbort(t *testing.T) {
+	r := startPPFlow(t)
+	r.enterPassphrase("hunter2")
+	r.h.mustReach("Seed FP")
+	r.enterFingerprint("a1b2c3d4")
+	r.h.mustReach("Expected Comb FP")
+	r.enterFingerprint("")
+	r.h.mustReach("QR Code")
+	r.chooseQR(false)
+	r.h.mustReach("Confirm")
+	if !uiHas(r.h.content, "hunter2") {
+		t.Fatalf("the passphrase never reached the confirm screen; got %q", r.h.content)
+	}
+	assertHolds(t, r.secret, "hunter2")
+	// Back out one step at a time, all the way off the program.
+	for i := 0; i < 5 && !r.done; i++ {
+		r.h.tapNav(Button1)
+		r.h.step()
+	}
+	for i := 0; i < 16 && !r.done; i++ {
+		r.h.frame()
+	}
+	if !r.done {
+		t.Fatalf("backing out of every step did not leave the program; last frame %q", r.h.content)
+	}
+	assertWiped(t, r.secret, "after an abort")
+}
+
+// assertHolds fails unless secret currently contains want. Without it, a wipe
+// test would pass just as happily against a buffer nothing was ever written to.
+func assertHolds(t *testing.T, secret []byte, want string) {
+	t.Helper()
+	if !bytes.Contains(secret, []byte(want)) {
+		t.Fatalf("the flow's secret buffer does not hold the passphrase; it is the wrong buffer to be asserting a wipe on")
+	}
+}
+
+func assertWiped(t *testing.T, secret []byte, when string) {
+	t.Helper()
+	if secret == nil {
+		t.Fatal("the flow never handed its secret buffer to the test")
+	}
+	if len(secret) != passphrase.MaxLen {
+		t.Fatalf("the secret buffer is %d bytes, want %d", len(secret), passphrase.MaxLen)
+	}
+	for i, b := range secret {
+		if b != 0 {
+			t.Fatalf("secret[%d] = %#x %s -- the buffer was not wiped", i, b, when)
+		}
+	}
+}
+
+// TestPassphraseFlowNeverLogs captures everything the flow writes to the log
+// while a full engrave runs and asserts the passphrase is not in it. The
+// passphrase is a distinctive string that occurs in no UI text, so a match
+// could only come from the secret itself.
+func TestPassphraseFlowNeverLogs(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const secret = "zqxjv7"
+		var logbuf bytes.Buffer
+		out, flags, prefix := log.Writer(), log.Flags(), log.Prefix()
+		log.SetOutput(&logbuf)
+		t.Cleanup(func() {
+			log.SetOutput(out)
+			log.SetFlags(flags)
+			log.SetPrefix(prefix)
+		})
+		r := startPPFlow(t)
+		// Force the refusal paths too: they are the ones most likely to
+		// interpolate the input into a message.
+		r.h.tapWidget("ok") // empty -> refused
+		r.h.mustReach("Enter a passphrase")
+		r.h.tapNav(Button3) // dismiss
+		r.h.mustReach("0/100")
+		r.enterPassphrase(secret)
+		r.h.mustReach("Seed FP")
+		r.h.typeString("zzz") // not a fingerprint -> refused
+		r.h.tapWidget("ok")
+		r.h.mustReach("8 hex digits")
+		r.h.tapNav(Button3) // dismiss
+		r.h.mustReach("Seed FP")
+		r.h.backspace(3) // clear the rejected input
+		r.enterFingerprint("a1b2c3d4")
+		r.h.mustReach("Expected Comb FP")
+		r.enterFingerprint("")
+		r.h.mustReach("QR Code")
+		r.chooseQR(true)
+		r.h.mustReach("Confirm")
+		r.h.tapWidget("ok")
+		r.engrave()
+		if !r.done {
+			t.Fatal("the flow did not return after a completed engrave")
+		}
+		if strings.Contains(logbuf.String(), secret) {
+			t.Fatalf("the passphrase reached the log: %q", logbuf.String())
+		}
+	})
 }
