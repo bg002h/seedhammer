@@ -135,27 +135,43 @@ func TestPassphraseLayoutFitsNoQR(t *testing.T) {
 // advance but an empty spline, so a passphrase of spaces would engrave nothing
 // at all.
 func TestPassphraseEngravesMarkNotSpace(t *testing.T) {
-	spaces := passphrasePoints(t, Passphrase{Passphrase: "   ", Font: constant.Font})
-	ink := 0
-	for _, k := range spaces {
-		if k.Engrave {
-			ink++
-		}
-	}
-	if ink == 0 {
+	if ink := passphraseTextInk(t, Passphrase{Passphrase: "   ", Font: constant.Font}); len(ink) == 0 {
 		t.Error("a passphrase of spaces engraved no ink: 0x20 reached the stringer")
 	}
 	// Engraving " " must be indistinguishable from engraving the mark itself.
 	// passphraseGlyphs is the identity on a string that already holds the mark,
-	// so equality here can only mean the space was translated.
-	viaSpace := passphrasePlan(t, Passphrase{Passphrase: "a b c", Font: constant.Font})
-	viaMark := passphrasePlan(t, Passphrase{
+	// so equality here can only mean the space was translated. Only the text
+	// block is compared: the space-containing plate also carries the legend.
+	viaSpace := passphraseTextInk(t, Passphrase{Passphrase: "a b c", Font: constant.Font})
+	viaMark := passphraseTextInk(t, Passphrase{
 		Passphrase: "a" + string(SpaceMark) + "b" + string(SpaceMark) + "c",
 		Font:       constant.Font,
 	})
 	if !slices.Equal(viaSpace, viaMark) {
-		t.Errorf("space and mark engrave differently: %d vs %d knots", len(viaSpace), len(viaMark))
+		t.Errorf("space and mark engrave differently: %d vs %d ink points", len(viaSpace), len(viaMark))
 	}
+}
+
+// passphraseTextInk returns the points engraved inside the text block, in cut
+// order, relative to the block's top-left corner. Everything outside the block
+// -- the metadata bands and the QR -- is excluded; TestPassphrasePlateWorstCase
+// is what proves nothing escapes a region in the first place.
+func passphraseTextInk(t *testing.T, plate Passphrase) []bezier.Point {
+	t.Helper()
+	dim := 0
+	if plate.QR {
+		dim = passphraseDim(t, plate)
+	}
+	l := passphraseLayoutFor(params, plate, dim)
+	lo := bezier.Pt(l.textX, l.textY)
+	hi := bezier.Pt(l.textX+l.blockW, l.textY+l.blockH)
+	var out []bezier.Point
+	for _, k := range passphrasePoints(t, plate) {
+		if k.Engrave && inRect(k.P, lo, hi) {
+			out = append(out, k.P.Sub(lo))
+		}
+	}
+	return out
 }
 
 func allPrintableASCII() string {
@@ -193,7 +209,7 @@ func passphraseQRGrid(t *testing.T, plate Passphrase) qrGrid {
 		t.Fatal(err)
 	}
 	dim := code.Size
-	l := passphraseLayoutFor(params, plate.Font, passphraseGlyphs(plate.Passphrase), dim)
+	l := passphraseLayoutFor(params, plate, dim)
 	if l.qrDim != dim {
 		t.Fatalf("layout reserved a %d-module code, plate encodes %d", l.qrDim, dim)
 	}
@@ -283,7 +299,7 @@ func TestPassphraseQRLayoutFits(t *testing.T) {
 			t.Fatalf("knot %v outside the usable area [%v, %v]", k.P, lo, hi)
 		}
 	}
-	l := passphraseLayoutFor(params, constant.Font, passphraseGlyphs(p.Passphrase), passphraseDim(t, p))
+	l := passphraseLayoutFor(params, p, passphraseDim(t, p))
 	if l.rows != 5 || l.rowLen != passphraseRowLenQR {
 		t.Errorf("QR layout is %d rows x %d, want 5 x %d", l.rows, l.rowLen, passphraseRowLenQR)
 	}
@@ -319,7 +335,7 @@ func TestPassphraseQRSizeVariable(t *testing.T) {
 		if dim != tc.wantDim {
 			t.Errorf("%s: QR is %d modules, want %d", tc.name, dim, tc.wantDim)
 		}
-		l := passphraseLayoutFor(params, constant.Font, passphraseGlyphs(tc.in), dim)
+		l := passphraseLayoutFor(params, plate, dim)
 		if l.envSize != passphraseQREnvelope*params.StrokeWidth*passphraseQRScale {
 			t.Errorf("%s: envelope %d is not the reserved %d modules", tc.name, l.envSize, passphraseQREnvelope)
 		}
@@ -364,5 +380,288 @@ func TestPassphraseQRTimingIsContentIndependent(t *testing.T) {
 	pb := engrave.ProfileSpline(engrave.PlanEngraving(conf, passphraseEngraving(t, b)))
 	if !pa.Equal(pb) {
 		t.Errorf("QR timing depends on content:\n%+v\n%+v", pa, pb)
+	}
+}
+
+// passphraseRegion is one rectangle of the plate: a metadata band, the text
+// block or the QR envelope. Every engraved point must land in exactly one.
+type passphraseRegion struct {
+	name     string
+	lo, hi   bezier.Point
+	required bool
+}
+
+// passphraseRegions derives the plate's regions from the layout the engraver
+// itself uses, so a test cannot assert geometry the engraver does not honour.
+func passphraseRegions(t *testing.T, plate Passphrase) []passphraseRegion {
+	t.Helper()
+	dim := 0
+	if plate.QR {
+		dim = passphraseDim(t, plate)
+	}
+	l := passphraseLayoutFor(params, plate, dim)
+	plateX := params.F(85)
+	var rs []passphraseRegion
+	if n := len(l.topLines); n > 0 {
+		rs = append(rs, passphraseRegion{
+			name: "top band",
+			lo:   bezier.Pt(0, l.topY), hi: bezier.Pt(plateX, l.topY+n*l.smallEm),
+			required: true,
+		})
+	}
+	rs = append(rs, passphraseRegion{
+		name: "text block",
+		lo:   bezier.Pt(l.textX, l.textY), hi: bezier.Pt(l.textX+l.blockW, l.textY+l.blockH),
+		required: true,
+	})
+	if l.qrDim > 0 {
+		rs = append(rs, passphraseRegion{
+			name: "qr envelope",
+			lo:   bezier.Pt(l.envX, l.envY), hi: bezier.Pt(l.envX+l.envSize, l.envY+l.envSize),
+			required: true,
+		})
+	}
+	if n := len(l.bottomLines); n > 0 {
+		rs = append(rs, passphraseRegion{
+			name: "bottom band",
+			lo:   bezier.Pt(0, l.bottomY), hi: bezier.Pt(plateX, l.bottomY+n*l.smallEm),
+			required: true,
+		})
+	}
+	return rs
+}
+
+// The partial case -- text only, no metadata -- is what let the metadata
+// overflow go unnoticed twice during specification, so this is the full one:
+// 100 characters with spaces, both fingerprints, the QR, the legend and the
+// footer, all at once.
+func TestPassphrasePlateWorstCase(t *testing.T) {
+	p := Passphrase{
+		Passphrase: strings.Repeat("a b", 33) + "a", // 100 chars, spaces -> legend required
+		SeedFP:     "A1B2C3D4",
+		CombinedFP: "5E6F7A8B",
+		QR:         true,
+		Font:       constant.Font,
+	}
+	if got := len(p.Passphrase); got != 100 {
+		t.Fatalf("test is void: passphrase is %d characters, want 100", got)
+	}
+	dim := passphraseDim(t, p)
+	l := passphraseLayoutFor(params, p, dim)
+
+	// Spec 4.3: at most two lines per 10mm band. A band offers innerMargin 10
+	// minus outerMargin 3 = 7mm; three 3mm lines need 9 and run off the plate.
+	if n := len(l.topLines); n != 2 {
+		t.Errorf("top band has %d lines, want 2 in the worst case: %q", n, l.topLines)
+	}
+	if n := len(l.bottomLines); n != 2 {
+		t.Errorf("bottom band has %d lines, want 2 in the worst case: %q", n, l.bottomLines)
+	}
+
+	regions := passphraseRegions(t, p)
+	// The regions must be disjoint on Y and in top-to-bottom order: that is
+	// what "blocks do not overlap" means on this plate.
+	for i := 1; i < len(regions); i++ {
+		if regions[i-1].hi.Y > regions[i].lo.Y {
+			t.Errorf("%s (ends %d) overlaps %s (starts %d)",
+				regions[i-1].name, regions[i-1].hi.Y, regions[i].name, regions[i].lo.Y)
+		}
+	}
+	// The bands live in the 10mm margins; the text and QR live between them.
+	band, content := params.F(outerMargin), params.F(innerMargin)
+	for _, r := range regions {
+		switch r.name {
+		case "top band":
+			if r.lo.Y < band || r.hi.Y > content {
+				t.Errorf("top band [%d,%d] escapes the margin [%d,%d]", r.lo.Y, r.hi.Y, band, content)
+			}
+		case "bottom band":
+			if r.lo.Y < params.F(85-innerMargin) || r.hi.Y > params.F(85-outerMargin) {
+				t.Errorf("bottom band [%d,%d] escapes the margin [%d,%d]",
+					r.lo.Y, r.hi.Y, params.F(85-innerMargin), params.F(85-outerMargin))
+			}
+		default:
+			if r.lo.Y < content || r.hi.Y > params.F(85-innerMargin) {
+				t.Errorf("%s [%d,%d] escapes the usable area [%d,%d]",
+					r.name, r.lo.Y, r.hi.Y, content, params.F(85-innerMargin))
+			}
+		}
+	}
+
+	// Every engraved point lands in exactly one region, and never in a corner
+	// screw-hole band.
+	seen := make(map[string]int)
+	for _, k := range passphrasePoints(t, p) {
+		hits := 0
+		for _, r := range regions {
+			if inRect(k.P, r.lo, r.hi) {
+				hits++
+				seen[r.name]++
+			}
+		}
+		if hits != 1 {
+			t.Fatalf("knot %v lands in %d regions, want exactly 1", k.P, hits)
+		}
+		inXBand := k.P.X < content || k.P.X > params.F(85-innerMargin)
+		inYBand := k.P.Y < content || k.P.Y > params.F(85-innerMargin)
+		if inXBand && inYBand {
+			t.Fatalf("knot %v lands in a corner screw-hole band", k.P)
+		}
+	}
+	for _, r := range regions {
+		if r.required && seen[r.name] == 0 {
+			t.Errorf("nothing engraved in the %s", r.name)
+		}
+	}
+}
+
+// Spec 4.3: no metadata line may exceed 64mm. The longest, FINGERPRINTS TYPED,
+// NOT VERIFIED, is 32 characters x the 2.0mm advance at the 3mm em, and clears
+// the 10mm corner screw-hole bands by 0.5mm on each side.
+func TestPassphraseBandBudget(t *testing.T) {
+	plates := []Passphrase{
+		{Passphrase: "hunter2", Font: constant.Font},
+		{Passphrase: "a b", Font: constant.Font},
+		{Passphrase: "a b", SeedFP: "A1B2C3D4", Font: constant.Font},
+		{Passphrase: "a b", CombinedFP: "5E6F7A8B", Font: constant.Font},
+		{Passphrase: strings.Repeat("a b", 33) + "a", SeedFP: "FFFFFFFF", CombinedFP: "00000000",
+			QR: true, Font: constant.Font},
+	}
+	for _, p := range plates {
+		dim := 0
+		if p.QR {
+			dim = passphraseDim(t, p)
+		}
+		l := passphraseLayoutFor(params, p, dim)
+		for _, band := range [][]string{l.topLines, l.bottomLines} {
+			if len(band) > 2 {
+				t.Errorf("%q: band has %d lines, want at most 2: %q", p.Passphrase, len(band), band)
+			}
+			for _, line := range band {
+				w, _ := engrave.String(p.Font, l.smallEm, line).Measure()
+				if w > params.F(64) {
+					t.Errorf("metadata line %q is %d wide, over the %d budget", line, w, params.F(64))
+				}
+			}
+		}
+	}
+}
+
+// The legend is required whenever the passphrase contains a space, and must not
+// appear otherwise: without it the mark is a private convention documented
+// nowhere the reader will be.
+func TestLegendPresence(t *testing.T) {
+	cases := []struct{ in string }{
+		{"hunter2"}, {"a b"}, {" leading"}, {"trailing "}, {"a  b"}, {"   "},
+		{"no_spaces_at_all"}, {"correct horse battery staple"},
+	}
+	legend := string(SpaceMark) + " = SPACE"
+	for _, tc := range cases {
+		l := passphraseLayoutFor(params, Passphrase{Passphrase: tc.in, Font: constant.Font}, 0)
+		got := slices.Contains(l.bottomLines, legend)
+		want := strings.ContainsRune(tc.in, ' ')
+		if got != want {
+			t.Errorf("%q: legend present = %v, want %v (lines %q)", tc.in, got, want, l.bottomLines)
+		}
+	}
+}
+
+// Fingerprints are engraved grouped 4-and-4, are omitted entirely when blank,
+// and the separator is a plain space, NEVER the visible mark: the mark means "a
+// literal space in the passphrase".
+func TestPassphraseFingerprintLines(t *testing.T) {
+	footer := "FINGERPRINTS TYPED, NOT VERIFIED"
+	cases := []struct {
+		seed, comb string
+		wantTop    []string
+		wantFooter bool
+	}{
+		{"", "", nil, false},
+		{"A1B2C3D4", "", []string{"SEED FP: A1B2 C3D4"}, true},
+		{"", "5E6F7A8B", []string{"EXPECTED COMB FP: 5E6F 7A8B"}, true},
+		{"A1B2C3D4", "5E6F7A8B", []string{"SEED FP: A1B2 C3D4", "EXPECTED COMB FP: 5E6F 7A8B"}, true},
+	}
+	for _, tc := range cases {
+		p := Passphrase{Passphrase: "hunter2", SeedFP: tc.seed, CombinedFP: tc.comb, Font: constant.Font}
+		l := passphraseLayoutFor(params, p, 0)
+		if !slices.Equal(l.topLines, tc.wantTop) {
+			t.Errorf("seed=%q comb=%q: top band %q, want %q", tc.seed, tc.comb, l.topLines, tc.wantTop)
+		}
+		for _, line := range l.topLines {
+			if strings.ContainsRune(line, SpaceMark) {
+				t.Errorf("fingerprint line %q uses the visible-space mark as a separator", line)
+			}
+			if !strings.Contains(line, " ") {
+				t.Errorf("fingerprint line %q has no 4-and-4 grouping", line)
+			}
+		}
+		if got := slices.Contains(l.bottomLines, footer); got != tc.wantFooter {
+			t.Errorf("seed=%q comb=%q: footer present = %v, want %v", tc.seed, tc.comb, got, tc.wantFooter)
+		}
+	}
+}
+
+// glyphInk is one glyph's engraved outline relative to its slot, produced by
+// the real plate path.
+func glyphInk(t *testing.T, r rune) []bezier.Point {
+	t.Helper()
+	ink := passphraseTextInk(t, Passphrase{Passphrase: string(r), Font: constant.Font})
+	if len(ink) == 0 {
+		t.Fatalf("glyph %#x engraves nothing", r)
+	}
+	return ink
+}
+
+// Leading, trailing, interior and repeated spaces each produce the
+// corresponding count of visible marks. The expectation is rebuilt from the RAW
+// passphrase here -- "space becomes the mark, everything else is verbatim" --
+// rather than from passphraseGlyphs, so the test does not assume the
+// substitution it is checking.
+func TestSpaceFidelity(t *testing.T) {
+	cases := []struct {
+		in    string
+		marks int
+	}{
+		{"a b", 1},
+		{" leading", 1},
+		{"trailing ", 1},
+		{"a  b", 2},
+		{"   ", 3},
+		{"a b  c   d", 6},
+		{"Mixed Case Kept", 2},
+		{strings.Repeat("a b", 33) + "a", 33},
+	}
+	cache := map[rune][]bezier.Point{}
+	ink := func(r rune) []bezier.Point {
+		if v, ok := cache[r]; ok {
+			return v
+		}
+		cache[r] = glyphInk(t, r)
+		return cache[r]
+	}
+	for _, tc := range cases {
+		plate := Passphrase{Passphrase: tc.in, Font: constant.Font}
+		l := passphraseLayoutFor(params, plate, 0)
+		adv := passphraseAdvance(constant.Font, l.em)
+		var want []bezier.Point
+		marks := 0
+		for i, c := range []rune(tc.in) {
+			if c == ' ' {
+				c = SpaceMark
+				marks++
+			}
+			off := bezier.Pt((i%l.rowLen)*adv, (i/l.rowLen)*l.em)
+			for _, p := range ink(c) {
+				want = append(want, p.Add(off))
+			}
+		}
+		if marks != tc.marks {
+			t.Fatalf("test is void: %q has %d spaces, expected %d", tc.in, marks, tc.marks)
+		}
+		got := passphraseTextInk(t, plate)
+		if !slices.Equal(got, want) {
+			t.Errorf("%q: the engraved text block is not the mark-substituted glyph sequence (%d vs %d ink points)",
+				tc.in, len(got), len(want))
+		}
 	}
 }

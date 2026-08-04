@@ -7,6 +7,7 @@ import (
 	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/vector"
+	"seedhammer.com/passphrase"
 )
 
 // SpaceMark is the codepoint of the visible-space glyph. A space is invisible
@@ -121,6 +122,16 @@ type passphraseLayout struct {
 	qrDim               int
 	qrX, qrY, qrSize    int
 	envX, envY, envSize int
+
+	// glyphs is the mark-substituted passphrase, one row per rowLen glyphs.
+	glyphs string
+	// The metadata bands. smallEm is their line height; topY and bottomY are
+	// the top edge of each band's first line. Fingerprint lines are omitted
+	// entirely when blank -- an empty label is worse than no label.
+	smallEm       int
+	topY, bottomY int
+	topLines      []string
+	bottomLines   []string
 }
 
 // passphraseAdvance is the per-character advance of the (fixed-width)
@@ -133,14 +144,47 @@ func passphraseAdvance(font *vector.Face, em int) int {
 	return adv * em / font.Metrics().Height
 }
 
-// passphraseLayoutFor lays out glyphs, reserving room for a qrDim-module QR.
+// passphraseLegend labels the visible-space mark. Without it the mark is a
+// private convention documented nowhere the reader will be: someone inheriting
+// a plate has no way to know whether to type a space, a hyphen or nothing, and
+// each guess silently opens a different wallet. It is engraved with the real
+// mark glyph so the reader matches shapes, not descriptions.
+const passphraseLegend = string(SpaceMark) + " = SPACE"
+
+// passphraseFooter is engraved whenever either fingerprint is present. Both are
+// user-typed claims (spec D1); nothing on this device has checked them.
+const passphraseFooter = "FINGERPRINTS TYPED, NOT VERIFIED"
+
+// passphraseLayoutFor lays out plate, reserving room for a qrDim-module QR.
 // qrDim of 0 means no QR.
-func passphraseLayoutFor(params engrave.Params, font *vector.Face, glyphs string, qrDim int) passphraseLayout {
+func passphraseLayoutFor(params engrave.Params, plate Passphrase, qrDim int) passphraseLayout {
 	plateDims := image.Point{X: params.F(85), Y: params.F(85)}
+	font := plate.Font
 	l := passphraseLayout{
-		rowLen: passphraseRowLen,
-		em:     params.F(passphraseFontSize),
-		qrDim:  qrDim,
+		rowLen:  passphraseRowLen,
+		em:      params.F(passphraseFontSize),
+		qrDim:   qrDim,
+		glyphs:  passphraseGlyphs(plate.Passphrase),
+		smallEm: params.F(plateSmallFontSize),
+		topY:    params.F(outerMargin),
+	}
+	glyphs := l.glyphs
+	// The bands are the 10mm margins, matching existing practice: the master
+	// fingerprint and title already sit in exactly those bands. At most two
+	// lines fit -- a band offers innerMargin 10 - outerMargin 3 = 7mm, and
+	// three 3mm lines need 9mm and run off the plate edge (spec 4.3).
+	l.bottomY = params.F(85 - innerMargin)
+	if plate.SeedFP != "" {
+		l.topLines = append(l.topLines, "SEED FP: "+passphrase.GroupFingerprint(plate.SeedFP))
+	}
+	if plate.CombinedFP != "" {
+		l.topLines = append(l.topLines, "EXPECTED COMB FP: "+passphrase.GroupFingerprint(plate.CombinedFP))
+	}
+	if strings.ContainsRune(plate.Passphrase, ' ') {
+		l.bottomLines = append(l.bottomLines, passphraseLegend)
+	}
+	if plate.SeedFP != "" || plate.CombinedFP != "" {
+		l.bottomLines = append(l.bottomLines, passphraseFooter)
 	}
 	gap := 0
 	if qrDim > 0 {
@@ -172,24 +216,37 @@ func passphraseLayoutFor(params engrave.Params, font *vector.Face, glyphs string
 }
 
 func engravePassphrase(params engrave.Params, plate Passphrase, qrc *engrave.ConstantQRCmd) engrave.Engraving {
-	glyphs := passphraseGlyphs(plate.Passphrase)
 	qrDim := 0
 	if qrc != nil {
 		qrDim = qrc.Size
 	}
-	l := passphraseLayoutFor(params, plate.Font, glyphs, qrDim)
+	l := passphraseLayoutFor(params, plate, qrDim)
 	// NewPassphraseStringer, never NewConstantStringer: the shared alphabet is
 	// 36 characters and panics on lowercase (spec 3.5.1).
 	constant := engrave.NewPassphraseStringer(plate.Font, params, l.em)
+	plateX := params.F(85)
+	// band engraves centred metadata lines downwards from y.
+	band := func(t engrave.Transform, y int, lines []string) {
+		for i, line := range lines {
+			s := engrave.String(plate.Font, l.smallEm, line)
+			w, _ := s.Measure()
+			t.Offset((plateX-w)/2, y+i*l.smallEm)
+			s.Engrave(t.Yield)
+		}
+	}
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
+		band(t, l.topY, l.topLines)
+
 		off := t.Offset(l.textX, l.textY)
-		stringColumn(off, constant, plate.Font, l.em, glyphs, l.rowLen, 0, l.rows)
+		stringColumn(off, constant, plate.Font, l.em, l.glyphs, l.rowLen, 0, l.rows)
 
 		if qrc != nil {
 			qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, passphraseQRScale)
 			t.Offset(l.qrX, l.qrY)
 			qrCmd(t.Yield)
 		}
+
+		band(t, l.bottomY, l.bottomLines)
 	}
 }
