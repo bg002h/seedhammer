@@ -131,12 +131,12 @@ func engraveSeedString(params engrave.Params, plate SeedString, qrc *engrave.Con
 
 		// Engrave column 1.
 		off := t.Offset(innerMargin, (plateDims.Y-col1Height)/2)
-		stringColumn(off, constant, plate.Font, pfs, seed, 0, endCol1)
+		stringColumn(off, constant, plate.Font, pfs, seed, groupLen, 0, endCol1)
 
 		// Engrave (top of) column 2.
 		endCol2 := min(ngroups, endCol1+maxCol2)
 		off = t.Offset(params.I(44), (plateDims.Y-col1Height)/2)
-		stringColumn(off, constant, plate.Font, pfs, seed, endCol1, endCol2)
+		stringColumn(off, constant, plate.Font, pfs, seed, groupLen, endCol1, endCol2)
 
 		// Engrave seed QR.
 		qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, qrScale)
@@ -147,7 +147,7 @@ func engraveSeedString(params engrave.Params, plate SeedString, qrc *engrave.Con
 			// Engrave bottom of column 2.
 			height := (ngroups - endCol2) * pfs
 			off := t.Offset(params.I(44), (plateDims.Y+col1Height)/2-height)
-			stringColumn(off, constant, plate.Font, pfs, seed, endCol2, ngroups)
+			stringColumn(off, constant, plate.Font, pfs, seed, groupLen, endCol2, ngroups)
 		}
 
 		// Engrave title.
@@ -265,11 +265,14 @@ func wordColumn(t engrave.Transform, constant *engrave.ConstantStringer, font *v
 	}
 }
 
-func stringColumn(t engrave.Transform, constant *engrave.ConstantStringer, font *vector.Face, fontSize int, s string, start, end int) {
+// stringColumn engraves rows [start, end) of s, rowLen characters per row, one
+// constant-time String call per row. The passphrase plate reuses it with
+// rowLen != groupLen, which is why the group size is a parameter.
+func stringColumn(t engrave.Transform, constant *engrave.ConstantStringer, font *vector.Face, fontSize int, s string, rowLen, start, end int) {
 	y := 0
 	for i := start; i < end; i++ {
-		word := s[i*groupLen:]
-		word = word[:min(len(word), groupLen)]
+		word := s[i*rowLen:]
+		word = word[:min(len(word), rowLen)]
 		constant.String(t.Offset(0, y).Yield, word)
 		y += fontSize
 	}
