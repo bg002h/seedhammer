@@ -91,11 +91,17 @@ func TestPassphraseSpaceSubstitution(t *testing.T) {
 	}
 }
 
-// The engraved stream must contain no literal 0x20. A real space would be
-// invisible on metal, which is the entire reason the mark exists.
-func TestPassphraseEngravesNoLiteralSpace(t *testing.T) {
+// TestPassphraseGlyphsLeavesNoSpace checks the SUBSTITUTION HELPER only.
+//
+// Named honestly after a Phase C review finding: an earlier version of this test
+// was called TestPassphraseEngravesNoLiteralSpace and its comment claimed to
+// guard the engrave path. It did not -- it only called passphraseGlyphs, so
+// engraving plate.Passphrase raw would have left it passing. The engrave path is
+// guarded by TestPassphraseEngravesMarkNotSpace and TestSpaceFidelity; this is
+// the helper-level check, and its name now says so.
+func TestPassphraseGlyphsLeavesNoSpace(t *testing.T) {
 	if strings.ContainsRune(passphraseGlyphs("a b c"), ' ') {
-		t.Error("engraved text contains a literal 0x20")
+		t.Error("passphraseGlyphs left a literal 0x20")
 	}
 }
 

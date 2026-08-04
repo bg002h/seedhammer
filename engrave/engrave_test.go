@@ -429,37 +429,34 @@ func FuzzConstantQR(f *testing.F) {
 		if len(entropy) < 16 {
 			return
 		}
-		// PROVISIONAL (Task 5, spec O6): raised from 40 to 120 so the
-		// fuzzer can drive dims up to v5/v6 (37/41) for measurement.
+		// 120 bytes so the fuzzer can reach v5 (dim 37) at ECC-L, which needs
+		// n >= 79. ECC-Q hits dim 41 from n = 61, which is out of the supported
+		// range -- so each level is tried INDEPENDENTLY below.
 		if m := 120; len(entropy) > m {
 			entropy = entropy[:m]
 		}
-		qrcq, err := qr.Encode(string(entropy), qr.Q)
-		if err != nil {
-			t.Fatal(err)
-		}
-		qrcqCmd, err := ConstantQR(qrcq)
-		if err != nil {
-			if qrcq.Size > 37 {
-				return // beyond the supported range (v5, dim 37); not a failure
+		// try engraves one ECC level, skipping only ITSELF when the code exceeds
+		// the supported range. An earlier version returned from the whole fuzz
+		// function on the ECC-Q failure, so above 60 bytes the ECC-L half never
+		// ran -- and ECC-L, the level this feature pins, was never fuzzed above
+		// dim 33. It never reached the version the cap was raised to exercise.
+		// (Phase A review M2.)
+		try := func(level qr.Level) {
+			c, err := qr.Encode(string(entropy), level)
+			if err != nil {
+				t.Fatal(err)
 			}
-			t.Fatalf("entropy: %x: %v", entropy, err)
-		}
-		qrcqCmd.Engrave(conf, strokeWidth, 3)
-		t.Logf("dim=%d modules=%d", qrcq.Size, len(qrcqCmd.plan))
-		qrcl, err := qr.Encode(string(entropy), qr.L)
-		if err != nil {
-			t.Fatal(err)
-		}
-		qrclCmd, err := ConstantQR(qrcl)
-		if err != nil {
-			if qrcl.Size > 37 {
-				return // beyond the supported range (v5, dim 37); not a failure
+			cmd, err := ConstantQR(c)
+			if err != nil {
+				if c.Size > 37 {
+					return // beyond the supported range (v5, dim 37); not a failure
+				}
+				t.Fatalf("entropy: %x: %v", entropy, err)
 			}
-			t.Fatalf("entropy: %x: %v", entropy, err)
+			cmd.Engrave(conf, strokeWidth, 3)
 		}
-		qrclCmd.Engrave(conf, strokeWidth, 3)
-		t.Logf("dim=%d modules=%d", qrcl.Size, len(qrclCmd.plan))
+		try(qr.Q)
+		try(qr.L)
 	})
 }
 
@@ -469,6 +466,12 @@ func FuzzConstantQR(f *testing.F) {
 // 5, spec O6): Phase B falls back to the 78-char cap when QR is enabled if
 // v5/v6 isn't supported.
 func TestConstantQRLargeVersionsFailClosed(t *testing.T) {
+	// v6 (dim 41) is deliberately unsupported -- spec O6 resolved to v5 only,
+	// because ECC-L caps at 106 bytes and the passphrase caps at 100.
+	//
+	// An earlier version of this test called t.Skipf when ConstantQR errored,
+	// which is ALWAYS, so it asserted nothing beyond "did not panic" while its
+	// comment claimed to check for silent truncation. Assert the rejection.
 	long := strings.Repeat("Xy7#", 30) // 120 bytes -> v6, dim 41
 	c, err := qr.Encode(long, qr.L)
 	if err != nil {
@@ -477,8 +480,8 @@ func TestConstantQRLargeVersionsFailClosed(t *testing.T) {
 	if c.Size != 41 {
 		t.Fatalf("expected dim 41, got %d", c.Size)
 	}
-	if _, err := ConstantQR(c); err != nil {
-		t.Skipf("v6 unsupported; Phase B uses the 78-char cap: %v", err)
+	if _, err := ConstantQR(c); err == nil {
+		t.Fatal("ConstantQR accepted a dim-41 code; the guard is meant to reject it")
 	}
 }
 
