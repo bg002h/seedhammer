@@ -474,3 +474,41 @@ func TestBodyRowsReserveOnlyWhatIsUsed(t *testing.T) {
 		t.Errorf("bodyRows(1, T, F) = (%d, %d), an inverted range", s, e)
 	}
 }
+
+// TestFitQREncodesTheTextOnly is spec 2, asserted where qrFor is visible and at
+// MODULE level: a decoder that ignores trailing data would return the text and
+// pass while the modules differed. The title and footer must leave no trace in
+// the code, whatever they are.
+func TestFitQREncodesTheTextOnly(t *testing.T) {
+	const text = "the note that goes on the plate"
+	want, err := qrpkg.Encode(text, qrpkg.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tf := range [][2]string{
+		{"", ""},
+		{"A TITLE", ""},
+		{"", "A FOOTER"},
+		{"A TITLE", "A FOOTER"},
+		{strings.Repeat("W", MaxTitleLen), strings.Repeat("m", MaxTitleLen)},
+	} {
+		_, _, got, err := Fit(prodParams, text, tf[0], tf[1], true)
+		if err != nil {
+			t.Fatalf("title=%q footer=%q: %v", tf[0], tf[1], err)
+		}
+		if got == nil {
+			t.Fatalf("title=%q footer=%q: no code", tf[0], tf[1])
+		}
+		if got.Size != want.Size || !slices.Equal(got.Bitmap, want.Bitmap) {
+			t.Errorf("title=%q footer=%q changed the code: %d modules vs %d", tf[0], tf[1], got.Size, want.Size)
+		}
+	}
+	// The assertion is not vacuous: a code over the concatenation differs.
+	other, err := qrpkg.Encode(text+"A TITLE"+"A FOOTER", qrpkg.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Equal(other.Bitmap, want.Bitmap) {
+		t.Fatal("text and text+title+footer encode identically; this test proves nothing")
+	}
+}
