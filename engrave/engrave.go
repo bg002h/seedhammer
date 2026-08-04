@@ -749,6 +749,20 @@ func (r Rect) Engrave(yield func(Command) bool) {
 
 const constantAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+// passphraseAlphabet is the alphabet for engraving BIP-39 passphrases: the
+// visible-space mark followed by every printable ASCII rune, in ascending
+// codepoint order (NewConstantStringer binary-searches it).
+//
+// It is deliberately SEPARATE from constantAlphabet. NewConstantStringer
+// derives runeDuration, startEndDist and center from whichever alphabet it is
+// given, accumulating bounds over every glyph. The lowercase descenders push
+// bounds.Max.Y positive, which would move center and startEndDist for every
+// constant-time string the machine engraves -- changing the goldens for seed,
+// SLIP-39 and codex32 plates. Widening constantAlphabet is forbidden.
+const passphraseAlphabet = "\x1f !\"#$%&'()*+,-./0123456789:;<=>?@" +
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
+	"abcdefghijklmnopqrstuvwxyz{|}~"
+
 // ConstantStringer can engrave text in a timing insensitive way.
 type ConstantStringer struct {
 	face *vector.Face
@@ -1193,19 +1207,28 @@ func timeMove(conf StepperConfig, dist int) uint {
 }
 
 func NewConstantStringer(face *vector.Face, params Params, em int) *ConstantStringer {
+	return newConstantStringer(face, params, em, constantAlphabet)
+}
+
+// NewPassphraseStringer builds a ConstantStringer over passphraseAlphabet.
+func NewPassphraseStringer(face *vector.Face, params Params, em int) *ConstantStringer {
+	return newConstantStringer(face, params, em, passphraseAlphabet)
+}
+
+func newConstantStringer(face *vector.Face, params Params, em int, alphabet string) *ConstantStringer {
 	var bounds bspline.Bounds
 	var adv int
 	var maxDur uint
 	m := face.Metrics()
 	fh := m.Height
 	conf := params.StepperConfig
-	runes := make([]constantRune, 0, len(constantAlphabet))
+	runes := make([]constantRune, 0, len(alphabet))
 	var lastr rune
 	const maxSplineKnots = 100
 
 	knotBuf := make([]bspline.Knot, 0, maxSplineKnots)
 	// Compute engraving durations for the alphabet.
-	for i, r := range constantAlphabet {
+	for i, r := range alphabet {
 		if r < lastr {
 			panic("unsorted alphabet")
 		}
