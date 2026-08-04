@@ -98,7 +98,12 @@ draws the baseline dot of each with a third cubic of
 face, including the visually identical `.` `:` `;` dots, sits at 2600.2–2610.9.
 
 The fix is one control point per glyph: the dot is now drawn exactly as the
-face's own `period` is (`C…,4.9 …,4.9 …,5`), translated to the glyph's cell.
+a VARIANT of the form this face's `period` uses (`C…,4.9 …,4.9 …,5`), translated
+to the glyph's cell. **Not `period`'s own form** — `period` (`sh.svg:178`) draws
+`C266,5,266,4.9,266.1,5`, which is the shape upstream's `!`/`?` had. Restoring
+the dot to match `period` exactly puts both glyphs back at 2638.22 mm/s³ and
+turns `TestFonts` red; measured, the whole-alphabet maximum rises from 2610.91
+to 2638.22, past that test's 1% slack (2626).
 Measured after: **2600.79** for both, i.e. in line with `.` at 2600.39. The
 artwork is unchanged — same 0.1×0.1 dot in the same place; only the tool path
 into it is smoother.

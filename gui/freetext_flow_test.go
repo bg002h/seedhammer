@@ -663,3 +663,85 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 		})
 	}
 }
+
+// TestFTQRChoiceLabelsBindToMeaning pins the QR screen's LABELS to the boolean
+// they produce. Every other test in this file selects the QR choice by index,
+// using the same index convention the flow itself uses, so nothing asserted the
+// label<->semantics binding in either direction.
+//
+// Proven necessary by mutation: swapping only the two strings, leaving
+// `sel == 1` alone, left the whole gui suite green. Under that mutation an
+// operator who taps the displayed "Add QR" gets NO QR, and one who taps "No QR"
+// gets a plate carrying a machine-readable copy of their text -- the
+// approved-vs-engraved inversion this feature's review gate exists to catch, on
+// the one field spec 9 calls out as a privacy hazard.
+//
+// This also pins spec 9's "default off, opt-in only": the initial selection is
+// index 0, so if the order were reversed, OK-without-moving would opt IN.
+func TestFTQRChoiceLabelsBindToMeaning(t *testing.T) {
+	for _, tc := range []struct {
+		sel   int
+		label string
+		want  bool
+	}{
+		{0, "No QR", false},
+		{1, "Add QR", true},
+	} {
+		h := newPPHarness(t)
+		var got, ok bool
+		h.start(func() { got, ok = ftQRChoiceFlow(h.ctx, &descriptorTheme, false) })
+		h.mustReach("QRCode")
+		cs, isCS := h.widget("qr").(*ChoiceScreen)
+		if !isCS {
+			t.Fatal(`widget "qr" is not a *ChoiceScreen`)
+		}
+		// The default must be the no-QR option, and it must be first.
+		if cs.choice != 0 {
+			t.Errorf("the QR screen opens on index %d; it must default to no QR", cs.choice)
+		}
+		if cs.Choices[0] != "No QR" {
+			t.Errorf("choice 0 is %q, want %q -- OK-without-moving must decline",
+				cs.Choices[0], "No QR")
+		}
+		if cs.Choices[tc.sel] != tc.label {
+			t.Fatalf("choice %d is labelled %q, want %q", tc.sel, cs.Choices[tc.sel], tc.label)
+		}
+		ftChoose(h, "qr", tc.sel)
+		for i := 0; i < 8 && !ok; i++ {
+			h.frame()
+		}
+		if !ok {
+			t.Fatalf("the QR screen never returned for %q", tc.label)
+		}
+		if got != tc.want {
+			t.Errorf("tapping the button labelled %q produced useQR=%v, want %v -- "+
+				"the operator gets the opposite of what they read", tc.label, got, tc.want)
+		}
+	}
+}
+
+// TestFTTitleAndFooterRejectNewlines guards the single-line rule. Untested
+// before: disabling the guard left the gui suite green.
+//
+// engrave.String treats '\n' as a line break, so a two-line title engraves its
+// tail onto the body's first row -- and StringCmd.Measure returns only the LAST
+// segment's advance, so the centering is computed from the wrong width.
+func TestFTTitleAndFooterRejectNewlines(t *testing.T) {
+	for _, what := range []string{"Title", "Footer"} {
+		h := newPPHarness(t)
+		var out string
+		var ok bool
+		h.start(func() { out, ok = ftLineEntryFlow(h.ctx, &descriptorTheme, what, "") })
+		h.mustReach(what)
+		kbd, isKbd := h.widget("kbd").(*PassphraseKeyboard)
+		if !isKbd {
+			t.Fatal(`widget "kbd" is not a *PassphraseKeyboard`)
+		}
+		kbd.Fragment = "two\nlines"
+		h.next("after entering a newline in the %s", what)
+		h.tapWidget("ok")
+		if !h.pump(8, "single line") {
+			t.Errorf("%s accepted a newline; got %q (out=%q ok=%v)", what, h.content, out, ok)
+		}
+	}
+}

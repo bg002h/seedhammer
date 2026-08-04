@@ -106,7 +106,9 @@ from another face before relying on the dedication.
    baseline dot with a control point the motion planner turns into a 2638 mm/s³
    jerk against the machine's 2600 limit — the import landed red on
    `engrave.TestFonts`. Their dot is now drawn exactly as this face's own
-   `period` is, which puts both at 2600.79, in line with `.` at 2600.39. Same
+   a VARIANT of `period`'s form is (`C…,4.9 …,4.9 …,5`, not `period`'s own
+   `C…,5 …,4.9 …,5`), which puts both at 2600.79, in line with `.` at 2600.39.
+   Copying `period` verbatim instead restores the 2638.22 red build. Same
    artwork, smoother path. Details in `import-check.md`.
 
    **Deliberately NOT taken** from the same upstream file: its rework of the
