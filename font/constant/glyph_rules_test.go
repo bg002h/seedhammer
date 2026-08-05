@@ -510,3 +510,58 @@ func TestFCrossbarAndHookFollowTheHouseAngle(t *testing.T) {
 			"respects; the ink gap to the preceding glyph would halve", barL.X, sideBearing)
 	}
 }
+
+// TestFTopBarIsShortByDesign records a DELIBERATE exception to the
+// two-stroke-width minimum, so that nobody has to rediscover the trade and
+// nobody can quietly make it worse.
+//
+// The 'f' top bar is 1.62 cell units = 0.540mm at the 3.0mm rung = 1.80 stroke
+// widths, against the 2.0 that TestSmallFeaturesClearTheStroke demands of the
+// '[' and ']' bars. It measured 1.87 before the hook lean was doubled.
+//
+// It is short because there is no room for it to be longer. The stem sits at
+// local x 3.00 and the side bearing at 5.00, so the top bar and the hook's
+// lateral lean share exactly 2.00 units. The lean takes 0.381 of them -- and
+// the lean is what makes it visible at all, 0.422 stroke widths against the
+// 0.144 it had at the plain house angle, which would not have read on steel.
+// A 1.8-unit bar and a visible lean cannot both fit; this was measured, not
+// estimated.
+//
+// Accepted by the operator on 2026-08-05, over restoring the bar and halving
+// the lean, on the grounds that the two features fail DIFFERENTLY. '[' and ']'
+// bars are stubs projecting from a stem, and when they close up the glyph reads
+// as '|' -- a different character. 'f's top bar CONNECTS the stem to the hook;
+// if it reads as a corner rather than a flat cap, 'f' is still 'f', carried by
+// its stem, crossbar and hook. The residual risk is real but is a
+// quality-of-cut question, not a mistaken-character one, and it is
+// UNTESTED ON STEEL: the next BOTHPROOF! plate is what settles it.
+//
+// This test is the floor. The bar may grow; it may not shrink.
+func TestFTopBarIsShortByDesign(t *testing.T) {
+	const scale = 100.0
+	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
+
+	f := barsOf(t, 'f')
+	if len(f) != 8 {
+		t.Fatalf("'f' has %d vertices, want 8", len(f))
+	}
+	hookTop, stemTop := f[1], f[2] // the top bar runs between these
+	bar := (float64(hookTop.X) - float64(stemTop.X)) / scale
+	barMM := bar * (emMM / cellUnits)
+
+	// The accepted value, to the unit it compiles at. Shrinking further has
+	// never been considered and must not happen by accident.
+	const floor = 1.62
+	if bar < floor {
+		t.Errorf("the 'f' top bar is %.3f units (%.3fmm, %.2f stroke widths); it may grow "+
+			"but not shrink below the accepted %.2f -- see the comment above for why it is "+
+			"already under the 2.0 stroke width rule", bar, barMM, barMM/strokeMM, floor)
+	}
+	// And if someone ever wins back the room, this should stop being an
+	// exception rather than silently staying one.
+	if want := 2.0 * strokeMM; barMM >= want {
+		t.Errorf("the 'f' top bar now measures %.3fmm (%.2f stroke widths), which CLEARS the "+
+			"2.0 rule -- delete this exception and add 'f top bar' to "+
+			"TestSmallFeaturesClearTheStroke instead", barMM, barMM/strokeMM)
+	}
+}
