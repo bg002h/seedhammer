@@ -115,7 +115,10 @@ func ftRefuse(ctx *Context, th *Colors, params engrave.Params, f ftFit, text str
 // the over-capacity state and OK refuses, naming the field. Silently dropping
 // keystrokes would leave the operator believing a longer text had been entered
 // (gui/passphrase_flow.go:113-118's reviewed decision).
-func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior, title, footer string, useQR *bool) (string, bool) {
+// loadProof, when non-nil, is called if the operator types the TEXTPROOF!
+// trigger and accepts the prompt. It writes all three fields, which is why it
+// takes pointers to title and footer rather than returning a string.
+func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, useQR *bool, loadProof func()) (string, bool) {
 	kbd := NewTextKeyboard(ctx)
 	kbd.Fragment = prior
 	backBtn := &Clickable{Button: Button1}
@@ -132,7 +135,7 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior, tit
 	cacheValid := false
 	evaluate := func() ftFit {
 		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR {
-			cache = ftEvaluate(params, kbd.Fragment, title, footer, *useQR)
+			cache = ftEvaluate(params, kbd.Fragment, *title, *footer, *useQR)
 			cacheText, cacheQR, cacheValid = kbd.Fragment, *useQR, true
 		}
 		return cache
@@ -145,6 +148,16 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior, tit
 			return "", false
 		}
 		if okBtn.Clicked(ctx) {
+			// The trigger check runs BEFORE this field's own validation, and
+			// before the fit evaluation: the pattern is chosen for the CURRENT
+			// QR choice, so evaluating the literal "TEXTPROOF!" first would
+			// tell the operator nothing useful.
+			if ftProofOffer(ctx, th, kbd.Fragment, loadProof) {
+				// Stay on this screen so the operator sees what landed, and
+				// re-seed from the loaded text.
+				kbd.Fragment = ftProofFor(*useQR)
+				continue
+			}
 			if kbd.Fragment == "" {
 				showError(ctx, th, "Text", "The Text field is required.")
 				continue
@@ -363,7 +376,8 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			useQR = add
 		case ftStepText:
-			s, ok := ftTextEntryFlow(ctx, th, params, text, title, footer, &useQR)
+			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &useQR,
+				ftProofLoader(&text, &title, &footer, &useQR))
 			if !ok {
 				step -= 2
 				break
