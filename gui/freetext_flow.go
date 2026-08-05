@@ -329,7 +329,7 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 			// before the fit evaluation: the pattern is chosen for the CURRENT
 			// QR choice and face, so evaluating the literal "TEXTPROOF!" first
 			// would tell the operator nothing useful.
-			if loaded, ok := ftProofOffer(ctx, th, kbd.Fragment, loadProof); ok {
+			if loaded, ok := ftProofOffer(ctx, th, kbd.Fragment, *useQR, loadProof); ok {
 				// Stay on this screen (continue, do NOT fall through to the
 				// return) so the operator sees what landed, and re-seed the
 				// field from the text the loader actually wrote.

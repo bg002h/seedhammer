@@ -833,7 +833,7 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 	load := func(*ftProof, float32) string { called = true; return "" }
 	for _, typed := range []string{"", "see TEXTPROOF! for details", "TEXTPROOF",
 		"textproof!", "CONSTPROOF", ftProofTriggerSH + " ", "TEXTPROOF!CONSTPROOF!"} {
-		if _, ok := ftProofOffer(ctx, &descriptorTheme, typed, load); ok {
+		if _, ok := ftProofOffer(ctx, &descriptorTheme, typed, false, load); ok {
 			t.Errorf("%q triggered the offer", typed)
 		}
 	}
@@ -846,7 +846,7 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 	// A nil loader disables the trigger: it must not prompt and must not panic.
 	for i := range ftProofs {
 		drew = false
-		if _, ok := ftProofOffer(newCtx(&drew), &descriptorTheme, ftProofs[i].Trigger, nil); ok {
+		if _, ok := ftProofOffer(newCtx(&drew), &descriptorTheme, ftProofs[i].Trigger, false, nil); ok {
 			t.Errorf("%s: a nil loader still reported the pattern as loaded", ftProofs[i].Plan.Name())
 		}
 		if drew {
@@ -923,7 +923,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 		}
 		whole++
 		// It is said, in the sentence the operator reads before accepting.
-		body := ftProofAsk(p) + " " + ftProofReplaces(p, 0) + " " + ftProofKeep(p)
+		body := ftProofAsk(p) + " " + ftProofReplaces(p, ftProofOutcomeFor(engraverParams, p, 0, false)) + " " + ftProofKeep(p)
 		for _, want := range []string{"REMOVES THE QR", "whole plate"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: the prompt never says %q, so removing the QR would be silent.\nprompt: %q",
@@ -962,7 +962,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 func TestProofPromptSaysWhatItWillDo(t *testing.T) {
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		body := ftProofAsk(p) + " " + ftProofReplaces(p, 0) + " " + ftProofKeep(p)
+		body := ftProofAsk(p) + " " + ftProofReplaces(p, ftProofOutcomeFor(engraverParams, p, 0, false)) + " " + ftProofKeep(p)
 		for _, want := range []string{
 			"REPLACES ALL THREE",  // that it destroys work
 			p.Title,               // what the title becomes
@@ -1005,7 +1005,16 @@ func TestProofPromptFitsPanel(t *testing.T) {
 	area := ppConfirmArea(dims)
 	for i := range ftProofs {
 		pr := &ftProofs[i]
-		_, sz := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr, 0)
+		// Every rung, not just the auto-fit prompt: the rung prompt is longer,
+			// and the panel is the one thing a longer string can silently overflow.
+			var sz image.Point
+			for _, rung := range append([]float32{0}, backup.FontSizes...) {
+				out := ftProofOutcomeFor(engraverParams, pr, rung, false)
+				_, s2 := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr, out)
+				if s2.Y > sz.Y {
+					sz = s2
+				}
+			}
 		if sz.Y > area.Dy() {
 			t.Errorf("%s: the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
 				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
@@ -1042,7 +1051,7 @@ func TestProofNavIconsMeanWhatTheyShow(t *testing.T) {
 			h := newPPHarness(t)
 			var answer, answered bool
 			h.start(func() {
-				answer = ftProofPrompt(h.ctx, &descriptorTheme, pr, 0)
+				answer = ftProofPrompt(h.ctx, &descriptorTheme, pr, ftProofOutcomeFor(engraverParams, pr, 0, false))
 				answered = true
 			})
 			if !uiContains(h.content, "REPLACES ALL THREE") {

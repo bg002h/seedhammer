@@ -419,11 +419,11 @@ var ftProofs = []ftProof{
 		TextQR:  ftProofTextConstQR,
 	},
 	{
-		Trigger: ftProofTriggerBoth,
+		Trigger:  ftProofTriggerBoth,
 		Plan:     &ftPlanBoth,
 		Sizeable: true,
 		Title:    ftProofTitleBoth,
-		Text:    ftProofTextBoth,
+		Text:     ftProofTextBoth,
 		// No QR variant: the pattern needs the whole plate. See
 		// NeedsWholePlate.
 		TextQR: "",
@@ -495,21 +495,36 @@ func ftProofAsk(p *ftProof) string {
 // in the sentence the operator reads before accepting, because the QR decides
 // what a scanner returns from the plate and changing it silently is exactly the
 // substitution this program exists to avoid.
-func ftProofReplaces(p *ftProof, size float32) string {
-	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
-		"Text becomes the proof pattern, Title becomes " + p.Title +
-		", Footer becomes " + ftProofFooter + ". The plate is cut in " +
-		p.Plan.Name() + " at " + ftRungLabel(size) + "."
-	if p.NeedsWholePlate() {
-		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
-			"so the plate will not be machine-readable."
-	}
-	return s
+// ftProofOutcome is what accepting the prompt will ACTUALLY write to the four
+// fields.
+//
+// It exists because the prompt and the loader used to derive the same answer
+// twice, and disagreed: with a rung named, the prompt printed the untrimmed
+// pattern's title and footer while the loader wrote the rung's. So
+// BOTHPROOF!4.4 asked the operator to consent to "Title becomes SH+CONST
+// 3.0mm ... cut at 4.4mm" -- a sentence that contradicts itself and describes a
+// plate the machine would not cut. Found by the pre-ship review, 2026-08-05.
+//
+// Now there is one resolver and both callers use it, so the sentence consented
+// to and the fields written are the same value. TestProofPromptMatchesWhatTheLoaderWrites
+// pins that across every rung.
+type ftProofOutcome struct {
+	Text, Title, Footer string
+	Plan                *ftPlan
+	SizeMM              float32
 }
 
-// ftProofKeep is the honest description of the OTHER answer. Declining is not a
-// cancel: the typed trigger is a perfectly good free text and stays exactly as
-// entered.
+// ftProofOutcomeFor resolves a proof and a chosen rung into the fields that
+// will be written. useQR must already reflect the whole-plate QR drop.
+func ftProofOutcomeFor(params engrave.Params, p *ftProof, rung float32, useQR bool) ftProofOutcome {
+	if rung != 0 {
+		if t, pl, ti, fo, err := ftBothAt(params, rung, useQR); err == nil {
+			return ftProofOutcome{Text: t, Title: ti, Footer: fo, Plan: pl, SizeMM: rung}
+		}
+	}
+	return ftProofOutcome{Text: p.For(useQR), Title: p.Title, Footer: ftProofFooter, Plan: p.Plan}
+}
+
 // ftRungLabel names the size the plate will be cut at, for the prompt the
 // operator reads before accepting. Without a chosen rung the pattern is tuned
 // to land at 3.0mm and auto-fit confirms it.
@@ -520,6 +535,21 @@ func ftRungLabel(size float32) string {
 	return fmt.Sprintf("%.1fmm, with the pattern trimmed to fit", size)
 }
 
+func ftProofReplaces(p *ftProof, out ftProofOutcome) string {
+	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
+		"Text becomes the proof pattern, Title becomes " + out.Title +
+		", Footer becomes " + out.Footer + ". The plate is cut in " +
+		out.Plan.Name() + " at " + ftRungLabel(out.SizeMM) + "."
+	if p.NeedsWholePlate() {
+		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
+			"so the plate will not be machine-readable."
+	}
+	return s
+}
+
+// ftProofKeep is the honest description of the OTHER answer. Declining is not a
+// cancel: the typed trigger is a perfectly good free text and stays exactly as
+// entered.
 func ftProofKeep(p *ftProof) string {
 	return "Back = no: continue with " + p.Trigger + " exactly as typed. " +
 		"Any text can be a real plate, including this one."
@@ -538,12 +568,17 @@ func ftProofKeep(p *ftProof) string {
 // the keyboard from the one value that was actually stored. A caller that
 // recomputed the pattern itself would be a second source of truth for which
 // pattern is loaded, and the two could disagree about the face or the QR.
-func ftProofOffer(ctx *Context, th *Colors, typed string, load func(*ftProof, float32) string) (string, bool) {
+func ftProofOffer(ctx *Context, th *Colors, typed string, useQR bool, load func(*ftProof, float32) string) (string, bool) {
 	p, size, ok := ftProofForTrigger(typed)
 	if !ok || load == nil {
 		return "", false
 	}
-	if !ftProofPrompt(ctx, th, p, size) {
+	// Resolved ONCE, ahead of the frame loop: ftBothAt walks the drop order
+	// fitting plates, which is not work to repeat every time the prompt redraws.
+	// The QR drop is applied first so the resolver sees the choice that will be
+	// in force, exactly as the loader does.
+	out := ftProofOutcomeFor(ctx.Platform.EngraverParams(), p, size, useQR && !p.NeedsWholePlate())
+	if !ftProofPrompt(ctx, th, p, out) {
 		return "", false
 	}
 	return load(p, size), true
@@ -553,11 +588,11 @@ func ftProofOffer(ctx *Context, th *Colors, typed string, load func(*ftProof, fl
 // can assert it fits the real panel by MEASURING RECTANGLES. Asserting fit from
 // ExtractText is impossible: it collects the runes of every drawn text op
 // regardless of occlusion, so a label drawn off the panel reads as present.
-func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof, size float32) (op.Op, image.Point) {
+func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof, out ftProofOutcome) (op.Op, image.Point) {
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofAsk(p))
 	rt.Y += 4
-	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p, size))
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p, out))
 	rt.Y += 4
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofKeep(p))
 	return rt.Content, image.Pt(width, rt.Y)
@@ -566,7 +601,7 @@ func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof, size float32) 
 // ftProofPrompt asks. It returns true only if the operator explicitly accepted
 // with the checkmark; Back, and a ctx that shuts down mid-prompt, both mean NO
 // -- the answer that changes nothing.
-func ftProofPrompt(ctx *Context, th *Colors, p *ftProof, size float32) bool {
+func ftProofPrompt(ctx *Context, th *Colors, p *ftProof, out ftProofOutcome) bool {
 	noBtn := &Clickable{Button: Button1}
 	yesBtn := &Clickable{Button: Button3}
 	hookPPWidget("proofNo", noBtn)
@@ -580,7 +615,7 @@ func ftProofPrompt(ctx *Context, th *Colors, p *ftProof, size float32) bool {
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ftProofBody(ctx, th, area.Dx(), p, size)
+		body, _ := ftProofBody(ctx, th, area.Dx(), p, out)
 		body = body.Offset(image.Point(area.Min))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, ftProofNav(noBtn, yesBtn)...)
 		title, _ := layoutTitle(ctx, dims.X, th.Text, ftProofPromptTitle)
@@ -626,23 +661,13 @@ func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ft
 			// text so For reads the choice that will actually be in force.
 			*useQR = false
 		}
-		// A named rung rebuilds the pattern for that size, trimming content down
-		// the drop order until it fits. Without one the pattern is its own tuned
-		// 3.0mm self and auto-fit decides, exactly as before.
-		if rung != 0 {
-			if t, pl, ti, fo, err := ftBothAt(params, rung, *useQR); err == nil {
-				*text, *plan, *title, *footer, *size = t, pl, ti, fo, rung
-				return *text
-			}
-			// A rung that cannot be built is not silently downgraded to some
-			// other size: fall through to the untrimmed pattern, whose own size
-			// the prompt already stated.
-		}
-		*text = p.For(*useQR)
-		*title = p.Title
-		*footer = ftProofFooter
-		*plan = p.Plan
-		*size = 0
+		// The SAME resolver the prompt used, so the four fields written are the
+		// ones the operator just consented to. A rung that cannot be built
+		// resolves to the untrimmed pattern with SizeMM 0 -- unreachable today,
+		// since every rung in FontSizes builds, and pinned by
+		// TestMixedProofFitsEveryRung.
+		out := ftProofOutcomeFor(params, p, rung, *useQR)
+		*text, *title, *footer, *plan, *size = out.Text, out.Title, out.Footer, out.Plan, out.SizeMM
 		return *text
 	}
 }

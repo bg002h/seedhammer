@@ -380,10 +380,14 @@ func TestEqualsBarsDivergeAndClearTheStroke(t *testing.T) {
 	// And '=' must not have grown past the alphabet's vertical extent:
 	// NewPassphraseStringer accumulates bounds over EVERY glyph, so a taller
 	// '=' would relocate plates that contain no '=' at all.
-	const ascender, descender = -600.0, 100.0 // y2 and y9 against the y8 baseline
+	// The alphabet's true vertical extent is -700..100: '#' and '|' both reach
+	// svg y=1. -600 is therefore a CONSERVATIVE bound that '=' clears with room
+	// to spare, not the alphabet's edge -- an earlier comment here claimed it
+	// was the edge, which was wrong.
+	const ascender, descender = -600.0, 100.0
 	for _, p := range pts {
 		if float64(p.Y) < ascender || float64(p.Y) > descender {
-			t.Errorf("'=' reaches y=%d, outside the alphabet's %.0f..%.0f", p.Y, ascender, descender)
+			t.Errorf("'=' reaches y=%d, outside the conservative %.0f..%.0f bound", p.Y, ascender, descender)
 		}
 	}
 }
@@ -406,11 +410,18 @@ func TestEqualsBarsDivergeAndClearTheStroke(t *testing.T) {
 //     'n' rises through, and the same direction '+' drops. 't' crosses FLAT at
 //     y4, so 'f' and 't' are now separated by a whole unit of height AND by
 //     slope, rather than by half a unit of height alone.
-//   - The hook leans right going down, through the same angle measured from
-//     vertical. It leans by moving its TOP end left: the hook's bottom point is
-//     the run's START, and newConstantStringer accumulates bounds over run
-//     start/end points, so moving it would shift `center` and relocate every
-//     constant-time plate. Grow inward, never outward.
+//   - The hook leans right going down, through TWICE the house angle, over a
+//     hook lengthened 50% (y2..y3.5 rather than y2..y3). Both were needed: an
+//     angle's visibility scales with its RUN, not its degrees, and the hook at
+//     the plain house angle over a 1-unit run displaced only 0.144 stroke
+//     widths -- against 'n's 0.556, which is the deviation actually read off an
+//     engraved plate. Doubled and lengthened it reaches 0.422, and the hook is
+//     the one place in this face where the house angle is deliberately doubled.
+//     It leans by moving its TOP end left: the hook's bottom point is the run's
+//     START, and newConstantStringer accumulates bounds over run start/end
+//     points, so moving it right would shift `center` and relocate every
+//     constant-time plate. Grow inward, never outward. The top bar shortens to
+//     1.62 units to make room, which the operator approved.
 //   - The arms are deliberately ASYMMETRIC, 2.0 units left of the stem against
 //     1.25 right (operator's preference, 2026-08-05). The left arm cannot grow:
 //     it already sits on the alphabet's local x minimum of 1.00, which NO glyph
@@ -461,16 +472,27 @@ func TestFCrossbarAndHookFollowTheHouseAngle(t *testing.T) {
 		t.Errorf("the 'f' hook does not lean right going down: top x=%d, bottom x=%d",
 			hookTop.X, hookEnd.X)
 	}
-	// The tolerance is QUANTISATION, not slack. The hook runs one cell unit,
-	// which is 100 font units at this face's scale, so its horizontal offset
-	// must be a whole number and the angle can only land on multiples of about
-	// 0.573 degrees. 7.125 is not one of them: dx=12 gives 6.843 and dx=13
-	// gives 7.407, both exactly 0.282 away. Half a quantisation step is
-	// therefore the tightest honest bound, and anything looser would admit a
-	// hook that is visibly off the house angle.
-	if got := deg(float64(hookEnd.X-hookTop.X), float64(hookEnd.Y-hookTop.Y)); math.Abs(got-house) > 0.3 {
-		t.Errorf("the 'f' hook leans %.3f degrees from vertical, want the house angle %.3f "+
-			"(within half a quantisation step)", got, house)
+	// TWICE the house angle, and the tolerance is QUANTISATION rather than
+	// slack: over the hook's 150-font-unit run the offset must be a whole
+	// number, so the angle lands on multiples of about 0.382 degrees. dx=38
+	// gives 14.216 against the 14.250 target, 0.034 away -- comfortably inside
+	// half a step, and the nearest alternatives (13.856 and 14.574) are ten
+	// times further off.
+	const hookStep = 0.382 / 2
+	if got := deg(float64(hookEnd.X-hookTop.X), float64(hookEnd.Y-hookTop.Y)); math.Abs(got-2*house) > hookStep {
+		t.Errorf("the 'f' hook leans %.3f degrees from vertical, want twice the house angle "+
+			"%.3f (within half a quantisation step)", got, 2*house)
+	}
+
+	// And the lean must stay VISIBLE once cut. The whole reason it is doubled is
+	// that the deviation, not the angle, is what survives the stroke: at the
+	// plain house angle over the original 1-unit hook this was 0.144 stroke
+	// widths and would not have read at all.
+	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
+	lateral := float64(hookEnd.X-hookTop.X) / scale * (emMM / cellUnits)
+	if sw := lateral / strokeMM; sw < 0.35 {
+		t.Errorf("the 'f' hook displaces %.3fmm (%.3f stroke widths) across its length; "+
+			"below about 0.35 the lean does not survive the cut", lateral, sw)
 	}
 
 	// The arms stay asymmetric, and the left one stays on the side bearing.

@@ -104,7 +104,12 @@ func TestMixedProofLabelsStateTheRungTheyAreCutAt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%.1fmm: %v", size, err)
 		}
-		if want := ftProofTitleBothAt(size); title != want {
+		// Built HERE from a literal format, not by calling ftProofTitleBothAt:
+		// comparing that function against itself passes however wrong it is.
+		// The label branch below already did this; the title did not, and the
+		// pre-ship review showed ftProofTitleBothAt could be hardcoded back to
+		// "SH+CONST 3.0mm" with the whole suite still green.
+		if want := fmt.Sprintf("SH+CONST %.1fmm", size); title != want {
 			t.Errorf("%.1fmm: title %q, want %q", size, title, want)
 		}
 		blocks := plan.Blocks(text)
@@ -151,6 +156,15 @@ func TestMixedProofNamesTheFacesWhenLabelsGo(t *testing.T) {
 		if len(ftProofFooterFaceMap) > backup.MaxTitleLen {
 			t.Errorf("the face-map footer is %d characters, over the %d cap",
 				len(ftProofFooterFaceMap), backup.MaxTitleLen)
+		}
+		// And it must actually NAME the faces. Asserting only that the footer
+		// equals the constant leaves the constant free to say anything.
+		for _, face := range []string{"SH", "CONST"} {
+			if !strings.Contains(ftProofFooterFaceMap, face) {
+				t.Errorf("the face-map footer %q does not name %q, so the plate that "+
+					"drops its labels says nothing about which half is which",
+					ftProofFooterFaceMap, face)
+			}
 		}
 	}
 }
@@ -232,6 +246,55 @@ func TestNamedRungIsTheRungEngraved(t *testing.T) {
 		}
 		if _, err := ftBuildPlate(engraverParams, plan, text, title, footer, useQR, size); err != nil {
 			t.Errorf("%.1fmm: build refused: %v", want, err)
+		}
+	}
+}
+
+// TestProofPromptMatchesWhatTheLoaderWrites is the consent property: the
+// sentence the operator reads before accepting must name the fields that
+// actually get written.
+//
+// It failed before the pre-ship review fold. The prompt and the loader derived
+// the same answer twice and disagreed once a rung was named -- BOTHPROOF!4.4
+// asked for consent to "Title becomes SH+CONST 3.0mm ... cut at 4.4mm", a
+// sentence contradicting itself and describing a plate the machine would not
+// cut. Every prompt test called ftProofReplaces(p, 0), so the rung path was
+// uncovered.
+//
+// This walks the REAL loader, not just the resolver, so a loader that stopped
+// using ftProofOutcomeFor is a failure rather than a silent second answer.
+func TestProofPromptMatchesWhatTheLoaderWrites(t *testing.T) {
+	p, _, ok := ftProofForTrigger(ftProofTriggerBoth)
+	if !ok {
+		t.Fatal("no mixed proof")
+	}
+	for _, rung := range append([]float32{0}, backup.FontSizes...) {
+		var text, title, footer string
+		useQR := false
+		var size float32
+		plan := &ftPlanSH
+		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, rung)
+
+		out := ftProofOutcomeFor(engraverParams, p, rung, false)
+		prompt := ftProofReplaces(p, out)
+
+		if title == "" || footer == "" {
+			t.Fatalf("rung %.1f: loader wrote an empty title or footer", rung)
+		}
+		if !strings.Contains(prompt, title) {
+			t.Errorf("rung %.1f: the loader writes title %q but the prompt says:\n  %s",
+				rung, title, prompt)
+		}
+		if !strings.Contains(prompt, footer) {
+			t.Errorf("rung %.1f: the loader writes footer %q but the prompt says:\n  %s",
+				rung, footer, prompt)
+		}
+		// And the size named in the prompt is the size the loader recorded.
+		if rung != 0 && !strings.Contains(prompt, fmt.Sprintf("%.1fmm", rung)) {
+			t.Errorf("rung %.1f: the prompt does not state the rung:\n  %s", rung, prompt)
+		}
+		if size != rung {
+			t.Errorf("rung %.1f: the loader recorded %.1f", rung, size)
 		}
 	}
 }
