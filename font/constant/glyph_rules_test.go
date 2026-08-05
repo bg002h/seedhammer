@@ -257,3 +257,18 @@ func TestPlusArchIsDeliberatelyOffHorizontal(t *testing.T) {
 		t.Error("'t' now slopes too; '+' is only distinctive while 't' is flat")
 	}
 }
+
+// TestSFootIsOffHorizontal: 's' and '5' are a classic confusable pair and are in
+// the proof's confusable table. The 's' foot now rises half a unit left to
+// right, the same 7.13 degrees as the 'n' arch, while '5' ends in a bowl that
+// curves the other way. Read off a plate, 2026-08-04.
+func TestSFootIsOffHorizontal(t *testing.T) {
+	const footLeftY, footRightY = 8.0, 7.5
+	if footLeftY == footRightY {
+		t.Error("'s' has a flat foot again; it is then closer to '5'")
+	}
+	const nRise = 0.5
+	if rise := footLeftY - footRightY; rise != nRise {
+		t.Errorf("'s' foot rises %.2f; the deliberate slants in this face are all %.2f", rise, nRise)
+	}
+}

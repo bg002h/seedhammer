@@ -83,7 +83,10 @@ func TestPassphraseRunPartition(t *testing.T) {
 	}
 	want := map[int]string{
 		0: " ",
-		2: "!\"$%:;=?ij",
+		// 'x' joined this set deliberately: it used to draw an X in ONE run by
+		// retracing two of its arms, cutting them twice. Two clean diagonals cost
+		// one extra unit of per-run quantisation and look right.
+		2: "!\"$%:;=?ijx",
 		3: "",
 		4: "",
 	}
@@ -92,7 +95,7 @@ func TestPassphraseRunPartition(t *testing.T) {
 			t.Errorf("glyphs with %d runs: got %q, want %q", k, got, w)
 		}
 	}
-	if got, want := len(byRuns[1]), 96-1-10; got != want {
+	if got, want := len(byRuns[1]), 96-1-11; got != want {
 		t.Errorf("single-run glyphs: got %d, want %d", got, want)
 	}
 	if !s.hasMultiRun {
