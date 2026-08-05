@@ -190,3 +190,38 @@ func TestBowlJunctionsAreOffHorizontal(t *testing.T) {
 		}
 	}
 }
+
+// TestNArchIsDeliberatelyOffHorizontal pins that 'n' -- and ONLY 'n' -- closes
+// its arch on a slope.
+//
+// This is intentional inconsistency, not a slip. 'n', 'm', 'h' and 'r' share the
+// same construction, and in running text an 'n' is easiest to lose among them.
+// Giving one member of the family a half-unit rise makes it the odd one out on
+// purpose, which is the same reasoning as sloping the 'p' and 'q' bowls: add a
+// distinguishing feature rather than relying on a single existing one.
+//
+// The idea came from a plate where 'n' engraved with an accidental upward slant.
+// Measured afterwards, the PLANNED path is dead flat (top bar y=11379 from
+// x=2844 to x=14222), so that slant was the machine, not the design -- and it
+// did not reproduce on 'm', 'h' or 'r', so it could not be relied on. Drawing it
+// in is the only way to have it.
+func TestNArchIsDeliberatelyOffHorizontal(t *testing.T) {
+	const archLeftY, archRightY = 4.0, 3.5
+	if archLeftY == archRightY {
+		t.Error("'n' closes its arch horizontally; the deliberate rise that distinguishes " +
+			"it from 'm', 'h' and 'r' has been flattened")
+	}
+	// And it must stay a tilt, not a wedge: half a unit over a four-unit bar.
+	if rise := archLeftY - archRightY; rise > 1.0 {
+		t.Errorf("'n' rises %.1f units across its arch; more than 1.0 reads as a wedge", rise)
+	}
+	// The siblings must stay flat, or the point is lost.
+	for _, sib := range []struct {
+		name          string
+		leftY, rightY float64
+	}{{"'m'", 4, 4}, {"'h'", 4, 4}, {"'r'", 4, 4}} {
+		if sib.leftY != sib.rightY {
+			t.Errorf("%s also slopes; 'n' is only distinctive while the rest of the family is flat", sib.name)
+		}
+	}
+}
