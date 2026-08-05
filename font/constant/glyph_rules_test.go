@@ -380,10 +380,12 @@ func TestEqualsBarsDivergeAndClearTheStroke(t *testing.T) {
 	// And '=' must not have grown past the alphabet's vertical extent:
 	// NewPassphraseStringer accumulates bounds over EVERY glyph, so a taller
 	// '=' would relocate plates that contain no '=' at all.
-	// The alphabet's true vertical extent is -700..100: '#' and '|' both reach
-	// svg y=1. -600 is therefore a CONSERVATIVE bound that '=' clears with room
-	// to spare, not the alphabet's edge -- an earlier comment here claimed it
-	// was the edge, which was wrong.
+	// The alphabet's true vertical extent is -700..100, measured over every
+	// glyph: '$' and '|' reach the top, and '$ _ g j p q y |' the bottom. -600
+	// is therefore a CONSERVATIVE bound that '=' clears with room to spare, not
+	// the alphabet's edge. Two earlier versions of this comment were wrong --
+	// one called -600 the edge, the next named '#' as a glyph reaching -700
+	// when it spans only -600..0.
 	const ascender, descender = -600.0, 100.0
 	for _, p := range pts {
 		if float64(p.Y) < ascender || float64(p.Y) > descender {

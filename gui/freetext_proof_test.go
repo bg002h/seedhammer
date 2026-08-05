@@ -1006,15 +1006,15 @@ func TestProofPromptFitsPanel(t *testing.T) {
 	for i := range ftProofs {
 		pr := &ftProofs[i]
 		// Every rung, not just the auto-fit prompt: the rung prompt is longer,
-			// and the panel is the one thing a longer string can silently overflow.
-			var sz image.Point
-			for _, rung := range append([]float32{0}, backup.FontSizes...) {
-				out := ftProofOutcomeFor(engraverParams, pr, rung, false)
-				_, s2 := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr, out)
-				if s2.Y > sz.Y {
-					sz = s2
-				}
+		// and the panel is the one thing a longer string can silently overflow.
+		var sz image.Point
+		for _, rung := range append([]float32{0}, backup.FontSizes...) {
+			out := ftProofOutcomeFor(engraverParams, pr, rung, false)
+			_, s2 := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr, out)
+			if s2.Y > sz.Y {
+				sz = s2
 			}
+		}
 		if sz.Y > area.Dy() {
 			t.Errorf("%s: the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
 				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",

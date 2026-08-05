@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"seedhammer.com/backup"
+	"seedhammer.com/font/vector"
 )
 
 // TestMixedProofFitsEveryRung: the operator picks the size, so every rung on
@@ -296,5 +297,86 @@ func TestProofPromptMatchesWhatTheLoaderWrites(t *testing.T) {
 		if size != rung {
 			t.Errorf("rung %.1f: the loader recorded %.1f", rung, size)
 		}
+	}
+}
+
+// TestProofE2ENamedRungDrivesThePrompt closes the gap the round-1 review found:
+// every other test here calls ftProofLoader or ftProofOutcomeFor DIRECTLY, so
+// nothing exercised ftProofOffer -- the one call site that actually builds the
+// prompt the operator reads. Hardcoding rung 0 into ftProofOffer's resolver
+// call reproduced the original round-0 consent bug with the whole suite green.
+//
+// This drives engraveTextFlow by touch: type BOTHPROOF!<rung>, read the prompt
+// off the rendered frame, accept, and assert the plate that reaches
+// freetextPlateHook is the one the prompt described.
+func TestProofE2ENamedRungDrivesThePrompt(t *testing.T) {
+	// BOTH QR choices. The mixed proof needs the whole plate, so accepting it
+	// DROPS a QR the operator had chosen -- and the prompt must describe the
+	// plate after that drop, not before. With QR off the two expressions agree
+	// and the case proves nothing; this is the one that separates them.
+	for _, tc := range []struct {
+		rung float32
+		qr   bool
+	}{{4.4, false}, {6.0, false}, {4.4, true}, {6.0, true}} {
+		rung := tc.rung
+		t.Run(fmt.Sprintf("%.1fmm-qr=%v", rung, tc.qr), func(t *testing.T) {
+			h, r := startFT(t)
+			ftPastQR(h, tc.qr)
+			ftTypeTrigger(h, fmt.Sprintf("%s%.1f", ftProofTriggerBoth, rung))
+			ftOK(h)
+
+			if !uiContains(h.content, "REPLACES ALL THREE") {
+				t.Fatalf("OK on the rung trigger did not offer the pattern; frame %q", h.content)
+			}
+			// What the operator is told, off the REAL frame. Resolved with the
+			// QR already dropped, because that is the plate that gets built.
+			want := ftProofOutcomeFor(proofParams(), &ftProofs[2], rung, false)
+			if !uiContains(h.content, want.Title) {
+				t.Errorf("the prompt does not name the title %q it will write; frame %q",
+					want.Title, h.content)
+			}
+			if !uiContains(h.content, want.Footer) {
+				t.Errorf("the prompt does not name the footer %q it will write; frame %q",
+					want.Footer, h.content)
+			}
+			if !uiContains(h.content, fmt.Sprintf("%.1fmm", rung)) {
+				t.Errorf("the prompt does not state the %.1fmm rung; frame %q", rung, h.content)
+			}
+
+			h.tapWidget("proofYes")
+			h.mustReach("lines")
+
+			// Straight through to the engrave, and the plate must be the rung's.
+			for _, step := range []string{"Title", "Footer", "Confirm"} {
+				ftOK(h)
+				h.mustReach(step)
+			}
+			ftOK(h)
+			h.step()
+			if !r.gotPlate {
+				t.Fatal("the flow never built a plate")
+			}
+			if r.got.SizeMM != rung {
+				t.Errorf("the operator asked for %.1fmm and the plate is %.1fmm", rung, r.got.SizeMM)
+			}
+			if r.got.Title != want.Title {
+				t.Errorf("plate title %q, prompt said %q", r.got.Title, want.Title)
+			}
+			if r.got.Footer != want.Footer {
+				t.Errorf("plate footer %q, prompt said %q", r.got.Footer, want.Footer)
+			}
+			// The QR really is gone, whatever the operator chose earlier.
+			if r.got.QR != nil {
+				t.Errorf("the mixed plate carries a QR; it needs the whole plate")
+			}
+			// A mixed plate must still be mixed at every rung.
+			faces := map[*vector.Face]bool{}
+			for _, f := range r.got.Faces {
+				faces[f] = true
+			}
+			if len(faces) != 2 {
+				t.Errorf("the %.1fmm mixed plate is cut in %d face(s), want 2", rung, len(faces))
+			}
+		})
 	}
 }
