@@ -83,3 +83,27 @@ func TestNoGlyphStartsAtOrigin(t *testing.T) {
 		}
 	}
 }
+
+// TestExclamGapClearsTheStroke pins the '!' dot-to-stem gap against the stroke
+// width, which is what actually decides whether it reads as '!' or as '|'.
+//
+// The original gap was ONE unit. At the 3.0mm rung that is 0.333mm against a
+// 0.3mm stroke -- 1.1 stroke widths -- so any burr closes it and the glyph
+// becomes a bar. '|' is a full-height unbroken line (y1..y9), so the gap is the
+// ONLY thing distinguishing them. Read off an engraved plate, 2026-08-04.
+//
+// Expressed in stroke widths rather than units because that is the quantity
+// that matters: a unit is only meaningful relative to how fat the cut is.
+func TestExclamGapClearsTheStroke(t *testing.T) {
+	// The engraving em ladder bottoms out at 3.0mm; stroke is 0.3mm.
+	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
+	const unitMM = emMM / cellUnits
+	// Geometry from constant.svg: stem ends at y=5, dot spans y=7..8.
+	const stemEnd, dotTop = 5.0, 7.0
+	gap := (dotTop - stemEnd) * unitMM
+	if want := 2.0 * strokeMM; gap < want {
+		t.Errorf("the '!' gap is %.3fmm (%.1f stroke widths) at the 3.0mm rung; "+
+			"want at least %.3fmm (2 stroke widths) or it closes up and reads as '|'",
+			gap, gap/strokeMM, want)
+	}
+}
