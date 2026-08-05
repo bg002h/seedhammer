@@ -20,46 +20,14 @@ import (
 	"strings"
 
 	"seedhammer.com/bspline"
-	"seedhammer.com/driver/tmc2209"
-	"seedhammer.com/engrave"
 	"seedhammer.com/gui"
 	"seedhammer.com/internal/golden"
+	"seedhammer.com/internal/sh2"
 )
 
-// The production engraver parameters, copied from
-// cmd/controller/platform_sh2.go, which is `tinygo && rp` and so cannot be
-// imported from a host binary.
-//
-// A copy that drifts would render a plate no machine cuts, quietly, so
-// TestParamsMatchTheMachine parses that file and fails on any divergence. Do
-// not edit these without editing it there -- the machine is the original.
-//
-// They are not decoration: PlanEngraving is jerk- and acceleration-limited, so
-// these numbers shape the toolpath and set the time estimate.
-const (
-	fullStepsPerRevolution = 200
-	mmPerRevolution        = 8
-	// mm is the number of (micro-)steps per millimeter: 6400.
-	mm = fullStepsPerRevolution / mmPerRevolution * tmc2209.Microsteps
-
-	strokeWidth    = 0.3 * mm
-	topSpeed       = 30 * mm
-	engravingSpeed = 8 * mm
-	acceleration   = 250 * mm
-	jerk           = 2600 * mm
-)
-
-var engraverParams = engrave.Params{
-	StrokeWidth: strokeWidth,
-	Millimeter:  mm,
-	StepperConfig: engrave.StepperConfig{
-		TicksPerSecond: topSpeed,
-		Speed:          topSpeed,
-		EngravingSpeed: engravingSpeed,
-		Acceleration:   acceleration,
-		Jerk:           jerk,
-	},
-}
+// The machine's engraver parameters, pinned against
+// cmd/controller/platform_sh2.go by internal/sh2's own test.
+var engraverParams = sh2.Params()
 
 func main() {
 	var (

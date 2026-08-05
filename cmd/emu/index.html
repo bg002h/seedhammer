@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SeedHammer II emulator</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
+    background: #1a1a1c; color: #ddd;
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* The panel is 480x320. Scale it up whole so pixels stay square and crisp;
+     the Go side maps clicks back through getBoundingClientRect. */
+  #screen {
+    width: min(96vw, 960px); height: auto; aspect-ratio: 480 / 320;
+    image-rendering: pixelated;
+    background: #000; border-radius: 6px;
+    box-shadow: 0 0 0 10px #2a2a2e, 0 12px 40px rgba(0,0,0,.6);
+    touch-action: none; /* or the browser scrolls instead of tapping */
+    cursor: pointer;
+  }
+  #status { min-height: 1.5em; opacity: .75; }
+  a { color: #8ab4f8; }
+</style>
+
+<canvas id="screen" width="480" height="320"></canvas>
+<div id="status">loading emu.wasm…</div>
+
+<script src="wasm_exec.js"></script>
+<script>
+  const status = document.getElementById("status");
+  const go = new Go();
+
+  WebAssembly.instantiateStreaming(fetch("emu.wasm"), go.importObject)
+    .then(res => {
+      status.textContent = "tap the screen to drive it — this is the firmware GUI, not a mock";
+      return go.run(res.instance);
+    })
+    .then(() => { status.textContent = "emulator exited"; })
+    .catch(err => {
+      // The common causes are worth naming: a stale wasm_exec.js, or opening
+      // this file over file:// where instantiateStreaming cannot fetch.
+      status.innerHTML = "failed to start: " + String(err) +
+        "<br>serve this directory over http (not file://), and rebuild with cmd/emu/build.sh " +
+        "so wasm_exec.js matches the wasm.";
+    });
+</script>
