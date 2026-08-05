@@ -7,7 +7,6 @@ import (
 	"math"
 	"strings"
 
-	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/backup"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/constant"
@@ -45,12 +44,142 @@ var (
 	ftFaceConst = ftFace{"constant", constant.Font}
 )
 
+// ftFaceRun is one run of the composition: a face, and how many of the Text
+// field's '\n'-separated blocks are cut in it.
+//
+// Blocks is a count of BLOCKS, not of rows or of characters, because '\n' is
+// the one boundary the operator can see in the field, WrapText already breaks
+// on it, and nothing is consumed or substituted to mark it -- a free-text plate
+// engraves what was typed, so a face plan may not be smuggled into the text as
+// an escape the operator cannot see. The LAST run in a plan takes whatever is
+// left over, whatever its Blocks says.
+type ftFaceRun struct {
+	Face   ftFace
+	Blocks int
+}
+
+// ftPlan is the composition's FACE PLAN: which engraving face each part of the
+// text is cut in, top of the plate to bottom.
+//
+// One run is the ordinary free-text plate. Two make a MIXED-FACE plate, which
+// exists so one piece of steel can qualify both shipped faces at 3.0mm rather
+// than costing a plate each; see ftProofTriggerBoth.
+//
+// Held by POINTER everywhere so plans compare by identity: the text-entry
+// screen caches its evaluation on the plan, and two plans that happened to be
+// equal are still two different plates as far as anything downstream is
+// concerned.
+type ftPlan struct {
+	Runs []ftFaceRun
+}
+
+var (
+	// ftPlanSH is the free-text plate's own face and the program's default.
+	ftPlanSH = ftPlan{Runs: []ftFaceRun{{Face: ftFaceSH}}}
+	// ftPlanConst cuts the whole plate in the face every seed, descriptor and
+	// passphrase plate uses.
+	ftPlanConst = ftPlan{Runs: []ftFaceRun{{Face: ftFaceConst}}}
+)
+
+// Name is what the prompt and the confirm screen call this plan: the face for a
+// single-face plate, and the faces joined by '+' for a mixed one.
+func (p *ftPlan) Name() string {
+	if len(p.Runs) == 1 {
+		return p.Runs[0].Face.Name
+	}
+	names := make([]string, len(p.Runs))
+	for i, r := range p.Runs {
+		names[i] = r.Face.Name
+	}
+	return strings.Join(names, "+")
+}
+
+// Blocks cuts text into the engraving blocks this plan describes.
+//
+// Splitting on '\n' and rejoining with '\n' is lossless, so the composition the
+// blocks describe is character-for-character the text that was typed -- which
+// is what makes the QR a copy of the plate rather than of a fragment.
+//
+// A text with FEWER blocks than the plan expects collapses to a single block in
+// the first run's face rather than producing an empty one. That is the honest
+// answer to an edited proof: an empty block would engrave a blank row that
+// nobody asked for, and there is no half of a plate to cut in the second face.
+func (p *ftPlan) Blocks(text string) []backup.Block {
+	first := p.Runs[0].Face.Face
+	if len(p.Runs) == 1 {
+		return []backup.Block{{Face: first, Text: text}}
+	}
+	parts := strings.Split(text, "\n")
+	out := make([]backup.Block, 0, len(p.Runs))
+	for i, r := range p.Runs {
+		n := r.Blocks
+		if i == len(p.Runs)-1 || n > len(parts) {
+			n = len(parts)
+		}
+		if n <= 0 {
+			// A non-final run that covers nothing is a malformed plan; see
+			// TestPlansAreWellFormed. Treat it as absent rather than emitting
+			// an empty block, which would engrave a blank row.
+			continue
+		}
+		out = append(out, backup.Block{Face: r.Face.Face, Text: strings.Join(parts[:n], "\n")})
+		parts = parts[n:]
+		if len(parts) == 0 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return []backup.Block{{Face: first, Text: text}}
+	}
+	return out
+}
+
+// ftFaceSummary is what the confirm screen prints for "font:". It is read from
+// the FITTED FACE MAP -- the faces the lines were actually wrapped and will
+// actually be cut in -- and never from the plan, so a plate that collapsed to
+// one face, or whose halves came out swapped, says so on the screen the
+// operator approves.
+//
+// A single-face plate is named plainly, exactly as it always was. A mixed one
+// carries the row count of each run, because how the plate divides is the one
+// thing about it that cannot be seen from the size or the line total.
+func ftFaceSummary(plan *ftPlan, faces []*vector.Face) string {
+	if len(plan.Runs) == 1 {
+		return plan.Runs[0].Face.Name
+	}
+	name := func(f *vector.Face) string {
+		for _, r := range plan.Runs {
+			if r.Face.Face == f {
+				return r.Face.Name
+			}
+		}
+		return "?"
+	}
+	var parts []string
+	for i := 0; i < len(faces); {
+		j := i
+		for j < len(faces) && faces[j] == faces[i] {
+			j++
+		}
+		parts = append(parts, fmt.Sprintf("%s %d", name(faces[i]), j-i))
+		i = j
+	}
+	if len(parts) == 0 {
+		return plan.Name()
+	}
+	return strings.Join(parts, " + ")
+}
+
 // ftFit is one live evaluation of the composition: what the operator is told
 // while typing, and what the plate will be.
+//
+// plate is FitBlocks' whole result, carried as ONE value: the size, the wrapped
+// lines, the face each line is cut in and the QR. The readout, the confirm
+// screen and the engraver all read it, and none of them recomputes any part of
+// it -- with a mixed-face plate the per-line character budget depends on the
+// face of that row, so a second derivation of that mapping is a second answer.
 type ftFit struct {
-	sizeMM     float32
-	lines      []string
-	qrc        *qr.Code
+	plate      backup.Fitted
 	linesUsed  int
 	linesAvail int
 	ok         bool
@@ -60,10 +189,11 @@ type ftFit struct {
 // ftEvaluate answers every live question at once, from ONE encode. Splitting it
 // would let the readout, the refusal figure and the engraving disagree about
 // the same text.
-func ftEvaluate(params engrave.Params, face ftFace, text, title, footer string, useQR bool) ftFit {
+func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool) ftFit {
 	var f ftFit
-	f.linesUsed, f.linesAvail, f.ok = backup.Admissible(params, face.Face, text, title, footer, useQR)
-	f.sizeMM, f.lines, f.qrc, f.err = backup.Fit(params, face.Face, text, title, footer, useQR)
+	blocks := plan.Blocks(text)
+	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, useQR)
+	f.plate, f.err = backup.FitBlocks(params, blocks, title, footer, useQR)
 	return f
 }
 
@@ -77,7 +207,7 @@ func ftEvaluate(params engrave.Params, face ftFace, text, title, footer string, 
 func ftSizeLabel(f ftFit) string {
 	size := "--"
 	if f.err == nil {
-		size = fmt.Sprintf("%.1fmm", f.sizeMM)
+		size = fmt.Sprintf("%.1fmm", f.plate.SizeMM)
 	}
 	return fmt.Sprintf("%s  %d/%d lines", size, f.linesUsed, f.linesAvail)
 }
@@ -111,15 +241,17 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 // The QR is never dropped automatically: it changes what a scanner returns from
 // the plate, and doing that on the operator's behalf to make room is exactly
 // the silent substitution this program exists to avoid.
-func ftRefuse(ctx *Context, th *Colors, params engrave.Params, face ftFace, f ftFit, text string, useQR bool) bool {
+func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f ftFit, text string, useQR bool) bool {
 	if !useQR {
 		showError(ctx, th, "Text", fmt.Sprintf(
 			"The text needs %d lines and a plate holds %d, at the smallest size. Shorten the Text field.",
 			f.linesUsed, f.linesAvail))
 		return false
 	}
-	freed := backup.MaxCharsAt(params, face.Face, backup.FontSizes[len(backup.FontSizes)-1], text, false) -
-		backup.MaxCharsAt(params, face.Face, backup.FontSizes[len(backup.FontSizes)-1], text, true)
+	blocks := plan.Blocks(text)
+	smallest := backup.FontSizes[len(backup.FontSizes)-1]
+	freed := backup.MaxCharsAtBlocks(params, blocks, smallest, false) -
+		backup.MaxCharsAtBlocks(params, blocks, smallest, true)
 	cs := &ChoiceScreen{
 		Title: "Too Long",
 		Lead: fmt.Sprintf(
@@ -138,10 +270,11 @@ func ftRefuse(ctx *Context, th *Colors, params engrave.Params, face ftFace, f ft
 // keystrokes would leave the operator believing a longer text had been entered
 // (gui/passphrase_flow.go:113-118's reviewed decision).
 // loadProof, when non-nil, is called if the operator types one of the proof
-// triggers and accepts the prompt. It writes the other fields and the face,
-// which is why it takes pointers, and RETURNS the text it wrote so this screen
-// re-seeds from the value that was actually stored rather than recomputing it.
-func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, face *ftFace, useQR *bool, loadProof func(*ftProof) string) (string, bool) {
+// triggers and accepts the prompt. It writes the other fields and the face
+// plan, which is why it takes pointers, and RETURNS the text it wrote so this
+// screen re-seeds from the value that was actually stored rather than
+// recomputing it.
+func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, plan **ftPlan, useQR *bool, loadProof func(*ftProof) string) (string, bool) {
 	kbd := NewTextKeyboard(ctx)
 	kbd.Fragment = prior
 	backBtn := &Clickable{Button: Button1}
@@ -150,20 +283,20 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 	hookPPWidget("back", backBtn)
 	hookPPWidget("ok", okBtn)
 
-	// The evaluation is cached on (text, qr, face) because it encodes a QR, and
+	// The evaluation is cached on (text, qr, plan) because it encodes a QR, and
 	// the screen redraws every frame while the text changes only on a
-	// keystroke. The FACE is part of the key: loading a proof changes it, and a
+	// keystroke. The PLAN is part of the key: loading a proof changes it, and a
 	// cache that ignored it would keep reporting the old face's line count and
 	// fitted size for the new plate.
 	var cache ftFit
 	var cacheText string
 	var cacheQR bool
-	var cacheFace ftFace
+	var cachePlan *ftPlan
 	cacheValid := false
 	evaluate := func() ftFit {
-		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR || cacheFace != *face {
-			cache = ftEvaluate(params, *face, kbd.Fragment, *title, *footer, *useQR)
-			cacheText, cacheQR, cacheFace, cacheValid = kbd.Fragment, *useQR, *face, true
+		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR || cachePlan != *plan {
+			cache = ftEvaluate(params, *plan, kbd.Fragment, *title, *footer, *useQR)
+			cacheText, cacheQR, cachePlan, cacheValid = kbd.Fragment, *useQR, *plan, true
 		}
 		return cache
 	}
@@ -201,7 +334,7 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 				continue
 			}
 			if !f.ok || f.err != nil {
-				if ftRefuse(ctx, th, params, *face, f, kbd.Fragment, *useQR) {
+				if ftRefuse(ctx, th, params, *plan, f, kbd.Fragment, *useQR) {
 					*useQR = false
 				}
 				continue
@@ -307,11 +440,11 @@ type ftConfirmRow struct {
 }
 
 func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
-	rows := make([]ftConfirmRow, 0, len(f.lines)+2)
+	rows := make([]ftConfirmRow, 0, len(f.plate.Lines)+2)
 	if title != "" {
 		rows = append(rows, ftConfirmRow{title, true})
 	}
-	for _, l := range f.lines {
+	for _, l := range f.plate.Lines {
 		rows = append(rows, ftConfirmRow{l, false})
 	}
 	if footer != "" {
@@ -332,11 +465,11 @@ func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
 // text-only test reporting them present because ExtractText ignores occlusion.
 // That was a defect in the free-text feature at large -- any long text reached
 // it -- not merely in the proof.
-func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, face ftFace, useQR bool, pager string) (op.Op, image.Point) {
+func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, useQR bool, pager string) (op.Op, image.Point) {
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, fmt.Sprintf(
 		"%.1fmm  %d lines  QR: %s  font: %s",
-		f.sizeMM, len(f.lines), ppYesNo(useQR), face.Name))
+		f.plate.SizeMM, len(f.plate.Lines), ppYesNo(useQR), ftFaceSummary(plan, f.plate.Faces)))
 	if pager != "" {
 		rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, pager)
 	}
@@ -373,14 +506,14 @@ type ftConfirmView struct {
 // at least one row, so the pager cannot stall; TestFTConfirmAlwaysFitsThePanel
 // pins that the budget on the real panel is at least one row even in the
 // tightest case.
-func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, face ftFace, title, footer string, useQR bool) ftConfirmView {
+func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer string, useQR bool) ftConfirmView {
 	rows := ftConfirmRows(f, title, footer)
 	if start < 0 || start >= len(rows) {
 		start = 0
 	}
 	// Measured with a pager string of the same shape as the real one, so the
 	// reservation is exact rather than approximately right.
-	_, probe := ftConfirmSummary(ctx, th, width, f, face, useQR, ftConfirmPager(0, 0, 0))
+	_, probe := ftConfirmSummary(ctx, th, width, f, plan, useQR, ftConfirmPager(0, 0, 0))
 	budget := height - probe.Y
 
 	var rt richText
@@ -404,7 +537,7 @@ func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, 
 	if start > 0 || shown < len(rows) {
 		pager = ftConfirmPager(start, shown, len(rows))
 	}
-	sum, sumSz := ftConfirmSummary(ctx, th, width, f, face, useQR, pager)
+	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, useQR, pager)
 	return ftConfirmView{
 		Content: op.Layer(rt.Content, sum.Offset(image.Pt(0, rt.Y))),
 		Size:    image.Pt(width, rt.Y+sumSz.Y),
@@ -426,7 +559,7 @@ func ftConfirmPager(start, shown, total int) string {
 // Three buttons, not two: Back, "next page" and OK. The page button appears
 // only when the preview does not fit at once, so a short text -- which is
 // almost every real one -- still shows the whole plate and two buttons.
-func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, face ftFace, title, footer string, useQR bool) bool {
+func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer string, useQR bool) bool {
 	backBtn := &Clickable{Button: Button1}
 	pageBtn := &Clickable{Button: Button2}
 	okBtn := &Clickable{Button: Button3}
@@ -453,7 +586,7 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, face ftFace, title, footer
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, face, title, footer, useQR)
+		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer, useQR)
 		body := view.Content.Offset(image.Point(area.Min))
 		btns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
@@ -469,33 +602,36 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, face ftFace, title, footer
 	return false
 }
 
-// freetextPlateHook receives exactly what EngraveFreeText was handed. nil in
+// freetextPlateHook receives exactly what EngraveFitted was handed. nil in
 // production. Without it there is no way to bind the layout the operator
 // APPROVED to the one that was ENGRAVED: the confirm screen is inspectable via
 // op.Drawer.ExtractText, a bspline.Curve is not -- Plate is {Duration, Spline},
 // stroke geometry carrying no text at all.
 //
-// The FACE is handed over too. It is not recoverable from the plate either, and
-// engraving a composition in a face other than the one it was fitted in puts
-// lines wide of the grid they were wrapped to -- a defect no assertion on the
-// size, the lines or the code can see.
-var freetextPlateHook func(fnt *vector.Face, fontMM float32, title string, lines []string, footer string, qrc *qr.Code)
+// It takes the WHOLE backup.Fitted, and the FACE MAP is the reason. None of it
+// is recoverable from the plate, and engraving a line in a face other than the
+// one it was fitted in puts it wide of the grid it was wrapped to -- a defect
+// no assertion on the size, the lines or the code can see. On a mixed-face
+// plate that includes engraving both halves in one face, or in each other's.
+var freetextPlateHook func(f backup.Fitted)
 
 // ftBuildPlate turns the fitted composition into an engravable plate.
 //
-// ONE call to Fit yields the size, the lines and the code, and all three go
-// straight to EngraveFreeText. It never encodes a second time: Fit's code IS
-// the artifact, so the fit path and the build path cannot disagree about what a
-// scanner will return.
-func ftBuildPlate(params engrave.Params, face ftFace, text, title, footer string, useQR bool) (Plate, error) {
-	fontMM, lines, qrc, err := backup.Fit(params, face.Face, text, title, footer, useQR)
+// ONE call to FitBlocks yields the size, the lines, the FACE OF EVERY LINE and
+// the code, and that one value goes straight to EngraveFitted. It never encodes
+// a second time and never re-derives the face map: the fit's code IS the
+// artifact and the fit's faces ARE the faces the lines were measured against,
+// so the fit path and the build path cannot disagree about what a scanner will
+// return or about which face any row is cut in.
+func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool) (Plate, error) {
+	fitted, err := backup.FitBlocks(params, plan.Blocks(text), title, footer, useQR)
 	if err != nil {
 		return Plate{}, err
 	}
 	if freetextPlateHook != nil {
-		freetextPlateHook(face.Face, fontMM, title, lines, footer, qrc)
+		freetextPlateHook(fitted)
 	}
-	return toPlate(backup.EngraveFreeText(params, face.Face, fontMM, title, lines, footer, qrc), params)
+	return toPlate(backup.EngraveFitted(params, fitted), params)
 }
 
 // The steps of spec 7, in order. The QR choice is first so the admission anchor
@@ -518,9 +654,9 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 	var text, title, footer string
 	useQR := false
 	// The free-text plate's own face, unless a proof trigger asks for another
-	// one. Held here rather than in ftTextEntryFlow so it survives Back exactly
+	// plan. Held here rather than in ftTextEntryFlow so it survives Back exactly
 	// as the other four fields do.
-	face := ftFaceSH
+	plan := &ftPlanSH
 	step := ftStepQR
 	for !ctx.Done {
 		switch step {
@@ -531,8 +667,8 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			useQR = add
 		case ftStepText:
-			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &face, &useQR,
-				ftProofLoader(&text, &title, &footer, &face, &useQR))
+			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR,
+				ftProofLoader(&text, &title, &footer, &plan, &useQR))
 			if !ok {
 				step -= 2
 				break
@@ -553,7 +689,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			footer = s
 		case ftStepConfirm:
-			f := ftEvaluate(params, face, text, title, footer, useQR)
+			f := ftEvaluate(params, plan, text, title, footer, useQR)
 			if f.err != nil || !f.ok {
 				// A title or footer entered after the text can only ever make
 				// the composition SMALLER on the plate, never inadmissible --
@@ -563,12 +699,12 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				step -= 2
 				break
 			}
-			if !ftConfirmFlow(ctx, th, f, face, title, footer, useQR) {
+			if !ftConfirmFlow(ctx, th, f, plan, title, footer, useQR) {
 				step -= 2
 				break
 			}
 		case ftStepEngrave:
-			plate, err := ftBuildPlate(params, face, text, title, footer, useQR)
+			plate, err := ftBuildPlate(params, plan, text, title, footer, useQR)
 			if err != nil {
 				// The message quotes no field content.
 				showError(ctx, th, "Text", "This text does not fit a plate.")

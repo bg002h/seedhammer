@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image"
+	"strings"
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
@@ -46,6 +47,21 @@ const (
 	// The two triggers are the same length and differ from the first character,
 	// so neither is a prefix of the other and a mistyped one matches nothing.
 	ftProofTriggerConst = "CONSTPROOF!"
+
+	// ftProofTriggerBoth loads the MIXED-FACE proof: one plate whose top half
+	// is cut in font/sh and whose bottom half is cut in font/constant, both at
+	// 3.0mm. Named for what it proves rather than for a face, because it proves
+	// both.
+	//
+	// It exists because plates are scarce. A legibility round that has to
+	// qualify both faces costs two plates -- TEXTPROOF! and CONSTPROOF! -- and
+	// this one costs one. It is not a replacement for either: half a plate
+	// holds less than a whole one, so the single-face proofs stay for the
+	// rounds where a face needs the deeper read.
+	//
+	// The three triggers differ from their FIRST character, so none is a prefix
+	// of another and a mistyped one matches nothing.
+	ftProofTriggerBoth = "BOTHPROOF!"
 )
 
 // The building blocks. Shared verbatim by all four patterns so a change to a
@@ -116,10 +132,11 @@ const (
 const ftProofHead = ftProofSweep + "\n" + ftProofConfusables + "\n" +
 	ftProofSeedWords + "\n" + ftProofUpperPangram + " " + ftProofLowerPangram
 
-// The four patterns. Head + as much prose as ABOUT NINE TENTHS of the plate
-// holds. The tails differ because the plates differ -- font/sh is 44 columns
-// against font/constant's 39, and a QR takes roughly two thirds of the width
-// off every line beside it.
+// The four single-face patterns. Head + as much prose as ABOUT NINE TENTHS of
+// the plate holds. The tails differ because the plates differ -- font/sh is 44
+// columns against font/constant's 39, and a QR takes roughly two thirds of the
+// width off every line beside it. The fifth pattern, the mixed-face plate, is
+// below and is built from halves rather than from the shared head.
 //
 // Deliberately NOT tuned to the last character (user directive 2026-08-04).
 // Auto-fit is all-or-nothing: a pattern sitting at 99% of the 3.0mm capacity is
@@ -138,6 +155,61 @@ const (
 		ftProofLorem3 + " " + ftProofPangram1 + " " + ftProofPangram2
 	ftProofTextConstQR = ftProofHead + " " + ftProofPangram1
 )
+
+// The mixed-face plate, as two halves.
+//
+// Each half is a proof of its own face and carries the whole payload for it:
+// the label, the complete 95-character codepoint sweep and the complete
+// confusable table. Those three are what makes a half a proof at all, and
+// neither the sweep nor the table may be trimmed to make room -- a face is not
+// qualified by most of its glyphs.
+//
+// What each half does NOT carry is a full page of prose. Two halves do not hold
+// what two plates hold; the reading material is split between them and the
+// running-text pangrams are what survives, because the halves have to fit ONE
+// plate at 3.0mm with margin to spare. See TestProofPatternsFillThePlate: this
+// pattern is deliberately well short of capacity, since auto-fit is
+// all-or-nothing and a pattern balanced on the limit is refused outright by the
+// next glyph edit rather than engraved slightly smaller.
+//
+// The LABEL is the first line of each half and is cut IN THE FACE IT NAMES, so
+// it is a specimen of that face as well as a caption for it. Without it the two
+// halves of an engraved plate cannot be told apart -- which half is which is
+// exactly the question the plate exists to answer. They are the same strings
+// the single-face plates carry as their titles, so the grid they state is
+// asserted by the same measurement; see TestProofBlockLabelsNameTheirOwnFace.
+const (
+	ftProofBothSH = ftProofTitleSH + "\n" + ftProofSweep + "\n" + ftProofConfusables + "\n" +
+		ftProofUpperPangram + " " + ftProofLowerPangram
+
+	ftProofBothConst = ftProofTitleConst + "\n" + ftProofSweep + "\n" + ftProofConfusables + "\n" +
+		ftProofSeedWords + "\n" + ftProofUpperPangram + " " + ftProofLowerPangram
+
+	ftProofTextBoth = ftProofBothSH + "\n" + ftProofBothConst
+)
+
+// ftProofBothSplit is how many of ftProofTextBoth's '\n'-blocks belong to the
+// font/sh half. DERIVED from the half itself rather than written down: a
+// hand-counted split that fell out of step with the text would cut part of one
+// face's proof in the other face, and the label would then name the wrong one.
+var ftProofBothSplit = strings.Count(ftProofBothSH, "\n") + 1
+
+// ftPlanBoth is the mixed-face plan: the first ftProofBothSplit blocks in
+// font/sh, everything after them in font/constant.
+var ftPlanBoth = ftPlan{Runs: []ftFaceRun{
+	{Face: ftFaceSH, Blocks: ftProofBothSplit},
+	{Face: ftFaceConst},
+}}
+
+// ftProofTitleBoth is the mixed plate's own title. It cannot state a grid --
+// the plate has two, 44 columns in its top half and 39 in its bottom -- so the
+// grids live on the block labels, where each one sits in the face it describes,
+// and the title carries what is true of the whole plate: which faces, at which
+// size.
+//
+// It is cut in font/sh, the face of the block it borders; the footer is cut in
+// font/constant for the same reason. See FitBlocks.
+const ftProofTitleBoth = "SH+CONST 3.0mm"
 
 // The plate's own titles. On permanent steel the title is the only record of
 // WHAT was tested, so it carries the three things that would otherwise be
@@ -159,22 +231,37 @@ const (
 // where a glyph is most likely to collide with a hole.
 const ftProofFooter = "gjpqy 0O 1lI| rn m" // 18
 
-// ftProof is one trigger's worth of proof: which face, what the plate says it
-// is, and the two patterns tuned for that face.
+// ftProof is one trigger's worth of proof: which face plan, what the plate says
+// it is, and the patterns tuned for that plan.
 type ftProof struct {
 	Trigger string
-	Face    ftFace
+	Plan    *ftPlan
 	Title   string
 	// Text is the pattern with no QR; TextQR the one with a QR beside it.
+	//
+	// An EMPTY TextQR means this proof needs the whole plate and cannot carry a
+	// QR at all -- see NeedsWholePlate.
 	Text   string
 	TextQR string
 }
 
+// NeedsWholePlate reports that this proof has no QR variant.
+//
+// The mixed-face plate is the case: with a QR the lines beside it are roughly a
+// third as wide, and the plate then holds about half as much at 3.0mm -- less
+// than ONE half's sweep and confusable table, let alone two. There is no
+// reduced mixed pattern worth cutting, so the honest answer is that this plate
+// carries no QR, said out loud in the prompt before the operator accepts it.
+func (p *ftProof) NeedsWholePlate() bool { return p.TextQR == "" }
+
 // For returns the pattern for the QR choice the operator has ALREADY made.
 // Splitting on the QR is not a nicety: with a QR the plate holds roughly half
 // as much at 3.0mm, so loading the other pattern would be refused outright.
+//
+// A proof that needs the whole plate has one pattern and the QR is dropped when
+// it loads, so there is nothing to choose between.
 func (p *ftProof) For(qr bool) string {
-	if qr {
+	if qr && !p.NeedsWholePlate() {
 		return p.TextQR
 	}
 	return p.Text
@@ -184,17 +271,26 @@ func (p *ftProof) For(qr bool) string {
 var ftProofs = []ftProof{
 	{
 		Trigger: ftProofTriggerSH,
-		Face:    ftFaceSH,
+		Plan:    &ftPlanSH,
 		Title:   ftProofTitleSH,
 		Text:    ftProofTextSH,
 		TextQR:  ftProofTextSHQR,
 	},
 	{
 		Trigger: ftProofTriggerConst,
-		Face:    ftFaceConst,
+		Plan:    &ftPlanConst,
 		Title:   ftProofTitleConst,
 		Text:    ftProofTextConst,
 		TextQR:  ftProofTextConstQR,
+	},
+	{
+		Trigger: ftProofTriggerBoth,
+		Plan:    &ftPlanBoth,
+		Title:   ftProofTitleBoth,
+		Text:    ftProofTextBoth,
+		// No QR variant: the pattern needs the whole plate. See
+		// NeedsWholePlate.
+		TextQR: "",
 	},
 }
 
@@ -226,21 +322,32 @@ func ftProofForTrigger(typed string) (*ftProof, bool) {
 // only this screen carries -- see TestProofNeedsTheWholeField.
 const ftProofPromptTitle = "Test Pattern"
 
-// ftProofAsk names the face in the question itself, because the two triggers
-// differ ONLY in which face they prove and the operator has to be able to tell,
-// from the screen, which of the two they typed.
+// ftProofAsk names the face plan in the question itself, because the triggers
+// differ ONLY in which faces they prove and the operator has to be able to
+// tell, from the screen, which of them they typed.
 func ftProofAsk(p *ftProof) string {
-	return "Load the " + p.Face.Name + " test pattern?"
+	return "Load the " + p.Plan.Name() + " test pattern?"
 }
 
 // ftProofReplaces is the prompt's promise, and ftProofLoader is what keeps it.
 // "REPLACES ALL THREE" is the load-bearing phrase: the operator is one tap from
 // losing a body they may have spent minutes typing.
+//
+// A proof that needs the whole plate also DROPS THE QR, which is a fourth field
+// and the only one the loader ever writes without being asked. It is said here,
+// in the sentence the operator reads before accepting, because the QR decides
+// what a scanner returns from the plate and changing it silently is exactly the
+// substitution this program exists to avoid.
 func ftProofReplaces(p *ftProof) string {
-	return "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
+	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
 		"Text becomes the proof pattern, Title becomes " + p.Title +
 		", Footer becomes " + ftProofFooter + ". The plate is cut in " +
-		p.Face.Name + " at 3.0mm."
+		p.Plan.Name() + " at 3.0mm."
+	if p.NeedsWholePlate() {
+		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
+			"so the plate will not be machine-readable."
+	}
+	return s
 }
 
 // ftProofKeep is the honest description of the OTHER answer. Declining is not a
@@ -335,17 +442,27 @@ func ftProofNav(noBtn, yesBtn *Clickable) []NavButton {
 //
 // The text is chosen for the CURRENT QR choice. The QR choice itself is never
 // modified -- the operator made it deliberately one step earlier, and silently
-// flipping it would change what a scanner returns from the plate.
+// flipping it would change what a scanner returns from the plate -- with the
+// single exception of a proof that NEEDS THE WHOLE PLATE, which has no QR
+// variant to load and whose prompt says in as many words that accepting removes
+// the QR. That is not silent, which is the property that mattered.
 //
-// The FACE is written, because it is what the trigger selects. It is returned
-// to the flow by writing through the pointer rather than by the return value:
-// the return value is the text, and the caller uses it to re-seed the keyboard.
-func ftProofLoader(text, title, footer *string, face *ftFace, useQR *bool) func(*ftProof) string {
+// The FACE PLAN is written, because it is what the trigger selects. It is
+// returned to the flow by writing through the pointer rather than by the return
+// value: the return value is the text, and the caller uses it to re-seed the
+// keyboard.
+func ftProofLoader(text, title, footer *string, plan **ftPlan, useQR *bool) func(*ftProof) string {
 	return func(p *ftProof) string {
+		if p.NeedsWholePlate() {
+			// The one exception, and it is prompted: ftProofReplaces says this
+			// will happen before the operator can accept it. Written BEFORE the
+			// text so For reads the choice that will actually be in force.
+			*useQR = false
+		}
 		*text = p.For(*useQR)
 		*title = p.Title
 		*footer = ftProofFooter
-		*face = p.Face
+		*plan = p.Plan
 		return *text
 	}
 }

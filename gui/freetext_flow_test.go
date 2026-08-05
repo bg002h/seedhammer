@@ -25,23 +25,21 @@ import (
 type ftRun struct {
 	done bool
 
-	// What EngraveFreeText was handed, via freetextPlateHook.
-	gotFont   *vector.Face
-	gotSize   float32
-	gotTitle  string
-	gotLines  []string
-	gotFooter string
-	gotQR     *qrpkg.Code
-	gotPlate  bool
+	// got is exactly what EngraveFitted was handed, via freetextPlateHook --
+	// including Faces, the face each engraved line is cut in, which nothing
+	// recoverable from the finished Plate can report.
+	got      backup.Fitted
+	gotPlate bool
 }
 
 func startFT(t *testing.T) (*ppHarness, *ftRun) {
 	t.Helper()
 	h := newPPHarness(t)
 	r := new(ftRun)
-	freetextPlateHook = func(fnt *vector.Face, fontMM float32, title string, lines []string, footer string, qrc *qrpkg.Code) {
-		r.gotFont, r.gotSize, r.gotTitle, r.gotFooter, r.gotQR, r.gotPlate = fnt, fontMM, title, footer, qrc, true
-		r.gotLines = slices.Clone(lines)
+	freetextPlateHook = func(f backup.Fitted) {
+		r.got, r.gotPlate = f, true
+		r.got.Lines = slices.Clone(f.Lines)
+		r.got.Faces = slices.Clone(f.Faces)
 	}
 	t.Cleanup(func() { freetextPlateHook = nil })
 	h.start(func() {
@@ -442,21 +440,21 @@ func TestFTPlateIsWhatWasApproved(t *testing.T) {
 	if !r.gotPlate {
 		t.Fatal("the flow never built a plate")
 	}
-	if r.gotSize != wantSize {
-		t.Errorf("engraved at %.1fmm, confirmed at %.1fmm", r.gotSize, wantSize)
+	if r.got.SizeMM != wantSize {
+		t.Errorf("engraved at %.1fmm, confirmed at %.1fmm", r.got.SizeMM, wantSize)
 	}
-	if !slices.Equal(r.gotLines, wantLines) {
-		t.Errorf("engraved lines differ from the confirmed ones:\n got %q\nwant %q", r.gotLines, wantLines)
+	if !slices.Equal(r.got.Lines, wantLines) {
+		t.Errorf("engraved lines differ from the confirmed ones:\n got %q\nwant %q", r.got.Lines, wantLines)
 	}
-	if r.gotTitle != "TO MY HEIR" || r.gotFooter != "2026 COPY 1" {
-		t.Errorf("title/footer engraved as %q/%q, want %q/%q", r.gotTitle, r.gotFooter, "TO MY HEIR", "2026 COPY 1")
+	if r.got.Title != "TO MY HEIR" || r.got.Footer != "2026 COPY 1" {
+		t.Errorf("title/footer engraved as %q/%q, want %q/%q", r.got.Title, r.got.Footer, "TO MY HEIR", "2026 COPY 1")
 	}
-	if r.gotQR == nil {
+	if r.got.QR == nil {
 		t.Fatal("no QR was engraved")
 	}
 	// Module level, not "a decoder returns the text": a decoder that ignores
 	// trailing data would pass while the modules differed.
-	if r.gotQR.Size != wantQR.Size || !slices.Equal(r.gotQR.Bitmap, wantQR.Bitmap) {
+	if r.got.QR.Size != wantQR.Size || !slices.Equal(r.got.QR.Bitmap, wantQR.Bitmap) {
 		t.Error("the engraved QR is not the code Fit measured")
 	}
 }
@@ -479,14 +477,14 @@ func TestFTQREncodesTheTextOnly(t *testing.T) {
 	h.mustReach("Confirm")
 	ftOK(h)
 	h.step()
-	if !r.gotPlate || r.gotQR == nil {
+	if !r.gotPlate || r.got.QR == nil {
 		t.Fatal("no QR plate was built")
 	}
 	want, err := qrpkg.Encode(text, qrpkg.L)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.gotQR.Size != want.Size || !slices.Equal(r.gotQR.Bitmap, want.Bitmap) {
+	if r.got.QR.Size != want.Size || !slices.Equal(r.got.QR.Bitmap, want.Bitmap) {
 		t.Error("the engraved QR is not qr.Encode(Text); a field other than Text reached it")
 	}
 	// And a code over the concatenation would be a DIFFERENT code, so the
@@ -517,11 +515,11 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 	if !r.gotPlate {
 		t.Fatal("the flow never built a plate")
 	}
-	if r.gotQR != nil {
-		t.Errorf("a %d-module QR was engraved after the operator declined one", r.gotQR.Size)
+	if r.got.QR != nil {
+		t.Errorf("a %d-module QR was engraved after the operator declined one", r.got.QR.Size)
 	}
-	if r.gotTitle != "" || r.gotFooter != "" {
-		t.Errorf("skipped title/footer arrived as %q/%q, want empty", r.gotTitle, r.gotFooter)
+	if r.got.Title != "" || r.got.Footer != "" {
+		t.Errorf("skipped title/footer arrived as %q/%q, want empty", r.got.Title, r.got.Footer)
 	}
 }
 
@@ -531,10 +529,10 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 func TestFTBuildPlateEncodesOnce(t *testing.T) {
 	const text = "a note that needs a code"
 	var got *qrpkg.Code
-	freetextPlateHook = func(_ *vector.Face, _ float32, _ string, _ []string, _ string, qrc *qrpkg.Code) { got = qrc }
+	freetextPlateHook = func(f backup.Fitted) { got = f.QR }
 	t.Cleanup(func() { freetextPlateHook = nil })
 	P := newPlatform().EngraverParams()
-	if _, err := ftBuildPlate(P, ftFaceSH, text, "T", "F", true); err != nil {
+	if _, err := ftBuildPlate(P, &ftPlanSH, text, "T", "F", true); err != nil {
 		t.Fatal(err)
 	}
 	_, _, want, err := backup.Fit(P, sh.Font, text, "T", "F", true)
@@ -563,18 +561,18 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	th := &descriptorTheme
 	// Lines far wider than any panel this screen is laid out on.
-	f := ftFit{
-		sizeMM: 3.0,
-		lines:  []string{strings.Repeat("W", 44), strings.Repeat("m", 44), "short"},
-	}
+	f := ftFit{plate: backup.Fitted{
+		SizeMM: 3.0,
+		Lines:  []string{strings.Repeat("W", 44), strings.Repeat("m", 44), "short"},
+	}}
 	empty := f
-	empty.lines = nil
+	empty.plate.Lines = nil
 
 	// A budget nothing can page against, so this test measures the layout and
 	// not the pager. The paging itself is TestFTConfirmPagesEveryRowExactlyOnce.
 	const noPaging = 1 << 20
 	body := func(width int, f ftFit, title, footer string) image.Point {
-		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, ftFaceSH, title, footer, false)
+		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, &ftPlanSH, title, footer, false)
 		if v.Shown != v.Total {
 			t.Fatalf("the %dpx budget still paged: %d of %d rows", noPaging, v.Shown, v.Total)
 		}
@@ -592,9 +590,9 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	}
 	row := rowOf(ctx.Styles.body)
 	for _, width := range []int{sh2DisplaySize.X, sh2DisplaySize.X / 2, sh2DisplaySize.X / 4} {
-		if got, want := lineBlock(width), len(f.lines)*row; got != want {
+		if got, want := lineBlock(width), len(f.plate.Lines)*row; got != want {
 			t.Errorf("at width %d the %d plate lines occupy %dpx, want %dpx (%d rows of %dpx) -- they are being re-wrapped",
-				width, len(f.lines), got, want, len(f.lines), row)
+				width, len(f.plate.Lines), got, want, len(f.plate.Lines), row)
 		}
 	}
 	// The title and footer are single rows too, in the subtitle style.
@@ -637,7 +635,7 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
 	for _, useQR := range []bool{false, true} {
-		got, err := ftBuildPlate(P, ftFaceSH, text, "TO MY HEIR", "2026 COPY 1", useQR)
+		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -676,8 +674,9 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 func TestFTBuiltPlateIsCutInTheFittedFace(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
-	for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
-		got, err := ftBuildPlate(P, face, text, "TO MY HEIR", "2026 COPY 1", false)
+	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst} {
+		face := plan.Runs[0].Face
+		got, err := ftBuildPlate(P, plan, text, "TO MY HEIR", "2026 COPY 1", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -762,7 +761,7 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 			// The face is stated too. It decides how much fits and what the
 			// plate looks like, and the proof triggers change it, so it must
 			// never be something the operator has to guess.
-			if !uiContains(h.content, "font: "+ftFaceSH.Name) {
+			if !uiContains(h.content, "font: "+ftPlanSH.Name()) {
 				t.Errorf("the confirm screen does not name the engraving face; frame %q", h.content)
 			}
 		})
@@ -770,13 +769,19 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 }
 
 // ftWorstCompositions returns the LARGEST composition the flow will admit for
-// each face / QR / title-and-footer combination -- the confirm screen's worst
-// case, found by search rather than assumed.
+// each face plan / QR / title-and-footer combination -- the confirm screen's
+// worst case, found by search rather than assumed.
+//
+// The mixed plan is searched too. Its texts here carry no '\n', so they collapse
+// to one block and fit exactly as the sh plan's do -- but the SUMMARY differs:
+// a mixed plan prints the measured row count of every run ("sh 24"), which is a
+// longer string than a single-face plan's bare "sh" and could take a line the
+// budget did not reserve.
 func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 	t.Helper()
 	cap18 := strings.Repeat("W", backup.MaxTitleLen)
 	var out []ftFit
-	for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
+	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst, &ftPlanBoth} {
 		for _, useQR := range []bool{false, true} {
 			for _, tf := range [][2]string{{"", ""}, {cap18, cap18}} {
 				// Binary search the longest admissible text. Word-free, so the
@@ -784,7 +789,7 @@ func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 				lo, hi, best := 1, 4000, 0
 				for lo <= hi {
 					mid := (lo + hi) / 2
-					f := ftEvaluate(P, face, strings.Repeat("a", mid), tf[0], tf[1], useQR)
+					f := ftEvaluate(P, plan, strings.Repeat("a", mid), tf[0], tf[1], useQR)
 					if f.ok && f.err == nil {
 						best, lo = mid, mid+1
 					} else {
@@ -792,9 +797,9 @@ func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 					}
 				}
 				if best == 0 {
-					t.Fatalf("no admissible text at all for face %s qr=%v", face.Name, useQR)
+					t.Fatalf("no admissible text at all for plan %s qr=%v", plan.Name(), useQR)
 				}
-				f := ftEvaluate(P, face, strings.Repeat("a", best), tf[0], tf[1], useQR)
+				f := ftEvaluate(P, plan, strings.Repeat("a", best), tf[0], tf[1], useQR)
 				out = append(out, f)
 			}
 		}
@@ -828,22 +833,22 @@ func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
 	area := ppConfirmArea(dims)
 	th := &descriptorTheme
 	worst := ftWorstCompositions(t, ctx.Platform.EngraverParams())
-	if len(worst) != 8 {
-		t.Fatalf("expected 8 worst cases, got %d", len(worst))
+	if len(worst) != 12 {
+		t.Fatalf("expected 12 worst cases, got %d", len(worst))
 	}
 	cap18 := strings.Repeat("W", backup.MaxTitleLen)
 	sawPaging := false
 	for i, f := range worst {
-		for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
+		for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst, &ftPlanBoth} {
 			for _, tf := range [][2]string{{"", ""}, {cap18, cap18}} {
-				useQR := f.qrc != nil
+				useQR := f.plate.QR != nil
 				start, guard := 0, 0
 				for {
-					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, face, tf[0], tf[1], useQR)
+					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1], useQR)
 					if v.Size.Y > area.Dy() {
 						t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q) page from row %d needs %dpx "+
 							"of a %dpx area: the size line and the warnings are off the %v panel",
-							i, len(f.lines), useQR, face.Name, tf[0], start, v.Size.Y, area.Dy(), dims)
+							i, len(f.plate.Lines), useQR, plan.Name(), tf[0], start, v.Size.Y, area.Dy(), dims)
 					}
 					if v.Size.X > area.Dx() {
 						t.Fatalf("case %d page from row %d is %dpx wide in a %dpx area", i, start, v.Size.X, area.Dx())
@@ -885,11 +890,11 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	area := ppConfirmArea(ctx.Platform.DisplaySize())
 	th := &descriptorTheme
 	cap18 := strings.Repeat("W", backup.MaxTitleLen)
-	f := ftFit{sizeMM: 3.0, qrc: &qrpkg.Code{Size: 73}}
+	f := ftFit{plate: backup.Fitted{SizeMM: 3.0, QR: &qrpkg.Code{Size: 73}}}
 	for i := 0; i < 24; i++ {
-		f.lines = append(f.lines, strings.Repeat("W", 44))
+		f.plate.Lines = append(f.plate.Lines, strings.Repeat("W", 44))
 	}
-	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, ftFaceConst, cap18, cap18, true)
+	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, &ftPlanConst, cap18, cap18, true)
 	if v.Total != 26 {
 		t.Fatalf("worst case is %d rows, want 26 (title + 24 lines + footer)", v.Total)
 	}
@@ -898,7 +903,7 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	}
 	// And the warnings themselves are what is being reserved for: the summary
 	// must be the taller part of the budget, or nothing was actually reserved.
-	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, ftFaceConst, true, ftConfirmPager(0, 1, 26))
+	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, &ftPlanConst, true, ftConfirmPager(0, 1, 26))
 	if sum.Y <= 0 {
 		t.Fatal("the summary block measures nothing; the reservation is vacuous")
 	}
@@ -920,16 +925,16 @@ func TestFTConfirmPagesEveryRowExactlyOnce(t *testing.T) {
 	area := ppConfirmArea(ctx.Platform.DisplaySize())
 	th := &descriptorTheme
 	cap18 := strings.Repeat("W", backup.MaxTitleLen)
-	f := ftFit{sizeMM: 3.0}
+	f := ftFit{plate: backup.Fitted{SizeMM: 3.0}}
 	for i := 0; i < 24; i++ {
-		f.lines = append(f.lines, strings.Repeat("W", 44))
+		f.plate.Lines = append(f.plate.Lines, strings.Repeat("W", 44))
 	}
 	rows := ftConfirmRows(f, cap18, cap18)
 	seen := 0
 	start := 0
 	pages := 0
 	for {
-		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, ftFaceSH, cap18, cap18, false)
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, &ftPlanSH, cap18, cap18, false)
 		if v.Total != len(rows) {
 			t.Fatalf("page %d reports %d rows, want %d", pages, v.Total, len(rows))
 		}
@@ -1031,5 +1036,148 @@ func TestFTTitleAndFooterRejectNewlines(t *testing.T) {
 		if !h.pump(8, "single line") {
 			t.Errorf("%s accepted a newline; got %q (out=%q ok=%v)", what, h.content, out, ok)
 		}
+	}
+}
+
+// ---- face plans -------------------------------------------------------------
+
+// TestPlansAreWellFormed: every plan the program ships must be usable. A
+// non-final run that covers no blocks is a plan whose second face never
+// appears; a plan with no runs at all has no face to cut in.
+func TestPlansAreWellFormed(t *testing.T) {
+	plans := map[string]*ftPlan{"sh": &ftPlanSH, "constant": &ftPlanConst, "both": &ftPlanBoth}
+	for name, plan := range plans {
+		if len(plan.Runs) == 0 {
+			t.Errorf("%s: the plan has no runs", name)
+			continue
+		}
+		for i, r := range plan.Runs {
+			if r.Face.Face == nil {
+				t.Errorf("%s: run %d has no face", name, i)
+			}
+			if r.Face.Name == "" {
+				t.Errorf("%s: run %d has no name; the confirm screen would print nothing", name, i)
+			}
+			if i < len(plan.Runs)-1 && r.Blocks < 1 {
+				t.Errorf("%s: run %d covers %d blocks, so the face after it would take the whole plate",
+					name, i, r.Blocks)
+			}
+		}
+		// Distinct faces, or the plan is a single-face plate wearing two names.
+		for i := 1; i < len(plan.Runs); i++ {
+			if plan.Runs[i].Face == plan.Runs[i-1].Face {
+				t.Errorf("%s: runs %d and %d are the same face", name, i-1, i)
+			}
+		}
+		if plan.Name() == "" {
+			t.Errorf("%s: the plan has no name", name)
+		}
+	}
+	if ftPlanSH.Name() != "sh" || ftPlanConst.Name() != "constant" {
+		t.Errorf("a single-face plan no longer names itself after its face: %q / %q",
+			ftPlanSH.Name(), ftPlanConst.Name())
+	}
+	if len(ftPlanBoth.Runs) != 2 {
+		t.Errorf("the mixed plan has %d runs, want 2", len(ftPlanBoth.Runs))
+	}
+}
+
+// TestPlanBlocksAreLosslessAndTotal: Blocks splits the field's text on '\n' and
+// nothing else. Rejoining the blocks must give back exactly what was typed --
+// a free-text plate engraves what was entered, so a split that consumed,
+// doubled or substituted a character would put something else on the steel and
+// something else again in the QR.
+//
+// And it is TOTAL: a text with fewer blocks than the plan expects collapses to
+// ONE block in the first run's face rather than producing an empty one, which
+// would engrave a blank row nobody asked for.
+func TestPlanBlocksAreLosslessAndTotal(t *testing.T) {
+	texts := []string{
+		"", "one", "one\ntwo", "one\ntwo\nthree", "a\nb\nc\nd\ne\nf\ng\nh",
+		"\nleading", "trailing\n", "double\n\nblank",
+		"a\nb\nc\nd\ne\n", // enough blocks to split AND a trailing newline
+		ftProofTextBoth,
+	}
+	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst, &ftPlanBoth} {
+		for _, text := range texts {
+			blocks := plan.Blocks(text)
+			if len(blocks) == 0 {
+				t.Fatalf("%s: %.20q produced no blocks", plan.Name(), text)
+			}
+			if got := backup.CompositionText(blocks); got != text {
+				t.Errorf("%s: %.20q rejoins as %.20q", plan.Name(), text, got)
+			}
+			for i, b := range blocks {
+				if b.Face == nil {
+					t.Errorf("%s: block %d has no face", plan.Name(), i)
+				}
+				// An empty block is a defect -- it engraves a blank row nobody
+				// asked for -- EXCEPT as the last block of a text that ends in
+				// '\n', where the empty final line is real and the single-face
+				// wrap engraves it too. See
+				// TestBlockSplittingDoesNotChangeTheLayoutWithinAFace.
+				trailing := i == len(blocks)-1 && strings.HasSuffix(text, "\n")
+				if b.Text == "" && len(blocks) > 1 && !trailing {
+					t.Errorf("%s: %.20q produced an empty block %d, which engraves a blank row",
+						plan.Name(), text, i)
+				}
+			}
+			// A single-face plan is never split at all: it is the untouched
+			// path, and it must stay one block whatever the text contains.
+			if len(plan.Runs) == 1 && len(blocks) != 1 {
+				t.Errorf("%s: a single-face plan split %.20q into %d blocks", plan.Name(), text, len(blocks))
+			}
+		}
+	}
+	// The specific collapse: too few blocks for the mixed plan means all of it
+	// in the FIRST face, in one block.
+	short := "only\ntwo"
+	if n := strings.Count(short, "\n") + 1; n >= ftProofBothSplit {
+		t.Fatalf("this case needs fewer than %d blocks; it has %d", ftProofBothSplit, n)
+	}
+	got := ftPlanBoth.Blocks(short)
+	if len(got) != 1 || got[0].Face != ftFaceSH.Face || got[0].Text != short {
+		t.Errorf("an edited-down mixed text became %d blocks, want one in font/sh holding all of it", len(got))
+	}
+	// And the full pattern DOES split, in the declared order.
+	full := ftPlanBoth.Blocks(ftProofTextBoth)
+	if len(full) != 2 {
+		t.Fatalf("the mixed pattern split into %d blocks, want 2", len(full))
+	}
+	if full[0].Face != ftFaceSH.Face || full[1].Face != ftFaceConst.Face {
+		t.Error("the mixed pattern's halves are in the wrong faces, or in the wrong order")
+	}
+	if full[0].Text != ftProofBothSH || full[1].Text != ftProofBothConst {
+		t.Error("the split does not fall between the two authored halves")
+	}
+}
+
+// TestFaceSummaryReportsTheMeasuredRuns: the confirm screen's "font:" field is
+// read from the FITTED face map, so it says what the plate will be rather than
+// what was asked for. A mixed plate that collapsed to one face, or whose halves
+// came out swapped, must read differently on the screen the operator approves.
+func TestFaceSummaryReportsTheMeasuredRuns(t *testing.T) {
+	sh, cn := ftFaceSH.Face, ftFaceConst.Face
+	mixed := []*vector.Face{sh, sh, sh, cn, cn}
+	base := ftFaceSummary(&ftPlanBoth, mixed)
+	for _, tc := range []struct {
+		name  string
+		faces []*vector.Face
+	}{
+		{"all in the first face", []*vector.Face{sh, sh, sh, sh, sh}},
+		{"all in the last face", []*vector.Face{cn, cn, cn, cn, cn}},
+		{"the halves swapped", []*vector.Face{cn, cn, cn, sh, sh}},
+		{"the boundary moved one row", []*vector.Face{sh, sh, cn, cn, cn}},
+	} {
+		if got := ftFaceSummary(&ftPlanBoth, tc.faces); got == base {
+			t.Errorf("%s reads as %q, the same as the correct plate", tc.name, got)
+		}
+	}
+	if !strings.Contains(base, ftFaceSH.Name) || !strings.Contains(base, ftFaceConst.Name) {
+		t.Errorf("the mixed summary %q does not name both faces", base)
+	}
+	// A single-face plan is untouched: the bare face name, as it always was.
+	if got := ftFaceSummary(&ftPlanSH, mixed); got != ftFaceSH.Name {
+		t.Errorf("a single-face plan now summarises as %q, want %q", got, ftFaceSH.Name)
 	}
 }

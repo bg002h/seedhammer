@@ -3,6 +3,7 @@ package backup
 import (
 	"errors"
 	"math"
+	"strings"
 
 	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/engrave"
@@ -28,11 +29,69 @@ const freeTextQRScale = 2
 // MaxCharsAt and EngraveFreeText therefore all take the face, and a caller that
 // passes different faces to the fit and to the engraving gets a plate that does
 // not match what was measured.
+//
+// A plate may also be cut in more than one face, one run of rows each: see
+// Block, FitBlocks and EngraveFitted, of which the single-face functions above
+// are the one-block case.
 var FreeTextFont *vector.Face = sh.Font
 
 // ErrTooLarge means the composition does not fit one plate even at the smallest
 // rung. Text is refused, never split across plates (spec 6, user directive).
 var ErrTooLarge = errors.New("backup: text does not fit a plate")
+
+// Block is one run of consecutive body rows cut in a SINGLE engraving face.
+//
+// A plate is a list of blocks in plate order, top to bottom. One block is the
+// ordinary free-text plate; two make a MIXED-FACE plate, which exists so a
+// single piece of steel can qualify both shipped faces at 3.0mm instead of
+// costing one plate each.
+//
+// Text may contain '\n' -- it wraps by the same rules as any other block text.
+// The composition text is the block texts joined by '\n' (CompositionText), so a
+// caller that split a string into blocks gets exactly that string back, and the
+// QR the plate carries is a copy of what is engraved rather than of a fragment.
+type Block struct {
+	Face *vector.Face
+	Text string
+}
+
+// CompositionText is the whole composition as one string: the block texts joined by '\n',
+// which is the boundary WrapText already breaks on. This is what the QR encodes
+// and what capacity is measured against.
+func CompositionText(blocks []Block) string {
+	if len(blocks) == 1 {
+		return blocks[0].Text
+	}
+	parts := make([]string, len(blocks))
+	for i, b := range blocks {
+		parts[i] = b.Text
+	}
+	return strings.Join(parts, "\n")
+}
+
+// Fitted is one composition laid out for one plate, and it is the ONLY output
+// of the fit. The confirm screen renders it, the engraver engraves it and the
+// readout counts it -- three consumers of ONE result, never three
+// re-derivations that ought to agree.
+//
+// Faces is parallel to Lines: Faces[i] is the face line i is cut in, and with a
+// mixed-face plate the per-line CHARACTER BUDGET the line was wrapped to
+// depends on it (font/sh is 44 columns at 3.0mm, font/constant 39). Recomputing
+// that mapping anywhere downstream is the one way this feature can silently
+// engrave lines wide of the grid they were broken to, so nothing downstream
+// may: read Faces.
+type Fitted struct {
+	SizeMM float32
+	Lines  []string
+	Faces  []*vector.Face
+	QR     *qr.Code
+
+	// The screw-hole rows. Title takes plate row 0 and Footer the last row,
+	// each when non-empty. Their faces are the faces of the blocks they border
+	// -- see FitBlocks.
+	Title, Footer         string
+	TitleFace, FooterFace *vector.Face
+}
 
 // qrFor returns the code the plate will carry, or nil when want is false.
 // qr.Encode fails at 2954 bytes and above, and the Text field is deliberately
@@ -72,78 +131,197 @@ func widthFor(lay lineLayout, startRow int) func(int) int {
 	}
 }
 
-// Fit is the largest rung whose layout holds the whole composition, in the
-// face fnt. The same text fits differently in different faces, so fnt must be
-// the face the composition will be ENGRAVED in; see FreeTextFont.
+// wrapBlocks is THE wrap, and the only place a block's face is turned into a
+// per-line character budget.
+//
+// Each block is wrapped in its OWN face, starting at the plate row the previous
+// block ended on, so the face boundary falls exactly on the content boundary
+// and the budget of every line is the budget of the face that line is cut in.
+// The returned faces slice is parallel to lines, and is the mapping every
+// consumer of the fit reads instead of recomputing.
+//
+// With a single block this is exactly the arithmetic Fit has always done: one
+// textLayout, one WrapText over [start, end).
+func wrapBlocks(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, start, end int) (lines []string, faces []*vector.Face, ok bool) {
+	row := start
+	for _, b := range blocks {
+		lay := textLayout(params, b.Face, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
+		l, fits := WrapText(b.Text, widthFor(lay, row), end-row)
+		if !fits {
+			return nil, nil, false
+		}
+		lines = append(lines, l...)
+		for range l {
+			faces = append(faces, b.Face)
+		}
+		row += len(l)
+	}
+	return lines, faces, true
+}
+
+// FitBlocks is the largest rung whose layout holds the whole composition, with
+// each block cut in its own face.
+//
+// The title takes the face of the FIRST block and the footer the face of the
+// LAST. Both sit on screw-hole rows at the very top and the very bottom of the
+// plate, so this makes the plate read as contiguous runs -- each screw-hole row
+// is cut in the face of the half it borders -- and with one block it is simply
+// "the plate's face", unchanged.
 //
 // It returns the QR CODE ITSELF, not just its size, so the artifact engraved is
 // the very object the fit measured: there is exactly one encode per
 // composition, and no caller can re-encode with different parameters and
 // disagree.
-func Fit(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (fontMM float32, lines []string, qrc *qr.Code, err error) {
-	qrc, err = qrFor(text, qr)
+func FitBlocks(params engrave.Params, blocks []Block, title, footer string, useQR bool) (Fitted, error) {
+	if len(blocks) == 0 {
+		return Fitted{}, ErrTooLarge
+	}
+	qrc, err := qrFor(CompositionText(blocks), useQR)
 	if err != nil {
-		return 0, nil, nil, err
+		return Fitted{}, err
 	}
 	for _, size := range FontSizes {
 		rows := LinesPerPlate(params, size)
 		start, end := bodyRows(rows, title, footer)
-		lay := textLayout(params, fnt, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
-		l, ok := WrapText(text, widthFor(lay, start), end-start)
-		if ok {
-			return size, l, qrc, nil
+		lines, faces, ok := wrapBlocks(params, blocks, size, qrc, start, end)
+		if !ok {
+			continue
 		}
+		return Fitted{
+			SizeMM:     size,
+			Lines:      lines,
+			Faces:      faces,
+			QR:         qrc,
+			Title:      title,
+			Footer:     footer,
+			TitleFace:  blocks[0].Face,
+			FooterFace: blocks[len(blocks)-1].Face,
+		}, nil
 	}
-	return 0, nil, nil, ErrTooLarge
+	return Fitted{}, ErrTooLarge
 }
 
-// Admissible is spec 6's anchor: 3.0mm, the QR as chosen, and BOTH the title
-// and footer rows reserved whether or not they are used.
+// Fit is FitBlocks for a composition cut entirely in one face. The same text
+// fits differently in different faces, so fnt must be the face the composition
+// will be ENGRAVED in; see FreeTextFont.
+func Fit(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (fontMM float32, lines []string, qrc *qr.Code, err error) {
+	f, err := FitBlocks(params, []Block{{Face: fnt, Text: text}}, title, footer, qr)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return f.SizeMM, f.Lines, f.QR, nil
+}
+
+// AdmissibleBlocks is spec 6's anchor: 3.0mm, the QR as chosen, and BOTH the
+// title and footer rows reserved whether or not they are used.
 //
 // Reserving unconditionally is what makes admission monotone -- title and
 // footer are deliberately NOT read, so entering a title after the text can
 // never retroactively invalidate text already accepted. linesAvail is defined
 // even when ok is false, so the readout can show "lines used / lines available"
 // over capacity.
-func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (linesUsed, linesAvail int, ok bool) {
+func AdmissibleBlocks(params engrave.Params, blocks []Block, title, footer string, useQR bool) (linesUsed, linesAvail int, ok bool) {
 	size := FontSizes[len(FontSizes)-1]
 	rows := LinesPerPlate(params, size)
 	linesAvail = rows - 2
 	if linesAvail < 0 {
 		linesAvail = 0
 	}
-	qrc, err := qrFor(text, qr)
+	qrc, err := qrFor(CompositionText(blocks), useQR)
 	if err != nil {
 		// An unencodable text is inadmissible, but the readout keeps working:
 		// linesAvail is already meaningful, and lines used is unknowable
 		// without a code to lay out around.
 		return 0, linesAvail, false
 	}
-	lay := textLayout(params, fnt, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
 	// Unbounded on purpose: a refusal that reported "26 / 26" for a text
 	// needing 300 lines would tell the operator nothing about how much to cut.
-	l, _ := WrapText(text, widthFor(lay, 1), math.MaxInt)
+	// The row a block starts on still decides its budget, so the blocks are
+	// counted in plate order from row 1 exactly as they are laid out.
+	l, _, _ := wrapBlocks(params, blocks, size, qrc, 1, math.MaxInt)
 	return len(l), linesAvail, len(l) <= linesAvail
 }
 
-// MaxCharsAt is the capacity solver behind the refusal message's live figure:
-// how many characters fit at fontMM given the QR that THIS text produces.
+// Admissible is AdmissibleBlocks for a composition cut entirely in one face.
+func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (linesUsed, linesAvail int, ok bool) {
+	return AdmissibleBlocks(params, []Block{{Face: fnt, Text: text}}, title, footer, qr)
+}
+
+// rowFaces is which face each of the plate's rows would be cut in, for a
+// composition laid out from row 0 with no bound. Rows past the end of the text
+// take the LAST block's face, because that is the block that would grow into
+// them.
+//
+// A one-block composition is answered without wrapping anything: every row is
+// that block's face, which is what the single-face capacity solver has always
+// assumed.
+func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, rows int) []*vector.Face {
+	out := make([]*vector.Face, rows)
+	last := blocks[len(blocks)-1].Face
+	var faces []*vector.Face
+	if len(blocks) > 1 {
+		_, faces, _ = wrapBlocks(params, blocks, fontMM, qrc, 0, math.MaxInt)
+	}
+	for r := range rows {
+		if r < len(faces) {
+			out[r] = faces[r]
+		} else {
+			out[r] = last
+		}
+	}
+	return out
+}
+
+// faceLayouts is the per-face lineLayout cache. A composition has one or two
+// faces, so a linear scan beats a map and allocates nothing.
+type faceLayouts struct {
+	faces []*vector.Face
+	lays  []lineLayout
+}
+
+func (c *faceLayouts) at(params engrave.Params, fnt *vector.Face, fontSize int, qrc *qr.Code) lineLayout {
+	for i, f := range c.faces {
+		if f == fnt {
+			return c.lays[i]
+		}
+	}
+	lay := textLayout(params, fnt, fontSize, params.I(outerMargin), qrc, freeTextQRScale)
+	c.faces = append(c.faces, fnt)
+	c.lays = append(c.lays, lay)
+	return lay
+}
+
+// MaxCharsAtBlocks is the capacity solver behind the refusal message's live
+// figure: how many characters fit at fontMM given the QR that THIS composition
+// produces.
 //
 // The QR's size comes from encoding the text, never from a length table, which
 // is the whole point: at 3.0mm with a 700-character text, spec 4's geometry
 // column suggests dropping the QR frees about 135 characters and the true
 // figure is several times that. Returns 0 if the text cannot be encoded.
-func MaxCharsAt(params engrave.Params, fnt *vector.Face, fontMM float32, text string, qr bool) int {
-	qrc, err := qrFor(text, qr)
+//
+// A mixed-face plate has no single column count, so each row is counted in the
+// face that row would be cut in. Returns 0 if the text cannot be encoded.
+func MaxCharsAtBlocks(params engrave.Params, blocks []Block, fontMM float32, useQR bool) int {
+	if len(blocks) == 0 {
+		return 0
+	}
+	qrc, err := qrFor(CompositionText(blocks), useQR)
 	if err != nil {
 		return 0
 	}
-	lay := textLayout(params, fnt, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
 	rows := LinesPerPlate(params, fontMM)
+	faces := rowFaces(params, blocks, fontMM, qrc, rows)
+	var lays faceLayouts
 	total := 0
 	for row := range rows {
-		n, _ := lay.at(row)
+		n, _ := lays.at(params, faces[row], params.F(fontMM), qrc).at(row)
 		total += n
 	}
 	return total
+}
+
+// MaxCharsAt is MaxCharsAtBlocks for a composition cut entirely in one face.
+func MaxCharsAt(params engrave.Params, fnt *vector.Face, fontMM float32, text string, qr bool) int {
+	return MaxCharsAtBlocks(params, []Block{{Face: fnt, Text: text}}, fontMM, qr)
 }
