@@ -387,3 +387,102 @@ func TestEqualsBarsDivergeAndClearTheStroke(t *testing.T) {
 		}
 	}
 }
+
+// TestFCrossbarAndHookFollowTheHouseAngle pins lowercase 'f', reading the
+// COMPILED font.
+//
+// It exists because 'f' had NO test at all. Replacing the whole glyph with an
+// X-shaped scribble left the entire suite green: the plate goldens only cover
+// the glyphs their own text happens to contain, and no golden text has an 'f'
+// in font/constant. A glyph nobody engraves in a golden is a glyph any edit can
+// silently destroy. Checked by mutation, 2026-08-05.
+//
+// The geometry, decided off an engraved plate and three rounds of renders:
+//
+//   - The crossbar crosses the stem at y5, splitting the stem's 2..8 span
+//     evenly, 3 units above and 3 below. At the shipped y4.5 it split 2.5/3.5
+//     and read high on steel.
+//   - The crossbar DROPS left to right through 7.125 degrees -- the same angle
+//     'n' rises through, and the same direction '+' drops. 't' crosses FLAT at
+//     y4, so 'f' and 't' are now separated by a whole unit of height AND by
+//     slope, rather than by half a unit of height alone.
+//   - The hook leans right going down, through the same angle measured from
+//     vertical. It leans by moving its TOP end left: the hook's bottom point is
+//     the run's START, and newConstantStringer accumulates bounds over run
+//     start/end points, so moving it would shift `center` and relocate every
+//     constant-time plate. Grow inward, never outward.
+//   - The arms are deliberately ASYMMETRIC, 2.0 units left of the stem against
+//     1.25 right (operator's preference, 2026-08-05). The left arm cannot grow:
+//     it already sits on the alphabet's local x minimum of 1.00, which NO glyph
+//     in this face crosses, and reaching past it would halve the ink gap to the
+//     preceding glyph.
+func TestFCrossbarAndHookFollowTheHouseAngle(t *testing.T) {
+	const scale = 100.0 // font units per cell unit
+
+	f := barsOf(t, 'f')
+	if len(f) != 8 {
+		t.Fatalf("'f' has %d vertices, want 8: %v", len(f), f)
+	}
+	hookEnd, hookTop := f[0], f[1] // bottom of the hook, then its top
+	stemTop, cross := f[2], f[3]   // top bar's left end, then the crossbar crossing
+	barL, barR := f[4], f[5]
+	stemBottom := f[7]
+
+	// The crossbar crosses the stem at the stem's vertical midpoint.
+	mid := (float64(stemTop.Y) + float64(stemBottom.Y)) / 2
+	if float64(cross.Y) != mid {
+		t.Errorf("the crossbar crosses at y=%d; the stem spans %d..%d, whose midpoint is %.0f",
+			cross.Y, stemTop.Y, stemBottom.Y, mid)
+	}
+
+	// The house angle, decoded from 'n' rather than written down, so flattening
+	// 'n' and leaving 'f' alone is a failure rather than a silent drift apart.
+	n := barsOf(t, 'n')
+	if len(n) != 4 {
+		t.Fatalf("'n' has %d vertices, want 4: %v", len(n), n)
+	}
+	deg := func(dy, dx float64) float64 { return math.Abs(math.Atan2(dy, dx)) * 180 / math.Pi }
+	house := deg(float64(n[2].Y-n[1].Y), float64(n[2].X-n[1].X))
+
+	// The crossbar drops left to right (y grows downward in font units, so the
+	// right tip must be BELOW the left: less negative).
+	if barR.Y <= barL.Y {
+		t.Errorf("the 'f' crossbar does not drop left to right: left y=%d, right y=%d",
+			barL.Y, barR.Y)
+	}
+	if got := deg(float64(barR.Y-barL.Y), float64(barR.X-barL.X)); math.Abs(got-house) > 0.1 {
+		t.Errorf("the 'f' crossbar drops through %.3f degrees but 'n' rises through %.3f; "+
+			"they are meant to be the same angle", got, house)
+	}
+
+	// The hook leans right going down: its top is LEFT of its bottom. Measured
+	// from vertical, which is why dx and dy are swapped here.
+	if hookTop.X >= hookEnd.X {
+		t.Errorf("the 'f' hook does not lean right going down: top x=%d, bottom x=%d",
+			hookTop.X, hookEnd.X)
+	}
+	// The tolerance is QUANTISATION, not slack. The hook runs one cell unit,
+	// which is 100 font units at this face's scale, so its horizontal offset
+	// must be a whole number and the angle can only land on multiples of about
+	// 0.573 degrees. 7.125 is not one of them: dx=12 gives 6.843 and dx=13
+	// gives 7.407, both exactly 0.282 away. Half a quantisation step is
+	// therefore the tightest honest bound, and anything looser would admit a
+	// hook that is visibly off the house angle.
+	if got := deg(float64(hookEnd.X-hookTop.X), float64(hookEnd.Y-hookTop.Y)); math.Abs(got-house) > 0.3 {
+		t.Errorf("the 'f' hook leans %.3f degrees from vertical, want the house angle %.3f "+
+			"(within half a quantisation step)", got, house)
+	}
+
+	// The arms stay asymmetric, and the left one stays on the side bearing.
+	left := (float64(cross.X) - float64(barL.X)) / scale
+	right := (float64(barR.X) - float64(cross.X)) / scale
+	if left <= right {
+		t.Errorf("the 'f' arms are %.2f left and %.2f right; the left is meant to be the longer",
+			left, right)
+	}
+	const sideBearing = 100 // local x 1.00; no glyph in this face crosses it
+	if barL.X < sideBearing {
+		t.Errorf("the 'f' crossbar reaches x=%d, past the %d side bearing every other glyph "+
+			"respects; the ink gap to the preceding glyph would halve", barL.X, sideBearing)
+	}
+}
