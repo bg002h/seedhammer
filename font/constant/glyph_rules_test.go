@@ -116,6 +116,10 @@ func TestSmallFeaturesClearTheStroke(t *testing.T) {
 		{"'[' bottom bar", 3, 5},
 		{"']' top bar", 1, 3},
 		{"']' bottom bar", 1, 3},
+		// Brace midpoints: the reach past the body is what says "brace" rather
+		// than "bracket". One unit of reach disappears into the stroke.
+		{"'{' midpoint reach", 1, 3},
+		{"'}' midpoint reach", 3, 5},
 	} {
 		gap := (g.upper - g.lower) * unitMM
 		if want := 2.0 * strokeMM; gap < want {
