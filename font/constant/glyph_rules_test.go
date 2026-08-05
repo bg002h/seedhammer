@@ -120,6 +120,10 @@ func TestSmallFeaturesClearTheStroke(t *testing.T) {
 		// than "bracket". One unit of reach disappears into the stroke.
 		{"'{' midpoint reach", 1, 3},
 		{"'}' midpoint reach", 3, 5},
+		// Small marks: a tick shorter than two stroke widths reads as a blob.
+		// The comma family was the worst on the plate at 1.6.
+		{"',' tail", 6, 8},
+		{"';' tail", 6, 8},
 	} {
 		gap := (g.upper - g.lower) * unitMM
 		if want := 2.0 * strokeMM; gap < want {

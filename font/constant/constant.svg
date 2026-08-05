@@ -44,9 +44,9 @@
 	<polyline class="st0" points="218,3 219,3 219,4 218,4 218,3 	"/>
 	<polyline class="st0" points="218,7 219,7 219,8 218,8 218,7 	"/>
 </g>
-<line id="comma" class="st0" x1="225" y1="7" x2="224" y2="8"/>
+<line id="comma" class="st0" x1="225" y1="6" x2="224" y2="8"/>
 <line id="slash" class="st0" x1="232" y1="2" x2="230" y2="8"/>
-<line id="apostrophe" class="st0" x1="237" y1="2" x2="236" y2="4"/>
+<line id="apostrophe" class="st0" x1="237" y1="2" x2="235.5" y2="5"/>
 <polyline id="period" class="st0" points="242,7 243,7 243,8 242,8 242,7 "/>
 <polyline id="leftparen" class="st0" points="250,2 249,4 249,6 250,8 "/>
 <polyline id="rightparen" class="st0" points="254,2 255,4 255,6 254,8 "/>
@@ -95,8 +95,8 @@
 	<polyline class="st0" points="464.5,7 465.5,7 465.5,8 464.5,8 464.5,7 "/>
 </g>
 <g id="quotedbl">
-	<polyline class="st0" points="471,2 470,4 "/>
-	<polyline class="st0" points="473,2 472,4 "/>
+	<polyline class="st0" points="471,2 469.5,5 "/>
+	<polyline class="st0" points="473,2 471.5,5 "/>
 </g>
 <g id="dollar">
 	<polyline class="st0" points="479,3 478,2 476,2 475,3 475,4 476,5 478,5 479,6 479,7 478,8 476,8 475,7 "/>
@@ -110,7 +110,7 @@
 <polyline id="plus" class="st0" points="493,5 497,5 495,5 495,3 495,7 "/>
 <g id="semicolon">
 	<polyline class="st0" points="500,3 501,3 501,4 500,4 500,3 "/>
-	<polyline class="st0" points="501,7 500,8 "/>
+	<polyline class="st0" points="501,6 500,8 "/>
 </g>
 <polyline id="lt" class="st0" points="509,3 505,5 509,7 "/>
 <g id="equal">
@@ -125,7 +125,7 @@
 <polyline id="backslash" class="st0" points="530,2 532,8 "/>
 <polyline id="asciicircum" class="st0" points="535,4 537,2 539,4 "/>
 <polyline id="_" class="st0" points="541,9 545,9 "/>
-<polyline id="grave" class="st0" points="548,2 549,4 "/>
+<polyline id="grave" class="st0" points="548,2 549.5,5 "/>
 <polyline id="bar" class="st0" points="555,1 555,9 "/>
 <polyline id="asciitilde" class="st0" points="559,5.5 560,4.5 562,5.5 563,4.5 "/>
 <polyline id="space_mark" class="st0" points="565,9 567,9 567,6 567,9 569,9 "/>
