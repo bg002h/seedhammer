@@ -84,26 +84,35 @@ func TestNoGlyphStartsAtOrigin(t *testing.T) {
 	}
 }
 
-// TestExclamGapClearsTheStroke pins the '!' dot-to-stem gap against the stroke
-// width, which is what actually decides whether it reads as '!' or as '|'.
+// TestDotGapsClearTheStroke pins every dot-over-stem glyph's gap against the
+// STROKE WIDTH, which is what actually decides whether the two marks stay
+// separate. A unit only means something relative to how fat the cut is.
 //
-// The original gap was ONE unit. At the 3.0mm rung that is 0.333mm against a
-// 0.3mm stroke -- 1.1 stroke widths -- so any burr closes it and the glyph
-// becomes a bar. '|' is a full-height unbroken line (y1..y9), so the gap is the
-// ONLY thing distinguishing them. Read off an engraved plate, 2026-08-04.
+// All three shipped with a ONE-unit gap: 0.333mm at the 3.0mm rung against a
+// 0.3mm stroke, i.e. 1.1 stroke widths, so any burr closes it. For '!' that
+// means reading as '|' -- a full-height unbroken line, where the gap is the ONLY
+// difference. For 'i' and 'j' it means the dot merges into the stem and they
+// read as 'l' and a hook. All three read off engraved plates, 2026-08-04.
 //
-// Expressed in stroke widths rather than units because that is the quantity
-// that matters: a unit is only meaningful relative to how fat the cut is.
-func TestExclamGapClearsTheStroke(t *testing.T) {
-	// The engraving em ladder bottoms out at 3.0mm; stroke is 0.3mm.
+// '!' was fixed by shortening the stem; 'i' and 'j' by raising the dot, because
+// their stems cannot move down -- 'i' sits on the baseline and 'j' already
+// descends to y9.
+func TestDotGapsClearTheStroke(t *testing.T) {
 	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
 	const unitMM = emMM / cellUnits
-	// Geometry from constant.svg: stem ends at y=5, dot spans y=7..8.
-	const stemEnd, dotTop = 5.0, 7.0
-	gap := (dotTop - stemEnd) * unitMM
-	if want := 2.0 * strokeMM; gap < want {
-		t.Errorf("the '!' gap is %.3fmm (%.1f stroke widths) at the 3.0mm rung; "+
-			"want at least %.3fmm (2 stroke widths) or it closes up and reads as '|'",
-			gap, gap/strokeMM, want)
+	for _, g := range []struct {
+		name         string
+		lower, upper float64 // the gap runs from lower to upper, in cell units
+	}{
+		{"'!' stem end -> dot top", 5, 7},
+		{"'i' dot bottom -> stem top", 3, 5},
+		{"'j' dot bottom -> stem top", 3, 5},
+	} {
+		gap := (g.upper - g.lower) * unitMM
+		if want := 2.0 * strokeMM; gap < want {
+			t.Errorf("%s is %.3fmm (%.1f stroke widths) at the 3.0mm rung; want at least "+
+				"%.3fmm (2 stroke widths) or the two marks merge when cut",
+				g.name, gap, gap/strokeMM, want)
+		}
 	}
 }

@@ -67,11 +67,11 @@
 <polyline id="g" class="st0" points="344,9 347,9 347,4 343,4 343,7 347,7 "/>
 <polyline id="h" class="st0" points="349,2 349,8 349,4 353,4 353,8 "/>
 <g id="i">
-	<polyline class="st0" points="356.5,3 357.5,3 357.5,4 356.5,4 356.5,3 "/>
+	<polyline class="st0" points="356.5,2 357.5,2 357.5,3 356.5,3 356.5,2 "/>
 	<polyline class="st0" points="357,5 357,8 "/>
 </g>
 <g id="j">
-	<polyline class="st0" points="363.5,3 364.5,3 364.5,4 363.5,4 363.5,3 "/>
+	<polyline class="st0" points="363.5,2 364.5,2 364.5,3 363.5,3 363.5,2 "/>
 	<polyline class="st0" points="364,5 364,9 362,9 "/>
 </g>
 <polyline id="k" class="st0" points="367,2 367,8 367,6 371,4 367,6 371,8 "/>
