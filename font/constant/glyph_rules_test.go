@@ -1,6 +1,7 @@
 package constant
 
 import (
+	"math"
 	"testing"
 
 	"seedhammer.com/bezier"
@@ -270,5 +271,119 @@ func TestSFootIsOffHorizontal(t *testing.T) {
 	const nRise = 0.5
 	if rise := footLeftY - footRightY; rise != nRise {
 		t.Errorf("'s' foot rises %.2f; the deliberate slants in this face are all %.2f", rise, nRise)
+	}
+}
+
+// barsOf returns a glyph's distinct control points in draw order.
+//
+// vectorfont emits each vertex three times (a uniform B-spline holds a
+// straight segment by repeating its control point), so the raw knot stream is
+// 3x the polyline. Collapsing runs gives back the vertices as drawn.
+func barsOf(t *testing.T, r rune) []bezier.Point {
+	t.Helper()
+	_, spline, ok := Font.Decode(r)
+	if !ok {
+		t.Fatalf("no glyph for %q", r)
+	}
+	var pts []bezier.Point
+	for {
+		k, ok := spline.Next()
+		if !ok {
+			break
+		}
+		if n := len(pts); n == 0 || pts[n-1] != k.Ctrl {
+			pts = append(pts, k.Ctrl)
+		}
+	}
+	return pts
+}
+
+// TestEqualsBarsDivergeAndClearTheStroke pins the '=' bars, reading the
+// COMPILED font rather than the numbers in constant.svg.
+//
+// That distinction is the reason this test exists in this form. constant.bin is
+// generated from the svg by `go generate ./font/constant`, and an edit to the
+// svg that is never regenerated changes nothing about what gets engraved. A
+// test asserting the coordinates it was written with passes against a stale
+// bin; this one decodes the glyph the machine will actually cut. The first
+// draft of this test was the former, and it passed before the font had been
+// rebuilt at all.
+//
+// '=' was MISSED by the 2026-08-04 sweep that fixed the other twelve one-unit
+// features. Its bars sat at y4 and y6: 2.0 units of centre separation, which
+// against a 0.9-unit stroke leaves 1.1 units of ink -- 1.22 stroke widths, the
+// same true gap the fixed '!' has.
+//
+// '!' reads fine at that gap and '=' did not, off the BOTHPROOF! plate cut
+// 2026-08-05. The difference is what the two marks ARE: a dot beside a stem end
+// touches over a point, while two 4-unit parallel bars run alongside each other
+// for their whole length, so the same gap closes visually along all of it.
+// Parallel bars need a wider gap than the ink measure alone would suggest.
+//
+// The fix does two things at once. The bars DIVERGE left to right, through the
+// same total angle 'n' rises through -- a widening gap is itself a cue, and one
+// this face already uses. And the narrow end is set at a true ink-to-ink 2.0
+// stroke widths, so the tightest point of the glyph clears the threshold and
+// everything rightward of it is looser.
+func TestEqualsBarsDivergeAndClearTheStroke(t *testing.T) {
+	const emMM, strokeMM, cellUnits, scale = 3.0, 0.3, 9.0, 100.0
+	// The stroke in FONT units: one cell unit is `scale`, and the em is
+	// cellUnits of them.
+	stroke := strokeMM / emMM * cellUnits * scale
+	unitMM := emMM / cellUnits / scale // font units -> mm
+
+	pts := barsOf(t, '=')
+	if len(pts) != 4 {
+		t.Fatalf("'=' has %d vertices, want 4 (two bars): %v", len(pts), pts)
+	}
+	// y grows downward in svg but the font negates it, so the TOP bar is the
+	// one with the more negative y.
+	topL, topR, botL, botR := pts[0], pts[1], pts[2], pts[3]
+	if topL.Y < botL.Y != true {
+		topL, topR, botL, botR = botL, botR, topL, topR
+	}
+
+	sepAt := func(a, b bezier.Point) float64 { return math.Abs(float64(b.Y - a.Y)) }
+	narrow := (sepAt(topL, botL) - stroke) * unitMM
+	wide := (sepAt(topR, botR) - stroke) * unitMM
+
+	if want := 2.0 * strokeMM; narrow < want {
+		t.Errorf("the '=' bars leave %.3fmm of ink gap (%.2f stroke widths) at their narrow "+
+			"end; want at least %.3fmm (2 stroke widths) or two long parallels cut as one mark",
+			narrow, narrow/strokeMM, want)
+	}
+	// They must widen RIGHTWARD -- a '=' that converged would pinch exactly
+	// where the check above does not look.
+	if wide <= narrow {
+		t.Errorf("the '=' bars do not diverge left to right: %.3fmm then %.3fmm", narrow, wide)
+	}
+
+	// The divergence is the whole of 'n's angle, split between the two bars.
+	// 'n' is decoded too, so flattening 'n' and leaving '=' alone is a failure
+	// rather than a silent drift apart.
+	n := barsOf(t, 'n')
+	if len(n) != 4 {
+		t.Fatalf("'n' has %d vertices, want 4: %v", len(n), n)
+	}
+	angle := func(a, b bezier.Point) float64 {
+		return math.Abs(math.Atan2(float64(b.Y-a.Y), float64(b.X-a.X))) * 180 / math.Pi
+	}
+	nAngle := angle(n[1], n[2]) // the arch, from the stem top to the right shoulder
+	total := angle(topL, topR) + angle(botL, botR)
+	// Angles do not add exactly under atan, so the round 0.25-unit rise per bar
+	// gives 7.153 degrees against 'n's 7.125. A tenth of a degree is the slack.
+	if math.Abs(total-nAngle) > 0.1 {
+		t.Errorf("the '=' bars diverge by %.3f degrees but 'n' rises through %.3f; "+
+			"the two are meant to be the same angle", total, nAngle)
+	}
+
+	// And '=' must not have grown past the alphabet's vertical extent:
+	// NewPassphraseStringer accumulates bounds over EVERY glyph, so a taller
+	// '=' would relocate plates that contain no '=' at all.
+	const ascender, descender = -600.0, 100.0 // y2 and y9 against the y8 baseline
+	for _, p := range pts {
+		if float64(p.Y) < ascender || float64(p.Y) > descender {
+			t.Errorf("'=' reaches y=%d, outside the alphabet's %.0f..%.0f", p.Y, ascender, descender)
+		}
 	}
 }
