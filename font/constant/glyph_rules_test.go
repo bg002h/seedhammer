@@ -84,11 +84,11 @@ func TestNoGlyphStartsAtOrigin(t *testing.T) {
 	}
 }
 
-// TestDotGapsClearTheStroke pins every dot-over-stem glyph's gap against the
+// TestSmallFeaturesClearTheStroke pins every small glyph feature against the
 // STROKE WIDTH, which is what actually decides whether the two marks stay
 // separate. A unit only means something relative to how fat the cut is.
 //
-// All three shipped with a ONE-unit gap: 0.333mm at the 3.0mm rung against a
+// All of these shipped at ONE unit: 0.333mm at the 3.0mm rung against a
 // 0.3mm stroke, i.e. 1.1 stroke widths, so any burr closes it. For '!' that
 // means reading as '|' -- a full-height unbroken line, where the gap is the ONLY
 // difference. For 'i' and 'j' it means the dot merges into the stem and they
@@ -97,16 +97,25 @@ func TestNoGlyphStartsAtOrigin(t *testing.T) {
 // '!' was fixed by shortening the stem; 'i' and 'j' by raising the dot, because
 // their stems cannot move down -- 'i' sits on the baseline and 'j' already
 // descends to y9.
-func TestDotGapsClearTheStroke(t *testing.T) {
+func TestSmallFeaturesClearTheStroke(t *testing.T) {
 	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
 	const unitMM = emMM / cellUnits
 	for _, g := range []struct {
 		name         string
-		lower, upper float64 // the gap runs from lower to upper, in cell units
+		lower, upper float64 // the feature spans lower..upper, in cell units
 	}{
+		// Dot-over-stem gaps: too small and the two marks merge.
 		{"'!' stem end -> dot top", 5, 7},
 		{"'i' dot bottom -> stem top", 3, 5},
 		{"'j' dot bottom -> stem top", 3, 5},
+		// Bracket bars: too short and the bar reads as a thickening of the
+		// stem, leaving '[' and ']' to look like '|'. Same arithmetic, same
+		// threshold -- a feature shorter than about two stroke widths does not
+		// survive the cut.
+		{"'[' top bar", 3, 5},
+		{"'[' bottom bar", 3, 5},
+		{"']' top bar", 1, 3},
+		{"']' bottom bar", 1, 3},
 	} {
 		gap := (g.upper - g.lower) * unitMM
 		if want := 2.0 * strokeMM; gap < want {
