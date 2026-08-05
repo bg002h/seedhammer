@@ -3,6 +3,7 @@ package backup
 import (
 	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/engrave"
+	"seedhammer.com/font/vector"
 )
 
 // EngraveFreeText lays out the free-text plate per spec 8.
@@ -14,16 +15,20 @@ import (
 // 20-character title at 6.0mm on the full width inks x[7.127, 77.962]mm, which
 // crosses both screw-hole bands while every check passes.
 //
-// lines must be Fit's output for the same composition and fontMM. They are
-// engraved at plate rows start, start+1, ... where start is 1 when a title
+// lines must be Fit's output for the same composition, fontMM AND FACE. They
+// are engraved at plate rows start, start+1, ... where start is 1 when a title
 // occupies row 0. Extra lines are NOT dropped: they run past the plate and
 // toPlate refuses the result, which is a visible failure rather than a plate
 // missing the end of what the operator wrote.
-func EngraveFreeText(params engrave.Params, fontMM float32,
+//
+// fnt is the face the whole plate is cut in -- body, title and footer alike.
+// Passing a face other than the one Fit measured re-flows nothing: the lines
+// are already broken, so they simply run wide or short of the grid they were
+// wrapped to.
+func EngraveFreeText(params engrave.Params, fnt *vector.Face, fontMM float32,
 	title string, lines []string, footer string, qrc *qr.Code) engrave.Engraving {
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
-		fnt := freeTextFont
 		fontSize := params.F(fontMM)
 		margin := params.I(outerMargin)
 		plateW := params.F(plateSize)

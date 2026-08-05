@@ -184,7 +184,7 @@ func TestQRModuleCountIsMonotone(t *testing.T) {
 func maxCharsByBisection(t *testing.T, size float32, ch, title, footer string) int {
 	t.Helper()
 	fits := func(n int) bool {
-		fm, _, _, err := Fit(prodParams, strings.Repeat(ch, n), title, footer, true)
+		fm, _, _, err := Fit(prodParams, sh.Font, strings.Repeat(ch, n), title, footer, true)
 		return err == nil && fm >= size
 	}
 	lo, hi := 0, 2000
@@ -244,10 +244,10 @@ func TestAdmissionIsAnchoredAt3mm(t *testing.T) {
 	// A text that fits at 3.0mm but at no larger rung: 900 characters is past
 	// 3.4mm's plain capacity of 834 and inside 3.0mm's 1104.
 	s := strings.Repeat("a", 900)
-	if _, avail, ok := Admissible(prodParams, s, "", "", false); !ok {
+	if _, avail, ok := Admissible(prodParams, sh.Font, s, "", "", false); !ok {
 		t.Fatalf("%d characters inadmissible with %d lines available", len(s), avail)
 	}
-	fm, _, _, err := Fit(prodParams, s, "", "", false)
+	fm, _, _, err := Fit(prodParams, sh.Font, s, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestAdmissionIsAnchoredAt3mm(t *testing.T) {
 
 	// linesAvail reserves BOTH the title and the footer row unconditionally.
 	rows := LinesPerPlate(prodParams, 3.0)
-	if _, avail, _ := Admissible(prodParams, "x", "", "", false); avail != rows-2 {
+	if _, avail, _ := Admissible(prodParams, sh.Font, "x", "", "", false); avail != rows-2 {
 		t.Errorf("linesAvail = %d, want %d (%d rows less the title and footer rows)", avail, rows-2, rows)
 	}
 }
@@ -270,8 +270,8 @@ func TestEnteringATitleNeverInvalidatesAcceptedText(t *testing.T) {
 	for _, useQR := range []bool{false, true} {
 		for n := 1; n <= 1200; n += 7 {
 			s := strings.Repeat("a", n)
-			bare, availBare, okBare := Admissible(prodParams, s, "", "", useQR)
-			full, availFull, okFull := Admissible(prodParams, s, "A Title Here", "and a footer", useQR)
+			bare, availBare, okBare := Admissible(prodParams, sh.Font, s, "", "", useQR)
+			full, availFull, okFull := Admissible(prodParams, sh.Font, s, "A Title Here", "and a footer", useQR)
 			if okBare != okFull || bare != full || availBare != availFull {
 				t.Fatalf("qr=%v n=%d: admission changed when a title was entered: (%d/%d %v) -> (%d/%d %v)",
 					useQR, n, bare, availBare, okBare, full, availFull, okFull)
@@ -287,8 +287,8 @@ func TestEnteringATitleNeverInvalidatesAcceptedText(t *testing.T) {
 func TestRefusalFigureIsComputedLive(t *testing.T) {
 	const s = 700
 	text := strings.Repeat("a", s)
-	withQR := MaxCharsAt(prodParams, 3.0, text, true)
-	noQR := MaxCharsAt(prodParams, 3.0, text, false)
+	withQR := MaxCharsAt(prodParams, sh.Font, 3.0, text, true)
+	noQR := MaxCharsAt(prodParams, sh.Font, 3.0, text, false)
 	if freed := noQR - withQR; freed != 640 {
 		t.Errorf("dropping the QR frees %d characters (%d -> %d), want 640", freed, withQR, noQR)
 	}
@@ -320,10 +320,10 @@ func TestUnencodableTextIsHandledEverywhere(t *testing.T) {
 		t.Fatalf("qr.Encode refused 2953 bytes (%v); the boundary has moved", err)
 	}
 
-	if _, _, qrc, err := Fit(prodParams, huge, "", "", true); err == nil || qrc != nil {
+	if _, _, qrc, err := Fit(prodParams, sh.Font, huge, "", "", true); err == nil || qrc != nil {
 		t.Errorf("Fit(unencodable) = (%v, %v), want (nil, error)", qrc, err)
 	}
-	used, avail, ok := Admissible(prodParams, huge, "", "", true)
+	used, avail, ok := Admissible(prodParams, sh.Font, huge, "", "", true)
 	if ok {
 		t.Error("Admissible(unencodable) = true")
 	}
@@ -331,11 +331,11 @@ func TestUnencodableTextIsHandledEverywhere(t *testing.T) {
 		t.Errorf("linesAvail = %d on an encode failure; the readout must keep working", avail)
 	}
 	_ = used
-	if got := MaxCharsAt(prodParams, 3.0, huge, true); got != 0 {
+	if got := MaxCharsAt(prodParams, sh.Font, 3.0, huge, true); got != 0 {
 		t.Errorf("MaxCharsAt(unencodable) = %d, want 0", got)
 	}
 	// Without a QR the same text is merely too long, not unencodable.
-	if got := MaxCharsAt(prodParams, 3.0, huge, false); got != 1104 {
+	if got := MaxCharsAt(prodParams, sh.Font, 3.0, huge, false); got != 1104 {
 		t.Errorf("MaxCharsAt(unencodable, no QR) = %d, want 1104", got)
 	}
 }
@@ -345,7 +345,7 @@ func TestUnencodableTextIsHandledEverywhere(t *testing.T) {
 // is a second chance to disagree.
 func TestFitReturnsTheCodeItMeasured(t *testing.T) {
 	const text = "the quick brown fox jumps over the lazy dog"
-	_, _, qrc, err := Fit(prodParams, text, "", "", true)
+	_, _, qrc, err := Fit(prodParams, sh.Font, text, "", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestFitReturnsTheCodeItMeasured(t *testing.T) {
 	if qrc.Size != want.Size || !slices.Equal(qrc.Bitmap, want.Bitmap) {
 		t.Error("Fit's code is not qr.Encode(text, qr.L)")
 	}
-	if _, _, qrc, err := Fit(prodParams, text, "", "", false); qrc != nil || err != nil {
+	if _, _, qrc, err := Fit(prodParams, sh.Font, text, "", "", false); qrc != nil || err != nil {
 		t.Errorf("Fit(qr=false) = (%v, %v), want (nil, nil)", qrc, err)
 	}
 }
@@ -368,7 +368,7 @@ func TestFitReturnsTheCodeItMeasured(t *testing.T) {
 func TestFitPicksTheLargestRungThatHolds(t *testing.T) {
 	for i, size := range FontSizes {
 		n := maxCharsByBisection(t, size, "a", "", "")
-		fm, lines, _, err := Fit(prodParams, strings.Repeat("a", n), "", "", true)
+		fm, lines, _, err := Fit(prodParams, sh.Font, strings.Repeat("a", n), "", "", true)
 		if err != nil {
 			t.Fatalf("%.1fmm: %d characters refused", size, n)
 		}
@@ -379,7 +379,7 @@ func TestFitPicksTheLargestRungThatHolds(t *testing.T) {
 			t.Errorf("%.1fmm: fitted lines carry %d characters, want %d", size, got, n)
 		}
 		// One more character must drop a rung -- or be refused at the last.
-		fm2, _, _, err := Fit(prodParams, strings.Repeat("a", n+1), "", "", true)
+		fm2, _, _, err := Fit(prodParams, sh.Font, strings.Repeat("a", n+1), "", "", true)
 		if i == len(FontSizes)-1 {
 			if err == nil {
 				t.Errorf("%d characters accepted past the smallest rung (at %.1fmm)", n+1, fm2)
@@ -393,7 +393,7 @@ func TestFitPicksTheLargestRungThatHolds(t *testing.T) {
 // TestFitRefusesRatherThanSplits: spec 6, user directive. Text that does not
 // fit one plate is refused; nothing is silently dropped or continued.
 func TestFitRefusesRatherThanSplits(t *testing.T) {
-	_, lines, _, err := Fit(prodParams, strings.Repeat("a", 1200), "", "", false)
+	_, lines, _, err := Fit(prodParams, sh.Font, strings.Repeat("a", 1200), "", "", false)
 	if err != ErrTooLarge {
 		t.Errorf("err = %v, want ErrTooLarge", err)
 	}
@@ -436,7 +436,7 @@ func TestPlateBoundsAtEveryRung(t *testing.T) {
 // is the fit-check third of spec 5's single-wrap-function invariant.
 func TestFitLinesMatchWrapText(t *testing.T) {
 	const text = "hello there this is a note to an heir\nkeep it safe and do not photograph it"
-	size, lines, qrc, err := Fit(prodParams, text, "TITLE", "FOOTER", true)
+	size, lines, qrc, err := Fit(prodParams, sh.Font, text, "TITLE", "FOOTER", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +492,7 @@ func TestFitQREncodesTheTextOnly(t *testing.T) {
 		{"A TITLE", "A FOOTER"},
 		{strings.Repeat("W", MaxTitleLen), strings.Repeat("m", MaxTitleLen)},
 	} {
-		_, _, got, err := Fit(prodParams, text, tf[0], tf[1], true)
+		_, _, got, err := Fit(prodParams, sh.Font, text, tf[0], tf[1], true)
 		if err != nil {
 			t.Fatalf("title=%q footer=%q: %v", tf[0], tf[1], err)
 		}

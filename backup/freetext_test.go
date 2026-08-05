@@ -9,13 +9,14 @@ import (
 	"seedhammer.com/bezier"
 	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
+	"seedhammer.com/font/sh"
 	"seedhammer.com/internal/golden"
 )
 
 // ftBounds is the ink of a free-text plate at the PRODUCTION stroke.
 func ftBounds(t testing.TB, fontMM float32, title string, lines []string, footer string, qrc *qrpkg.Code) bspline.Bounds {
 	t.Helper()
-	return inkBounds(t, prodParams, EngraveFreeText(prodParams, fontMM, title, lines, footer, qrc))
+	return inkBounds(t, prodParams, EngraveFreeText(prodParams, sh.Font, fontMM, title, lines, footer, qrc))
 }
 
 func rowBand(fontMM float32, row int) (top, bottom int) {
@@ -230,7 +231,7 @@ func TestFreeTextBodyRespectsTheBand(t *testing.T) {
 // stroke. New goldens are permitted; no existing one may move.
 func ftGolden(t *testing.T, name string, fontMM float32, title string, lines []string, footer string, qrc *qrpkg.Code) {
 	t.Helper()
-	e := EngraveFreeText(prodParams, fontMM, title, lines, footer, qrc)
+	e := EngraveFreeText(prodParams, sh.Font, fontMM, title, lines, footer, qrc)
 	spline := engrave.PlanEngraving(prodParams.StepperConfig, e)
 	bounds := bspline.Bounds{Max: bezier.Point{X: plateSize * mm, Y: plateSize * mm}}
 	p := filepath.Join("testdata", name+".bin")
@@ -252,7 +253,7 @@ func TestFreeTextGoldens(t *testing.T) {
 		{"freetext-1-qr", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			size, lines, qrc, err := Fit(prodParams, text, "TO MY HEIR", "2026 COPY 1/1", tc.qr)
+			size, lines, qrc, err := Fit(prodParams, sh.Font, text, "TO MY HEIR", "2026 COPY 1/1", tc.qr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -278,7 +279,7 @@ func TestFreeTextBodyNeverEntersTheQRBox(t *testing.T) {
 	}
 	for _, text := range texts {
 		for _, tf := range [][2]string{{"", ""}, {"TITLE", "FOOTER"}} {
-			size, lines, qrc, err := Fit(P, text, tf[0], tf[1], true)
+			size, lines, qrc, err := Fit(P, sh.Font, text, tf[0], tf[1], true)
 			if err != nil {
 				continue // too large at every rung is a different test's problem
 			}
@@ -319,7 +320,7 @@ func TestFreeTextStaysOnThePlate(t *testing.T) {
 			// A full plate at this rung.
 			n := maxCharsByBisection(t, size, "W", cap18, cap18)
 			text := strings.Repeat("W", n)
-			fm, lines, qrc, err := Fit(P, text, cap18, cap18, useQR)
+			fm, lines, qrc, err := Fit(P, sh.Font, text, cap18, cap18, useQR)
 			if err != nil {
 				continue
 			}
@@ -377,11 +378,11 @@ func TestWrappedBlankLinesReachThePlate(t *testing.T) {
 	P := prodParams
 	const withBlanks = "one\n\n\ntwo"
 	const without = "one\ntwo"
-	sizeA, linesA, _, err := Fit(P, withBlanks, "", "", false)
+	sizeA, linesA, _, err := Fit(P, sh.Font, withBlanks, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sizeB, linesB, _, err := Fit(P, without, "", "", false)
+	sizeB, linesB, _, err := Fit(P, sh.Font, without, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,10 +15,20 @@ import (
 // changing it changes what fits on a plate.
 const freeTextQRScale = 2
 
-// freeTextFont is the engraving face for free text. Fixed rather than a
-// parameter, because the capacity ladder, the 18-character title cap and the
-// printable-ASCII coverage guarantee are all properties of this face.
-var freeTextFont *vector.Face = sh.Font
+// FreeTextFont is the engraving face the free-text plate uses unless a caller
+// asks for another one. Every capacity figure in spec 4 is measured in THIS
+// face: the ladder's character grid is a property of the face (font/sh is 44
+// columns at 3.0mm, font/constant is 39), so a composition fitted in one face
+// must never be engraved in the other.
+//
+// The face is a parameter rather than a package constant because the plate has
+// to be able to prove BOTH shipped engraving faces at the smallest rung -- the
+// seed, descriptor and passphrase plates engrave in font/constant, and a
+// legibility proof cut in font/sh says nothing about those. Fit, Admissible,
+// MaxCharsAt and EngraveFreeText therefore all take the face, and a caller that
+// passes different faces to the fit and to the engraving gets a plate that does
+// not match what was measured.
+var FreeTextFont *vector.Face = sh.Font
 
 // ErrTooLarge means the composition does not fit one plate even at the smallest
 // rung. Text is refused, never split across plates (spec 6, user directive).
@@ -62,13 +72,15 @@ func widthFor(lay lineLayout, startRow int) func(int) int {
 	}
 }
 
-// Fit is the largest rung whose layout holds the whole composition.
+// Fit is the largest rung whose layout holds the whole composition, in the
+// face fnt. The same text fits differently in different faces, so fnt must be
+// the face the composition will be ENGRAVED in; see FreeTextFont.
 //
 // It returns the QR CODE ITSELF, not just its size, so the artifact engraved is
 // the very object the fit measured: there is exactly one encode per
 // composition, and no caller can re-encode with different parameters and
 // disagree.
-func Fit(params engrave.Params, text, title, footer string, qr bool) (fontMM float32, lines []string, qrc *qr.Code, err error) {
+func Fit(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (fontMM float32, lines []string, qrc *qr.Code, err error) {
 	qrc, err = qrFor(text, qr)
 	if err != nil {
 		return 0, nil, nil, err
@@ -76,7 +88,7 @@ func Fit(params engrave.Params, text, title, footer string, qr bool) (fontMM flo
 	for _, size := range FontSizes {
 		rows := LinesPerPlate(params, size)
 		start, end := bodyRows(rows, title, footer)
-		lay := textLayout(params, freeTextFont, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
+		lay := textLayout(params, fnt, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
 		l, ok := WrapText(text, widthFor(lay, start), end-start)
 		if ok {
 			return size, l, qrc, nil
@@ -93,7 +105,7 @@ func Fit(params engrave.Params, text, title, footer string, qr bool) (fontMM flo
 // never retroactively invalidate text already accepted. linesAvail is defined
 // even when ok is false, so the readout can show "lines used / lines available"
 // over capacity.
-func Admissible(params engrave.Params, text, title, footer string, qr bool) (linesUsed, linesAvail int, ok bool) {
+func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (linesUsed, linesAvail int, ok bool) {
 	size := FontSizes[len(FontSizes)-1]
 	rows := LinesPerPlate(params, size)
 	linesAvail = rows - 2
@@ -107,7 +119,7 @@ func Admissible(params engrave.Params, text, title, footer string, qr bool) (lin
 		// without a code to lay out around.
 		return 0, linesAvail, false
 	}
-	lay := textLayout(params, freeTextFont, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
+	lay := textLayout(params, fnt, params.F(size), params.I(outerMargin), qrc, freeTextQRScale)
 	// Unbounded on purpose: a refusal that reported "26 / 26" for a text
 	// needing 300 lines would tell the operator nothing about how much to cut.
 	l, _ := WrapText(text, widthFor(lay, 1), math.MaxInt)
@@ -121,12 +133,12 @@ func Admissible(params engrave.Params, text, title, footer string, qr bool) (lin
 // is the whole point: at 3.0mm with a 700-character text, spec 4's geometry
 // column suggests dropping the QR frees about 135 characters and the true
 // figure is several times that. Returns 0 if the text cannot be encoded.
-func MaxCharsAt(params engrave.Params, fontMM float32, text string, qr bool) int {
+func MaxCharsAt(params engrave.Params, fnt *vector.Face, fontMM float32, text string, qr bool) int {
 	qrc, err := qrFor(text, qr)
 	if err != nil {
 		return 0
 	}
-	lay := textLayout(params, freeTextFont, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
+	lay := textLayout(params, fnt, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
 	rows := LinesPerPlate(params, fontMM)
 	total := 0
 	for row := range rows {

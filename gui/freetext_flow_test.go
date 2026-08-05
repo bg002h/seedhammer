@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"image"
 	"slices"
 	"strconv"
 	"strings"
@@ -9,6 +10,9 @@ import (
 	qrpkg "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/backup"
 	"seedhammer.com/bspline"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/sh"
+	"seedhammer.com/font/vector"
 	"seedhammer.com/gui/text"
 )
 
@@ -22,6 +26,7 @@ type ftRun struct {
 	done bool
 
 	// What EngraveFreeText was handed, via freetextPlateHook.
+	gotFont   *vector.Face
 	gotSize   float32
 	gotTitle  string
 	gotLines  []string
@@ -34,8 +39,8 @@ func startFT(t *testing.T) (*ppHarness, *ftRun) {
 	t.Helper()
 	h := newPPHarness(t)
 	r := new(ftRun)
-	freetextPlateHook = func(fontMM float32, title string, lines []string, footer string, qrc *qrpkg.Code) {
-		r.gotSize, r.gotTitle, r.gotFooter, r.gotQR, r.gotPlate = fontMM, title, footer, qrc, true
+	freetextPlateHook = func(fnt *vector.Face, fontMM float32, title string, lines []string, footer string, qrc *qrpkg.Code) {
+		r.gotFont, r.gotSize, r.gotTitle, r.gotFooter, r.gotQR, r.gotPlate = fnt, fontMM, title, footer, qrc, true
 		r.gotLines = slices.Clone(lines)
 	}
 	t.Cleanup(func() { freetextPlateHook = nil })
@@ -99,6 +104,35 @@ func ftOK(h *ppHarness) {
 	h.tapWidget("ok")
 }
 
+// ftConfirmPages taps through every page of the confirm screen and returns the
+// frames it drew, starting with the one already on screen. It stops when the
+// pager wraps back to the first page.
+//
+// A preview that does not fit the panel is PAGED, not truncated -- the size
+// line and the warnings are pinned so they cannot be pushed off the bottom --
+// so an assertion about what the operator can read has to walk the pages.
+func ftConfirmPages(h *ppHarness) []string {
+	h.t.Helper()
+	pages := []string{h.content}
+	page, ok := h.widget("page").(*Clickable)
+	if !ok {
+		h.t.Fatal(`widget "page" is not a *Clickable`)
+	}
+	if _, drawn := h.drawer().TagBounds(page); !drawn {
+		return pages // everything fit at once
+	}
+	for range 64 {
+		h.tapAt(h.point(page, "the confirm pager"))
+		h.step()
+		if h.content == pages[0] {
+			return pages
+		}
+		pages = append(pages, h.content)
+	}
+	h.t.Fatalf("the confirm pager never wrapped back to its first page after %d taps", len(pages))
+	return nil
+}
+
 func ftBack(h *ppHarness) {
 	h.t.Helper()
 	h.tapWidget("back")
@@ -142,7 +176,7 @@ func TestConfirmLinesEqualWrapText(t *testing.T) {
 	ftOK(h) // skip
 	h.mustReach("Confirm")
 
-	_, want, _, err := backup.Fit(h.ctx.Platform.EngraverParams(), text, "", "", false)
+	_, want, _, err := backup.Fit(h.ctx.Platform.EngraverParams(), sh.Font, text, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +209,7 @@ func TestConfirmLinesAreNotRewrapped(t *testing.T) {
 	h.mustReach("Footer")
 	ftOK(h)
 	h.mustReach("Confirm")
-	_, want, _, err := backup.Fit(h.ctx.Platform.EngraverParams(), text, "", "", false)
+	_, want, _, err := backup.Fit(h.ctx.Platform.EngraverParams(), sh.Font, text, "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +261,7 @@ func TestFTOverCapacityIsShownNotDropped(t *testing.T) {
 	}
 	// The readout says so: used exceeds available.
 	rows := backup.LinesPerPlate(h.ctx.Platform.EngraverParams(), backup.FontSizes[len(backup.FontSizes)-1])
-	used, avail, ok := backup.Admissible(h.ctx.Platform.EngraverParams(), huge, "", "", false)
+	used, avail, ok := backup.Admissible(h.ctx.Platform.EngraverParams(), sh.Font, huge, "", "", false)
 	if ok || avail != rows-2 || used <= avail {
 		t.Fatalf("this test needs an over-capacity text; got %d/%d ok=%v", used, avail, ok)
 	}
@@ -258,7 +292,7 @@ func TestFTRefusalOffersTheQRRatherThanDroppingIt(t *testing.T) {
 
 	P := h.ctx.Platform.EngraverParams()
 	smallest := backup.FontSizes[len(backup.FontSizes)-1]
-	freed := backup.MaxCharsAt(P, smallest, text, false) - backup.MaxCharsAt(P, smallest, text, true)
+	freed := backup.MaxCharsAt(P, sh.Font, smallest, text, false) - backup.MaxCharsAt(P, sh.Font, smallest, text, true)
 	if freed != 640 {
 		t.Fatalf("the live figure is %d, not the measured 640; the test's premise has moved", freed)
 	}
@@ -384,16 +418,23 @@ func TestFTPlateIsWhatWasApproved(t *testing.T) {
 
 	// What the screen displayed.
 	P := h.ctx.Platform.EngraverParams()
-	wantSize, wantLines, wantQR, err := backup.Fit(P, text, "TO MY HEIR", "2026 COPY 1", true)
+	wantSize, wantLines, wantQR, err := backup.Fit(P, sh.Font, text, "TO MY HEIR", "2026 COPY 1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sb strings.Builder
-	for _, l := range wantLines {
-		sb.WriteString(strings.ReplaceAll(l, " ", ""))
+	// Paged: this composition is 8 rows against a QR's tighter budget, so the
+	// preview does not fit at once. Every fitted line must be readable on SOME
+	// page -- a pager that skipped one would let the operator approve a line
+	// they never saw.
+	pages := ftConfirmPages(h)
+	if len(pages) < 2 {
+		t.Fatalf("this test needs a paged confirm screen; got %d page(s)", len(pages))
 	}
-	if !uiHas(h.content, sb.String()) {
-		t.Fatalf("the confirm screen does not show the fitted lines; frame %q", h.content)
+	all := strings.Join(pages, "\n")
+	for i, l := range wantLines {
+		if !uiHas(all, strings.ReplaceAll(l, " ", "")) {
+			t.Fatalf("fitted line %d (%q) appears on no page of the confirm screen.\npages: %q", i, l, pages)
+		}
 	}
 
 	ftOK(h) // engrave
@@ -490,13 +531,13 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 func TestFTBuildPlateEncodesOnce(t *testing.T) {
 	const text = "a note that needs a code"
 	var got *qrpkg.Code
-	freetextPlateHook = func(_ float32, _ string, _ []string, _ string, qrc *qrpkg.Code) { got = qrc }
+	freetextPlateHook = func(_ *vector.Face, _ float32, _ string, _ []string, _ string, qrc *qrpkg.Code) { got = qrc }
 	t.Cleanup(func() { freetextPlateHook = nil })
 	P := newPlatform().EngraverParams()
-	if _, err := ftBuildPlate(P, text, "T", "F", true); err != nil {
+	if _, err := ftBuildPlate(P, ftFaceSH, text, "T", "F", true); err != nil {
 		t.Fatal(err)
 	}
-	_, _, want, err := backup.Fit(P, text, "T", "F", true)
+	_, _, want, err := backup.Fit(P, sh.Font, text, "T", "F", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,10 +570,18 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	empty := f
 	empty.lines = nil
 
+	// A budget nothing can page against, so this test measures the layout and
+	// not the pager. The paging itself is TestFTConfirmPagesEveryRowExactlyOnce.
+	const noPaging = 1 << 20
+	body := func(width int, f ftFit, title, footer string) image.Point {
+		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, ftFaceSH, title, footer, false)
+		if v.Shown != v.Total {
+			t.Fatalf("the %dpx budget still paged: %d of %d rows", noPaging, v.Shown, v.Total)
+		}
+		return v.Size
+	}
 	lineBlock := func(width int) int {
-		_, with := ftConfirmBody(ctx, th, width, f, "", "", false)
-		_, without := ftConfirmBody(ctx, th, width, empty, "", "", false)
-		return with.Y - without.Y
+		return body(width, f, "", "").Y - body(width, empty, "", "").Y
 	}
 	// richText.Addf advances Y by ascent+descent for an unwrapped label, and by
 	// a further LineHeight for every break the layout inserts. So one row per
@@ -552,12 +601,12 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	titleRow := rowOf(ctx.Styles.subtitle)
 	cap18 := strings.Repeat("W", 18)
 	for _, width := range []int{sh2DisplaySize.X, sh2DisplaySize.X / 4} {
-		_, plain := ftConfirmBody(ctx, th, width, empty, "", "", false)
-		_, titled := ftConfirmBody(ctx, th, width, empty, cap18, "", false)
+		plain := body(width, empty, "", "")
+		titled := body(width, empty, cap18, "")
 		if got := titled.Y - plain.Y; got != titleRow {
 			t.Errorf("at width %d an 18-character title occupies %dpx, want one %dpx row", width, got, titleRow)
 		}
-		_, footed := ftConfirmBody(ctx, th, width, empty, "", cap18, false)
+		footed := body(width, empty, "", cap18)
 		if got := footed.Y - plain.Y; got != titleRow {
 			t.Errorf("at width %d an 18-character footer occupies %dpx, want one %dpx row", width, got, titleRow)
 		}
@@ -588,15 +637,15 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
 	for _, useQR := range []bool{false, true} {
-		got, err := ftBuildPlate(P, text, "TO MY HEIR", "2026 COPY 1", useQR)
+		got, err := ftBuildPlate(P, ftFaceSH, text, "TO MY HEIR", "2026 COPY 1", useQR)
 		if err != nil {
 			t.Fatal(err)
 		}
-		size, lines, qrc, err := backup.Fit(P, text, "TO MY HEIR", "2026 COPY 1", useQR)
+		size, lines, qrc, err := backup.Fit(P, sh.Font, text, "TO MY HEIR", "2026 COPY 1", useQR)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, err := toPlate(backup.EngraveFreeText(P, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+		want, err := toPlate(backup.EngraveFreeText(P, sh.Font, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -608,7 +657,7 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 		}
 		// And it is NOT the same plate at another size, so the comparison is
 		// not vacuous.
-		other, err := toPlate(backup.EngraveFreeText(P, backup.FontSizes[len(backup.FontSizes)-1], "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+		other, err := toPlate(backup.EngraveFreeText(P, sh.Font, backup.FontSizes[len(backup.FontSizes)-1], "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
 		if err == nil && slices.Equal(ftSpline(t, got), ftSpline(t, other)) && size != backup.FontSizes[len(backup.FontSizes)-1] {
 			t.Errorf("qr=%v: %.1fmm and %.1fmm produce identical geometry; this test cannot see a size change",
 				useQR, size, backup.FontSizes[len(backup.FontSizes)-1])
@@ -616,9 +665,59 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	}
 }
 
+// TestFTBuiltPlateIsCutInTheFittedFace: the composition is measured in one face
+// and engraved in another only if something is wrong, and NOTHING recoverable
+// from the plate says which face it was -- Plate is {Duration, Spline}, stroke
+// geometry with no text in it. So the geometry itself is the assertion.
+//
+// freetextPlateHook cannot cover this on its own: it reports the face
+// ftBuildPlate was HANDED, so a builder that reports one face and engraves in
+// the other passes every hook assertion in this file.
+func TestFTBuiltPlateIsCutInTheFittedFace(t *testing.T) {
+	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
+	P := newPlatform().EngraverParams()
+	for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
+		got, err := ftBuildPlate(P, face, text, "TO MY HEIR", "2026 COPY 1", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		size, lines, qrc, err := backup.Fit(P, face.Face, text, "TO MY HEIR", "2026 COPY 1", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := toPlate(backup.EngraveFreeText(P, face.Face, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g, w := ftSpline(t, got), ftSpline(t, want); !slices.Equal(g, w) {
+			t.Errorf("%s: the built plate is not the composition cut in font/%s (%d knots vs %d)",
+				face.Name, face.Name, len(g), len(w))
+		}
+		// And the OTHER face produces different geometry, so the comparison
+		// above can actually see a wrong face.
+		other := ftFaceConst
+		if face == ftFaceConst {
+			other = ftFaceSH
+		}
+		wrong, err := toPlate(backup.EngraveFreeText(P, other.Face, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+		if err == nil && slices.Equal(ftSpline(t, got), ftSpline(t, wrong)) {
+			t.Errorf("%s: font/%s and font/%s produce identical geometry; this test cannot see a wrong face",
+				face.Name, face.Name, other.Name)
+		}
+	}
+}
+
 // TestFTConfirmCarriesTheSafetyCopy is spec 9. A free-text box is where someone
 // will type a seed phrase: it bypasses the wordlist, the checksum and the verify
 // flow, and the confirm screen is the only place that says so.
+//
+// This is the TEXT half only. It cannot see whether the copy landed on the
+// panel -- op.Drawer.ExtractText collects the runes of every drawn text op
+// wherever it went -- and before the execution review it was the ONLY half,
+// which made it a false PASS: measured, a 20-line composition put all three
+// warnings at y=537 on a 320-pixel panel and this test stayed green. The
+// geometric half is TestFTConfirmAlwaysFitsThePanel; neither is sufficient
+// alone.
 func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 	for _, useQR := range []bool{false, true} {
 		name := "without a QR"
@@ -660,8 +759,197 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 			if !uiContains(h.content, want) {
 				t.Errorf("the confirm screen does not state %q; frame %q", want, h.content)
 			}
+			// The face is stated too. It decides how much fits and what the
+			// plate looks like, and the proof triggers change it, so it must
+			// never be something the operator has to guess.
+			if !uiContains(h.content, "font: "+ftFaceSH.Name) {
+				t.Errorf("the confirm screen does not name the engraving face; frame %q", h.content)
+			}
 		})
 	}
+}
+
+// ftWorstCompositions returns the LARGEST composition the flow will admit for
+// each face / QR / title-and-footer combination -- the confirm screen's worst
+// case, found by search rather than assumed.
+func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
+	t.Helper()
+	cap18 := strings.Repeat("W", backup.MaxTitleLen)
+	var out []ftFit
+	for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
+		for _, useQR := range []bool{false, true} {
+			for _, tf := range [][2]string{{"", ""}, {cap18, cap18}} {
+				// Binary search the longest admissible text. Word-free, so the
+				// wrap fills every column and the line count is maximal.
+				lo, hi, best := 1, 4000, 0
+				for lo <= hi {
+					mid := (lo + hi) / 2
+					f := ftEvaluate(P, face, strings.Repeat("a", mid), tf[0], tf[1], useQR)
+					if f.ok && f.err == nil {
+						best, lo = mid, mid+1
+					} else {
+						hi = mid - 1
+					}
+				}
+				if best == 0 {
+					t.Fatalf("no admissible text at all for face %s qr=%v", face.Name, useQR)
+				}
+				f := ftEvaluate(P, face, strings.Repeat("a", best), tf[0], tf[1], useQR)
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// TestFTConfirmAlwaysFitsThePanel is M6, the defect the text-only safety test
+// could not see: the confirm screen must show the size line and all three
+// warnings for EVERY composition the flow will admit, on the panel the machine
+// actually has.
+//
+// Measured as RECTANGLES against the same budget the layout spends, because it
+// cannot be done from ExtractText -- that collects runes from every drawn text
+// op regardless of where they landed, so an overflowing screen reads as fully
+// present. Before the fix the worst case measured 637px (no QR) and 701px (with
+// one) against 270px of area: the size line and every warning were off-panel,
+// and the codebase's only scroller is bound to buttons SeedHammer II does not
+// have.
+//
+// Every PAGE is measured, not just the first: a pager that fits page 0 and
+// overflows page 3 is the same defect one tap later.
+func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	dims := ctx.Platform.DisplaySize()
+	if dims != sh2DisplaySize {
+		t.Fatalf("the fit test is running at %v, not the real %v panel", dims, sh2DisplaySize)
+	}
+	area := ppConfirmArea(dims)
+	th := &descriptorTheme
+	worst := ftWorstCompositions(t, ctx.Platform.EngraverParams())
+	if len(worst) != 8 {
+		t.Fatalf("expected 8 worst cases, got %d", len(worst))
+	}
+	cap18 := strings.Repeat("W", backup.MaxTitleLen)
+	sawPaging := false
+	for i, f := range worst {
+		for _, face := range []ftFace{ftFaceSH, ftFaceConst} {
+			for _, tf := range [][2]string{{"", ""}, {cap18, cap18}} {
+				useQR := f.qrc != nil
+				start, guard := 0, 0
+				for {
+					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, face, tf[0], tf[1], useQR)
+					if v.Size.Y > area.Dy() {
+						t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q) page from row %d needs %dpx "+
+							"of a %dpx area: the size line and the warnings are off the %v panel",
+							i, len(f.lines), useQR, face.Name, tf[0], start, v.Size.Y, area.Dy(), dims)
+					}
+					if v.Size.X > area.Dx() {
+						t.Fatalf("case %d page from row %d is %dpx wide in a %dpx area", i, start, v.Size.X, area.Dx())
+					}
+					if v.Shown < 1 && v.Total > 0 {
+						t.Fatalf("case %d page from row %d drew no rows: the pager cannot advance", i, start)
+					}
+					if v.Shown < v.Total {
+						sawPaging = true
+					}
+					guard++
+					if guard > 200 {
+						t.Fatalf("case %d never finished paging", i)
+					}
+					start += v.Shown
+					if start >= v.Total {
+						break
+					}
+				}
+			}
+		}
+	}
+	// The premise: at least one of these compositions really does need paging,
+	// or the loop above proved nothing about the paged path.
+	if !sawPaging {
+		t.Error("no worst-case composition needed a second page; this test cannot see a pager defect")
+	}
+}
+
+// TestFTConfirmReservesRoomForTheWarnings is the non-vacuity check under
+// TestFTConfirmAlwaysFitsThePanel: a body that drew NO plate rows would fit the
+// panel trivially. The preview budget has to be at least one row in the
+// tightest case the flow can produce -- a QR (which adds a third warning) and a
+// title and footer (which add two subtitle rows to the preview).
+func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	area := ppConfirmArea(ctx.Platform.DisplaySize())
+	th := &descriptorTheme
+	cap18 := strings.Repeat("W", backup.MaxTitleLen)
+	f := ftFit{sizeMM: 3.0, qrc: &qrpkg.Code{Size: 73}}
+	for i := 0; i < 24; i++ {
+		f.lines = append(f.lines, strings.Repeat("W", 44))
+	}
+	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, ftFaceConst, cap18, cap18, true)
+	if v.Total != 26 {
+		t.Fatalf("worst case is %d rows, want 26 (title + 24 lines + footer)", v.Total)
+	}
+	if v.Shown < 1 {
+		t.Fatal("the tightest composition leaves no room for a single plate row")
+	}
+	// And the warnings themselves are what is being reserved for: the summary
+	// must be the taller part of the budget, or nothing was actually reserved.
+	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, ftFaceConst, true, ftConfirmPager(0, 1, 26))
+	if sum.Y <= 0 {
+		t.Fatal("the summary block measures nothing; the reservation is vacuous")
+	}
+	if v.Size.Y > area.Dy() {
+		t.Errorf("the tightest composition needs %dpx of a %dpx area", v.Size.Y, area.Dy())
+	}
+	t.Logf("tightest case: summary %dpx, %d of %d rows shown, total %dpx of %dpx",
+		sum.Y, v.Shown, v.Total, v.Size.Y, area.Dy())
+}
+
+// TestFTConfirmPagesEveryRowExactlyOnce: the pager advances by what was DRAWN,
+// so walking it must visit every plate row once, in order, with no gap and no
+// repeat. A fixed-page pager over variable-height rows silently skips rows,
+// which on this screen means approving lines that were never displayed.
+func TestFTConfirmPagesEveryRowExactlyOnce(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	area := ppConfirmArea(ctx.Platform.DisplaySize())
+	th := &descriptorTheme
+	cap18 := strings.Repeat("W", backup.MaxTitleLen)
+	f := ftFit{sizeMM: 3.0}
+	for i := 0; i < 24; i++ {
+		f.lines = append(f.lines, strings.Repeat("W", 44))
+	}
+	rows := ftConfirmRows(f, cap18, cap18)
+	seen := 0
+	start := 0
+	pages := 0
+	for {
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, ftFaceSH, cap18, cap18, false)
+		if v.Total != len(rows) {
+			t.Fatalf("page %d reports %d rows, want %d", pages, v.Total, len(rows))
+		}
+		seen += v.Shown
+		pages++
+		start += v.Shown
+		if start >= v.Total {
+			break
+		}
+		if pages > 100 {
+			t.Fatal("the pager never reached the end")
+		}
+	}
+	if seen != len(rows) {
+		t.Errorf("walking the pager showed %d rows of %d", seen, len(rows))
+	}
+	if pages < 2 {
+		t.Fatalf("the worst case fit on %d page(s); this test cannot see a paging defect", pages)
+	}
+	t.Logf("%d rows over %d pages", len(rows), pages)
 }
 
 // TestFTQRChoiceLabelsBindToMeaning pins the QR screen's LABELS to the boolean
