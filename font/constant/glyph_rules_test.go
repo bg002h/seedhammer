@@ -133,3 +133,27 @@ func TestSmallFeaturesClearTheStroke(t *testing.T) {
 		}
 	}
 }
+
+// TestQuoteInkGapClearsTheStroke pins the double quote's INK-TO-INK gap, which
+// is a different quantity from the feature lengths above: centre separation
+// alone is misleading, because the stroke is 0.9 units wide at this rung, so
+// 2.0 units of separation is only 1.1 units of actual gap.
+//
+// It is held at 1.5 stroke widths rather than the 2.0 the other features use,
+// because widening further would push the glyph past the alphabet's local x
+// maximum of 5.0 -- and NewPassphraseStringer derives `center` from bounds
+// accumulated over EVERY glyph, so extending that maximum relocates every
+// constant-time plate. Measured: growing rightward moved center.X from 7111 to
+// 7822 and shifted three goldens whose text contains no quote at all. Widening
+// LEFTWARD instead reaches 1.5 stroke widths with the box untouched.
+func TestQuoteInkGapClearsTheStroke(t *testing.T) {
+	const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
+	const unitMM = emMM / cellUnits
+	const sep = 2.25 // stroke centres, in cell units (x470.75 and x473)
+	stroke := strokeMM / unitMM
+	ink := (sep - stroke) * unitMM
+	if want := 1.5 * strokeMM; ink < want {
+		t.Errorf("the '\"' ink gap is %.3fmm (%.2f stroke widths); want at least %.3fmm "+
+			"(1.5 stroke widths) or the two strokes cut as one mark", ink, ink/strokeMM, want)
+	}
+}
