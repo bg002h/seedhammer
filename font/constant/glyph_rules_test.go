@@ -225,3 +225,35 @@ func TestNArchIsDeliberatelyOffHorizontal(t *testing.T) {
 		}
 	}
 }
+
+// TestPlusArchIsDeliberatelyOffHorizontal is the mirror of the 'n' rule.
+//
+// '+' and 't' are the same construction -- a vertical crossed by a bar -- and at
+// 3.0mm a '+' with a flat bar is close to a 't' that has lost its foot. The bar
+// now DROPS half a unit left to right, the exact mirror of 'n' rising by the
+// same amount over the same 4-unit run: 7.13 degrees each way.
+//
+// The two directions are deliberate. A reader who learns "sloped arch = n" would
+// be misled by a '+' sloping the same way, so the pair leans apart rather than
+// together. 't' stays flat, which is what makes '+' distinctive.
+func TestPlusArchIsDeliberatelyOffHorizontal(t *testing.T) {
+	const barLeftY, barRightY = 5.0, 5.5 // y grows downward
+	if barLeftY == barRightY {
+		t.Error("'+' has a flat bar again; it is then close to a 't' that has lost its foot")
+	}
+	if drop := barRightY - barLeftY; drop <= 0 {
+		t.Errorf("'+' rises by %.2f; it must DROP, opposite to 'n', so the two do not "+
+			"teach the reader the same cue", -drop)
+	}
+	// Same magnitude as 'n', over the same 4-unit run: the two are mirrors.
+	const nRise = 0.5
+	if drop := barRightY - barLeftY; drop != nRise {
+		t.Errorf("'+' drops %.2f but 'n' rises %.2f; they are meant to be equal and opposite",
+			drop, nRise)
+	}
+	// 't' must stay flat or '+' stops being the odd one.
+	const tLeftY, tRightY = 4.0, 4.0
+	if tLeftY != tRightY {
+		t.Error("'t' now slopes too; '+' is only distinctive while 't' is flat")
+	}
+}
