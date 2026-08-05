@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"seedhammer.com/backup"
 	"seedhammer.com/bip39"
 	"seedhammer.com/engrave"
+	"seedhammer.com/font/vector"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 )
@@ -22,7 +24,8 @@ func proofParams() engrave.Params {
 	return newPlatform().EngraverParams()
 }
 
-// proofCases is the four patterns: two faces, each with and without a QR.
+// proofCases is every pattern the program offers: one per face plan and QR
+// choice, minus the QR variants of the plans that have none.
 func proofCases(t *testing.T) []struct {
 	name  string
 	proof *ftProof
@@ -34,18 +37,70 @@ func proofCases(t *testing.T) []struct {
 		proof *ftProof
 		qr    bool
 	}
-	if len(ftProofs) != 2 {
-		t.Fatalf("there are %d proofs, want one per engraving face", len(ftProofs))
+	if len(ftProofs) != 3 {
+		t.Fatalf("there are %d proofs, want one per engraving face plus the mixed-face plate", len(ftProofs))
 	}
 	for i := range ftProofs {
 		p := &ftProofs[i]
 		for _, qr := range []bool{false, true} {
+			if qr && p.NeedsWholePlate() {
+				// There is no such pattern to test: the plate carries no QR
+				// and the loader drops the choice. That it is dropped, and
+				// said out loud first, is TestProofWholePlateDropsTheQR.
+				continue
+			}
 			out = append(out, struct {
 				name  string
 				proof *ftProof
 				qr    bool
-			}{fmt.Sprintf("%s/qr=%v", p.Face.Name, qr), p, qr})
+			}{fmt.Sprintf("%s/qr=%v", p.Plan.Name(), qr), p, qr})
 		}
+	}
+	return out
+}
+
+// proofFit lays a pattern out exactly as the flow does: through the pattern's
+// own FACE PLAN, so a mixed-face plate is measured in both of its faces and a
+// single-face one in its one. Nothing in this file re-derives which face a row
+// is cut in -- the fit answers that, and its answer is what is asserted.
+func proofFit(t *testing.T, P engrave.Params, p *ftProof, qr bool) backup.Fitted {
+	t.Helper()
+	f, err := backup.FitBlocks(P, p.Plan.Blocks(p.For(qr)), p.Title, ftProofFooter, qr)
+	if err != nil {
+		t.Fatalf("%s/qr=%v: the proof does not fit: %v", p.Plan.Name(), qr, err)
+	}
+	return f
+}
+
+// proofFaceRuns is the fitted plate's face map as runs: the face and the number
+// of consecutive body rows cut in it, in plate order. Read from Fitted.Faces,
+// never recomputed.
+func proofFaceRuns(p *ftProof, f backup.Fitted) []struct {
+	Face ftFace
+	Rows int
+} {
+	name := func(v *vector.Face) ftFace {
+		for _, r := range p.Plan.Runs {
+			if r.Face.Face == v {
+				return r.Face
+			}
+		}
+		return ftFace{"?", v}
+	}
+	var out []struct {
+		Face ftFace
+		Rows int
+	}
+	for i := 0; i < len(f.Faces); {
+		j := i
+		for j < len(f.Faces) && f.Faces[j] == f.Faces[i] {
+			j++
+		}
+		out = append(out, struct {
+			Face ftFace
+			Rows int
+		}{name(f.Faces[i]), j - i})
+		i = j
 	}
 	return out
 }
@@ -63,19 +118,20 @@ func TestProofPatternsLandAtSmallestRung(t *testing.T) {
 	}
 	for _, tc := range proofCases(t) {
 		text := tc.proof.For(tc.qr)
-		fontMM, lines, code, err := backup.Fit(P, tc.proof.Face.Face, text, tc.proof.Title, ftProofFooter, tc.qr)
-		if err != nil {
-			t.Fatalf("%s: the proof does not fit: %v", tc.name, err)
-		}
-		if fontMM != smallest {
+		f := proofFit(t, P, tc.proof, tc.qr)
+		if f.SizeMM != smallest {
 			t.Errorf("%s: proof lands at %.1fmm, want %.1fmm -- %d chars is the wrong length "+
-				"to select the smallest rung", tc.name, fontMM, smallest, utf8.RuneCountInString(text))
+				"to select the smallest rung", tc.name, f.SizeMM, smallest, utf8.RuneCountInString(text))
 		}
-		if len(lines) == 0 {
+		if len(f.Lines) == 0 {
 			t.Errorf("%s: no lines", tc.name)
 		}
-		if tc.qr != (code != nil) {
-			t.Errorf("%s: qr=%v but code!=nil is %v", tc.name, tc.qr, code != nil)
+		if len(f.Faces) != len(f.Lines) {
+			t.Errorf("%s: %d lines but %d faces; the face map does not cover the plate",
+				tc.name, len(f.Lines), len(f.Faces))
+		}
+		if tc.qr != (f.QR != nil) {
+			t.Errorf("%s: qr=%v but code!=nil is %v", tc.name, tc.qr, f.QR != nil)
 		}
 	}
 }
@@ -99,7 +155,7 @@ func TestProofPatternsFillThePlate(t *testing.T) {
 	P := proofParams()
 	for _, tc := range proofCases(t) {
 		text := tc.proof.For(tc.qr)
-		used, avail, ok := backup.Admissible(P, tc.proof.Face.Face, text, tc.proof.Title, ftProofFooter, tc.qr)
+		used, avail, ok := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(text), tc.proof.Title, ftProofFooter, tc.qr)
 		if !ok {
 			t.Fatalf("%s: the pattern is not admissible: %d of %d rows", tc.name, used, avail)
 		}
@@ -115,7 +171,8 @@ func TestProofPatternsFillThePlate(t *testing.T) {
 		// must still fit, AT THE SAME RUNG. Appended as short words so it wraps
 		// like the prose it stands in for.
 		grown := text + " " + strings.TrimSpace(strings.Repeat("pad ", len(text)/80+1))
-		size, _, _, err := backup.Fit(P, tc.proof.Face.Face, grown, tc.proof.Title, ftProofFooter, tc.qr)
+		gf, err := backup.FitBlocks(P, tc.proof.Plan.Blocks(grown), tc.proof.Title, ftProofFooter, tc.qr)
+		size := gf.SizeMM
 		pct := 100 * (len(grown) - len(text)) / len(text)
 		if err != nil {
 			t.Errorf("%s: %d%% more text no longer fits at all; the pattern has no margin", tc.name, pct)
@@ -133,12 +190,17 @@ func TestProofNoQRPatternWouldNotFitWithAQR(t *testing.T) {
 	P := proofParams()
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		if _, _, _, err := backup.Fit(P, p.Face.Face, p.Text, p.Title, ftProofFooter, true); err == nil {
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, ftProofFooter, true); err == nil {
 			t.Errorf("%s: the no-QR pattern now fits with a QR -- the split is no longer needed, "+
-				"or the capacity changed and the lengths should be revisited", p.Face.Name)
+				"or the capacity changed and the lengths should be revisited", p.Plan.Name())
 		}
-		if _, _, _, err := backup.Fit(P, p.Face.Face, p.TextQR, p.Title, ftProofFooter, true); err != nil {
-			t.Errorf("%s: the QR variant does not fit with a QR: %v", p.Face.Name, err)
+		if p.NeedsWholePlate() {
+			// No QR variant to check, and the claim that there could not be
+			// one is the assertion above: this pattern does not fit with a QR.
+			continue
+		}
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.TextQR), p.Title, ftProofFooter, true); err != nil {
+			t.Errorf("%s: the QR variant does not fit with a QR: %v", p.Plan.Name(), err)
 		}
 	}
 }
@@ -153,7 +215,7 @@ func TestProofNoQRPatternWouldNotFitWithAQR(t *testing.T) {
 func TestProofPatternsAreFaceSpecific(t *testing.T) {
 	P := proofParams()
 	smallest := backup.FontSizes[len(backup.FontSizes)-1]
-	a, b := ftProofs[0].Face, ftProofs[1].Face
+	a, b := ftFaceSH, ftFaceConst
 	if backup.CharsPerLine(P, a.Face, smallest) == backup.CharsPerLine(P, b.Face, smallest) {
 		t.Fatalf("font/%s and font/%s have the same %d-column grid at %.1fmm; there would be nothing "+
 			"to tune per face", a.Name, b.Name, backup.CharsPerLine(P, a.Face, smallest), smallest)
@@ -165,20 +227,34 @@ func TestProofPatternsAreFaceSpecific(t *testing.T) {
 		}
 		seen[tc.proof.For(tc.qr)] = tc.name
 	}
-	crossWrong := 0
+	// The cross check is over the two SINGLE-FACE proofs: it asks whether one
+	// face's tuned pattern would serve the other, which is only a question
+	// about a plate cut entirely in one face. The mixed plate is not a
+	// candidate answer -- it is a different plate, and its own face-specificity
+	// is TestProofBlockLabelsNameTheirOwnFace.
+	single := []*ftProof{}
 	for i := range ftProofs {
-		p := &ftProofs[i]
-		other := &ftProofs[(i+1)%len(ftProofs)]
+		if len(ftProofs[i].Plan.Runs) == 1 {
+			single = append(single, &ftProofs[i])
+		}
+	}
+	if len(single) != 2 {
+		t.Fatalf("there are %d single-face proofs, want one per engraving face", len(single))
+	}
+	crossWrong := 0
+	for i, p := range single {
+		other := single[(i+1)%len(single)]
 		for _, qr := range []bool{false, true} {
 			// This face's own pattern satisfies this face's requirements --
 			// that is TestProofPatternsFillThePlate. What is asked here is
 			// whether the OTHER face's pattern would, and it must not always.
-			cross, avail, crossOK := backup.Admissible(P, p.Face.Face, other.For(qr), p.Title, ftProofFooter, qr)
-			size, _, _, err := backup.Fit(P, p.Face.Face, other.For(qr), p.Title, ftProofFooter, qr)
-			if !crossOK || err != nil || size != smallest || cross > avail-2 || cross < avail*3/4 {
+			blocks := p.Plan.Blocks(other.For(qr))
+			cross, avail, crossOK := backup.AdmissibleBlocks(P, blocks, p.Title, ftProofFooter, qr)
+			cf, err := backup.FitBlocks(P, blocks, p.Title, ftProofFooter, qr)
+			if !crossOK || err != nil || cf.SizeMM != smallest || cross > avail-2 || cross < avail*3/4 {
 				crossWrong++
 				t.Logf("font/%s qr=%v: %s's pattern would be %d of %d rows at %.1fmm (err=%v)",
-					p.Face.Name, qr, other.Face.Name, cross, avail, size, err)
+					p.Plan.Name(), qr, other.Plan.Name(), cross, avail, cf.SizeMM, err)
 			}
 		}
 	}
@@ -250,10 +326,7 @@ var ftConfusableGroups = []string{
 func TestProofConfusablesSurviveTheWrap(t *testing.T) {
 	P := proofParams()
 	for _, tc := range proofCases(t) {
-		_, lines, _, err := backup.Fit(P, tc.proof.Face.Face, tc.proof.For(tc.qr), tc.proof.Title, ftProofFooter, tc.qr)
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
+		lines := proofFit(t, P, tc.proof, tc.qr).Lines
 		for _, g := range ftConfusableGroups {
 			if !strings.Contains(ftProofConfusables, g) {
 				t.Errorf("the confusable table lost %q", g)
@@ -308,27 +381,130 @@ func TestProofTitlesStateTheMeasuredGrid(t *testing.T) {
 	rows := backup.LinesPerPlate(P, smallest)
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		cols := backup.CharsPerLine(P, p.Face.Face, smallest)
-		want := fmt.Sprintf("%.1fmm %dx%d", smallest, cols, rows)
-		if !strings.Contains(p.Title, want) {
-			t.Errorf("%s: the title %q does not state the measured grid %q -- the plate would claim "+
-				"a size or a column count it does not have", p.Face.Name, p.Title, want)
+		if len(p.Plan.Runs) == 1 {
+			face := p.Plan.Runs[0].Face
+			cols := backup.CharsPerLine(P, face.Face, smallest)
+			want := fmt.Sprintf("%.1fmm %dx%d", smallest, cols, rows)
+			if !strings.Contains(p.Title, want) {
+				t.Errorf("%s: the title %q does not state the measured grid %q -- the plate would claim "+
+					"a size or a column count it does not have", p.Plan.Name(), p.Title, want)
+			}
+		} else {
+			// A mixed plate has TWO grids -- 44 columns in its top half and 39
+			// in its bottom -- so no single "COLSxROWS" is true of it. The
+			// grids live on the block labels instead, each in the face it
+			// describes; see TestProofBlockLabelsNameTheirOwnFace. What the
+			// title must still carry is the rung, which is one number and is
+			// true of the whole plate.
+			if !strings.Contains(p.Title, fmt.Sprintf("%.1fmm", smallest)) {
+				t.Errorf("%s: the title %q does not state the %.1fmm rung", p.Plan.Name(), p.Title, smallest)
+			}
+			for _, r := range p.Plan.Runs {
+				if !strings.Contains(strings.ToLower(p.Title), strings.ToLower(r.Face.Name[:2])) {
+					t.Errorf("%s: the title %q does not name the %s half", p.Plan.Name(), p.Title, r.Face.Name)
+				}
+			}
 		}
-		// And it names its own face, or two plates cut in different faces are
-		// indistinguishable a year later.
-		if !strings.Contains(strings.ToLower(p.Title), strings.ToLower(p.Face.Name[:2])) {
-			t.Errorf("%s: the title %q does not name the face", p.Face.Name, p.Title)
+		// And it names its own first face, or two plates cut in different faces
+		// are indistinguishable a year later.
+		if lead := p.Plan.Runs[0].Face.Name[:2]; !strings.Contains(strings.ToLower(p.Title), strings.ToLower(lead)) {
+			t.Errorf("%s: the title %q does not name the face", p.Plan.Name(), p.Title)
 		}
 		if n := utf8.RuneCountInString(p.Title); n > ftMaxLineLen {
-			t.Errorf("%s: the title is %d characters, past the %d cap", p.Face.Name, n, ftMaxLineLen)
+			t.Errorf("%s: the title is %d characters, past the %d cap", p.Plan.Name(), n, ftMaxLineLen)
 		}
-		// The two titles must differ, or the plate does not identify itself.
+		// The titles must differ, or the plate does not identify itself.
 		for j := range ftProofs {
 			if j != i && ftProofs[j].Title == p.Title {
-				t.Errorf("%s and %s carry the same title %q", p.Face.Name, ftProofs[j].Face.Name, p.Title)
+				t.Errorf("%s and %s carry the same title %q", p.Plan.Name(), ftProofs[j].Plan.Name(), p.Title)
 			}
 		}
 	}
+}
+
+// TestProofBlockLabelsNameTheirOwnFace is the mixed plate's whole readability
+// story, and it is asserted on the ENGRAVED PLATE -- the wrapped lines and the
+// face map the fit produced -- never on the source constants.
+//
+// Each run of body rows must OPEN with a label that (a) names the face that run
+// is cut in and (b) states that face's measured grid at 3.0mm. Without it the
+// two halves of a finished plate cannot be told apart, and which half is which
+// is the only question the plate exists to answer. Because the label is the
+// first line OF the run, it is cut in the face it names: it is a specimen as
+// well as a caption, so a label naming the wrong face is visibly wrong on the
+// steel as well as failing here.
+//
+// The grid figures are LIVE measurements, so a font change that moves a column
+// count fails this rather than shipping a plate that lies about itself.
+func TestProofBlockLabelsNameTheirOwnFace(t *testing.T) {
+	P := proofParams()
+	smallest := backup.FontSizes[len(backup.FontSizes)-1]
+	rows := backup.LinesPerPlate(P, smallest)
+	mixed := 0
+	for _, tc := range proofCases(t) {
+		if len(tc.proof.Plan.Runs) == 1 {
+			continue
+		}
+		mixed++
+		f := proofFit(t, P, tc.proof, tc.qr)
+		runs := proofFaceRuns(tc.proof, f)
+		if len(runs) != len(tc.proof.Plan.Runs) {
+			t.Fatalf("%s: the plate came out in %d face runs, want %d -- the halves collapsed, "+
+				"merged or came out in the wrong order.\nfaces: %v", tc.name, len(runs), len(tc.proof.Plan.Runs), runs)
+		}
+		row := 0
+		for i, run := range runs {
+			if want := tc.proof.Plan.Runs[i].Face; run.Face != want {
+				t.Errorf("%s: run %d is cut in font/%s, want font/%s -- the halves are in the wrong faces",
+					tc.name, i, run.Face.Name, want.Name)
+			}
+			label := f.Lines[row]
+			cols := backup.CharsPerLine(P, run.Face.Face, smallest)
+			grid := fmt.Sprintf("%.1fmm %dx%d", smallest, cols, rows)
+			if !strings.Contains(strings.ToLower(label), strings.ToLower(run.Face.Name[:2])) {
+				t.Errorf("%s: the block cut in font/%s opens with %q, which does not name that face; "+
+					"the two halves of the plate are indistinguishable", tc.name, run.Face.Name, label)
+			}
+			if !strings.Contains(label, grid) {
+				t.Errorf("%s: the font/%s block opens with %q, which does not state that face's "+
+					"measured grid %q", tc.name, run.Face.Name, label, grid)
+			}
+			// The label must be a line of its OWN, or it runs into the payload
+			// and stops reading as a heading on the plate.
+			if strings.Contains(label, ftProofSweep[:8]) {
+				t.Errorf("%s: the font/%s label shares its row with the sweep: %q",
+					tc.name, run.Face.Name, label)
+			}
+			row += run.Rows
+		}
+		// A label must not name a face it is not cut in: swapping the two would
+		// otherwise pass every containment check above taken one at a time.
+		for i, run := range runs {
+			for _, other := range tc.proof.Plan.Runs {
+				if other.Face == run.Face {
+					continue
+				}
+				if strings.Contains(strings.ToLower(f.Lines[labelRow(runs, i)]), strings.ToLower(other.Face.Name)) {
+					t.Errorf("%s: the font/%s label also names font/%s", tc.name, run.Face.Name, other.Face.Name)
+				}
+			}
+		}
+	}
+	if mixed == 0 {
+		t.Fatal("no mixed-face pattern was checked; this test is vacuous")
+	}
+}
+
+// labelRow is the body line each run opens on.
+func labelRow(runs []struct {
+	Face ftFace
+	Rows int
+}, i int) int {
+	row := 0
+	for _, r := range runs[:i] {
+		row += r.Rows
+	}
+	return row
 }
 
 // The footer sits exactly at the cap, so the plate exercises the cap on a
@@ -354,26 +530,32 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 	P := proofParams()
 	for _, tc := range proofCases(t) {
 		text := tc.proof.For(tc.qr)
-		for _, s := range []string{text, tc.proof.Title, ftProofFooter} {
-			for _, r := range s {
+		f := proofFit(t, P, tc.proof, tc.qr)
+		// Every ENGRAVED line against the face THAT line is cut in -- on a
+		// mixed plate the two halves go through different faces, and a rune
+		// checked against the wrong one is not checked at all.
+		lines := append([]string{}, f.Lines...)
+		faces := append([]*vector.Face{}, f.Faces...)
+		lines = append(lines, tc.proof.Title, ftProofFooter)
+		faces = append(faces, f.TitleFace, f.FooterFace)
+		for i, l := range lines {
+			for _, r := range l {
 				if r == '\n' {
 					// A wrap-time block boundary. WrapText consumes it; no
-					// engrave.String call ever sees one, because Fit's lines
-					// are guaranteed newline-free.
+					// engrave.String call ever sees one, because the fit's
+					// lines are guaranteed newline-free.
 					continue
 				}
-				if _, _, ok := tc.proof.Face.Face.Decode(r); !ok {
-					t.Errorf("%s: %q does not decode in font/%s", tc.name, r, tc.proof.Face.Name)
+				if _, _, ok := faces[i].Decode(r); !ok {
+					t.Errorf("%s: %q does not decode in the face line %d is cut in", tc.name, r, i)
 				}
 			}
 		}
-		// And no engraved line carries one, which is what makes the skip above
-		// safe rather than a hole in the check.
-		if _, lines, _, err := backup.Fit(P, tc.proof.Face.Face, text, tc.proof.Title, ftProofFooter, tc.qr); err == nil {
-			for _, l := range lines {
-				if strings.ContainsRune(l, '\n') {
-					t.Errorf("%s: an engraved line contains a newline: %q", tc.name, l)
-				}
+		// And no engraved line carries a newline, which is what makes the skip
+		// above safe rather than a hole in the check.
+		for _, l := range f.Lines {
+			if strings.ContainsRune(l, '\n') {
+				t.Errorf("%s: an engraved line contains a newline: %q", tc.name, l)
 			}
 		}
 		func() {
@@ -382,7 +564,7 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 					t.Errorf("%s: building the plate panicked: %v", tc.name, p)
 				}
 			}()
-			if _, err := ftBuildPlate(P, tc.proof.Face, text, tc.proof.Title, ftProofFooter, tc.qr); err != nil {
+			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, ftProofFooter, tc.qr); err != nil {
 				t.Errorf("%s: the plate does not build: %v", tc.name, err)
 			}
 		}()
@@ -401,12 +583,21 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 func TestProofCarriesBothCasesInRunningText(t *testing.T) {
 	// The running text is everything except the sweep and the confusable table:
 	// those two are dense reference blocks, not reading material.
+	// Selected by IDENTITY rather than by position: the mixed plate opens each
+	// half with a label, so "everything after the first two blocks" would count
+	// the second half's sweep and confusable table as reading material.
 	running := func(text string) string {
-		blocks := strings.Split(text, "\n")
-		if len(blocks) < 3 {
-			return ""
+		var out []string
+		for _, b := range strings.Split(text, "\n") {
+			if b == ftProofSweep || b == ftProofConfusables {
+				continue
+			}
+			out = append(out, b)
 		}
-		return strings.Join(blocks[2:], " ")
+		if len(out) == len(strings.Split(text, "\n")) {
+			return "" // neither reference block is present; not a proof at all
+		}
+		return strings.Join(out, " ")
 	}
 	for _, tc := range proofCases(t) {
 		run := running(tc.proof.For(tc.qr))
@@ -491,11 +682,18 @@ func TestProofPatternsCarryTheirProse(t *testing.T) {
 		pangram1 = "How vexingly quick daft zebras jump."
 		pangram2 = "Sphinx of black quartz, judge my vow."
 	)
+	// The mixed plate carries NO lorem. Two halves do not hold what two plates
+	// hold: each half spends its rows on the complete sweep and the complete
+	// confusable table -- the payload, which may not be trimmed -- and what is
+	// left over is the running-text pangrams. It is still held to the
+	// distinct-word floor below, which is what stops the reading material
+	// degenerating.
 	want := map[string][]string{
-		"sh/qr=false":       {lorem1, lorem2, lorem3, lorem4, pangram1},
-		"sh/qr=true":        {pangram1, pangram2},
-		"constant/qr=false": {lorem1, lorem2, lorem3, pangram1, pangram2},
-		"constant/qr=true":  {pangram1},
+		"sh/qr=false":          {lorem1, lorem2, lorem3, lorem4, pangram1},
+		"sh/qr=true":           {pangram1, pangram2},
+		"constant/qr=false":    {lorem1, lorem2, lorem3, pangram1, pangram2},
+		"constant/qr=true":     {pangram1},
+		"sh+constant/qr=false": nil,
 	}
 	for _, tc := range proofCases(t) {
 		text := tc.proof.For(tc.qr)
@@ -511,10 +709,7 @@ func TestProofPatternsCarryTheirProse(t *testing.T) {
 		// The prose must actually reach the plate as WRAPPED prose: at least
 		// half the engraved lines have to be ragged, or the pattern is all
 		// reference blocks and no reading.
-		_, lines, _, err := backup.Fit(P, tc.proof.Face.Face, text, tc.proof.Title, ftProofFooter, tc.qr)
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
+		lines := proofFit(t, P, tc.proof, tc.qr).Lines
 		// Joining the lines back with a space reconstitutes the prose exactly:
 		// WrapText breaks at spaces, so no prose word is ever split. A pattern
 		// whose prose ran off the end of the plate fails here even though the
@@ -652,11 +847,11 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 	for i := range ftProofs {
 		drew = false
 		if _, ok := ftProofOffer(newCtx(&drew), &descriptorTheme, ftProofs[i].Trigger, nil); ok {
-			t.Errorf("%s: a nil loader still reported the pattern as loaded", ftProofs[i].Face.Name)
+			t.Errorf("%s: a nil loader still reported the pattern as loaded", ftProofs[i].Plan.Name())
 		}
 		if drew {
 			t.Errorf("%s: a nil loader still put the prompt up, which no answer could act on",
-				ftProofs[i].Face.Name)
+				ftProofs[i].Plan.Name())
 		}
 	}
 }
@@ -666,9 +861,10 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 func TestProofLoaderWritesEveryPromisedField(t *testing.T) {
 	for _, tc := range proofCases(t) {
 		text, title, footer := "old text", "old title", "old footer"
-		face := ftFace{"stale", nil}
+		stale := &ftPlan{Runs: []ftFaceRun{{Face: ftFace{"stale", nil}}}}
+		plan := stale
 		useQR := tc.qr
-		got := ftProofLoader(&text, &title, &footer, &face, &useQR)(tc.proof)
+		got := ftProofLoader(&text, &title, &footer, &plan, &useQR)(tc.proof)
 		if text != tc.proof.For(tc.qr) {
 			t.Errorf("%s: text not loaded", tc.name)
 		}
@@ -682,15 +878,75 @@ func TestProofLoaderWritesEveryPromisedField(t *testing.T) {
 		if footer != ftProofFooter {
 			t.Errorf("%s: footer not loaded, got %q", tc.name, footer)
 		}
-		if face != tc.proof.Face {
-			t.Errorf("%s: face not loaded, got %q -- the plate would be cut in the wrong font",
-				tc.name, face.Name)
+		if plan != tc.proof.Plan {
+			t.Errorf("%s: face plan not loaded, got %q -- the plate would be cut in the wrong font",
+				tc.name, plan.Name())
 		}
 		if useQR != tc.qr {
 			t.Errorf("%s: the loader changed the QR choice to %v -- it must never do that, "+
 				"the operator chose it one step earlier and it decides what a scanner returns",
 				tc.name, useQR)
 		}
+	}
+}
+
+// TestProofWholePlateDropsTheQR is the ONE exception to "the loader never
+// touches the QR choice", and the two halves of it are inseparable: the prompt
+// has to SAY it, and the loader has to DO it.
+//
+// A pattern that needs the whole plate has no QR variant, so loading it with a
+// QR chosen would produce a composition the fit refuses outright -- the
+// operator would tap accept and get a "Too Long" screen instead of a proof.
+// Removing the QR is the only useful answer, and saying so first is what keeps
+// it from being the silent substitution this program exists to avoid.
+func TestProofWholePlateDropsTheQR(t *testing.T) {
+	P := proofParams()
+	whole := 0
+	for i := range ftProofs {
+		p := &ftProofs[i]
+		if !p.NeedsWholePlate() {
+			// A proof WITH a QR variant must not drop the choice, in either
+			// direction: this is the control that stops the branch above from
+			// being applied to everything.
+			for _, qr := range []bool{false, true} {
+				text, title, footer := "", "", ""
+				plan := &ftPlanSH
+				useQR := qr
+				ftProofLoader(&text, &title, &footer, &plan, &useQR)(p)
+				if useQR != qr {
+					t.Errorf("%s: loading changed the QR choice from %v to %v", p.Plan.Name(), qr, useQR)
+				}
+			}
+			continue
+		}
+		whole++
+		// It is said, in the sentence the operator reads before accepting.
+		body := ftProofAsk(p) + " " + ftProofReplaces(p) + " " + ftProofKeep(p)
+		for _, want := range []string{"REMOVES THE QR", "whole plate"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: the prompt never says %q, so removing the QR would be silent.\nprompt: %q",
+					p.Plan.Name(), want, body)
+			}
+		}
+		// And it is done.
+		text, title, footer := "", "", ""
+		plan := &ftPlanSH
+		useQR := true
+		ftProofLoader(&text, &title, &footer, &plan, &useQR)(p)
+		if useQR {
+			t.Errorf("%s: the loader left the QR on; the pattern does not fit beside one", p.Plan.Name())
+		}
+		if text != p.Text {
+			t.Errorf("%s: the loader stored a different pattern than the one that fits", p.Plan.Name())
+		}
+		// Which is the point: with the QR still on, this composition is refused.
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, ftProofFooter, true); err == nil {
+			t.Errorf("%s: the pattern now fits beside a QR, so it no longer needs the whole plate "+
+				"and NeedsWholePlate should go away", p.Plan.Name())
+		}
+	}
+	if whole == 0 {
+		t.Fatal("no proof needs the whole plate; this test is vacuous")
 	}
 }
 
@@ -708,21 +964,21 @@ func TestProofPromptSaysWhatItWillDo(t *testing.T) {
 			"REPLACES ALL THREE",  // that it destroys work
 			p.Title,               // what the title becomes
 			ftProofFooter,         // what the footer becomes
-			p.Face.Name,           // which face it will be cut in
+			p.Plan.Name(),         // which face(s) it will be cut in
 			"3.0mm",               // at which size
 			p.Trigger,             // what declining leaves behind
 			"Back = no",           // and which answer declines
 			"can be a real plate", // that the typed trigger is usable text
 		} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s: the prompt never says %q.\nprompt: %q", p.Face.Name, want, body)
+				t.Errorf("%s: the prompt never says %q.\nprompt: %q", p.Plan.Name(), want, body)
 			}
 		}
-		// The two prompts must differ, or the operator cannot tell from the
-		// screen which trigger they typed.
+		// The prompts must differ, or the operator cannot tell from the screen
+		// which trigger they typed.
 		other := &ftProofs[(i+1)%len(ftProofs)]
 		if ftProofAsk(p) == ftProofAsk(other) {
-			t.Errorf("both triggers ask the same question %q", ftProofAsk(p))
+			t.Errorf("%s and %s ask the same question %q", p.Trigger, other.Trigger, ftProofAsk(p))
 		}
 	}
 }
@@ -750,10 +1006,10 @@ func TestProofPromptFitsPanel(t *testing.T) {
 		if sz.Y > area.Dy() {
 			t.Errorf("%s: the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
 				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
-				pr.Face.Name, sz.Y, area.Dy(), dims)
+				pr.Plan.Name(), sz.Y, area.Dy(), dims)
 		}
 		if sz.X > area.Dx() {
-			t.Errorf("%s: the prompt is %dpx wide in a %dpx area", pr.Face.Name, sz.X, area.Dx())
+			t.Errorf("%s: the prompt is %dpx wide in a %dpx area", pr.Plan.Name(), sz.X, area.Dx())
 		}
 	}
 	// layoutTitle wraps at width-32 and draws at y=8 inside the leadingSize band.
@@ -787,7 +1043,7 @@ func TestProofNavIconsMeanWhatTheyShow(t *testing.T) {
 				answered = true
 			})
 			if !uiContains(h.content, "REPLACES ALL THREE") {
-				t.Fatalf("%s: the prompt did not render its warning; got %q", pr.Face.Name, h.content)
+				t.Fatalf("%s: the prompt did not render its warning; got %q", pr.Plan.Name(), h.content)
 			}
 			no, okNo := h.widget("proofNo").(*Clickable)
 			yes, okYes := h.widget("proofYes").(*Clickable)
@@ -804,7 +1060,7 @@ func TestProofNavIconsMeanWhatTheyShow(t *testing.T) {
 				}
 			}
 			if target == nil {
-				t.Fatalf("%s: no button carries the %s icon", pr.Face.Name, tc.name)
+				t.Fatalf("%s: no button carries the %s icon", pr.Plan.Name(), tc.name)
 			}
 			// point() fails unless the target was drawn, sits on the panel and
 			// is the topmost thing at its own centre.
@@ -813,12 +1069,12 @@ func TestProofNavIconsMeanWhatTheyShow(t *testing.T) {
 				h.frame()
 			}
 			if !answered {
-				t.Fatalf("%s: tapping the %s button left the prompt up; got %q", pr.Face.Name, tc.name, h.content)
+				t.Fatalf("%s: tapping the %s button left the prompt up; got %q", pr.Plan.Name(), tc.name, h.content)
 			}
 			if answer != tc.want {
 				t.Errorf("%s: tapping the button showing the %s icon answered %v, want %v -- "+
 					"the operator gets the opposite of what they read",
-					pr.Face.Name, tc.name, answer, tc.want)
+					pr.Plan.Name(), tc.name, answer, tc.want)
 			}
 		}
 	}
@@ -856,8 +1112,8 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			if !uiContains(h.content, "REPLACES ALL THREE") {
 				t.Fatalf("OK on the trigger did not offer the pattern; frame %q", h.content)
 			}
-			if !uiContains(h.content, "Load the "+tc.proof.Face.Name+" test pattern") {
-				t.Errorf("the prompt does not name the %s face; frame %q", tc.proof.Face.Name, h.content)
+			if !uiContains(h.content, "Load the "+tc.proof.Plan.Name()+" test pattern") {
+				t.Errorf("the prompt does not name the %s plan; frame %q", tc.proof.Plan.Name(), h.content)
 			}
 			h.tapWidget("proofYes")
 			h.mustReach("lines")
@@ -882,7 +1138,7 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			// and reported for the wrong face it is simply a different number,
 			// with nothing on screen to say so.
 			P := proofParams()
-			used, avail, _ := backup.Admissible(P, tc.proof.Face.Face, want, tc.proof.Title, ftProofFooter, tc.qr)
+			used, avail, _ := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(want), tc.proof.Title, ftProofFooter, tc.qr)
 			if !uiHas(h.content, fmt.Sprintf("%d/%dlines", used, avail)) {
 				t.Errorf("the readout does not show %d/%d lines for the %s pattern; frame %q",
 					used, avail, tc.name, h.content)
@@ -901,8 +1157,10 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			}
 			ftOK(h)
 			h.mustReach("Confirm")
-			if !uiContains(h.content, "font: "+tc.proof.Face.Name) {
-				t.Errorf("the confirm screen does not name the %s face; frame %q", tc.proof.Face.Name, h.content)
+			wantFit := proofFit(t, P, tc.proof, tc.qr)
+			if !uiContains(h.content, "font: "+ftFaceSummary(tc.proof.Plan, wantFit.Faces)) {
+				t.Errorf("the confirm screen does not report the face map %q; frame %q",
+					ftFaceSummary(tc.proof.Plan, wantFit.Faces), h.content)
 			}
 
 			// What the operator APPROVES has to be the plate that gets cut, and
@@ -910,10 +1168,7 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			// number of lines in each face. A screen evaluated in one face and a
 			// plate engraved in the other agree about the size and the QR and
 			// disagree about every line.
-			_, wantLines, _, err := backup.Fit(P, tc.proof.Face.Face, want, tc.proof.Title, ftProofFooter, tc.qr)
-			if err != nil {
-				t.Fatal(err)
-			}
+			wantLines := wantFit.Lines
 			if !uiContains(h.content, strconv.Itoa(len(wantLines))+" lines") {
 				t.Errorf("the confirm screen does not report the %d lines the plate will carry; frame %q",
 					len(wantLines), h.content)
@@ -929,27 +1184,41 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			if !r.gotPlate {
 				t.Fatal("the flow never built a plate")
 			}
-			if r.gotFont != tc.proof.Face.Face {
-				t.Errorf("the plate was cut in the wrong face; the composition was fitted in font/%s",
-					tc.proof.Face.Name)
+			// The FACE OF EVERY ROW, not just "the" face: on a mixed plate a
+			// half cut in the other half's face, or both halves cut in one,
+			// agree about the size, the lines and the code and differ only
+			// here.
+			if !slices.Equal(r.got.Faces, wantFit.Faces) {
+				t.Errorf("the plate's face map is not the fitted one: got %v, want %v",
+					r.got.Faces, wantFit.Faces)
 			}
-			if r.gotSize != 3.0 {
-				t.Errorf("engraved at %.1fmm, want 3.0mm -- the proof tests the rung its length selects", r.gotSize)
+			if r.got.TitleFace != wantFit.TitleFace || r.got.FooterFace != wantFit.FooterFace {
+				t.Error("the title or footer was cut in a face the fit did not choose")
 			}
-			if r.gotTitle != tc.proof.Title {
-				t.Errorf("engraved title %q, want %q", r.gotTitle, tc.proof.Title)
+			if r.got.SizeMM != 3.0 {
+				t.Errorf("engraved at %.1fmm, want 3.0mm -- the proof tests the rung its length selects", r.got.SizeMM)
 			}
-			if r.gotFooter != ftProofFooter {
-				t.Errorf("engraved footer %q, want %q", r.gotFooter, ftProofFooter)
+			if r.got.Title != tc.proof.Title {
+				t.Errorf("engraved title %q, want %q", r.got.Title, tc.proof.Title)
 			}
-			if len(r.gotLines) != len(wantLines) {
-				t.Errorf("engraved %d lines, want %d", len(r.gotLines), len(wantLines))
+			if r.got.Footer != ftProofFooter {
+				t.Errorf("engraved footer %q, want %q", r.got.Footer, ftProofFooter)
 			}
-			if (r.gotQR != nil) != tc.qr {
-				t.Errorf("engraved with a QR = %v, want %v", r.gotQR != nil, tc.qr)
+			if !slices.Equal(r.got.Lines, wantLines) {
+				t.Errorf("engraved %d lines, want the %d fitted ones", len(r.got.Lines), len(wantLines))
 			}
-			if !strings.HasPrefix(strings.Join(r.gotLines, "\n"), " !\"") {
-				t.Errorf("the engraved plate does not start with the codepoint sweep: %q", r.gotLines[0])
+			if (r.got.QR != nil) != tc.qr {
+				t.Errorf("engraved with a QR = %v, want %v", r.got.QR != nil, tc.qr)
+			}
+			// Every pattern opens with the codepoint sweep; the mixed plate
+			// opens each HALF with a label and then the sweep.
+			opens := strings.Join(r.got.Lines, "\n")
+			if len(tc.proof.Plan.Runs) == 1 {
+				if !strings.HasPrefix(opens, " !\"") {
+					t.Errorf("the engraved plate does not start with the codepoint sweep: %q", r.got.Lines[0])
+				}
+			} else if !strings.Contains(opens, "\n !\"") {
+				t.Errorf("the engraved plate does not carry the codepoint sweep on a row of its own: %q", r.got.Lines)
 			}
 		})
 	}
@@ -964,7 +1233,7 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 func TestProofE2EDecliningEngravesTheTypedText(t *testing.T) {
 	for i := range ftProofs {
 		pr := &ftProofs[i]
-		t.Run(pr.Face.Name, func(t *testing.T) {
+		t.Run(pr.Plan.Name(), func(t *testing.T) {
 			h, r := startFT(t)
 			ftPastQR(h, false)
 			ftTypeTrigger(h, pr.Trigger)
@@ -985,16 +1254,19 @@ func TestProofE2EDecliningEngravesTheTypedText(t *testing.T) {
 			if !r.gotPlate {
 				t.Fatal("the flow never built a plate")
 			}
-			if r.gotTitle != "" || r.gotFooter != "" {
-				t.Errorf("declining still loaded the proof's title/footer: %q / %q", r.gotTitle, r.gotFooter)
+			if r.got.Title != "" || r.got.Footer != "" {
+				t.Errorf("declining still loaded the proof's title/footer: %q / %q", r.got.Title, r.got.Footer)
 			}
-			if r.gotFont != ftFaceSH.Face {
-				t.Error("declining still switched the engraving face")
+			for _, f := range r.got.Faces {
+				if f != ftFaceSH.Face {
+					t.Error("declining still switched the engraving face")
+					break
+				}
 			}
-			if len(r.gotLines) != 1 || r.gotLines[0] != pr.Trigger {
-				t.Errorf("engraved %q, want the single line %q", r.gotLines, pr.Trigger)
+			if len(r.got.Lines) != 1 || r.got.Lines[0] != pr.Trigger {
+				t.Errorf("engraved %q, want the single line %q", r.got.Lines, pr.Trigger)
 			}
-			if r.gotSize == 3.0 {
+			if r.got.SizeMM == 3.0 {
 				t.Errorf("an %d-character text engraved at 3.0mm; the proof pattern was loaded anyway",
 					len(pr.Trigger))
 			}
@@ -1035,16 +1307,287 @@ func TestProofE2EIsScopedToTheTextField(t *testing.T) {
 			if !r.gotPlate {
 				t.Fatal("the flow never built a plate")
 			}
-			got := r.gotTitle
+			got := r.got.Title
 			if step == "Footer" {
-				got = r.gotFooter
+				got = r.got.Footer
 			}
 			if got != ftProofTriggerSH {
 				t.Errorf("the %s engraved as %q, want the typed %q", step, got, ftProofTriggerSH)
 			}
-			if len(r.gotLines) != 1 || r.gotLines[0] != "hi" {
-				t.Errorf("the body engraved as %q; the trigger clobbered it", r.gotLines)
+			if len(r.got.Lines) != 1 || r.got.Lines[0] != "hi" {
+				t.Errorf("the body engraved as %q; the trigger clobbered it", r.got.Lines)
 			}
 		})
+	}
+}
+
+// ---- the mixed-face plate ---------------------------------------------------
+
+// ftMixedProof is the mixed-face proof, or a fatal error. Found by its plan
+// rather than by position, so reordering ftProofs does not silently test the
+// wrong plate.
+func ftMixedProof(t *testing.T) *ftProof {
+	t.Helper()
+	for i := range ftProofs {
+		if len(ftProofs[i].Plan.Runs) > 1 {
+			return &ftProofs[i]
+		}
+	}
+	t.Fatal("no mixed-face proof; the whole point of the plate is missing")
+	return nil
+}
+
+// TestMixedProofQualifiesBothFacesOnOnePlate is the plate's reason to exist,
+// stated as the thing that would be lost: EACH HALF must be a complete proof of
+// its own face. A half missing a glyph, or with a confusable group broken
+// across two rows, qualifies nothing -- and the operator would have spent the
+// plate believing otherwise.
+//
+// Checked half by half against the ENGRAVED ROWS of that half, selected by the
+// fit's own face map. Checking the plate as a whole would pass with the entire
+// payload in one face, which is the plate this one exists not to be.
+func TestMixedProofQualifiesBothFacesOnOnePlate(t *testing.T) {
+	P := proofParams()
+	p := ftMixedProof(t)
+	f := proofFit(t, P, p, false)
+	runs := proofFaceRuns(p, f)
+	if len(runs) != 2 {
+		t.Fatalf("the plate came out in %d face runs, want 2", len(runs))
+	}
+	row := 0
+	for _, run := range runs {
+		half := strings.Join(f.Lines[row:row+run.Rows], "")
+		spaced := strings.Join(f.Lines[row:row+run.Rows], " ")
+		row += run.Rows
+
+		// Every printable ASCII, in this half, in this face.
+		var missing []rune
+		for r := rune(0x20); r <= 0x7E; r++ {
+			if !strings.ContainsRune(spaced, r) {
+				missing = append(missing, r)
+			}
+		}
+		if len(missing) > 0 {
+			t.Errorf("the font/%s half omits %d printable ASCII: %q -- it does not qualify that face",
+				run.Face.Name, len(missing), string(missing))
+		}
+		// Every confusable group, unsplit, on a single row of this half.
+		for _, g := range ftConfusableGroups {
+			intact := false
+			for _, l := range f.Lines[row-run.Rows : row] {
+				if strings.Contains(l, g) {
+					intact = true
+					break
+				}
+			}
+			if !intact {
+				t.Errorf("the font/%s half splits the group %q across rows; the comparison it exists "+
+					"for cannot be made in that face", run.Face.Name, g)
+			}
+		}
+		// And running text in both cases, which is the reading task a real
+		// plate sets. The sweep is dense reference material and does not count:
+		// it is stripped by taking only the rows that are not part of it.
+		if !strings.Contains(spaced, ftProofUpperPangram) {
+			t.Errorf("the font/%s half carries no upper-case running text", run.Face.Name)
+		}
+		if !strings.Contains(spaced, ftProofLowerPangram) {
+			t.Errorf("the font/%s half carries no lower-case running text", run.Face.Name)
+		}
+		if len(half) == 0 {
+			t.Errorf("the font/%s half is empty", run.Face.Name)
+		}
+	}
+	// Both halves must be a real share of the plate. A "mixed" plate that gave
+	// one face two rows would pass every check above and prove nothing about
+	// it: the sweep and the table alone need six.
+	for _, run := range runs {
+		if run.Rows < len(f.Lines)/4 {
+			t.Errorf("the font/%s half is %d of %d rows; that is not half a plate",
+				run.Face.Name, run.Rows, len(f.Lines))
+		}
+	}
+	t.Logf("%s: %d rows in font/%s + %d rows in font/%s, %d characters, at %.1fmm",
+		p.Trigger, runs[0].Rows, runs[0].Face.Name, runs[1].Rows, runs[1].Face.Name,
+		utf8.RuneCountInString(p.Text), f.SizeMM)
+}
+
+// TestMixedProofPlateIsCutInBothFaces is the geometry-level assertion, and the
+// only one that can see the defect it is aimed at: freetextPlateHook reports
+// what ftBuildPlate was HANDED, so a builder that reported the right face map
+// and engraved something else passes every hook assertion in this file. A
+// finished Plate is {Duration, Spline} -- stroke geometry with no text in it --
+// so the strokes themselves are the assertion.
+//
+// Each mutation is one that leaves the size, the lines and the code untouched.
+func TestMixedProofPlateIsCutInBothFaces(t *testing.T) {
+	P := proofParams()
+	p := ftMixedProof(t)
+	got, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, ftProofFooter, false)
+	if err != nil {
+		t.Fatalf("the mixed plate does not build: %v", err)
+	}
+	f := proofFit(t, P, p, false)
+	want, err := toPlate(backup.EngraveFitted(P, f), P)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, w := ftSpline(t, got), ftSpline(t, want); !slices.Equal(g, w) {
+		t.Fatalf("the built plate is not the fitted composition (%d knots vs %d)", len(g), len(w))
+	}
+
+	swap := func(v *vector.Face) *vector.Face {
+		if v == ftFaceSH.Face {
+			return ftFaceConst.Face
+		}
+		return ftFaceSH.Face
+	}
+	for _, mut := range []struct {
+		name string
+		make func(backup.Fitted) backup.Fitted
+	}{
+		{"both halves in font/sh", func(g backup.Fitted) backup.Fitted {
+			g.Faces = slices.Clone(g.Faces)
+			for i := range g.Faces {
+				g.Faces[i] = ftFaceSH.Face
+			}
+			g.TitleFace, g.FooterFace = ftFaceSH.Face, ftFaceSH.Face
+			return g
+		}},
+		{"both halves in font/constant", func(g backup.Fitted) backup.Fitted {
+			g.Faces = slices.Clone(g.Faces)
+			for i := range g.Faces {
+				g.Faces[i] = ftFaceConst.Face
+			}
+			g.TitleFace, g.FooterFace = ftFaceConst.Face, ftFaceConst.Face
+			return g
+		}},
+		{"the halves swapped", func(g backup.Fitted) backup.Fitted {
+			g.Faces = slices.Clone(g.Faces)
+			for i := range g.Faces {
+				g.Faces[i] = swap(g.Faces[i])
+			}
+			g.TitleFace, g.FooterFace = swap(g.TitleFace), swap(g.FooterFace)
+			return g
+		}},
+		{"the face boundary one row late", func(g backup.Fitted) backup.Fitted {
+			g.Faces = slices.Clone(g.Faces)
+			for i := 1; i < len(g.Faces); i++ {
+				if g.Faces[i] != g.Faces[i-1] {
+					g.Faces[i] = g.Faces[i-1]
+					break
+				}
+			}
+			return g
+		}},
+	} {
+		wrong, err := toPlate(backup.EngraveFitted(P, mut.make(f)), P)
+		if err != nil {
+			continue // refused outright, which is louder than different geometry
+		}
+		if slices.Equal(ftSpline(t, got), ftSpline(t, wrong)) {
+			t.Errorf("%s produces identical geometry; nothing here can see a wrong face", mut.name)
+		}
+	}
+}
+
+// TestMixedProofConfirmScreenFitsThePanel: the mixed plate is the longest
+// composition the program can load AND it carries the longest "font:" string
+// the summary can print ("sh N + constant M"), which is a combination
+// ftWorstCompositions cannot reach -- its search texts have no '\n', so they
+// collapse to one block. Every page of it has to fit the panel the machine
+// actually has, or the operator approves a plate having read part of it.
+func TestMixedProofConfirmScreenFitsThePanel(t *testing.T) {
+	pl := newPlatform()
+	pl.display = sh2DisplaySize
+	ctx := NewContext(pl)
+	dims := ctx.Platform.DisplaySize()
+	if dims != sh2DisplaySize {
+		t.Fatalf("the fit test is running at %v, not the real %v panel", dims, sh2DisplaySize)
+	}
+	area := ppConfirmArea(dims)
+	th := &descriptorTheme
+	P := ctx.Platform.EngraverParams()
+	p := ftMixedProof(t)
+	f := ftEvaluate(P, p.Plan, p.Text, p.Title, ftProofFooter, false)
+	if f.err != nil || !f.ok {
+		t.Fatalf("the mixed pattern is not admissible: %v", f.err)
+	}
+	if !strings.Contains(ftFaceSummary(p.Plan, f.plate.Faces), " + ") {
+		t.Fatalf("the summary %q does not report two runs; this test is not measuring a mixed plate",
+			ftFaceSummary(p.Plan, f.plate.Faces))
+	}
+	start, seen, pages := 0, 0, 0
+	for {
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, ftProofFooter, false)
+		if v.Size.Y > area.Dy() {
+			t.Fatalf("page %d needs %dpx of a %dpx area on a %v panel", pages, v.Size.Y, area.Dy(), dims)
+		}
+		if v.Shown < 1 {
+			t.Fatalf("page %d drew no rows; the pager would stall", pages)
+		}
+		seen += v.Shown
+		start += v.Shown
+		pages++
+		if start >= v.Total {
+			if seen != v.Total {
+				t.Errorf("the pager showed %d of %d rows", seen, v.Total)
+			}
+			break
+		}
+		if pages > 64 {
+			t.Fatal("the pager never reached the end")
+		}
+	}
+	t.Logf("the mixed plate previews in %d page(s) of a %dpx area", pages, area.Dy())
+}
+
+// TestMixedProofE2EWithAQRChosen drives the whole program with "Add QR" already
+// selected and BOTHPROOF! typed. The pattern needs the whole plate, so the only
+// useful answer is to remove the QR -- and the prompt has to say so before the
+// operator can accept it, which is what makes this a choice rather than a
+// substitution.
+func TestMixedProofE2EWithAQRChosen(t *testing.T) {
+	p := ftMixedProof(t)
+	h, r := startFT(t)
+	ftPastQR(h, true)
+	ftTypeTrigger(h, p.Trigger)
+	ftOK(h)
+	if !uiContains(h.content, "REPLACES ALL THREE") {
+		t.Fatalf("OK on the trigger did not offer the pattern; frame %q", h.content)
+	}
+	if !uiContains(h.content, "REMOVES THE QR") {
+		t.Fatalf("the prompt does not warn that the QR will be removed; frame %q", h.content)
+	}
+	h.tapWidget("proofYes")
+	h.mustReach("lines")
+	if got := ftKbd(h).Fragment; got != p.Text {
+		t.Fatalf("the field holds %d characters, want the %d-character mixed pattern", len(got), len(p.Text))
+	}
+	if !uiContains(h.content, "3.0mm") {
+		t.Errorf("the readout does not show the pattern fitting at 3.0mm; frame %q", h.content)
+	}
+	ftOK(h)
+	h.mustReach("Title")
+	ftOK(h)
+	h.mustReach("Footer")
+	ftOK(h)
+	h.mustReach("Confirm")
+	if !uiContains(h.content, "QR: No") {
+		t.Errorf("the confirm screen still reports a QR; frame %q", h.content)
+	}
+	ftOK(h)
+	h.step()
+	if !r.gotPlate {
+		t.Fatal("the flow never built a plate")
+	}
+	if r.got.QR != nil {
+		t.Error("a QR was engraved on a plate whose pattern needs the whole plate")
+	}
+	// And it really is the mixed plate: both faces, in the declared order.
+	P := proofParams()
+	want := proofFit(t, P, p, false)
+	if !slices.Equal(r.got.Faces, want.Faces) {
+		t.Error("the engraved face map is not the fitted one")
 	}
 }
