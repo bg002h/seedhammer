@@ -532,7 +532,7 @@ func TestFTBuildPlateEncodesOnce(t *testing.T) {
 	freetextPlateHook = func(f backup.Fitted) { got = f.QR }
 	t.Cleanup(func() { freetextPlateHook = nil })
 	P := newPlatform().EngraverParams()
-	if _, err := ftBuildPlate(P, &ftPlanSH, text, "T", "F", true); err != nil {
+	if _, err := ftBuildPlate(P, &ftPlanSH, text, "T", "F", true, 0); err != nil {
 		t.Fatal(err)
 	}
 	_, _, want, err := backup.Fit(P, sh.Font, text, "T", "F", true)
@@ -635,7 +635,7 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
 	for _, useQR := range []bool{false, true} {
-		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR)
+		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -676,7 +676,7 @@ func TestFTBuiltPlateIsCutInTheFittedFace(t *testing.T) {
 	P := newPlatform().EngraverParams()
 	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst} {
 		face := plan.Runs[0].Face
-		got, err := ftBuildPlate(P, plan, text, "TO MY HEIR", "2026 COPY 1", false)
+		got, err := ftBuildPlate(P, plan, text, "TO MY HEIR", "2026 COPY 1", false, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -789,7 +789,7 @@ func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 				lo, hi, best := 1, 4000, 0
 				for lo <= hi {
 					mid := (lo + hi) / 2
-					f := ftEvaluate(P, plan, strings.Repeat("a", mid), tf[0], tf[1], useQR)
+					f := ftEvaluate(P, plan, strings.Repeat("a", mid), tf[0], tf[1], useQR, 0)
 					if f.ok && f.err == nil {
 						best, lo = mid, mid+1
 					} else {
@@ -799,7 +799,7 @@ func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 				if best == 0 {
 					t.Fatalf("no admissible text at all for plan %s qr=%v", plan.Name(), useQR)
 				}
-				f := ftEvaluate(P, plan, strings.Repeat("a", best), tf[0], tf[1], useQR)
+				f := ftEvaluate(P, plan, strings.Repeat("a", best), tf[0], tf[1], useQR, 0)
 				out = append(out, f)
 			}
 		}

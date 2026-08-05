@@ -564,7 +564,7 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 					t.Errorf("%s: building the plate panicked: %v", tc.name, p)
 				}
 			}()
-			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, ftProofFooter, tc.qr); err != nil {
+			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, ftProofFooter, tc.qr, 0); err != nil {
 				t.Errorf("%s: the plate does not build: %v", tc.name, err)
 			}
 		}()
@@ -766,7 +766,7 @@ func TestProofTriggersAreDistinctAndExact(t *testing.T) {
 			t.Fatalf("two proofs share the trigger %q", p.Trigger)
 		}
 		seen[p.Trigger] = true
-		got, ok := ftProofForTrigger(p.Trigger)
+		got, _, ok := ftProofForTrigger(p.Trigger)
 		if !ok || got != p {
 			t.Errorf("%q does not resolve to its own proof", p.Trigger)
 		}
@@ -812,7 +812,7 @@ func TestProofTriggersAreDistinctAndExact(t *testing.T) {
 		if real[n] {
 			continue // a near miss that happens to spell the other trigger
 		}
-		if _, ok := ftProofForTrigger(n); ok {
+		if _, _, ok := ftProofForTrigger(n); ok {
 			t.Errorf("%q triggers a proof; the match must be whole-field, exact and case-sensitive", n)
 		}
 	}
@@ -830,10 +830,10 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 	}
 	called, drew := false, false
 	ctx := newCtx(&drew)
-	load := func(*ftProof) string { called = true; return "" }
+	load := func(*ftProof, float32) string { called = true; return "" }
 	for _, typed := range []string{"", "see TEXTPROOF! for details", "TEXTPROOF",
 		"textproof!", "CONSTPROOF", ftProofTriggerSH + " ", "TEXTPROOF!CONSTPROOF!"} {
-		if _, ok := ftProofOffer(ctx, &descriptorTheme, typed, load); ok {
+		if _, ok := ftProofOffer(ctx, &descriptorTheme, typed, false, load); ok {
 			t.Errorf("%q triggered the offer", typed)
 		}
 	}
@@ -846,7 +846,7 @@ func TestProofNeedsTheWholeField(t *testing.T) {
 	// A nil loader disables the trigger: it must not prompt and must not panic.
 	for i := range ftProofs {
 		drew = false
-		if _, ok := ftProofOffer(newCtx(&drew), &descriptorTheme, ftProofs[i].Trigger, nil); ok {
+		if _, ok := ftProofOffer(newCtx(&drew), &descriptorTheme, ftProofs[i].Trigger, false, nil); ok {
 			t.Errorf("%s: a nil loader still reported the pattern as loaded", ftProofs[i].Plan.Name())
 		}
 		if drew {
@@ -864,7 +864,8 @@ func TestProofLoaderWritesEveryPromisedField(t *testing.T) {
 		stale := &ftPlan{Runs: []ftFaceRun{{Face: ftFace{"stale", nil}}}}
 		plan := stale
 		useQR := tc.qr
-		got := ftProofLoader(&text, &title, &footer, &plan, &useQR)(tc.proof)
+		var size float32
+		got := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(tc.proof, 0)
 		if text != tc.proof.For(tc.qr) {
 			t.Errorf("%s: text not loaded", tc.name)
 		}
@@ -912,7 +913,8 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 				text, title, footer := "", "", ""
 				plan := &ftPlanSH
 				useQR := qr
-				ftProofLoader(&text, &title, &footer, &plan, &useQR)(p)
+				var size float32
+				ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
 				if useQR != qr {
 					t.Errorf("%s: loading changed the QR choice from %v to %v", p.Plan.Name(), qr, useQR)
 				}
@@ -921,7 +923,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 		}
 		whole++
 		// It is said, in the sentence the operator reads before accepting.
-		body := ftProofAsk(p) + " " + ftProofReplaces(p) + " " + ftProofKeep(p)
+		body := ftProofAsk(p) + " " + ftProofReplaces(p, ftProofOutcomeFor(engraverParams, p, 0, false)) + " " + ftProofKeep(p)
 		for _, want := range []string{"REMOVES THE QR", "whole plate"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: the prompt never says %q, so removing the QR would be silent.\nprompt: %q",
@@ -932,7 +934,8 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 		text, title, footer := "", "", ""
 		plan := &ftPlanSH
 		useQR := true
-		ftProofLoader(&text, &title, &footer, &plan, &useQR)(p)
+		var size float32
+		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
 		if useQR {
 			t.Errorf("%s: the loader left the QR on; the pattern does not fit beside one", p.Plan.Name())
 		}
@@ -959,7 +962,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 func TestProofPromptSaysWhatItWillDo(t *testing.T) {
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		body := ftProofAsk(p) + " " + ftProofReplaces(p) + " " + ftProofKeep(p)
+		body := ftProofAsk(p) + " " + ftProofReplaces(p, ftProofOutcomeFor(engraverParams, p, 0, false)) + " " + ftProofKeep(p)
 		for _, want := range []string{
 			"REPLACES ALL THREE",  // that it destroys work
 			p.Title,               // what the title becomes
@@ -1002,7 +1005,16 @@ func TestProofPromptFitsPanel(t *testing.T) {
 	area := ppConfirmArea(dims)
 	for i := range ftProofs {
 		pr := &ftProofs[i]
-		_, sz := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr)
+		// Every rung, not just the auto-fit prompt: the rung prompt is longer,
+		// and the panel is the one thing a longer string can silently overflow.
+		var sz image.Point
+		for _, rung := range append([]float32{0}, backup.FontSizes...) {
+			out := ftProofOutcomeFor(engraverParams, pr, rung, false)
+			_, s2 := ftProofBody(ctx, &descriptorTheme, area.Dx(), pr, out)
+			if s2.Y > sz.Y {
+				sz = s2
+			}
+		}
 		if sz.Y > area.Dy() {
 			t.Errorf("%s: the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
 				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
@@ -1039,7 +1051,7 @@ func TestProofNavIconsMeanWhatTheyShow(t *testing.T) {
 			h := newPPHarness(t)
 			var answer, answered bool
 			h.start(func() {
-				answer = ftProofPrompt(h.ctx, &descriptorTheme, pr)
+				answer = ftProofPrompt(h.ctx, &descriptorTheme, pr, ftProofOutcomeFor(engraverParams, pr, 0, false))
 				answered = true
 			})
 			if !uiContains(h.content, "REPLACES ALL THREE") {
@@ -1423,7 +1435,7 @@ func TestMixedProofQualifiesBothFacesOnOnePlate(t *testing.T) {
 func TestMixedProofPlateIsCutInBothFaces(t *testing.T) {
 	P := proofParams()
 	p := ftMixedProof(t)
-	got, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, ftProofFooter, false)
+	got, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, ftProofFooter, false, 0)
 	if err != nil {
 		t.Fatalf("the mixed plate does not build: %v", err)
 	}
@@ -1509,7 +1521,7 @@ func TestMixedProofConfirmScreenFitsThePanel(t *testing.T) {
 	th := &descriptorTheme
 	P := ctx.Platform.EngraverParams()
 	p := ftMixedProof(t)
-	f := ftEvaluate(P, p.Plan, p.Text, p.Title, ftProofFooter, false)
+	f := ftEvaluate(P, p.Plan, p.Text, p.Title, ftProofFooter, false, 0)
 	if f.err != nil || !f.ok {
 		t.Fatalf("the mixed pattern is not admissible: %v", f.err)
 	}

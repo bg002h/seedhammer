@@ -120,3 +120,30 @@ from another face before relying on the dedication.
 4. **Obligations** — none. Unlicense is a public-domain dedication; nothing to
    reproduce, attribute or preserve. This entry exists for traceability, not
    because the licence demands it.
+
+## `cmd/emu` — the browser emulator
+
+**No third-party code was taken.** The idea came from
+[`Gangleri42/studio`](https://github.com/Gangleri42/studio), whose `emu/`
+directory is a `GOOS=js` build of `seedhammer.com/gui` served on a canvas, and
+whose README describes the host bridge it uses (`seedhammerBlit`,
+`seedhammerTouch`, `seedhammerSynthTap`). That approach is the whole insight
+and it is not ours.
+
+**It was reimplemented rather than vendored for a licence reason.** Their
+firmware fork is Unlicense, but `emu/` lives in the `studio` repository, which
+carries **no LICENSE file and no licence statement** (checked 2026-08-05, via
+the GitHub licence API and the README). Absent a grant, it is all rights
+reserved, and copying it into a public-domain repository would misrepresent its
+status. Our `cmd/emu` is written against our own `gui.Platform` interface —
+which, usefully, their shim also implements method-for-method, so the two forks
+have not diverged there.
+
+**It is also a smaller job than reconciling theirs would have been:** their
+`nfc.go` synthesises a `seedhammer.com:curves` NDEF record, a type their fork
+has and ours does not, and our emulator has no NFC at all (`NFCReader` returns
+nil, a case `gui` already handles).
+
+**If `studio` gains a licence**, the `emu/` there is more capable — synthetic
+tag taps, demo wallets on the number keys — and adopting it would be worth
+revisiting.

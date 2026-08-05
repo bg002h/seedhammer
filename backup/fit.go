@@ -2,7 +2,9 @@ package backup
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	qr "github.com/seedhammer/kortschak-qr"
@@ -181,24 +183,61 @@ func FitBlocks(params engrave.Params, blocks []Block, title, footer string, useQ
 		return Fitted{}, err
 	}
 	for _, size := range FontSizes {
-		rows := LinesPerPlate(params, size)
-		start, end := bodyRows(rows, title, footer)
-		lines, faces, ok := wrapBlocks(params, blocks, size, qrc, start, end)
-		if !ok {
+		f, err := fitBlocksAt(params, blocks, title, footer, qrc, size)
+		if err != nil {
 			continue
 		}
-		return Fitted{
-			SizeMM:     size,
-			Lines:      lines,
-			Faces:      faces,
-			QR:         qrc,
-			Title:      title,
-			Footer:     footer,
-			TitleFace:  blocks[0].Face,
-			FooterFace: blocks[len(blocks)-1].Face,
-		}, nil
+		return f, nil
 	}
 	return Fitted{}, ErrTooLarge
+}
+
+// FitBlocksAt is FitBlocks at ONE rung: it engraves at size or refuses, and
+// never quietly picks a different one.
+//
+// Auto-fit answers "as large as possible", which is the right question for a
+// plate whose content is fixed. It is the wrong question when the SIZE is what
+// the operator chose and the content is what gives way -- a proof pattern
+// trimmed to reach 4.4mm also fits at 5.0mm, so FitBlocks would engrave the
+// trimmed pattern at 5.0 and the operator would get neither the size they asked
+// for nor the content they gave up.
+//
+// size must be a rung in FontSizes: those are the sizes every capacity number
+// in this package is measured at, and an arbitrary one would lay out fine while
+// matching nothing any test pins.
+func FitBlocksAt(params engrave.Params, blocks []Block, title, footer string, useQR bool, size float32) (Fitted, error) {
+	if len(blocks) == 0 {
+		return Fitted{}, ErrTooLarge
+	}
+	if !slices.Contains(FontSizes, size) {
+		return Fitted{}, fmt.Errorf("backup: %.1fmm is not a rung in FontSizes %v", size, FontSizes)
+	}
+	qrc, err := qrFor(CompositionText(blocks), useQR)
+	if err != nil {
+		return Fitted{}, err
+	}
+	return fitBlocksAt(params, blocks, title, footer, qrc, size)
+}
+
+// fitBlocksAt is the single rung attempt both entry points share, so the
+// laddered and the fixed-size paths cannot lay a plate out differently.
+func fitBlocksAt(params engrave.Params, blocks []Block, title, footer string, qrc *qr.Code, size float32) (Fitted, error) {
+	rows := LinesPerPlate(params, size)
+	start, end := bodyRows(rows, title, footer)
+	lines, faces, ok := wrapBlocks(params, blocks, size, qrc, start, end)
+	if !ok {
+		return Fitted{}, ErrTooLarge
+	}
+	return Fitted{
+		SizeMM:     size,
+		Lines:      lines,
+		Faces:      faces,
+		QR:         qrc,
+		Title:      title,
+		Footer:     footer,
+		TitleFace:  blocks[0].Face,
+		FooterFace: blocks[len(blocks)-1].Face,
+	}, nil
 }
 
 // Fit is FitBlocks for a composition cut entirely in one face. The same text

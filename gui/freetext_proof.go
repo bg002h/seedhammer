@@ -1,9 +1,14 @@
 package gui
 
 import (
+	"fmt"
 	"image"
+	"strconv"
 	"strings"
 
+	"seedhammer.com/backup"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/vector"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 )
@@ -201,6 +206,132 @@ var ftPlanBoth = ftPlan{Runs: []ftFaceRun{
 	{Face: ftFaceConst},
 }}
 
+// ftDrop is what the mixed proof sacrifices, in order, to reach a larger rung.
+//
+// The plate holds a fixed number of characters, so a bigger glyph means less of
+// them: the full pattern reaches 3.0mm and nothing else. Rather than write a
+// separate pattern per rung -- five patterns to keep in step with every glyph
+// change -- there is ONE pattern and an order in which it gives way.
+//
+// The order is by what a proof is FOR. Seed words go first: they are a sample
+// of real plate content, and every letter in them appears in the sweep anyway
+// (operator's instruction, 2026-08-05). Then the prose, which is reading
+// material. Then the confusable table, which is a genuine loss but a
+// comparison rather than a coverage guarantee. The SWEEP is never dropped: a
+// face is not qualified by most of its glyphs, and at every rung the sweep is
+// what makes the plate a proof at all.
+//
+// The labels go last and cost the most, because they are cut in the face they
+// name and so are specimens as well as captions. When they go, the footer takes
+// over as the face map -- the plate still says which half is which, it just
+// stops demonstrating it. Measured: at 6.0mm the two sweeps need 10 of the 11
+// body rows, so one row is left and two labels need two.
+type ftDrop int
+
+const (
+	ftDropNothing ftDrop = iota
+	ftDropSeedWords
+	ftDropProse
+	ftDropConfusables
+	ftDropLabels
+	ftDropLevels
+)
+
+// ftProofFooterFaceMap replaces ftProofFooter once the in-body labels are gone,
+// so which half is which survives on the plate. Exactly MaxTitleLen characters,
+// like the footer it stands in for.
+const ftProofFooterFaceMap = "TOP SH / BOT CONST" // 18
+
+// ftBothHalves builds the mixed composition at a drop level: the font/sh half,
+// the font/constant half, and the footer that goes with them.
+//
+// Both halves are assembled from the SAME section constants the 3.0mm pattern
+// uses, so a glyph group edited once changes every rung at once -- which is the
+// property that makes one pattern with a drop order better than five patterns.
+func ftBothHalves(params engrave.Params, size float32, d ftDrop) (sh, cons, footer string) {
+	keep := func(dropAt ftDrop, s string) []string {
+		if d >= dropAt {
+			return nil
+		}
+		return []string{s}
+	}
+	var shParts, coParts []string
+	shParts = append(shParts, keep(ftDropLabels, ftProofLabel("SH", params, ftFaceSH.Face, size))...)
+	shParts = append(shParts, ftProofSweep)
+	shParts = append(shParts, keep(ftDropConfusables, ftProofConfusables)...)
+	shParts = append(shParts, keep(ftDropProse, ftProofUpperPangram+" "+ftProofLowerPangram)...)
+
+	coParts = append(coParts, keep(ftDropLabels, ftProofLabel("CONST", params, ftFaceConst.Face, size))...)
+	coParts = append(coParts, ftProofSweep)
+	coParts = append(coParts, keep(ftDropConfusables, ftProofConfusables)...)
+	coParts = append(coParts, keep(ftDropSeedWords, ftProofSeedWords)...)
+	coParts = append(coParts, keep(ftDropProse, ftProofUpperPangram+" "+ftProofLowerPangram)...)
+
+	footer = ftProofFooter
+	if d >= ftDropLabels {
+		footer = ftProofFooterFaceMap
+	}
+	return strings.Join(shParts, "\n"), strings.Join(coParts, "\n"), footer
+}
+
+// ftProofLabel names a half: the face, the rung the plate is ACTUALLY cut at,
+// and that face's character grid at that rung.
+//
+// Every number in it is measured here rather than written down. The 3.0mm
+// pattern could afford constants because it had one size; with the rung chosen
+// by the operator, a fixed "SH 3.0mm 44x26" would sit on a 4.4mm plate stating
+// a size and a grid it does not have -- and on permanent steel that is worse
+// than no label, because it is the only record of what was tested.
+func ftProofLabel(face string, params engrave.Params, fnt *vector.Face, size float32) string {
+	return fmt.Sprintf("%s %.1fmm %dx%d", face, size,
+		backup.CharsPerLine(params, fnt, size), backup.LinesPerPlate(params, size))
+}
+
+// ftBothAt is the mixed pattern for a chosen rung: the most content that fits
+// at exactly that size, with the plan, title and footer that go with it.
+//
+// It walks the drop order and stops at the first level that fits, so the
+// operator gets the fullest proof their chosen size can carry rather than a
+// pattern trimmed to the worst case. The size is fixed by FitBlocksAt, never
+// re-chosen -- a pattern trimmed to reach 4.4mm also fits at 5.0mm, and
+// auto-fit would engrave it there, giving neither the size asked for nor the
+// content given up.
+func ftBothAt(params engrave.Params, size float32, useQR bool) (text string, plan *ftPlan, title, footer string, err error) {
+	title = ftProofTitleBothAt(size)
+	for d := ftDropNothing; d < ftDropLevels; d++ {
+		sh, cons, foot := ftBothHalves(params, size, d)
+		blocks := []backup.Block{
+			{Face: ftFaceSH.Face, Text: sh},
+			{Face: ftFaceConst.Face, Text: cons},
+		}
+		if _, err := backup.FitBlocksAt(params, blocks, title, foot, useQR, size); err != nil {
+			continue
+		}
+		// The plan's split is DERIVED from the half that was built, not the
+		// hand-counted one the 3.0mm pattern uses: a trimmed half has fewer
+		// blocks, and a stale count would cut part of one face's proof in the
+		// other face under a label naming the wrong one.
+		n := strings.Count(sh, "\n") + 1
+		return sh + "\n" + cons, ftBothPlanFor(n), title, foot, nil
+	}
+	return "", nil, "", "", backup.ErrTooLarge
+}
+
+// ftBothPlanFor is the mixed plan with the sh half occupying the first n blocks.
+func ftBothPlanFor(n int) *ftPlan {
+	return &ftPlan{Runs: []ftFaceRun{
+		{Face: ftFaceSH, Blocks: n},
+		{Face: ftFaceConst},
+	}}
+}
+
+// ftProofTitleBothAt states the size the plate is ACTUALLY cut at. On permanent
+// steel a title claiming a size the plate does not have is worse than no title,
+// and with the rung now chosen by the operator the number has to follow it.
+func ftProofTitleBothAt(size float32) string {
+	return fmt.Sprintf("SH+CONST %.1fmm", size)
+}
+
 // ftProofTitleBoth is the mixed plate's own title. It cannot state a grid --
 // the plate has two, 44 columns in its top half and 39 in its bottom -- so the
 // grids live on the block labels, where each one sits in the face it describes,
@@ -243,6 +374,10 @@ type ftProof struct {
 	// QR at all -- see NeedsWholePlate.
 	Text   string
 	TextQR string
+	// Sizeable proofs accept a rung appended to the trigger and rebuild their
+	// content to reach it; see ftBothAt. The single-face patterns are tuned to
+	// land at 3.0mm and have no drop order, so they take no suffix.
+	Sizeable bool
 }
 
 // NeedsWholePlate reports that this proof has no QR variant.
@@ -284,10 +419,11 @@ var ftProofs = []ftProof{
 		TextQR:  ftProofTextConstQR,
 	},
 	{
-		Trigger: ftProofTriggerBoth,
-		Plan:    &ftPlanBoth,
-		Title:   ftProofTitleBoth,
-		Text:    ftProofTextBoth,
+		Trigger:  ftProofTriggerBoth,
+		Plan:     &ftPlanBoth,
+		Sizeable: true,
+		Title:    ftProofTitleBoth,
+		Text:     ftProofTextBoth,
 		// No QR variant: the pattern needs the whole plate. See
 		// NeedsWholePlate.
 		TextQR: "",
@@ -298,13 +434,34 @@ var ftProofs = []ftProof{
 //
 // typed is the field's ENTIRE contents: an equality test, not a substring
 // search, so "see TEXTPROOF! for details" is just text.
-func ftProofForTrigger(typed string) (*ftProof, bool) {
+func ftProofForTrigger(typed string) (*ftProof, float32, bool) {
 	for i := range ftProofs {
-		if ftProofs[i].Trigger == typed {
-			return &ftProofs[i], true
+		p := &ftProofs[i]
+		if typed == p.Trigger {
+			return p, 0, true // no rung named: the pattern's own size
+		}
+		// A RUNG may be appended to the mixed trigger -- BOTHPROOF!4.4 or
+		// BOTHPROOF!6 -- because that plate is the one whose content gives way
+		// to reach a size, so the size is a choice rather than a property of
+		// the pattern.
+		//
+		// The base triggers stay EXACT matches, and only a suffix naming a real
+		// rung is accepted: "BOTHPROOF!4.5" and "BOTHPROOF!x" match nothing and
+		// stay ordinary text, exactly as any unrecognised trigger does. FontSizes
+		// is the only set every capacity number in backup is measured against,
+		// so a nearby size would lay out fine while matching nothing pinned.
+		if !p.Sizeable || !strings.HasPrefix(typed, p.Trigger) {
+			continue
+		}
+		suffix := typed[len(p.Trigger):]
+		for _, size := range backup.FontSizes {
+			if suffix == strconv.FormatFloat(float64(size), 'f', 1, 32) ||
+				suffix == strconv.FormatFloat(float64(size), 'f', -1, 32) {
+				return p, size, true
+			}
 		}
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 // Prompt copy. Titled "Test Pattern" and NOT "Text Proof": uiContains
@@ -338,11 +495,51 @@ func ftProofAsk(p *ftProof) string {
 // in the sentence the operator reads before accepting, because the QR decides
 // what a scanner returns from the plate and changing it silently is exactly the
 // substitution this program exists to avoid.
-func ftProofReplaces(p *ftProof) string {
+// ftProofOutcome is what accepting the prompt will ACTUALLY write to the four
+// fields.
+//
+// It exists because the prompt and the loader used to derive the same answer
+// twice, and disagreed: with a rung named, the prompt printed the untrimmed
+// pattern's title and footer while the loader wrote the rung's. So
+// BOTHPROOF!4.4 asked the operator to consent to "Title becomes SH+CONST
+// 3.0mm ... cut at 4.4mm" -- a sentence that contradicts itself and describes a
+// plate the machine would not cut. Found by the pre-ship review, 2026-08-05.
+//
+// Now there is one resolver and both callers use it, so the sentence consented
+// to and the fields written are the same value. TestProofPromptMatchesWhatTheLoaderWrites
+// pins that across every rung.
+type ftProofOutcome struct {
+	Text, Title, Footer string
+	Plan                *ftPlan
+	SizeMM              float32
+}
+
+// ftProofOutcomeFor resolves a proof and a chosen rung into the fields that
+// will be written. useQR must already reflect the whole-plate QR drop.
+func ftProofOutcomeFor(params engrave.Params, p *ftProof, rung float32, useQR bool) ftProofOutcome {
+	if rung != 0 {
+		if t, pl, ti, fo, err := ftBothAt(params, rung, useQR); err == nil {
+			return ftProofOutcome{Text: t, Title: ti, Footer: fo, Plan: pl, SizeMM: rung}
+		}
+	}
+	return ftProofOutcome{Text: p.For(useQR), Title: p.Title, Footer: ftProofFooter, Plan: p.Plan}
+}
+
+// ftRungLabel names the size the plate will be cut at, for the prompt the
+// operator reads before accepting. Without a chosen rung the pattern is tuned
+// to land at 3.0mm and auto-fit confirms it.
+func ftRungLabel(size float32) string {
+	if size == 0 {
+		return "3.0mm"
+	}
+	return fmt.Sprintf("%.1fmm, with the pattern trimmed to fit", size)
+}
+
+func ftProofReplaces(p *ftProof, out ftProofOutcome) string {
 	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
-		"Text becomes the proof pattern, Title becomes " + p.Title +
-		", Footer becomes " + ftProofFooter + ". The plate is cut in " +
-		p.Plan.Name() + " at 3.0mm."
+		"Text becomes the proof pattern, Title becomes " + out.Title +
+		", Footer becomes " + out.Footer + ". The plate is cut in " +
+		out.Plan.Name() + " at " + ftRungLabel(out.SizeMM) + "."
 	if p.NeedsWholePlate() {
 		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
 			"so the plate will not be machine-readable."
@@ -371,26 +568,31 @@ func ftProofKeep(p *ftProof) string {
 // the keyboard from the one value that was actually stored. A caller that
 // recomputed the pattern itself would be a second source of truth for which
 // pattern is loaded, and the two could disagree about the face or the QR.
-func ftProofOffer(ctx *Context, th *Colors, typed string, load func(*ftProof) string) (string, bool) {
-	p, ok := ftProofForTrigger(typed)
+func ftProofOffer(ctx *Context, th *Colors, typed string, useQR bool, load func(*ftProof, float32) string) (string, bool) {
+	p, size, ok := ftProofForTrigger(typed)
 	if !ok || load == nil {
 		return "", false
 	}
-	if !ftProofPrompt(ctx, th, p) {
+	// Resolved ONCE, ahead of the frame loop: ftBothAt walks the drop order
+	// fitting plates, which is not work to repeat every time the prompt redraws.
+	// The QR drop is applied first so the resolver sees the choice that will be
+	// in force, exactly as the loader does.
+	out := ftProofOutcomeFor(ctx.Platform.EngraverParams(), p, size, useQR && !p.NeedsWholePlate())
+	if !ftProofPrompt(ctx, th, p, out) {
 		return "", false
 	}
-	return load(p), true
+	return load(p, size), true
 }
 
 // ftProofBody lays out the prompt, returned with its measured size so a test
 // can assert it fits the real panel by MEASURING RECTANGLES. Asserting fit from
 // ExtractText is impossible: it collects the runes of every drawn text op
 // regardless of occlusion, so a label drawn off the panel reads as present.
-func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof) (op.Op, image.Point) {
+func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof, out ftProofOutcome) (op.Op, image.Point) {
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofAsk(p))
 	rt.Y += 4
-	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p))
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p, out))
 	rt.Y += 4
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofKeep(p))
 	return rt.Content, image.Pt(width, rt.Y)
@@ -399,7 +601,7 @@ func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof) (op.Op, image.
 // ftProofPrompt asks. It returns true only if the operator explicitly accepted
 // with the checkmark; Back, and a ctx that shuts down mid-prompt, both mean NO
 // -- the answer that changes nothing.
-func ftProofPrompt(ctx *Context, th *Colors, p *ftProof) bool {
+func ftProofPrompt(ctx *Context, th *Colors, p *ftProof, out ftProofOutcome) bool {
 	noBtn := &Clickable{Button: Button1}
 	yesBtn := &Clickable{Button: Button3}
 	hookPPWidget("proofNo", noBtn)
@@ -413,7 +615,7 @@ func ftProofPrompt(ctx *Context, th *Colors, p *ftProof) bool {
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ftProofBody(ctx, th, area.Dx(), p)
+		body, _ := ftProofBody(ctx, th, area.Dx(), p, out)
 		body = body.Offset(image.Point(area.Min))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, ftProofNav(noBtn, yesBtn)...)
 		title, _ := layoutTitle(ctx, dims.X, th.Text, ftProofPromptTitle)
@@ -451,18 +653,21 @@ func ftProofNav(noBtn, yesBtn *Clickable) []NavButton {
 // returned to the flow by writing through the pointer rather than by the return
 // value: the return value is the text, and the caller uses it to re-seed the
 // keyboard.
-func ftProofLoader(text, title, footer *string, plan **ftPlan, useQR *bool) func(*ftProof) string {
-	return func(p *ftProof) string {
+func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ftPlan, useQR *bool, size *float32) func(*ftProof, float32) string {
+	return func(p *ftProof, rung float32) string {
 		if p.NeedsWholePlate() {
 			// The one exception, and it is prompted: ftProofReplaces says this
 			// will happen before the operator can accept it. Written BEFORE the
 			// text so For reads the choice that will actually be in force.
 			*useQR = false
 		}
-		*text = p.For(*useQR)
-		*title = p.Title
-		*footer = ftProofFooter
-		*plan = p.Plan
+		// The SAME resolver the prompt used, so the four fields written are the
+		// ones the operator just consented to. A rung that cannot be built
+		// resolves to the untrimmed pattern with SizeMM 0 -- unreachable today,
+		// since every rung in FontSizes builds, and pinned by
+		// TestMixedProofFitsEveryRung.
+		out := ftProofOutcomeFor(params, p, rung, *useQR)
+		*text, *title, *footer, *plan, *size = out.Text, out.Title, out.Footer, out.Plan, out.SizeMM
 		return *text
 	}
 }
