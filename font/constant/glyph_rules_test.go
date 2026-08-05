@@ -157,3 +157,36 @@ func TestQuoteInkGapClearsTheStroke(t *testing.T) {
 			"(1.5 stroke widths) or the two strokes cut as one mark", ink, ink/strokeMM, want)
 	}
 }
+
+// TestBowlJunctionsAreOffHorizontal pins that 'p' and 'q' close their bowls on a
+// SLOPE rather than a horizontal, so a descender lost to damage cannot leave
+// something that reads as 'o'.
+//
+// 'o' is a plain rectangle and 'b'/'d' close flat, so a flat-bottomed p or q was
+// distinguished from all three by its tail alone -- the one feature most exposed
+// to a scratch or a bad cut. Sloping the junction makes the bowl itself
+// unmistakable, and raising it (rather than lowering) lengthens the visible
+// descender from 2 units to 3 at the same time. Lowering would have shortened it
+// to 1 unit = 1.1 stroke widths, making the tail the likeliest thing to be lost
+// on the very glyph whose damage case this protects. Read off a plate, 2026-08-04.
+func TestBowlJunctionsAreOffHorizontal(t *testing.T) {
+	for _, g := range []struct {
+		name             string
+		bowlY, junctionY float64 // right-hand bowl corner, and where it meets the stem
+	}{
+		{"'p'", 7, 6},
+		{"'q'", 7, 6},
+	} {
+		if g.bowlY == g.junctionY {
+			t.Errorf("%s closes its bowl horizontally at y=%.0f; a damaged descender would "+
+				"leave a shape that reads as 'o'", g.name, g.bowlY)
+		}
+		// And the descender must still clear the stroke below the junction.
+		const emMM, strokeMM, cellUnits = 3.0, 0.3, 9.0
+		tail := (9 - g.junctionY) * (emMM / cellUnits)
+		if want := 2.0 * strokeMM; tail < want {
+			t.Errorf("%s has only %.3fmm (%.1f stroke widths) of descender below the junction",
+				g.name, tail, tail/strokeMM)
+		}
+	}
+}

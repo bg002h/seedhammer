@@ -79,8 +79,8 @@
 <polyline id="m" class="st0" points="379,8 379,4 381,4 381,8 381,4 383,4 383,8 "/>
 <polyline id="n" class="st0" points="385,8 385,4 389,4 389,8 "/>
 <polyline id="o" class="st0" points="391,4 395,4 395,8 391,8 391,4 "/>
-<polyline id="p" class="st0" points="397,9 397,4 401,4 401,7 397,7 "/>
-<polyline id="q" class="st0" points="407,9 407,4 403,4 403,7 407,7 "/>
+<polyline id="p" class="st0" points="397,9 397,4 401,4 401,7 397,6 "/>
+<polyline id="q" class="st0" points="407,9 407,4 403,4 403,7 407,6 "/>
 <polyline id="r" class="st0" points="409,8 409,4 411,4 412,5 "/>
 <polyline id="s" class="st0" points="419,4 415,4 415,6 419,6 419,8 415,8 "/>
 <polyline id="t" class="st0" points="424,4 421,4 422,4 422,2 422,8 424,8 "/>
