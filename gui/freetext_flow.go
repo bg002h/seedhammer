@@ -189,12 +189,23 @@ type ftFit struct {
 // ftEvaluate answers every live question at once, from ONE encode. Splitting it
 // would let the readout, the refusal figure and the engraving disagree about
 // the same text.
-func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool) ftFit {
+func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) ftFit {
 	var f ftFit
 	blocks := plan.Blocks(text)
 	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, useQR)
-	f.plate, f.err = backup.FitBlocks(params, blocks, title, footer, useQR)
+	f.plate, f.err = ftFitAt(params, blocks, title, footer, useQR, size)
 	return f
+}
+
+// ftFitAt is the ONE place the rung choice is applied. With no rung named the
+// plate auto-fits, as every free-text plate always has; with one, the plate is
+// cut at THAT rung or refused. Splitting this decision across the evaluate and
+// the build paths would let the readout promise a size the engraver does not use.
+func ftFitAt(params engrave.Params, blocks []backup.Block, title, footer string, useQR bool, size float32) (backup.Fitted, error) {
+	if size != 0 {
+		return backup.FitBlocksAt(params, blocks, title, footer, useQR, size)
+	}
+	return backup.FitBlocks(params, blocks, title, footer, useQR)
 }
 
 // ftSizeLabel is the readout: the fitted size and "lines used / lines
@@ -274,7 +285,7 @@ func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f f
 // plan, which is why it takes pointers, and RETURNS the text it wrote so this
 // screen re-seeds from the value that was actually stored rather than
 // recomputing it.
-func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, plan **ftPlan, useQR *bool, loadProof func(*ftProof) string) (string, bool) {
+func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, plan **ftPlan, useQR *bool, size *float32, loadProof func(*ftProof, float32) string) (string, bool) {
 	kbd := NewTextKeyboard(ctx)
 	kbd.Fragment = prior
 	backBtn := &Clickable{Button: Button1}
@@ -292,11 +303,17 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 	var cacheText string
 	var cacheQR bool
 	var cachePlan *ftPlan
+	// The rung is part of the cache KEY. Loading a proof at a named size changes
+	// the plate without necessarily changing the text, and a stale entry would
+	// report the auto-fit size while the engraver used the chosen one.
+	var cacheSize float32
 	cacheValid := false
 	evaluate := func() ftFit {
-		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR || cachePlan != *plan {
-			cache = ftEvaluate(params, *plan, kbd.Fragment, *title, *footer, *useQR)
-			cacheText, cacheQR, cachePlan, cacheValid = kbd.Fragment, *useQR, *plan, true
+		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR ||
+			cachePlan != *plan || cacheSize != *size {
+			cache = ftEvaluate(params, *plan, kbd.Fragment, *title, *footer, *useQR, *size)
+			cacheText, cacheQR, cachePlan, cacheSize, cacheValid =
+				kbd.Fragment, *useQR, *plan, *size, true
 		}
 		return cache
 	}
@@ -623,8 +640,8 @@ var freetextPlateHook func(f backup.Fitted)
 // artifact and the fit's faces ARE the faces the lines were measured against,
 // so the fit path and the build path cannot disagree about what a scanner will
 // return or about which face any row is cut in.
-func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool) (Plate, error) {
-	fitted, err := backup.FitBlocks(params, plan.Blocks(text), title, footer, useQR)
+func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) (Plate, error) {
+	fitted, err := ftFitAt(params, plan.Blocks(text), title, footer, useQR, size)
 	if err != nil {
 		return Plate{}, err
 	}
@@ -653,6 +670,9 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 	params := ctx.Platform.EngraverParams()
 	var text, title, footer string
 	useQR := false
+	// The rung the operator named on a proof trigger, or 0 for auto-fit. Held
+	// here beside the other fields so it survives Back exactly as they do.
+	var size float32
 	// The free-text plate's own face, unless a proof trigger asks for another
 	// plan. Held here rather than in ftTextEntryFlow so it survives Back exactly
 	// as the other four fields do.
@@ -667,8 +687,8 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			useQR = add
 		case ftStepText:
-			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR,
-				ftProofLoader(&text, &title, &footer, &plan, &useQR))
+			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR, &size,
+				ftProofLoader(params, &text, &title, &footer, &plan, &useQR, &size))
 			if !ok {
 				step -= 2
 				break
@@ -689,7 +709,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			footer = s
 		case ftStepConfirm:
-			f := ftEvaluate(params, plan, text, title, footer, useQR)
+			f := ftEvaluate(params, plan, text, title, footer, useQR, size)
 			if f.err != nil || !f.ok {
 				// A title or footer entered after the text can only ever make
 				// the composition SMALLER on the plate, never inadmissible --
@@ -704,7 +724,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				break
 			}
 		case ftStepEngrave:
-			plate, err := ftBuildPlate(params, plan, text, title, footer, useQR)
+			plate, err := ftBuildPlate(params, plan, text, title, footer, useQR, size)
 			if err != nil {
 				// The message quotes no field content.
 				showError(ctx, th, "Text", "This text does not fit a plate.")

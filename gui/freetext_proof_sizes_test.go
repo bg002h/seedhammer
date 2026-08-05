@@ -154,3 +154,84 @@ func TestMixedProofNamesTheFacesWhenLabelsGo(t *testing.T) {
 		}
 	}
 }
+
+// TestSizeSuffixOnlyMatchesRealRungs: the rung is named by appending it to the
+// trigger, so the parser decides what is a keyword and what is ordinary text.
+// A suffix that is not a rung must fall through to text -- an operator who
+// types BOTHPROOF!5 and gets a plate at some nearby size was not asked.
+func TestSizeSuffixOnlyMatchesRealRungs(t *testing.T) {
+	for _, tc := range []struct {
+		typed string
+		want  float32
+		ok    bool
+	}{
+		{"BOTHPROOF!", 0, true}, // no rung: the pattern's own size
+		{"BOTHPROOF!3.0", 3.0, true},
+		{"BOTHPROOF!4.4", 4.4, true},
+		{"BOTHPROOF!6", 6.0, true},
+		{"BOTHPROOF!6.0", 6.0, true},
+		// Not rungs. FontSizes is the only set every capacity number in backup
+		// is measured against.
+		{"BOTHPROOF!4.5", 0, false},
+		{"BOTHPROOF!2", 0, false},
+		{"BOTHPROOF!7", 0, false},
+		{"BOTHPROOF!x", 0, false},
+		{"BOTHPROOF!3.0 ", 0, false},
+		// The single-face patterns are tuned to land at 3.0mm and have no drop
+		// order, so they take no suffix at all.
+		{"TEXTPROOF!4.4", 0, false},
+		{"CONSTPROOF!6", 0, false},
+		// And the base triggers stay exact matches.
+		{"TEXTPROOF!", 0, true},
+		{"CONSTPROOF!", 0, true},
+	} {
+		p, size, ok := ftProofForTrigger(tc.typed)
+		if ok != tc.ok {
+			t.Errorf("%q: matched=%v, want %v", tc.typed, ok, tc.ok)
+			continue
+		}
+		if ok && size != tc.want {
+			t.Errorf("%q: rung %.1f, want %.1f", tc.typed, size, tc.want)
+		}
+		if ok && p == nil {
+			t.Errorf("%q: matched with no proof", tc.typed)
+		}
+	}
+}
+
+// TestNamedRungIsTheRungEngraved is the end-to-end version of the property
+// FitBlocksAt exists for: what the operator named is what the engraver uses.
+//
+// The loader and the plate builder are separate functions with separate
+// arguments, so this walks BOTH -- a loader that trimmed the pattern while the
+// builder auto-fit it would engrave the trimmed content at some larger size,
+// and every unit test either side of that seam would still pass.
+func TestNamedRungIsTheRungEngraved(t *testing.T) {
+	for _, want := range backup.FontSizes {
+		var text, title, footer string
+		useQR := false
+		var size float32
+		plan := &ftPlanSH
+		load := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)
+
+		p, rung, ok := ftProofForTrigger(fmt.Sprintf("BOTHPROOF!%.1f", want))
+		if !ok {
+			t.Fatalf("%.1fmm is a rung in FontSizes but the trigger did not match it", want)
+		}
+		load(p, rung)
+		if size != want {
+			t.Errorf("%.1fmm: the loader recorded rung %.1f", want, size)
+		}
+		f := ftEvaluate(engraverParams, plan, text, title, footer, useQR, size)
+		if f.err != nil {
+			t.Errorf("%.1fmm: evaluate refused the pattern it was just given: %v", want, f.err)
+			continue
+		}
+		if f.plate.SizeMM != want {
+			t.Errorf("%.1fmm: the readout would say %.1fmm", want, f.plate.SizeMM)
+		}
+		if _, err := ftBuildPlate(engraverParams, plan, text, title, footer, useQR, size); err != nil {
+			t.Errorf("%.1fmm: build refused: %v", want, err)
+		}
+	}
+}

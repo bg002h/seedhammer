@@ -110,7 +110,7 @@ func BuildPreview(params engrave.Params, name string, o PreviewOpts) (Preview, e
 // trigger lookup the text box uses -- so a proof that changes changes here too.
 func proofPreview(trigger string) func(engrave.Params, PreviewOpts) (Preview, error) {
 	return func(params engrave.Params, o PreviewOpts) (Preview, error) {
-		p, ok := ftProofForTrigger(trigger)
+		p, _, ok := ftProofForTrigger(trigger)
 		if !ok {
 			return Preview{}, fmt.Errorf("plateview: no proof for trigger %q", trigger)
 		}

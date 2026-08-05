@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
 
 	"seedhammer.com/backup"
@@ -373,6 +374,10 @@ type ftProof struct {
 	// QR at all -- see NeedsWholePlate.
 	Text   string
 	TextQR string
+	// Sizeable proofs accept a rung appended to the trigger and rebuild their
+	// content to reach it; see ftBothAt. The single-face patterns are tuned to
+	// land at 3.0mm and have no drop order, so they take no suffix.
+	Sizeable bool
 }
 
 // NeedsWholePlate reports that this proof has no QR variant.
@@ -415,8 +420,9 @@ var ftProofs = []ftProof{
 	},
 	{
 		Trigger: ftProofTriggerBoth,
-		Plan:    &ftPlanBoth,
-		Title:   ftProofTitleBoth,
+		Plan:     &ftPlanBoth,
+		Sizeable: true,
+		Title:    ftProofTitleBoth,
 		Text:    ftProofTextBoth,
 		// No QR variant: the pattern needs the whole plate. See
 		// NeedsWholePlate.
@@ -428,13 +434,34 @@ var ftProofs = []ftProof{
 //
 // typed is the field's ENTIRE contents: an equality test, not a substring
 // search, so "see TEXTPROOF! for details" is just text.
-func ftProofForTrigger(typed string) (*ftProof, bool) {
+func ftProofForTrigger(typed string) (*ftProof, float32, bool) {
 	for i := range ftProofs {
-		if ftProofs[i].Trigger == typed {
-			return &ftProofs[i], true
+		p := &ftProofs[i]
+		if typed == p.Trigger {
+			return p, 0, true // no rung named: the pattern's own size
+		}
+		// A RUNG may be appended to the mixed trigger -- BOTHPROOF!4.4 or
+		// BOTHPROOF!6 -- because that plate is the one whose content gives way
+		// to reach a size, so the size is a choice rather than a property of
+		// the pattern.
+		//
+		// The base triggers stay EXACT matches, and only a suffix naming a real
+		// rung is accepted: "BOTHPROOF!4.5" and "BOTHPROOF!x" match nothing and
+		// stay ordinary text, exactly as any unrecognised trigger does. FontSizes
+		// is the only set every capacity number in backup is measured against,
+		// so a nearby size would lay out fine while matching nothing pinned.
+		if !p.Sizeable || !strings.HasPrefix(typed, p.Trigger) {
+			continue
+		}
+		suffix := typed[len(p.Trigger):]
+		for _, size := range backup.FontSizes {
+			if suffix == strconv.FormatFloat(float64(size), 'f', 1, 32) ||
+				suffix == strconv.FormatFloat(float64(size), 'f', -1, 32) {
+				return p, size, true
+			}
 		}
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 // Prompt copy. Titled "Test Pattern" and NOT "Text Proof": uiContains
@@ -468,11 +495,11 @@ func ftProofAsk(p *ftProof) string {
 // in the sentence the operator reads before accepting, because the QR decides
 // what a scanner returns from the plate and changing it silently is exactly the
 // substitution this program exists to avoid.
-func ftProofReplaces(p *ftProof) string {
+func ftProofReplaces(p *ftProof, size float32) string {
 	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
 		"Text becomes the proof pattern, Title becomes " + p.Title +
 		", Footer becomes " + ftProofFooter + ". The plate is cut in " +
-		p.Plan.Name() + " at 3.0mm."
+		p.Plan.Name() + " at " + ftRungLabel(size) + "."
 	if p.NeedsWholePlate() {
 		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
 			"so the plate will not be machine-readable."
@@ -483,6 +510,16 @@ func ftProofReplaces(p *ftProof) string {
 // ftProofKeep is the honest description of the OTHER answer. Declining is not a
 // cancel: the typed trigger is a perfectly good free text and stays exactly as
 // entered.
+// ftRungLabel names the size the plate will be cut at, for the prompt the
+// operator reads before accepting. Without a chosen rung the pattern is tuned
+// to land at 3.0mm and auto-fit confirms it.
+func ftRungLabel(size float32) string {
+	if size == 0 {
+		return "3.0mm"
+	}
+	return fmt.Sprintf("%.1fmm, with the pattern trimmed to fit", size)
+}
+
 func ftProofKeep(p *ftProof) string {
 	return "Back = no: continue with " + p.Trigger + " exactly as typed. " +
 		"Any text can be a real plate, including this one."
@@ -501,26 +538,26 @@ func ftProofKeep(p *ftProof) string {
 // the keyboard from the one value that was actually stored. A caller that
 // recomputed the pattern itself would be a second source of truth for which
 // pattern is loaded, and the two could disagree about the face or the QR.
-func ftProofOffer(ctx *Context, th *Colors, typed string, load func(*ftProof) string) (string, bool) {
-	p, ok := ftProofForTrigger(typed)
+func ftProofOffer(ctx *Context, th *Colors, typed string, load func(*ftProof, float32) string) (string, bool) {
+	p, size, ok := ftProofForTrigger(typed)
 	if !ok || load == nil {
 		return "", false
 	}
-	if !ftProofPrompt(ctx, th, p) {
+	if !ftProofPrompt(ctx, th, p, size) {
 		return "", false
 	}
-	return load(p), true
+	return load(p, size), true
 }
 
 // ftProofBody lays out the prompt, returned with its measured size so a test
 // can assert it fits the real panel by MEASURING RECTANGLES. Asserting fit from
 // ExtractText is impossible: it collects the runes of every drawn text op
 // regardless of occlusion, so a label drawn off the panel reads as present.
-func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof) (op.Op, image.Point) {
+func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof, size float32) (op.Op, image.Point) {
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofAsk(p))
 	rt.Y += 4
-	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p))
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofReplaces(p, size))
 	rt.Y += 4
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ftProofKeep(p))
 	return rt.Content, image.Pt(width, rt.Y)
@@ -529,7 +566,7 @@ func ftProofBody(ctx *Context, th *Colors, width int, p *ftProof) (op.Op, image.
 // ftProofPrompt asks. It returns true only if the operator explicitly accepted
 // with the checkmark; Back, and a ctx that shuts down mid-prompt, both mean NO
 // -- the answer that changes nothing.
-func ftProofPrompt(ctx *Context, th *Colors, p *ftProof) bool {
+func ftProofPrompt(ctx *Context, th *Colors, p *ftProof, size float32) bool {
 	noBtn := &Clickable{Button: Button1}
 	yesBtn := &Clickable{Button: Button3}
 	hookPPWidget("proofNo", noBtn)
@@ -543,7 +580,7 @@ func ftProofPrompt(ctx *Context, th *Colors, p *ftProof) bool {
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ftProofBody(ctx, th, area.Dx(), p)
+		body, _ := ftProofBody(ctx, th, area.Dx(), p, size)
 		body = body.Offset(image.Point(area.Min))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, ftProofNav(noBtn, yesBtn)...)
 		title, _ := layoutTitle(ctx, dims.X, th.Text, ftProofPromptTitle)
@@ -581,18 +618,31 @@ func ftProofNav(noBtn, yesBtn *Clickable) []NavButton {
 // returned to the flow by writing through the pointer rather than by the return
 // value: the return value is the text, and the caller uses it to re-seed the
 // keyboard.
-func ftProofLoader(text, title, footer *string, plan **ftPlan, useQR *bool) func(*ftProof) string {
-	return func(p *ftProof) string {
+func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ftPlan, useQR *bool, size *float32) func(*ftProof, float32) string {
+	return func(p *ftProof, rung float32) string {
 		if p.NeedsWholePlate() {
 			// The one exception, and it is prompted: ftProofReplaces says this
 			// will happen before the operator can accept it. Written BEFORE the
 			// text so For reads the choice that will actually be in force.
 			*useQR = false
 		}
+		// A named rung rebuilds the pattern for that size, trimming content down
+		// the drop order until it fits. Without one the pattern is its own tuned
+		// 3.0mm self and auto-fit decides, exactly as before.
+		if rung != 0 {
+			if t, pl, ti, fo, err := ftBothAt(params, rung, *useQR); err == nil {
+				*text, *plan, *title, *footer, *size = t, pl, ti, fo, rung
+				return *text
+			}
+			// A rung that cannot be built is not silently downgraded to some
+			// other size: fall through to the untrimmed pattern, whose own size
+			// the prompt already stated.
+		}
 		*text = p.For(*useQR)
 		*title = p.Title
 		*footer = ftProofFooter
 		*plan = p.Plan
+		*size = 0
 		return *text
 	}
 }
