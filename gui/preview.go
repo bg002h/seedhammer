@@ -33,6 +33,9 @@ type PreviewOpts struct {
 	QR bool
 	// Face is "sh" or "const", for "freetext" only.
 	Face string
+	// SizeMM pins the rung. Zero auto-fits, which is what the device does
+	// unless the operator chose a size.
+	SizeMM float32
 }
 
 // PreviewRow is one engraved row: the face it is cut in and what it says.
@@ -114,7 +117,17 @@ func proofPreview(trigger string) func(engrave.Params, PreviewOpts) (Preview, er
 		// A whole-plate proof drops the QR when it loads; mirror that here
 		// rather than fitting a plate the device would refuse to build.
 		qr := o.QR && !p.NeedsWholePlate()
-		return fittedPreview(params, p.Plan, p.For(qr), p.Title, ftProofFooter, qr)
+		// The mixed proof at a chosen rung goes through the SAME drop ladder
+		// the device walks, so a preview cannot show content the machine would
+		// have trimmed.
+		if o.SizeMM != 0 && p.Trigger == ftProofTriggerBoth {
+			text, plan, title, footer, err := ftBothAt(params, o.SizeMM, qr)
+			if err != nil {
+				return Preview{}, err
+			}
+			return fittedPreviewAt(params, plan, text, title, footer, qr, o.SizeMM)
+		}
+		return fittedPreviewAt(params, p.Plan, p.For(qr), p.Title, ftProofFooter, qr, o.SizeMM)
 	}
 }
 
@@ -127,14 +140,21 @@ func freeTextPreview(params engrave.Params, o PreviewOpts) (Preview, error) {
 	default:
 		return Preview{}, fmt.Errorf("plateview: unknown face %q (want sh or const)", o.Face)
 	}
-	return fittedPreview(params, plan, o.Text, o.Title, o.Footer, o.QR)
+	return fittedPreviewAt(params, plan, o.Text, o.Title, o.Footer, o.QR, o.SizeMM)
 }
 
 // fittedPreview is the one path every free-text-family plate takes: ONE
 // FitBlocks, whose result is both engraved and reported. The rows printed and
 // the rows cut cannot disagree because they are the same value.
-func fittedPreview(params engrave.Params, plan *ftPlan, text, title, footer string, qr bool) (Preview, error) {
-	fitted, err := backup.FitBlocks(params, plan.Blocks(text), title, footer, qr)
+func fittedPreviewAt(params engrave.Params, plan *ftPlan, text, title, footer string, qr bool, size float32) (Preview, error) {
+	blocks := plan.Blocks(text)
+	fit := backup.FitBlocks
+	if size != 0 {
+		fit = func(p engrave.Params, b []backup.Block, t, f string, q bool) (backup.Fitted, error) {
+			return backup.FitBlocksAt(p, b, t, f, q, size)
+		}
+	}
+	fitted, err := fit(params, blocks, title, footer, qr)
 	if err != nil {
 		return Preview{}, err
 	}

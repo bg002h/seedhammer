@@ -38,6 +38,7 @@ func main() {
 		footer = flag.String("footer", "", "footer row (freetext plate)")
 		face   = flag.String("face", "sh", "engraving face for the freetext plate: sh or const")
 		qr     = flag.Bool("qr", false, "include a QR code")
+		size   = flag.Float64("size", 0, "engrave at this rung in mm (0 auto-fits); 6.0 5.0 4.4 3.8 3.4 3.0")
 		px     = flag.Int("px", 1600, "PNG width and height in pixels")
 		list   = flag.Bool("list", false, "list the plates and exit")
 	)
@@ -51,6 +52,7 @@ func main() {
 	}
 	if err := run(*plate, *out, *px, gui.PreviewOpts{
 		Text: *text, Title: *title, Footer: *footer, Face: *face, QR: *qr,
+		SizeMM: float32(*size),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "plateview: %v\n", err)
 		os.Exit(1)

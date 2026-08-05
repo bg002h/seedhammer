@@ -1,9 +1,13 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 
+	"seedhammer.com/backup"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/vector"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 )
@@ -200,6 +204,132 @@ var ftPlanBoth = ftPlan{Runs: []ftFaceRun{
 	{Face: ftFaceSH, Blocks: ftProofBothSplit},
 	{Face: ftFaceConst},
 }}
+
+// ftDrop is what the mixed proof sacrifices, in order, to reach a larger rung.
+//
+// The plate holds a fixed number of characters, so a bigger glyph means less of
+// them: the full pattern reaches 3.0mm and nothing else. Rather than write a
+// separate pattern per rung -- five patterns to keep in step with every glyph
+// change -- there is ONE pattern and an order in which it gives way.
+//
+// The order is by what a proof is FOR. Seed words go first: they are a sample
+// of real plate content, and every letter in them appears in the sweep anyway
+// (operator's instruction, 2026-08-05). Then the prose, which is reading
+// material. Then the confusable table, which is a genuine loss but a
+// comparison rather than a coverage guarantee. The SWEEP is never dropped: a
+// face is not qualified by most of its glyphs, and at every rung the sweep is
+// what makes the plate a proof at all.
+//
+// The labels go last and cost the most, because they are cut in the face they
+// name and so are specimens as well as captions. When they go, the footer takes
+// over as the face map -- the plate still says which half is which, it just
+// stops demonstrating it. Measured: at 6.0mm the two sweeps need 10 of the 11
+// body rows, so one row is left and two labels need two.
+type ftDrop int
+
+const (
+	ftDropNothing ftDrop = iota
+	ftDropSeedWords
+	ftDropProse
+	ftDropConfusables
+	ftDropLabels
+	ftDropLevels
+)
+
+// ftProofFooterFaceMap replaces ftProofFooter once the in-body labels are gone,
+// so which half is which survives on the plate. Exactly MaxTitleLen characters,
+// like the footer it stands in for.
+const ftProofFooterFaceMap = "TOP SH / BOT CONST" // 18
+
+// ftBothHalves builds the mixed composition at a drop level: the font/sh half,
+// the font/constant half, and the footer that goes with them.
+//
+// Both halves are assembled from the SAME section constants the 3.0mm pattern
+// uses, so a glyph group edited once changes every rung at once -- which is the
+// property that makes one pattern with a drop order better than five patterns.
+func ftBothHalves(params engrave.Params, size float32, d ftDrop) (sh, cons, footer string) {
+	keep := func(dropAt ftDrop, s string) []string {
+		if d >= dropAt {
+			return nil
+		}
+		return []string{s}
+	}
+	var shParts, coParts []string
+	shParts = append(shParts, keep(ftDropLabels, ftProofLabel("SH", params, ftFaceSH.Face, size))...)
+	shParts = append(shParts, ftProofSweep)
+	shParts = append(shParts, keep(ftDropConfusables, ftProofConfusables)...)
+	shParts = append(shParts, keep(ftDropProse, ftProofUpperPangram+" "+ftProofLowerPangram)...)
+
+	coParts = append(coParts, keep(ftDropLabels, ftProofLabel("CONST", params, ftFaceConst.Face, size))...)
+	coParts = append(coParts, ftProofSweep)
+	coParts = append(coParts, keep(ftDropConfusables, ftProofConfusables)...)
+	coParts = append(coParts, keep(ftDropSeedWords, ftProofSeedWords)...)
+	coParts = append(coParts, keep(ftDropProse, ftProofUpperPangram+" "+ftProofLowerPangram)...)
+
+	footer = ftProofFooter
+	if d >= ftDropLabels {
+		footer = ftProofFooterFaceMap
+	}
+	return strings.Join(shParts, "\n"), strings.Join(coParts, "\n"), footer
+}
+
+// ftProofLabel names a half: the face, the rung the plate is ACTUALLY cut at,
+// and that face's character grid at that rung.
+//
+// Every number in it is measured here rather than written down. The 3.0mm
+// pattern could afford constants because it had one size; with the rung chosen
+// by the operator, a fixed "SH 3.0mm 44x26" would sit on a 4.4mm plate stating
+// a size and a grid it does not have -- and on permanent steel that is worse
+// than no label, because it is the only record of what was tested.
+func ftProofLabel(face string, params engrave.Params, fnt *vector.Face, size float32) string {
+	return fmt.Sprintf("%s %.1fmm %dx%d", face, size,
+		backup.CharsPerLine(params, fnt, size), backup.LinesPerPlate(params, size))
+}
+
+// ftBothAt is the mixed pattern for a chosen rung: the most content that fits
+// at exactly that size, with the plan, title and footer that go with it.
+//
+// It walks the drop order and stops at the first level that fits, so the
+// operator gets the fullest proof their chosen size can carry rather than a
+// pattern trimmed to the worst case. The size is fixed by FitBlocksAt, never
+// re-chosen -- a pattern trimmed to reach 4.4mm also fits at 5.0mm, and
+// auto-fit would engrave it there, giving neither the size asked for nor the
+// content given up.
+func ftBothAt(params engrave.Params, size float32, useQR bool) (text string, plan *ftPlan, title, footer string, err error) {
+	title = ftProofTitleBothAt(size)
+	for d := ftDropNothing; d < ftDropLevels; d++ {
+		sh, cons, foot := ftBothHalves(params, size, d)
+		blocks := []backup.Block{
+			{Face: ftFaceSH.Face, Text: sh},
+			{Face: ftFaceConst.Face, Text: cons},
+		}
+		if _, err := backup.FitBlocksAt(params, blocks, title, foot, useQR, size); err != nil {
+			continue
+		}
+		// The plan's split is DERIVED from the half that was built, not the
+		// hand-counted one the 3.0mm pattern uses: a trimmed half has fewer
+		// blocks, and a stale count would cut part of one face's proof in the
+		// other face under a label naming the wrong one.
+		n := strings.Count(sh, "\n") + 1
+		return sh + "\n" + cons, ftBothPlanFor(n), title, foot, nil
+	}
+	return "", nil, "", "", backup.ErrTooLarge
+}
+
+// ftBothPlanFor is the mixed plan with the sh half occupying the first n blocks.
+func ftBothPlanFor(n int) *ftPlan {
+	return &ftPlan{Runs: []ftFaceRun{
+		{Face: ftFaceSH, Blocks: n},
+		{Face: ftFaceConst},
+	}}
+}
+
+// ftProofTitleBothAt states the size the plate is ACTUALLY cut at. On permanent
+// steel a title claiming a size the plate does not have is worse than no title,
+// and with the rung now chosen by the operator the number has to follow it.
+func ftProofTitleBothAt(size float32) string {
+	return fmt.Sprintf("SH+CONST %.1fmm", size)
+}
 
 // ftProofTitleBoth is the mixed plate's own title. It cannot state a grid --
 // the plate has two, 44 columns in its top half and 39 in its bottom -- so the
