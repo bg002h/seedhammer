@@ -69,7 +69,7 @@ func ppEntryError(err error) string {
 // typed.
 //
 // loadProof populates all three of the program's fields with the fixed
-// font-proof test pattern; see ppFontProofOffer.
+// pass-proof test pattern; see ppPassProofOffer.
 func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof func()) (int, bool) {
 	kbd := NewPassphraseKeyboard(ctx)
 	if n > 0 {
@@ -87,16 +87,16 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof 
 			return 0, false
 		}
 		if okBtn.Clicked(ctx) {
-			// The font-proof trigger, checked HERE -- on OK, on the whole
+			// The pass-proof trigger, checked HERE -- on OK, on the whole
 			// field, in this program's own handler -- and not in
 			// PassphraseKeyboard, which BIP-85 index entry and address
 			// verification share. Declining loads nothing and falls through to
-			// the validation below, so FONTPROOF! remains a typeable
+			// the validation below, so PASSPROOF! remains a typeable
 			// passphrase.
-			if ppFontProofOffer(ctx, th, kbd.Fragment, true, loadProof) {
+			if ppPassProofOffer(ctx, th, kbd.Fragment, true, loadProof) {
 				// Stay on this screen: the operator sees the 95 characters
 				// that landed before choosing to advance.
-				kbd.Fragment = ppFontProofPassphrase
+				kbd.Fragment = ppPassProofPassphrase
 				continue
 			}
 			if err := passphrase.ValidatePassphrase(kbd.Fragment); err != nil {
@@ -239,7 +239,7 @@ func ppFingerprintPreview(typed string) string {
 // looks identical to one that was never filled. (Phase D review M2.)
 //
 // loadProof populates all three of the program's fields with the fixed
-// font-proof test pattern; see ppFontProofOffer.
+// pass-proof test pattern; see ppPassProofOffer.
 func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, prior string, loadProof func()) (string, bool) {
 	kbd := NewAddressKeyboard(ctx)
 	// Re-seed from the value already entered, so Back-then-forward preserves it.
@@ -260,12 +260,12 @@ func fingerprintEntryFlow(ctx *Context, th *Colors, which ppFingerprintStep, pri
 		if okBtn.Clicked(ctx) {
 			// Same trigger as the entry step, in this program's own handler.
 			// Declining falls through to ValidateFingerprint, which refuses
-			// FONTPROOF! -- it is not hex -- so the "no" branch is honest here
+			// PASSPROOF! -- it is not hex -- so the "no" branch is honest here
 			// too: the operator is told what a fingerprint field wants.
-			if ppFontProofOffer(ctx, th, kbd.Fragment, false, loadProof) {
+			if ppPassProofOffer(ctx, th, kbd.Fragment, false, loadProof) {
 				// Stay on this screen, showing the loaded value grouped
 				// exactly as the plate will carry it.
-				kbd.Fragment = ppFontProofFragment(which)
+				kbd.Fragment = ppPassProofFragment(which)
 				continue
 			}
 			canon, err := passphrase.ValidateFingerprint(kbd.Fragment)
@@ -522,7 +522,7 @@ var passphraseSecretHook func(secret []byte)
 // what the confirm screen showed to what was actually engraved: secret here
 // is whatever the CALLER passed -- correctly, engravePassphraseFlow passes
 // secret[:n] -- but secret's backing array can be up to passphrase.MaxLen
-// bytes and, after the FONTPROOF! pattern shrinks n, the bytes past n can
+// bytes and, after the PASSPROOF! pattern shrinks n, the bytes past n can
 // still hold a printable tail of a longer passphrase typed earlier in the
 // same flow. A caller that passed the whole buffer instead of secret[:n]
 // would leak that tail onto the plate, and nothing short of observing the
@@ -609,12 +609,12 @@ func engravePassphraseFlow(ctx *Context, th *Colors) {
 	n := 0
 	var seedFP, combinedFP string
 	qr := false
-	// The font-proof trigger fires inside ONE field but must populate all
+	// The pass-proof trigger fires inside ONE field but must populate all
 	// three, and no field step owns the other two -- so the writer lives here,
 	// where the state does, and each step is handed it. A step wired with nil
-	// silently loses the trigger; TestFontProofTriggersFromEveryField drives
+	// silently loses the trigger; TestPassProofTriggersFromEveryField drives
 	// this production flow from each field in turn, so that mutation fails.
-	loadProof := ppFontProofLoader(secret, &n, &seedFP, &combinedFP)
+	loadProof := ppPassProofLoader(secret, &n, &seedFP, &combinedFP)
 	step := ppStepEntry
 	for !ctx.Done {
 		switch step {
