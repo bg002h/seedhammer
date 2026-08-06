@@ -18,18 +18,24 @@ import (
 // 20-character title at 6.0mm on the full width inks x[7.127, 77.962]mm, which
 // crosses both screw-hole bands while every check passes.
 //
-// f must be FitBlocks' output for the same composition. Its lines are engraved
-// at plate rows start, start+1, ... where start is 1 when a title occupies row
-// 0. Extra lines are NOT dropped: they run past the plate and toPlate refuses
-// the result, which is a visible failure rather than a plate missing the end of
-// what the operator wrote.
+// f must be the fit's output for the same composition. Its lines are engraved
+// down a running y in DEVICE units, each row advancing by its OWN size, which
+// is what a plate that mixes sizes needs and what a plate that does not gets
+// for free: with every entry of f.Sizes equal, the running sum and
+// margin + row*fontSize are exactly equal. Extra lines are NOT dropped: they
+// run past the plate and toPlate refuses the result, which is a visible failure
+// rather than a plate missing the end of what the operator wrote.
 //
-// f.Faces is READ, never re-derived. Each line is cut in the face it was
-// WRAPPED to, and the left inset of a screw-hole row is that face's own
-// character width. Engraving a line in any other face re-flows nothing -- the
-// line is already broken, so it simply runs wide or short of the grid it was
-// measured against, which no assertion on the size, the lines or the code can
-// see.
+// f.Faces and f.Sizes are READ, never re-derived. Each line is cut in the face
+// it was WRAPPED to and at the size it was MEASURED at, and the left inset of a
+// screw-hole row is that face's own character width at that size. Engraving a
+// line in any other face re-flows nothing -- the line is already broken, so it
+// simply runs wide or short of the grid it was measured against, which no
+// assertion on the size, the lines or the code can see.
+//
+// f.SizeMM is deliberately not read here: it is valid only when !Mixed, and a
+// mixed plate's zero would put LinesPerPlate and the width division through a
+// divide by zero, mid-flow, with a plate clamped in the machine.
 func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 	// The Faces guard is evaluated FIRST, and deliberately: the test that pins
 	// it hands in a short face map with a correct size map, so a Sizes guard
@@ -81,38 +87,58 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 	}
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
-		fontSize := params.F(f.SizeMM)
 		margin := params.I(outerMargin)
 		plateW := params.F(plateSize)
-		rows := LinesPerPlate(params, f.SizeMM)
-		start, _ := bodyRows(rows, f.Title, f.Footer)
-		var lays faceLayouts
-
-		rowY := func(row int) int { return margin + row*fontSize }
+		// The SAME window the fit wrapped against. limit is the footer's own
+		// top y, so the row the body was refused above and the row the footer
+		// is cut on cannot be two different rows; a bottom anchor of the
+		// engraver's own differs from it by the LinesPerPlate remainder.
+		start, limit := yBudget(params, f.Title, f.Footer, f.TitleSizeMM, f.FooterSizeMM)
 
 		// centerInset engraves s centered between the screw-hole bands, in its
-		// own face: the inset is a whole number of THAT face's characters.
-		centerInset := func(s string, fnt *vector.Face, row int) {
+		// own face AND at its own size: the inset is a whole number of THAT
+		// face's characters at THAT size, and the title of a size-ladder plate
+		// is not cut at the body's rung.
+		centerInset := func(s string, fnt *vector.Face, sizeMM float32, y int) {
 			if s == "" {
 				return
 			}
-			lay := lays.at(params, fnt, fontSize, f.qrAt)
+			fontSize := params.F(sizeMM)
+			lay := textLayout(params, fnt, fontSize, y, f.qrAt)
 			cmd := engrave.String(fnt, fontSize, s)
 			w, _ := cmd.Measure()
 			inset := lay.holeChars * lay.charWidth
-			t.Offset(margin+inset+(plateW-2*margin-2*inset-w)/2, rowY(row))
+			t.Offset(margin+inset+(plateW-2*margin-2*inset-w)/2, y)
 			cmd.Engrave(t.Yield)
 		}
 
-		centerInset(f.Title, f.TitleFace, 0)
-		centerInset(f.Footer, f.FooterFace, rows-1)
+		centerInset(f.Title, f.TitleFace, f.TitleSizeMM, margin)
+		if f.Footer != "" {
+			// Guarded on the STRING and not on centerInset's own empty check,
+			// because limit is only the footer's row when there IS a footer:
+			// without one it is the bottom margin, and spec 5's ladder plates
+			// carry no footer at all.
+			centerInset(f.Footer, f.FooterFace, f.FooterSizeMM, limit)
+		}
 
+		// The running y, in DEVICE units. Accumulating float32 millimetres and
+		// converting once at the end drifts -- 20 additions of 3.8 can land on
+		// 486399 instead of 486400 -- and moves every golden. For a uniform
+		// plate this sum and margin + row*fontSize are exactly equal, because
+		// every rung converts exactly at MM = 6400.
+		y := start
 		for i, l := range f.Lines {
 			fnt := f.Faces[i]
-			row := start + i
-			_, offx := lays.at(params, fnt, fontSize, f.qrAt).at(row)
-			t.Offset(offx+margin, rowY(row))
+			fontSize := params.F(f.Sizes[i])
+			// Row i's own layout at row i's own baseY, read at 0. Keeping a
+			// plate-absolute row index here would agree on a uniform plate and
+			// diverge on a mixed one: the fit computed this inset
+			// block-relative and the engraver would compute it plate-relative,
+			// a drift no assertion on the size, the lines or the code can see.
+			_, offx := textLayout(params, fnt, fontSize, y, f.qrAt).at(0)
+			t.Offset(offx+margin, y)
 			engrave.String(fnt, fontSize, l).Engrave(t.Yield)
+			y += fontSize
 		}
 
 		if f.QR != nil {
