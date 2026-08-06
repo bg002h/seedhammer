@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,14 +79,20 @@ func run(plate, out string, px int, o gui.PreviewOpts) error {
 
 // describe reports the layout in text, from the SAME Preview that is drawn --
 // so the listing cannot describe a plate other than the one rendered.
-func describe(w *os.File, plate string, p gui.Preview) {
+func describe(w io.Writer, plate string, p gui.Preview) {
 	fmt.Fprintf(w, "%s: %s, %d rows, ~%s to engrave\n",
 		plate, sizeLabel(p), len(p.Rows), engraveDuration(p.Plate.Duration))
 	if p.Title != "" {
 		fmt.Fprintf(w, "  title  [%-5s] %s\n", p.TitleFace, p.Title)
 	}
 	for i, r := range p.Rows {
-		fmt.Fprintf(w, "  row %2d [%-5s] %2d  %s\n", i+1, r.Face, len([]rune(r.Text)), r.Text)
+		// The SIZE beside the face, because on a size ladder neither one alone
+		// says what a row is: the same face is cut at two rungs on one plate.
+		size := ""
+		if i < len(p.Sizes) {
+			size = fmt.Sprintf(" %4.1f", p.Sizes[i])
+		}
+		fmt.Fprintf(w, "  row %2d [%-5s%s] %2d  %s\n", i+1, r.Face, size, len([]rune(r.Text)), r.Text)
 	}
 	if p.Footer != "" {
 		fmt.Fprintf(w, "  footer [%-5s] %s\n", p.FooterFace, p.Footer)
@@ -95,7 +102,24 @@ func describe(w *os.File, plate string, p gui.Preview) {
 	}
 }
 
+// sizeLabel names the size the plate is cut at.
+//
+// Three answers, not two. A plate that MIXES sizes has no valid SizeMM -- it is
+// 0 -- so the zero branch below would call a size ladder a "fixed layout",
+// which is the same defect as the device printing "0.0mm" wearing this tool's
+// own wording. The range is taken first, and only a plate with no per-row sizes
+// at all -- the seed and passphrase plates, which the free-text fitter never
+// lays out -- reaches "fixed layout".
 func sizeLabel(p gui.Preview) string {
+	if len(p.Sizes) > 0 {
+		lo, hi := p.Sizes[0], p.Sizes[0]
+		for _, s := range p.Sizes {
+			lo, hi = min(lo, s), max(hi, s)
+		}
+		if lo != hi {
+			return fmt.Sprintf("%.1f-%.1fmm", hi, lo)
+		}
+	}
 	if p.SizeMM == 0 {
 		return "fixed layout"
 	}

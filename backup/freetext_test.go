@@ -189,12 +189,11 @@ func TestFreeTextQRPlacement(t *testing.T) {
 		t.Errorf("QR left edge at %d, want %d (half a stroke in from %d)", b.Min.X, wantX+P.StrokeWidth/2, wantX)
 	}
 
-	// It starts below the top screw-hole band, on the same rows the fit
-	// reserved for it.
-	lay, _ := layAt(size, qrc, freeTextQRScale)
-	top := P.I(outerMargin) + lay.holeLines*P.F(size)
+	// It starts below the top screw-hole band, inside the very band the fit
+	// reserved for it -- read off the placement rather than recounted in rows.
+	top := qrPlaceFor(size, qrc, freeTextQRScale).Top
 	if b.Min.Y < top {
-		t.Errorf("QR starts at y=%d, above row %d's top edge %d", b.Min.Y, lay.holeLines, top)
+		t.Errorf("QR starts at y=%d, above the reserved band's top edge %d", b.Min.Y, top)
 	}
 }
 
@@ -284,9 +283,9 @@ func TestFreeTextBodyNeverEntersTheQRBox(t *testing.T) {
 				continue // too large at every rung is a different test's problem
 			}
 			lay, rows := layAt(size, qrc, freeTextQRScale)
-			qrsz := qrc.Size * P.StrokeWidth * freeTextQRScale
-			qrx := P.F(plateSize) - qrsz - P.I(outerMargin) - P.I(2)
-			qry := P.I(outerMargin) + lay.holeLines*lay.fontSize + (lay.qrLines*lay.fontSize-qrsz)/2
+			qrp := qrPlaceFor(size, qrc, freeTextQRScale)
+			qrsz := qrp.Size
+			qrx, qry := qrp.X, qrp.Y
 			start, _ := bodyRows(rows, tf[0], tf[1])
 			for i, l := range lines {
 				row := start + i

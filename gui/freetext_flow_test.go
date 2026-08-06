@@ -572,7 +572,7 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	// not the pager. The paging itself is TestFTConfirmPagesEveryRowExactlyOnce.
 	const noPaging = 1 << 20
 	body := func(width int, f ftFit, title, footer string) image.Point {
-		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, &ftPlanSH, title, footer, false)
+		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, &ftPlanSH, title, footer)
 		if v.Shown != v.Total {
 			t.Fatalf("the %dpx budget still paged: %d of %d rows", noPaging, v.Shown, v.Total)
 		}
@@ -844,7 +844,7 @@ func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
 				useQR := f.plate.QR != nil
 				start, guard := 0, 0
 				for {
-					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1], useQR)
+					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1])
 					if v.Size.Y > area.Dy() {
 						t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q) page from row %d needs %dpx "+
 							"of a %dpx area: the size line and the warnings are off the %v panel",
@@ -894,7 +894,7 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	for i := 0; i < 24; i++ {
 		f.plate.Lines = append(f.plate.Lines, strings.Repeat("W", 44))
 	}
-	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, &ftPlanConst, cap18, cap18, true)
+	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, &ftPlanConst, cap18, cap18)
 	if v.Total != 26 {
 		t.Fatalf("worst case is %d rows, want 26 (title + 24 lines + footer)", v.Total)
 	}
@@ -903,7 +903,7 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	}
 	// And the warnings themselves are what is being reserved for: the summary
 	// must be the taller part of the budget, or nothing was actually reserved.
-	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, &ftPlanConst, true, ftConfirmPager(0, 1, 26))
+	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, &ftPlanConst, ftConfirmPager(0, 1, 26))
 	if sum.Y <= 0 {
 		t.Fatal("the summary block measures nothing; the reservation is vacuous")
 	}
@@ -934,7 +934,7 @@ func TestFTConfirmPagesEveryRowExactlyOnce(t *testing.T) {
 	start := 0
 	pages := 0
 	for {
-		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, &ftPlanSH, cap18, cap18, false)
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, &ftPlanSH, cap18, cap18)
 		if v.Total != len(rows) {
 			t.Fatalf("page %d reports %d rows, want %d", pages, v.Total, len(rows))
 		}
@@ -1045,7 +1045,10 @@ func TestFTTitleAndFooterRejectNewlines(t *testing.T) {
 // non-final run that covers no blocks is a plan whose second face never
 // appears; a plan with no runs at all has no face to cut in.
 func TestPlansAreWellFormed(t *testing.T) {
-	plans := map[string]*ftPlan{"sh": &ftPlanSH, "constant": &ftPlanConst, "both": &ftPlanBoth}
+	plans := map[string]*ftPlan{
+		"sh": &ftPlanSH, "constant": &ftPlanConst, "both": &ftPlanBoth,
+		"sizeproof-front": &ftPlanSizeFront, "sizeproof-back": &ftPlanSizeBack,
+	}
 	for name, plan := range plans {
 		if len(plan.Runs) == 0 {
 			t.Errorf("%s: the plan has no runs", name)
@@ -1159,7 +1162,7 @@ func TestPlanBlocksAreLosslessAndTotal(t *testing.T) {
 func TestFaceSummaryReportsTheMeasuredRuns(t *testing.T) {
 	sh, cn := ftFaceSH.Face, ftFaceConst.Face
 	mixed := []*vector.Face{sh, sh, sh, cn, cn}
-	base := ftFaceSummary(&ftPlanBoth, mixed)
+	base := ftFaceSummary(&ftPlanBoth, mixed, nil)
 	for _, tc := range []struct {
 		name  string
 		faces []*vector.Face
@@ -1169,7 +1172,7 @@ func TestFaceSummaryReportsTheMeasuredRuns(t *testing.T) {
 		{"the halves swapped", []*vector.Face{cn, cn, cn, sh, sh}},
 		{"the boundary moved one row", []*vector.Face{sh, sh, cn, cn, cn}},
 	} {
-		if got := ftFaceSummary(&ftPlanBoth, tc.faces); got == base {
+		if got := ftFaceSummary(&ftPlanBoth, tc.faces, nil); got == base {
 			t.Errorf("%s reads as %q, the same as the correct plate", tc.name, got)
 		}
 	}
@@ -1177,7 +1180,7 @@ func TestFaceSummaryReportsTheMeasuredRuns(t *testing.T) {
 		t.Errorf("the mixed summary %q does not name both faces", base)
 	}
 	// A single-face plan is untouched: the bare face name, as it always was.
-	if got := ftFaceSummary(&ftPlanSH, mixed); got != ftFaceSH.Name {
+	if got := ftFaceSummary(&ftPlanSH, mixed, nil); got != ftFaceSH.Name {
 		t.Errorf("a single-face plan now summarises as %q, want %q", got, ftFaceSH.Name)
 	}
 }

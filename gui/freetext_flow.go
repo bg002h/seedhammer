@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"slices"
 	"strings"
 
 	"seedhammer.com/backup"
@@ -53,9 +54,15 @@ var (
 // engraves what was typed, so a face plan may not be smuggled into the text as
 // an escape the operator cannot see. The LAST run in a plan takes whatever is
 // left over, whatever its Blocks says.
+//
+// SizeMM is the rung this run's blocks are cut at, or 0 for "the size the plate
+// is fitted at" -- which is what every plan that shipped before the size ladder
+// says, so the zero value is the legacy auto-fit plate. See ftPlan.Blocks: the
+// sizes are stamped onto the blocks ALL OR NOTHING, against the part count.
 type ftFaceRun struct {
 	Face   ftFace
 	Blocks int
+	SizeMM float32
 }
 
 // ftPlan is the composition's FACE PLAN: which engraving face each part of the
@@ -94,20 +101,98 @@ func (p *ftPlan) Name() string {
 	return strings.Join(names, "+")
 }
 
+// Sized reports that this plan states a rung per run, so the plate is a SIZE
+// LADDER cut at several sizes rather than a composition auto-fitted at one.
+func (p *ftPlan) Sized() bool {
+	for _, r := range p.Runs {
+		if r.SizeMM != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Rungs is the plan's sizes, deduplicated and in PLATE ORDER -- top of the
+// plate to bottom, which is the order the ladder titles name them in. Empty for
+// a plan that states no sizes.
+func (p *ftPlan) Rungs() []float32 {
+	var out []float32
+	for _, r := range p.Runs {
+		if r.SizeMM != 0 && !slices.Contains(out, r.SizeMM) {
+			out = append(out, r.SizeMM)
+		}
+	}
+	return out
+}
+
+// declaredParts is how many '\n'-separated parts this plan describes: the SUM
+// of every run's Blocks, which is the quantity Blocks' predicate matches the
+// text against.
+//
+// It is a sum rather than len(Runs) because a run may declare more than one
+// part, and it is not the BLOCK count because the final run absorbs the
+// remainder -- see Blocks.
+func (p *ftPlan) declaredParts() int {
+	n := 0
+	for _, r := range p.Runs {
+		n += r.Blocks
+	}
+	return n
+}
+
 // Blocks cuts text into the engraving blocks this plan describes.
 //
 // Splitting on '\n' and rejoining with '\n' is lossless, so the composition the
 // blocks describe is character-for-character the text that was typed -- which
 // is what makes the QR a copy of the plate rather than of a fragment.
 //
-// A text with FEWER blocks than the plan expects collapses to a single block in
-// the first run's face rather than producing an empty one. That is the honest
-// answer to an edited proof: an empty block would engrave a blank row that
-// nobody asked for, and there is no half of a plate to cut in the second face.
+// Each NON-FINAL run takes min(Blocks, remaining) parts and the walk stops as
+// soon as the parts run out; the FINAL run takes whatever is left, whatever its
+// own Blocks says. So len(out) == len(p.Runs) only once every non-final run's
+// declared share has been satisfied -- and it then stays equal for every LARGER
+// part count too, because the final run absorbs the remainder. A text with too
+// few parts to fill the first run collapses to a single block in that run's
+// face rather than producing an empty one: an empty block would engrave a blank
+// row nobody asked for, and there is no half of a plate to cut in the next face.
+//
+// The comment this replaced said the text "collapses to a single block in the
+// first run's face", full stop. That is true of the two-run plans that shipped
+// when it was written -- ftPlanBoth's first run declares every part of its half,
+// so it swallows everything at any part count at or below that -- and FALSE for
+// the four- and six-run ladders, where five parts of a six-part plan produce
+// FIVE blocks and no collapse at all. It misled a spec draft; the rule above is
+// read off the walk rather than generalised from the plans in front of it.
+//
+// SIZES ARE ALL OR NOTHING. Every emitted block is stamped with its run's
+// SizeMM -- unless the text's PART count differs from declaredParts, in which
+// case every block's size is CLEARED and the plate reverts to ordinary uniform
+// auto-fit.
+//
+// The predicate is on the part count and NOT on the block count, because the
+// final run absorbs the remainder and so pins len(out) at len(p.Runs) for every
+// part count at or above the declared one. A block-count predicate reports
+// "exact shape" for a text with an extra newline in it, and what gets cut is a
+// full ladder with every band one run late, in faces the title does not name --
+// which the confirm screen cannot expose, because the expected number of rungs
+// is present and correct. The part count is the quantity that actually has to
+// match, and it is the one the operator can see in the field.
+//
+// Reverting on a mismatch rather than cutting the partial ladder is spec 3.1's
+// decision: on a deleted newline the rung that goes missing is always the LAST
+// run, which on both ladder sides is the smallest and the one the proof exists
+// to answer. A refusal or a plain plate is visible; a size change is not.
 func (p *ftPlan) Blocks(text string) []backup.Block {
 	first := p.Runs[0].Face.Face
+	// Resolved once, over the WHOLE text, so every block agrees about it.
+	exact := len(strings.Split(text, "\n")) == p.declaredParts()
+	sizeOf := func(r ftFaceRun) float32 {
+		if !exact {
+			return 0
+		}
+		return r.SizeMM
+	}
 	if len(p.Runs) == 1 {
-		return []backup.Block{{Face: first, Text: text}}
+		return []backup.Block{{Face: first, Text: text, SizeMM: sizeOf(p.Runs[0])}}
 	}
 	parts := strings.Split(text, "\n")
 	out := make([]backup.Block, 0, len(p.Runs))
@@ -122,13 +207,19 @@ func (p *ftPlan) Blocks(text string) []backup.Block {
 			// an empty block, which would engrave a blank row.
 			continue
 		}
-		out = append(out, backup.Block{Face: r.Face.Face, Text: strings.Join(parts[:n], "\n")})
+		out = append(out, backup.Block{
+			Face:   r.Face.Face,
+			Text:   strings.Join(parts[:n], "\n"),
+			SizeMM: sizeOf(r),
+		})
 		parts = parts[n:]
 		if len(parts) == 0 {
 			break
 		}
 	}
 	if len(out) == 0 {
+		// The collapse carries no size: it is one block standing in for a plan
+		// the text no longer matches.
 		return []backup.Block{{Face: first, Text: text}}
 	}
 	return out
@@ -143,7 +234,17 @@ func (p *ftPlan) Blocks(text string) []backup.Block {
 // A single-face plate is named plainly, exactly as it always was. A mixed one
 // carries the row count of each run, because how the plate divides is the one
 // thing about it that cannot be seen from the size or the line total.
-func ftFaceSummary(plan *ftPlan, faces []*vector.Face) string {
+//
+// Runs are grouped by (FACE, SIZE), never by face alone: the ladder cuts font/sh
+// at 5.0mm and again at 3.8mm, and grouping by face reports two runs where the
+// plate has four -- with row counts that belong to neither.
+//
+// The size is PRINTED only when the plate mixes them. On a uniform plate the
+// size is already the first thing on the summary line, so repeating it against
+// every run is noise on a panel whose budget this block competes for; on a
+// ladder it is the only thing that maps a rung to the rows it is cut on. sizes
+// is read from Fitted.Sizes and may be nil, which is the uniform case.
+func ftFaceSummary(plan *ftPlan, faces []*vector.Face, sizes []float32) string {
 	if len(plan.Runs) == 1 {
 		return plan.Runs[0].Face.Name
 	}
@@ -155,13 +256,31 @@ func ftFaceSummary(plan *ftPlan, faces []*vector.Face) string {
 		}
 		return "?"
 	}
+	// sizes is parallel to faces, or it is not consulted at all: a short slice
+	// is a caller that has not got one, not a plate whose tail has no size.
+	if len(sizes) != len(faces) {
+		sizes = nil
+	}
+	mixed := false
+	for _, s := range sizes {
+		if s != sizes[0] {
+			mixed = true
+		}
+	}
+	same := func(a, b int) bool {
+		return faces[a] == faces[b] && (sizes == nil || sizes[a] == sizes[b])
+	}
 	var parts []string
 	for i := 0; i < len(faces); {
 		j := i
-		for j < len(faces) && faces[j] == faces[i] {
+		for j < len(faces) && same(i, j) {
 			j++
 		}
-		parts = append(parts, fmt.Sprintf("%s %d", name(faces[i]), j-i))
+		if mixed {
+			parts = append(parts, fmt.Sprintf("%s %.1f %d", name(faces[i]), sizes[i], j-i))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %d", name(faces[i]), j-i))
+		}
 		i = j
 	}
 	if len(parts) == 0 {
@@ -189,23 +308,157 @@ type ftFit struct {
 // ftEvaluate answers every live question at once, from ONE encode. Splitting it
 // would let the readout, the refusal figure and the engraving disagree about
 // the same text.
+//
+// ADMISSION MUST AGREE WITH THE ROUTER about the QR. ftFitAt sends a sized
+// composition to FitSized, which has no QR parameter at all (spec 2.7) and so
+// ignores useQR entirely -- while AdmissibleBlocks reserves a whole QR band
+// whenever the flag is set. Handing it the raw flag therefore narrows the band
+// for a plate that can never carry a code: the operator loads a ladder (which
+// clears the flag), goes Back to the QR screen and turns it on again -- spec
+// 3.2's reachable path -- and comes back to a plate that FitSized lays out
+// perfectly being refused, over a code it cannot hold. Measured before the fix:
+// SIZEPROOF!BACK went from (18, 24, ok) to (30, 24, REFUSED) on the flag alone,
+// and the front sat four lines under the same cliff.
+//
+// The stale flag is dropped HERE and not in AdmissibleBlocks. Spec 6 pins that
+// function at the uniform 3.0mm anchor -- it never reads Block.SizeMM -- and
+// TestAdmissibleBlocksVerdictDoesNotMove holds its verdict to measured cliff
+// values. Counting a sized composition at its OWN rungs is the better answer
+// and would also make the readout's line count describe the rows actually cut
+// (spec 6 accepts that divergence); it changes that function's contract, so it
+// is left to the phase that next touches admission rather than made at a gate.
+//
+// Dropping the flag is not the WHOLE answer either: spec 3.0 requires the QR
+// step to stop offering a choice it will not honour, rather than accepting one
+// and discarding it downstream. That is the QR step's own change, and its own
+// follow-up.
 func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) ftFit {
 	var f ftFit
 	blocks := plan.Blocks(text)
-	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, useQR)
+	admitQR := useQR && !ftSizedBlocks(blocks)
+	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, admitQR)
 	f.plate, f.err = ftFitAt(params, blocks, title, footer, useQR, size)
 	return f
+}
+
+// ftSizedBlocks reports that EVERY block states its own rung, which is the
+// condition that routes a composition to FitSized.
+//
+// Every block, not any: a composition with one unsized block is not a ladder,
+// and handing it to FitSized would refuse it as "sized 0mm" rather than laying
+// it out at a single rung the way an ordinary edited plate is.
+func ftSizedBlocks(blocks []backup.Block) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.SizeMM == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ftScrewHoleRung is the size the title and footer rows of a sized composition
+// are cut at: the SMALLEST rung on the plate.
+//
+// Not the first block's, which is spec 2.3's explicit rule and R0's I1: the
+// back's first block is 4.4mm, and a title cut there costs 1.400mm of the
+// 2.400mm this side has to spare.
+func ftScrewHoleRung(blocks []backup.Block) float32 {
+	rung := blocks[0].SizeMM
+	for _, b := range blocks {
+		if b.SizeMM < rung {
+			rung = b.SizeMM
+		}
+	}
+	return rung
 }
 
 // ftFitAt is the ONE place the rung choice is applied. With no rung named the
 // plate auto-fits, as every free-text plate always has; with one, the plate is
 // cut at THAT rung or refused. Splitting this decision across the evaluate and
 // the build paths would let the readout promise a size the engraver does not use.
+//
+// The PER-BLOCK-SIZE test comes first, and the order is load-bearing.
+// FitBlocksAt ignores Block.SizeMM (spec 2.2), and this function is shared with
+// the BOTHPROOF!<rung> path, which does set a non-zero rung -- so a FitSized
+// branch appended second would engrave a size ladder at one uniform rung the
+// moment both were set, which is R0's C6 in a third hat.
+//
+// A non-zero size together with sized blocks is therefore an ERROR rather than
+// a silent uniform fit. The un-edited ladder never reaches it: the ladder proofs
+// are not Sizeable, so the trigger resolves rung 0 and the loader writes 0.
+//
+// There is no QR on a sized plate. FitSized has no parameter for one (spec 2.7):
+// the code's keep-out band is quantised by a single fontSize and a plate that
+// mixes sizes has none. The operator's choice is dropped at the LOAD, by the
+// prompt the ladder proofs put up (spec 7.16), and the confirm screen reads the
+// QR state off the fitted plate rather than off the flag, so it cannot claim a
+// code the plate does not carry.
 func ftFitAt(params engrave.Params, blocks []backup.Block, title, footer string, useQR bool, size float32) (backup.Fitted, error) {
+	if ftSizedBlocks(blocks) {
+		if size != 0 {
+			return backup.Fitted{}, fmt.Errorf(
+				"gui: the composition states its own rungs and cannot also be fitted at %.1fmm", size)
+		}
+		var titleSize, footerSize float32
+		rung := ftScrewHoleRung(blocks)
+		// Both branches test the STRING, never the size: spec 2.3's invariant
+		// is that each size is non-zero exactly when its string is non-empty.
+		if title != "" {
+			titleSize = rung
+		}
+		if footer != "" {
+			footerSize = rung
+		}
+		return backup.FitSized(params, blocks, title, footer, titleSize, footerSize)
+	}
 	if size != 0 {
 		return backup.FitBlocksAt(params, blocks, title, footer, useQR, size)
 	}
 	return backup.FitBlocks(params, blocks, title, footer, useQR)
+}
+
+// ftPlateRungs is the size field of the confirm screen and of the prompt: the
+// one rung of a uniform plate, or the ladder's distinct rungs in PLATE ORDER,
+// joined the way the ladder titles join them.
+//
+// A plate that mixes sizes has no valid SizeMM -- it is 0 by spec 2.3 -- so a
+// reader that prints it regardless prints "0.0mm" on the one screen the
+// operator approves. That is a defect, not a fallback.
+func ftPlateRungs(f backup.Fitted) string {
+	if !f.Mixed {
+		return fmt.Sprintf("%.1fmm", f.SizeMM)
+	}
+	var rungs []float32
+	for _, s := range f.Sizes {
+		if !slices.Contains(rungs, s) {
+			rungs = append(rungs, s)
+		}
+	}
+	if len(rungs) == 0 {
+		return "--"
+	}
+	parts := make([]string, len(rungs))
+	for i, r := range rungs {
+		parts[i] = fmt.Sprintf("%.1f", r)
+	}
+	return strings.Join(parts, "+") + "mm"
+}
+
+// ftPlateSizeSpan is the same answer in the space the live readout has: the
+// largest and the smallest size on the plate. The readout sits beside the line
+// count on the text-entry screen and grows with the text, so it takes the range
+// where the confirm screen takes the list.
+func ftPlateSizeSpan(f backup.Fitted) string {
+	if !f.Mixed {
+		return fmt.Sprintf("%.1fmm", f.SizeMM)
+	}
+	if len(f.Sizes) == 0 {
+		return "--"
+	}
+	return fmt.Sprintf("%.1f-%.1fmm", slices.Max(f.Sizes), slices.Min(f.Sizes))
 }
 
 // ftSizeLabel is the readout: the fitted size and "lines used / lines
@@ -218,7 +471,7 @@ func ftFitAt(params engrave.Params, blocks []backup.Block, title, footer string,
 func ftSizeLabel(f ftFit) string {
 	size := "--"
 	if f.err == nil {
-		size = fmt.Sprintf("%.1fmm", f.plate.SizeMM)
+		size = ftPlateSizeSpan(f.plate)
 	}
 	return fmt.Sprintf("%s  %d/%d lines", size, f.linesUsed, f.linesAvail)
 }
@@ -252,14 +505,20 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 // The QR is never dropped automatically: it changes what a scanner returns from
 // the plate, and doing that on the operator's behalf to make room is exactly
 // the silent substitution this program exists to avoid.
+//
+// A SIZED composition is never offered that remedy, whatever the flag says. It
+// is laid out by FitSized, which has no QR (spec 2.7), so removing a code the
+// plate does not carry frees nothing -- and an edited ladder that overflows its
+// own rungs is refused by the fit, not by the QR band. Shortening the text is
+// the only remedy there is, so it is the only one offered.
 func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f ftFit, text string, useQR bool) bool {
-	if !useQR {
+	blocks := plan.Blocks(text)
+	if !useQR || ftSizedBlocks(blocks) {
 		showError(ctx, th, "Text", fmt.Sprintf(
 			"The text needs %d lines and a plate holds %d, at the smallest size. Shorten the Text field.",
 			f.linesUsed, f.linesAvail))
 		return false
 	}
-	blocks := plan.Blocks(text)
 	smallest := backup.FontSizes[len(backup.FontSizes)-1]
 	freed := backup.MaxCharsAtBlocks(params, blocks, smallest, false) -
 		backup.MaxCharsAtBlocks(params, blocks, smallest, true)
@@ -482,11 +741,19 @@ func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
 // text-only test reporting them present because ExtractText ignores occlusion.
 // That was a defect in the free-text feature at large -- any long text reached
 // it -- not merely in the proof.
-func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, useQR bool, pager string) (op.Op, image.Point) {
+// The QR state and the SIZE are both read off the FITTED PLATE rather than off
+// the flow's own fields. The size because a plate that mixes them has no valid
+// SizeMM and would print "0.0mm"; the QR because a sized composition carries no
+// code whatever the operator chose one step earlier (spec 2.7), and a screen
+// that reported the flag would promise a machine-readable plate that the
+// engraver does not cut.
+func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager string) (op.Op, image.Point) {
+	useQR := f.plate.QR != nil
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, fmt.Sprintf(
-		"%.1fmm  %d lines  QR: %s  font: %s",
-		f.plate.SizeMM, len(f.plate.Lines), ppYesNo(useQR), ftFaceSummary(plan, f.plate.Faces)))
+		"%s  %d lines  QR: %s  font: %s",
+		ftPlateRungs(f.plate), len(f.plate.Lines), ppYesNo(useQR),
+		ftFaceSummary(plan, f.plate.Faces, f.plate.Sizes)))
 	if pager != "" {
 		rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, pager)
 	}
@@ -523,14 +790,14 @@ type ftConfirmView struct {
 // at least one row, so the pager cannot stall; TestFTConfirmAlwaysFitsThePanel
 // pins that the budget on the real panel is at least one row even in the
 // tightest case.
-func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer string, useQR bool) ftConfirmView {
+func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer string) ftConfirmView {
 	rows := ftConfirmRows(f, title, footer)
 	if start < 0 || start >= len(rows) {
 		start = 0
 	}
 	// Measured with a pager string of the same shape as the real one, so the
 	// reservation is exact rather than approximately right.
-	_, probe := ftConfirmSummary(ctx, th, width, f, plan, useQR, ftConfirmPager(0, 0, 0))
+	_, probe := ftConfirmSummary(ctx, th, width, f, plan, ftConfirmPager(0, 0, 0))
 	budget := height - probe.Y
 
 	var rt richText
@@ -554,7 +821,7 @@ func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, 
 	if start > 0 || shown < len(rows) {
 		pager = ftConfirmPager(start, shown, len(rows))
 	}
-	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, useQR, pager)
+	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, pager)
 	return ftConfirmView{
 		Content: op.Layer(rt.Content, sum.Offset(image.Pt(0, rt.Y))),
 		Size:    image.Pt(width, rt.Y+sumSz.Y),
@@ -576,7 +843,7 @@ func ftConfirmPager(start, shown, total int) string {
 // Three buttons, not two: Back, "next page" and OK. The page button appears
 // only when the preview does not fit at once, so a short text -- which is
 // almost every real one -- still shows the whole plate and two buttons.
-func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer string, useQR bool) bool {
+func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer string) bool {
 	backBtn := &Clickable{Button: Button1}
 	pageBtn := &Clickable{Button: Button2}
 	okBtn := &Clickable{Button: Button3}
@@ -603,7 +870,7 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, foote
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer, useQR)
+		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer)
 		body := view.Content.Offset(image.Point(area.Min))
 		btns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
@@ -719,7 +986,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				step -= 2
 				break
 			}
-			if !ftConfirmFlow(ctx, th, f, plan, title, footer, useQR) {
+			if !ftConfirmFlow(ctx, th, f, plan, title, footer) {
 				step -= 2
 				break
 			}

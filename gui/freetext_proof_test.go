@@ -37,8 +37,9 @@ func proofCases(t *testing.T) []struct {
 		proof *ftProof
 		qr    bool
 	}
-	if len(ftProofs) != 3 {
-		t.Fatalf("there are %d proofs, want one per engraving face plus the mixed-face plate", len(ftProofs))
+	if len(ftProofs) != 5 {
+		t.Fatalf("there are %d proofs, want one per engraving face, the mixed-face plate and "+
+			"the two sides of the size ladder", len(ftProofs))
 	}
 	for i := range ftProofs {
 		p := &ftProofs[i]
@@ -53,8 +54,40 @@ func proofCases(t *testing.T) []struct {
 				name  string
 				proof *ftProof
 				qr    bool
-			}{fmt.Sprintf("%s/qr=%v", p.Plan.Name(), qr), p, qr})
+			}{fmt.Sprintf("%s/qr=%v", p.Name(), qr), p, qr})
 		}
+	}
+	return out
+}
+
+// proofAutoFitCases is every proof that is AUTO-FITTED at one rung: the three
+// patterns tuned to land at 3.0mm.
+//
+// The size ladders are excluded, and not because they are awkward. Every test
+// that takes this list asserts a property of a pattern whose SIZE is chosen by
+// the fit -- that it lands at 3.0mm, that it fills nine tenths of the plate at
+// that rung, that its prose survives the wrap of that rung's grid. A ladder
+// states its own rungs, carries nothing but the sweep, and has its own gate:
+// see freetext_sizeproof_test.go.
+func proofAutoFitCases(t *testing.T) []struct {
+	name  string
+	proof *ftProof
+	qr    bool
+} {
+	t.Helper()
+	var out []struct {
+		name  string
+		proof *ftProof
+		qr    bool
+	}
+	for _, tc := range proofCases(t) {
+		if tc.proof.Plan.Sized() {
+			continue
+		}
+		out = append(out, tc)
+	}
+	if len(out) == 0 {
+		t.Fatal("every proof states its own rungs; this list is vacuous")
 	}
 	return out
 }
@@ -65,7 +98,10 @@ func proofCases(t *testing.T) []struct {
 // is cut in -- the fit answers that, and its answer is what is asserted.
 func proofFit(t *testing.T, P engrave.Params, p *ftProof, qr bool) backup.Fitted {
 	t.Helper()
-	f, err := backup.FitBlocks(P, p.Plan.Blocks(p.For(qr)), p.Title, ftProofFooter, qr)
+	// Through ftFitAt, the flow's own router, and with the proof's OWN footer:
+	// FitBlocks ignores Block.SizeMM, so a size ladder laid out through it is a
+	// uniform plate that no assertion here would notice.
+	f, err := ftFitAt(P, p.Plan.Blocks(p.For(qr)), p.Title, p.Footer, qr, 0)
 	if err != nil {
 		t.Fatalf("%s/qr=%v: the proof does not fit: %v", p.Plan.Name(), qr, err)
 	}
@@ -116,7 +152,7 @@ func TestProofPatternsLandAtSmallestRung(t *testing.T) {
 	if smallest != 3.0 {
 		t.Fatalf("the smallest rung is %.1fmm, not 3.0mm; the patterns and their titles are tuned to 3.0", smallest)
 	}
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		text := tc.proof.For(tc.qr)
 		f := proofFit(t, P, tc.proof, tc.qr)
 		if f.SizeMM != smallest {
@@ -153,9 +189,9 @@ func TestProofPatternsLandAtSmallestRung(t *testing.T) {
 // operator gets no proof at all instead of a slightly smaller one.
 func TestProofPatternsFillThePlate(t *testing.T) {
 	P := proofParams()
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		text := tc.proof.For(tc.qr)
-		used, avail, ok := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(text), tc.proof.Title, ftProofFooter, tc.qr)
+		used, avail, ok := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(text), tc.proof.Title, tc.proof.Footer, tc.qr)
 		if !ok {
 			t.Fatalf("%s: the pattern is not admissible: %d of %d rows", tc.name, used, avail)
 		}
@@ -171,7 +207,7 @@ func TestProofPatternsFillThePlate(t *testing.T) {
 		// must still fit, AT THE SAME RUNG. Appended as short words so it wraps
 		// like the prose it stands in for.
 		grown := text + " " + strings.TrimSpace(strings.Repeat("pad ", len(text)/80+1))
-		gf, err := backup.FitBlocks(P, tc.proof.Plan.Blocks(grown), tc.proof.Title, ftProofFooter, tc.qr)
+		gf, err := backup.FitBlocks(P, tc.proof.Plan.Blocks(grown), tc.proof.Title, tc.proof.Footer, tc.qr)
 		size := gf.SizeMM
 		pct := 100 * (len(grown) - len(text)) / len(text)
 		if err != nil {
@@ -190,7 +226,21 @@ func TestProofNoQRPatternWouldNotFitWithAQR(t *testing.T) {
 	P := proofParams()
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, ftProofFooter, true); err == nil {
+		if p.Plan.Sized() {
+			// A size ladder has no QR variant for a STRUCTURAL reason rather
+			// than a capacity one: the code's keep-out band is quantised by a
+			// single fontSize and a plate that mixes sizes has none, so
+			// FitSized takes no code at all. Asking whether the pattern "would
+			// fit beside a QR" measures FitBlocks ignoring Block.SizeMM -- a
+			// plate the device never cuts -- and it does fit, which would read
+			// as a finding here. See TestSizeProofNeedsTheWholePlate.
+			if !p.NeedsWholePlate() {
+				t.Errorf("%s: a size ladder declares a QR variant, which FitSized cannot lay out",
+					p.Trigger)
+			}
+			continue
+		}
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, p.Footer, true); err == nil {
 			t.Errorf("%s: the no-QR pattern now fits with a QR -- the split is no longer needed, "+
 				"or the capacity changed and the lengths should be revisited", p.Plan.Name())
 		}
@@ -199,7 +249,7 @@ func TestProofNoQRPatternWouldNotFitWithAQR(t *testing.T) {
 			// one is the assertion above: this pattern does not fit with a QR.
 			continue
 		}
-		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.TextQR), p.Title, ftProofFooter, true); err != nil {
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.TextQR), p.Title, p.Footer, true); err != nil {
 			t.Errorf("%s: the QR variant does not fit with a QR: %v", p.Plan.Name(), err)
 		}
 	}
@@ -221,7 +271,7 @@ func TestProofPatternsAreFaceSpecific(t *testing.T) {
 			"to tune per face", a.Name, b.Name, backup.CharsPerLine(P, a.Face, smallest), smallest)
 	}
 	seen := map[string]string{}
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		if where, dup := seen[tc.proof.For(tc.qr)]; dup {
 			t.Errorf("%s and %s are the same pattern", tc.name, where)
 		}
@@ -325,7 +375,7 @@ var ftConfusableGroups = []string{
 // lost. With a QR the lines narrow to 14 characters, so this is not theoretical.
 func TestProofConfusablesSurviveTheWrap(t *testing.T) {
 	P := proofParams()
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		lines := proofFit(t, P, tc.proof, tc.qr).Lines
 		for _, g := range ftConfusableGroups {
 			if !strings.Contains(ftProofConfusables, g) {
@@ -381,7 +431,22 @@ func TestProofTitlesStateTheMeasuredGrid(t *testing.T) {
 	rows := backup.LinesPerPlate(P, smallest)
 	for i := range ftProofs {
 		p := &ftProofs[i]
-		if len(p.Plan.Runs) == 1 {
+		if p.Plan.Sized() {
+			// A size ladder has a grid per (face, rung) pair, and its plate is
+			// one SIDE of a pair proving identical faces -- so what the title
+			// has to carry is the side and the rungs, not a grid and not a
+			// face. Rebuilt from the side and the plan by
+			// TestSizeProofPlansAreWellFormed; here only the cap and the
+			// distinctness below apply.
+			if !strings.HasPrefix(p.Title, p.Side+" ") {
+				t.Errorf("%s: the title %q does not open with the side %q", p.Trigger, p.Title, p.Side)
+			}
+			for _, r := range p.Plan.Rungs() {
+				if !strings.Contains(p.Title, fmt.Sprintf("%.1f", r)) {
+					t.Errorf("%s: the title %q does not state the %.1fmm rung", p.Trigger, p.Title, r)
+				}
+			}
+		} else if len(p.Plan.Runs) == 1 {
 			face := p.Plan.Runs[0].Face
 			cols := backup.CharsPerLine(P, face.Face, smallest)
 			want := fmt.Sprintf("%.1fmm %dx%d", smallest, cols, rows)
@@ -406,8 +471,11 @@ func TestProofTitlesStateTheMeasuredGrid(t *testing.T) {
 			}
 		}
 		// And it names its own first face, or two plates cut in different faces
-		// are indistinguishable a year later.
-		if lead := p.Plan.Runs[0].Face.Name[:2]; !strings.Contains(strings.ToLower(p.Title), strings.ToLower(lead)) {
+		// are indistinguishable a year later. A ladder is exempt: both sides
+		// are cut in both faces, so the face says nothing about which plate is
+		// in the hand and the side says everything.
+		lead := p.Plan.Runs[0].Face.Name[:2]
+		if !p.Plan.Sized() && !strings.Contains(strings.ToLower(p.Title), strings.ToLower(lead)) {
 			t.Errorf("%s: the title %q does not name the face", p.Plan.Name(), p.Title)
 		}
 		if n := utf8.RuneCountInString(p.Title); n > ftMaxLineLen {
@@ -441,7 +509,7 @@ func TestProofBlockLabelsNameTheirOwnFace(t *testing.T) {
 	smallest := backup.FontSizes[len(backup.FontSizes)-1]
 	rows := backup.LinesPerPlate(P, smallest)
 	mixed := 0
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		if len(tc.proof.Plan.Runs) == 1 {
 			continue
 		}
@@ -536,7 +604,7 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 		// checked against the wrong one is not checked at all.
 		lines := append([]string{}, f.Lines...)
 		faces := append([]*vector.Face{}, f.Faces...)
-		lines = append(lines, tc.proof.Title, ftProofFooter)
+		lines = append(lines, tc.proof.Title, tc.proof.Footer)
 		faces = append(faces, f.TitleFace, f.FooterFace)
 		for i, l := range lines {
 			for _, r := range l {
@@ -564,7 +632,7 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 					t.Errorf("%s: building the plate panicked: %v", tc.name, p)
 				}
 			}()
-			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, ftProofFooter, tc.qr, 0); err != nil {
+			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, tc.proof.Footer, tc.qr, 0); err != nil {
 				t.Errorf("%s: the plate does not build: %v", tc.name, err)
 			}
 		}()
@@ -599,7 +667,7 @@ func TestProofCarriesBothCasesInRunningText(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		run := running(tc.proof.For(tc.qr))
 		if run == "" {
 			t.Fatalf("%s: the pattern has no running-text block", tc.name)
@@ -655,7 +723,7 @@ func TestProofSeedWordsAreRealBIP39Words(t *testing.T) {
 			t.Errorf("%q is not a BIP-39 word", w)
 		}
 	}
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		if !strings.Contains(tc.proof.For(tc.qr), ftProofSeedWords) {
 			t.Errorf("%s: the uppercase seed-word block is missing from the pattern", tc.name)
 		}
@@ -695,7 +763,7 @@ func TestProofPatternsCarryTheirProse(t *testing.T) {
 		"constant/qr=true":     {pangram1},
 		"sh+constant/qr=false": nil,
 	}
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		text := tc.proof.For(tc.qr)
 		blocks, known := want[tc.name]
 		if !known {
@@ -876,8 +944,8 @@ func TestProofLoaderWritesEveryPromisedField(t *testing.T) {
 		if title != tc.proof.Title {
 			t.Errorf("%s: title not loaded, got %q", tc.name, title)
 		}
-		if footer != ftProofFooter {
-			t.Errorf("%s: footer not loaded, got %q", tc.name, footer)
+		if footer != tc.proof.Footer {
+			t.Errorf("%s: footer not loaded, got %q want %q", tc.name, footer, tc.proof.Footer)
 		}
 		if plan != tc.proof.Plan {
 			t.Errorf("%s: face plan not loaded, got %q -- the plate would be cut in the wrong font",
@@ -916,7 +984,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 				var size float32
 				ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
 				if useQR != qr {
-					t.Errorf("%s: loading changed the QR choice from %v to %v", p.Plan.Name(), qr, useQR)
+					t.Errorf("%s: loading changed the QR choice from %v to %v", p.Name(), qr, useQR)
 				}
 			}
 			continue
@@ -942,8 +1010,14 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 		if text != p.Text {
 			t.Errorf("%s: the loader stored a different pattern than the one that fits", p.Plan.Name())
 		}
-		// Which is the point: with the QR still on, this composition is refused.
-		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, ftProofFooter, true); err == nil {
+		// Which is the point: with the QR still on, this composition is
+		// refused. A size ladder is exempt -- its QR-lessness is structural,
+		// not a capacity judgement, because FitSized has no parameter for a
+		// code at all (see TestSizeProofNeedsTheWholePlate).
+		if p.Plan.Sized() {
+			continue
+		}
+		if _, err := backup.FitBlocks(P, p.Plan.Blocks(p.Text), p.Title, p.Footer, true); err == nil {
 			t.Errorf("%s: the pattern now fits beside a QR, so it no longer needs the whole plate "+
 				"and NeedsWholePlate should go away", p.Plan.Name())
 		}
@@ -963,18 +1037,32 @@ func TestProofPromptSaysWhatItWillDo(t *testing.T) {
 	for i := range ftProofs {
 		p := &ftProofs[i]
 		body := ftProofAsk(p) + " " + ftProofReplaces(p, ftProofOutcomeFor(engraverParams, p, 0, false)) + " " + ftProofKeep(p)
+		// What the footer line has to say, and what the plate is cut AS. A
+		// size ladder clears the footer and states its rungs; a proof with a
+		// footer names it, is cut in its face plan, and lands at 3.0mm.
+		footerCopy, size := ftProofFooter, "3.0mm"
+		if p.Plan.Sized() {
+			var rungs []string
+			for _, r := range p.Plan.Rungs() {
+				rungs = append(rungs, fmt.Sprintf("%.1f", r))
+			}
+			footerCopy, size = "Footer is CLEARED", strings.Join(rungs, "+")+"mm"
+		}
 		for _, want := range []string{
-			"REPLACES ALL THREE",  // that it destroys work
-			p.Title,               // what the title becomes
-			ftProofFooter,         // what the footer becomes
-			p.Plan.Name(),         // which face(s) it will be cut in
-			"3.0mm",               // at which size
+			"REPLACES ALL THREE", // that it destroys work
+			p.Title,              // what the title becomes
+			footerCopy,           // what the footer becomes
+			// What the plate is cut AS, as the whole PHRASE: the title in the
+			// same sentence names the side, so a bare needle passes whatever
+			// the sentence says.
+			"cut in " + p.Name() + " at ",
+			size,                  // at which size, or sizes
 			p.Trigger,             // what declining leaves behind
 			"Back = no",           // and which answer declines
 			"can be a real plate", // that the typed trigger is usable text
 		} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s: the prompt never says %q.\nprompt: %q", p.Plan.Name(), want, body)
+				t.Errorf("%s: the prompt never says %q.\nprompt: %q", p.Trigger, want, body)
 			}
 		}
 		// The prompts must differ, or the operator cannot tell from the screen
@@ -1113,7 +1201,7 @@ func ftTypeTrigger(h *ppHarness, trigger string) {
 // the footer, the line count and the QR state. Nothing here synthesizes a
 // ButtonEvent.
 func TestProofE2ELoadsTheWholePlate(t *testing.T) {
-	for _, tc := range proofCases(t) {
+	for _, tc := range proofAutoFitCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, r := startFT(t)
 			ftPastQR(h, tc.qr)
@@ -1124,8 +1212,8 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			if !uiContains(h.content, "REPLACES ALL THREE") {
 				t.Fatalf("OK on the trigger did not offer the pattern; frame %q", h.content)
 			}
-			if !uiContains(h.content, "Load the "+tc.proof.Plan.Name()+" test pattern") {
-				t.Errorf("the prompt does not name the %s plan; frame %q", tc.proof.Plan.Name(), h.content)
+			if !uiContains(h.content, "Load the "+tc.proof.Name()+" test pattern") {
+				t.Errorf("the prompt does not name %s; frame %q", tc.proof.Name(), h.content)
 			}
 			h.tapWidget("proofYes")
 			h.mustReach("lines")
@@ -1150,7 +1238,7 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			// and reported for the wrong face it is simply a different number,
 			// with nothing on screen to say so.
 			P := proofParams()
-			used, avail, _ := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(want), tc.proof.Title, ftProofFooter, tc.qr)
+			used, avail, _ := backup.AdmissibleBlocks(P, tc.proof.Plan.Blocks(want), tc.proof.Title, tc.proof.Footer, tc.qr)
 			if !uiHas(h.content, fmt.Sprintf("%d/%dlines", used, avail)) {
 				t.Errorf("the readout does not show %d/%d lines for the %s pattern; frame %q",
 					used, avail, tc.name, h.content)
@@ -1164,15 +1252,15 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			}
 			ftOK(h)
 			h.mustReach("Footer")
-			if got := ftKbd(h).Fragment; got != ftProofFooter {
-				t.Errorf("the Footer field holds %q, want %q", got, ftProofFooter)
+			if got := ftKbd(h).Fragment; got != tc.proof.Footer {
+				t.Errorf("the Footer field holds %q, want %q", got, tc.proof.Footer)
 			}
 			ftOK(h)
 			h.mustReach("Confirm")
 			wantFit := proofFit(t, P, tc.proof, tc.qr)
-			if !uiContains(h.content, "font: "+ftFaceSummary(tc.proof.Plan, wantFit.Faces)) {
+			if !uiContains(h.content, "font: "+ftFaceSummary(tc.proof.Plan, wantFit.Faces, wantFit.Sizes)) {
 				t.Errorf("the confirm screen does not report the face map %q; frame %q",
-					ftFaceSummary(tc.proof.Plan, wantFit.Faces), h.content)
+					ftFaceSummary(tc.proof.Plan, wantFit.Faces, wantFit.Sizes), h.content)
 			}
 
 			// What the operator APPROVES has to be the plate that gets cut, and
@@ -1213,8 +1301,8 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 			if r.got.Title != tc.proof.Title {
 				t.Errorf("engraved title %q, want %q", r.got.Title, tc.proof.Title)
 			}
-			if r.got.Footer != ftProofFooter {
-				t.Errorf("engraved footer %q, want %q", r.got.Footer, ftProofFooter)
+			if r.got.Footer != tc.proof.Footer {
+				t.Errorf("engraved footer %q, want %q", r.got.Footer, tc.proof.Footer)
 			}
 			if !slices.Equal(r.got.Lines, wantLines) {
 				t.Errorf("engraved %d lines, want the %d fitted ones", len(r.got.Lines), len(wantLines))
@@ -1525,13 +1613,13 @@ func TestMixedProofConfirmScreenFitsThePanel(t *testing.T) {
 	if f.err != nil || !f.ok {
 		t.Fatalf("the mixed pattern is not admissible: %v", f.err)
 	}
-	if !strings.Contains(ftFaceSummary(p.Plan, f.plate.Faces), " + ") {
+	if !strings.Contains(ftFaceSummary(p.Plan, f.plate.Faces, f.plate.Sizes), " + ") {
 		t.Fatalf("the summary %q does not report two runs; this test is not measuring a mixed plate",
-			ftFaceSummary(p.Plan, f.plate.Faces))
+			ftFaceSummary(p.Plan, f.plate.Faces, f.plate.Sizes))
 	}
 	start, seen, pages := 0, 0, 0
 	for {
-		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, ftProofFooter, false)
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, ftProofFooter)
 		if v.Size.Y > area.Dy() {
 			t.Fatalf("page %d needs %dpx of a %dpx area on a %v panel", pages, v.Size.Y, area.Dy(), dims)
 		}

@@ -158,15 +158,27 @@ func TestEmptyTextEngravesZeroLines(t *testing.T) {
 // widthAt >= 1 assertion turns a cramped plate into a panic.
 func TestLineLayoutClampsBudgetToOne(t *testing.T) {
 	// A layout whose QR leaves less room than the screw-hole band takes.
+	//
+	// The band was written as holeLines: 2, qrLines: 19 -- rows 2 through 20
+	// counted off this layout's own baseY. It is the SAME band expressed in
+	// absolute y, with those two numbers still on the page, because the rows
+	// this test names (18 is both a QR row and a bottom-band row; 5 and 0 are
+	// neither) are what every assertion below turns on.
+	const (
+		llBaseY     = 19200
+		llFontSize  = 24320
+		llHoleLines = 2
+		llQRLines   = 19
+	)
 	lay := lineLayout{
 		charPerLine:   34,
 		charPerQRLine: 2,
 		holeChars:     4,
-		holeLines:     2,
-		qrLines:       19,
+		qrTop:         llBaseY + llHoleLines*llFontSize,
+		qrBottom:      llBaseY + (llHoleLines+llQRLines)*llFontSize,
 		charWidth:     14520,
-		fontSize:      24320,
-		baseY:         19200,
+		fontSize:      llFontSize,
+		baseY:         llBaseY,
 		plateHeight:   544000,
 		innerMargin:   64000,
 	}
@@ -187,7 +199,7 @@ func TestLineLayoutClampsBudgetToOne(t *testing.T) {
 	}
 	// And an unobstructed line is untouched by the clamp: no QR, no band.
 	lay3 := lay
-	lay3.qrLines, lay3.charPerQRLine = 0, 0
+	lay3.qrTop, lay3.qrBottom, lay3.charPerQRLine = 0, 0, 0
 	if n, offx := lay3.at(5); n != 34 || offx != 0 {
 		t.Errorf("unobstructed line = (%d, %d), want (34, 0)", n, offx)
 	}

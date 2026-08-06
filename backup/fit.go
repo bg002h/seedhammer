@@ -52,9 +52,19 @@ var ErrTooLarge = errors.New("backup: text does not fit a plate")
 // The composition text is the block texts joined by '\n' (CompositionText), so a
 // caller that split a string into blocks gets exactly that string back, and the
 // QR the plate carries is a copy of what is engraved rather than of a fragment.
+//
+// SizeMM is the size this block's rows are cut at. Zero means "the size the
+// plate is fitted at", which is what every caller but FitSized passes, so the
+// zero value preserves every existing composition and every golden.
+//
+// SizeMM is data the composition CARRIES; the wrap never reads it. FitSized is
+// the one function that resolves it into the per-block sizes the wrap is
+// handed, and every other entry point passes its own single rung for every
+// block. FitBlocks and FitBlocksAt therefore ignore it outright.
 type Block struct {
-	Face *vector.Face
-	Text string
+	Face   *vector.Face
+	Text   string
+	SizeMM float32
 }
 
 // CompositionText is the whole composition as one string: the block texts joined by '\n',
@@ -82,8 +92,24 @@ func CompositionText(blocks []Block) string {
 // that mapping anywhere downstream is the one way this feature can silently
 // engrave lines wide of the grid they were broken to, so nothing downstream
 // may: read Faces.
+//
+// Sizes is parallel to Lines for the same reason and under the same
+// prohibition. It is ALWAYS populated, uniform plates included, so the engraver
+// has one path and the existing goldens prove that path reproduces the special
+// case rather than running beside it.
 type Fitted struct {
+	// Mixed is true when the plate does NOT cut everything at one size --
+	// counting the title and the footer, so !Mixed means literally every glyph
+	// on the plate is one size, which is exactly what makes SizeMM printable.
+	//
+	// Mixed rather than Uniform because the zero value has to be the safe,
+	// legacy branch: every hand-built Fitted literal leaves it false, and false
+	// must mean "one size everywhere", which is what those literals are.
+	Mixed bool
+	// SizeMM is valid only when !Mixed. A reader that prints it regardless
+	// prints "0.0mm" for a mixed plate, which is a defect and not a fallback.
 	SizeMM float32
+	Sizes  []float32
 	Lines  []string
 	Faces  []*vector.Face
 	QR     *qr.Code
@@ -93,6 +119,23 @@ type Fitted struct {
 	// -- see FitBlocks.
 	Title, Footer         string
 	TitleFace, FooterFace *vector.Face
+
+	// TitleSizeMM and FooterSizeMM are EXPLICIT, never inherited from the
+	// blocks they border: the title of a size-ladder plate sits at the side's
+	// SMALLEST rung, not at the first block's. Each is non-zero exactly when
+	// its string is non-empty; EngraveFitted panics on any other combination,
+	// because LinesPerPlate(params, 0) is a divide by zero and a title at
+	// fontSize 0 is one too.
+	TitleSizeMM, FooterSizeMM float32
+
+	// qrAt is the code's resolved placement: computed ONCE, by the fit, and
+	// never re-derived. It is nil exactly when QR is nil.
+	//
+	// Unexported because the only Fitted literals outside this package feed the
+	// readout and never engrave, and a literal that set QR without a placement
+	// and then engraved it must fail loudly rather than draw a code at a y
+	// nobody computed.
+	qrAt *qrPlacement
 }
 
 // qrFor returns the code the plate will carry, or nil when want is false.
@@ -106,24 +149,6 @@ func qrFor(text string, want bool) (*qr.Code, error) {
 	return qr.Encode(text, qr.L)
 }
 
-// bodyRows is the half-open range of plate rows the body may use. A title takes
-// row 0 and a footer the last row -- but only when they exist, which is what
-// makes spec 4's "Plain" column the full plate. Admission is the one place that
-// reserves both unconditionally; see Admissible.
-func bodyRows(rows int, title, footer string) (start, end int) {
-	start, end = 0, rows
-	if title != "" {
-		start++
-	}
-	if footer != "" {
-		end--
-	}
-	if end < start {
-		end = start
-	}
-	return start, end
-}
-
 // widthFor turns a plate layout into the widthAt closure WrapText wants:
 // indexed by OUTPUT line, with the plate-row offset applied inside.
 func widthFor(lay lineLayout, startRow int) func(int) int {
@@ -133,32 +158,104 @@ func widthFor(lay lineLayout, startRow int) func(int) int {
 	}
 }
 
+// footerRowY is the footer's OWN top y, in device units.
+//
+// It is a function rather than an expression because the body's budget is READ
+// OFF IT (yBudget) and the engraver cuts the footer AT it (EngraveFitted): one
+// expression with two readers, so the row the body is refused above and the row
+// the footer is engraved on cannot be two different rows. A naive bottom anchor
+// differs from it by the LinesPerPlate remainder -- 1.000mm at 3.0mm, 3.000mm
+// at 3.8mm -- and moves every existing golden.
+//
+// It divides by footerSizeMM, so every caller must have established that there
+// IS a footer first; see yBudget.
+func footerRowY(params engrave.Params, footerSizeMM float32) int {
+	return params.I(outerMargin) + (LinesPerPlate(params, footerSizeMM)-1)*params.F(footerSizeMM)
+}
+
+// yBudget is the vertical window the body may use, in DEVICE units: the y its
+// first row starts at, and the y no row's bottom may pass.
+//
+// The limit is read off the footer rather than computed from the bottom margin.
+// plateHeight - margin - F(footerSizeMM) sits BELOW the footer's own ink and
+// lays the last body row over it -- measured, by 3.000mm at 3.8mm and 4.200mm
+// at 4.4mm. Uniform plates escape it only because the old row counting never
+// consulted either formula, so no golden would have moved.
+//
+// BOTH branches test the STRING, never the size: spec 5's mandated no-footer
+// plate carries a footerSizeMM of 0, and LinesPerPlate would divide by it.
+func yBudget(params engrave.Params, title, footer string, titleSizeMM, footerSizeMM float32) (start, limit int) {
+	start = params.I(outerMargin)
+	if title != "" {
+		start += params.F(titleSizeMM)
+	}
+	limit = params.F(plateSize) - params.I(outerMargin)
+	if footer != "" {
+		limit = footerRowY(params, footerSizeMM)
+	}
+	return start, limit
+}
+
 // wrapBlocks is THE wrap, and the only place a block's face is turned into a
 // per-line character budget.
 //
-// Each block is wrapped in its OWN face, starting at the plate row the previous
-// block ended on, so the face boundary falls exactly on the content boundary
-// and the budget of every line is the budget of the face that line is cut in.
-// The returned faces slice is parallel to lines, and is the mapping every
-// consumer of the fit reads instead of recomputing.
+// Each block is wrapped in its OWN face at its OWN size, starting at the y the
+// previous block ended on, so the face boundary falls exactly on the content
+// boundary and the budget of every line is the budget of the face that line is
+// cut in. The returned faces and rowSizes slices are parallel to lines, and are
+// the mapping every consumer of the fit reads instead of recomputing.
 //
-// With a single block this is exactly the arithmetic Fit has always done: one
-// textLayout, one WrapText over [start, end).
-func wrapBlocks(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, start, end int) (lines []string, faces []*vector.Face, ok bool) {
-	row := start
-	for _, b := range blocks {
-		lay := textLayout(params, b.Face, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
-		l, fits := WrapText(b.Text, widthFor(lay, row), end-row)
+// sizes is parallel to BLOCKS and is the only channel a per-block size travels
+// on: Block.SizeMM is data the composition carries and the wrap never reads it.
+//
+// start and limit are device-unit y, NOT row indices. Each block is laid out at
+// the running y, and its rows are indexed from 0 within the block -- so a row
+// index never has to mean the same thing to two blocks that start at different
+// heights. A row is admitted iff its BOTTOM is at or above limit; math.MaxInt is
+// the unbounded value the untruncated callers pass.
+//
+// qrp is the plate's ONE resolved placement, shared by every block: the code is
+// one object on one plate and does not belong to a block, so a caller resolves
+// it once and every block narrows against the same band. That band is
+// plate-absolute, which is what lets a block be laid out at its own baseY
+// without moving the code.
+func wrapBlocks(params engrave.Params, blocks []Block, sizes []float32, qrp *qrPlacement, start, limit int) (lines []string, faces []*vector.Face, rowSizes []float32, ok bool) {
+	y := start
+	for i, b := range blocks {
+		fontSize := params.F(sizes[i])
+		lay := textLayout(params, b.Face, fontSize, y, qrp)
+		// Row j of this block occupies [y+j*fontSize, y+(j+1)*fontSize), so the
+		// rows that fit are those with j+1 <= (limit-y)/fontSize. On a uniform
+		// plate that is exactly the end-row count this replaced, because
+		// (limit - y) is a whole number of rows either way.
+		avail := 0
+		if limit > y {
+			avail = (limit - y) / fontSize
+		}
+		l, fits := WrapText(b.Text, widthFor(lay, 0), avail)
 		if !fits {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		lines = append(lines, l...)
 		for range l {
 			faces = append(faces, b.Face)
+			rowSizes = append(rowSizes, sizes[i])
 		}
-		row += len(l)
+		y += len(l) * fontSize
 	}
-	return lines, faces, true
+	return lines, faces, rowSizes, true
+}
+
+// uniformSizes is one size per BLOCK, for the entry points that fit a whole
+// composition at a single rung. FitSized is the one function that resolves
+// per-block sizes; everything else passes its own rung for every block, which
+// is what keeps spec 6's admission anchor true.
+func uniformSizes(blocks []Block, size float32) []float32 {
+	sizes := make([]float32, len(blocks))
+	for i := range sizes {
+		sizes[i] = size
+	}
+	return sizes
 }
 
 // FitBlocks is the largest rung whose layout holds the whole composition, with
@@ -221,22 +318,192 @@ func FitBlocksAt(params engrave.Params, blocks []Block, title, footer string, us
 
 // fitBlocksAt is the single rung attempt both entry points share, so the
 // laddered and the fixed-size paths cannot lay a plate out differently.
+//
+// It fills Sizes with one entry per line, all at size, and sets TitleSizeMM and
+// FooterSizeMM to size exactly when the corresponding string is non-empty. That
+// is what makes this the ONE-SIZE CASE of the general path rather than a second
+// path beside it: Mixed stays false and every golden that runs through here is
+// engraved by the same code a mixed plate will be.
 func fitBlocksAt(params engrave.Params, blocks []Block, title, footer string, qrc *qr.Code, size float32) (Fitted, error) {
-	rows := LinesPerPlate(params, size)
-	start, end := bodyRows(rows, title, footer)
-	lines, faces, ok := wrapBlocks(params, blocks, size, qrc, start, end)
+	var titleSize, footerSize float32
+	if title != "" {
+		titleSize = size
+	}
+	if footer != "" {
+		footerSize = size
+	}
+	start, limit := yBudget(params, title, footer, titleSize, footerSize)
+	// The placement is resolved BEFORE the wrap, because the wrap narrows
+	// against it -- but its bound is checked AFTER, so ErrTooLarge still wins
+	// when both would fire and every reachable case returns exactly what it
+	// returned before this change.
+	qrAt := qrPlacementFor(params, qrc, params.F(size))
+	lines, faces, sizes, ok := wrapBlocks(params, blocks, uniformSizes(blocks, size), qrAt, start, limit)
 	if !ok {
 		return Fitted{}, ErrTooLarge
 	}
+	if err := qrFitsPlate(params, qrAt); err != nil {
+		return Fitted{}, err
+	}
 	return Fitted{
-		SizeMM:     size,
-		Lines:      lines,
-		Faces:      faces,
-		QR:         qrc,
-		Title:      title,
-		Footer:     footer,
-		TitleFace:  blocks[0].Face,
-		FooterFace: blocks[len(blocks)-1].Face,
+		SizeMM:       size,
+		Sizes:        sizes,
+		Lines:        lines,
+		Faces:        faces,
+		QR:           qrc,
+		qrAt:         qrAt,
+		Title:        title,
+		Footer:       footer,
+		TitleFace:    blocks[0].Face,
+		FooterFace:   blocks[len(blocks)-1].Face,
+		TitleSizeMM:  titleSize,
+		FooterSizeMM: footerSize,
+	}, nil
+}
+
+// ErrQRTooTall means the code's keep-out band runs past the bottom margin, so
+// there is no room below it for the rows the plate is supposed to carry.
+//
+// It is a property of the COMPOSITION, which is why it comes back from the fit
+// as an error rather than out of the engraver as a panic: EngraveFitted is
+// reached only AFTER the confirm screen, so a check that belongs at the fit but
+// lives in the engraver crashes mid-flow with a plate clamped in the machine.
+var ErrQRTooTall = errors.New("backup: the QR band runs past the bottom margin")
+
+// qrPlacementFor resolves the free-text plate's ONE code placement, anchored at
+// the plate's top margin -- one code on one plate, whatever block a row belongs
+// to.
+//
+// Returns nil when there is no code, which is the nil half of the "qrAt is nil
+// exactly when QR is nil" invariant, satisfied at the constructor.
+//
+// The bottom-margin bound is qrFitsPlate's, not this function's, because the
+// wrap needs the placement whether or not it fits and the ordering of the two
+// refusals is the caller's to choose; see fitBlocksAt.
+func qrPlacementFor(params engrave.Params, qrc *qr.Code, fontSize int) *qrPlacement {
+	if qrc == nil {
+		return nil
+	}
+	p := qrPlaceAt(params, qrc, freeTextQRScale, fontSize, params.I(outerMargin))
+	return &p
+}
+
+// qrFitsPlate is ErrQRTooTall's one test: the band must end above the bottom
+// margin, or there is no room below it for the rows the plate carries.
+func qrFitsPlate(params engrave.Params, qrp *qrPlacement) error {
+	if qrp != nil && qrp.Bottom > params.F(plateSize)-params.I(outerMargin) {
+		return ErrQRTooTall
+	}
+	return nil
+}
+
+// FitSized lays out a composition whose every block states its OWN size, and it
+// is the one function that resolves Block.SizeMM (spec 2.2). FitBlocks and
+// FitBlocksAt are untouched and go on ignoring it: they fit a whole composition
+// at ONE rung, which is what keeps spec 6's admission anchor true.
+//
+// There is no useQR parameter and no code. The QR band is quantised by a single
+// fontSize (spec 2.1), and a plate that mixes sizes has none -- so Fitted.QR and
+// its placement are both left nil, which makes spec 2.1.1's "QR != nil implies
+// !Mixed" STRUCTURALLY true rather than checked.
+//
+// ErrQRTooTall, the third of spec 2.1.1's invariants, is therefore never
+// returned from here, and that AGREES with fitBlocksAt rather than diverging
+// from it. fitBlocksAt resolves the placement before the wrap and checks its
+// bottom bound AFTER, so ErrTooLarge wins when both would fire and every
+// reachable case returns byte for byte what it returned before this change.
+// Here only one of the two refusals can ever fire -- qrFitsPlate(params, nil)
+// is unconditionally nil -- so there is no ordering to match and calling it
+// would be a call with one possible answer. Spec 7.7(d)'s FitSized half is
+// vacuous for the same reason. A future FitSized that took a code would owe
+// fitBlocksAt's order: the refusal that is a property of the whole
+// composition, ErrTooLarge, first.
+//
+// Every refusal below comes back as an ERROR and never as a panic. EngraveFitted
+// is reached only AFTER the confirm screen, so the same refusal arriving from
+// the engraver arrives mid-flow with a plate clamped in the machine.
+func FitSized(params engrave.Params, blocks []Block, title, footer string,
+	titleSizeMM, footerSizeMM float32) (Fitted, error) {
+	if len(blocks) == 0 {
+		return Fitted{}, ErrTooLarge
+	}
+	sizes := make([]float32, len(blocks))
+	for i, b := range blocks {
+		// The zero that means "the size the plate is fitted at" for every other
+		// entry point has no meaning here, and a zero reaching Fitted.Sizes is
+		// spec 2.3's per-entry invariant -- which EngraveFitted enforces as a
+		// panic, on nothing today. This is the matching ERROR, worded as that
+		// panic is and kept separate from the rung check below so a block that
+		// simply forgot its size is not reported as one that named a size off
+		// the ladder.
+		if b.SizeMM == 0 {
+			return Fitted{}, fmt.Errorf("backup: block %d is sized 0mm", i)
+		}
+		if !slices.Contains(FontSizes, b.SizeMM) {
+			return Fitted{}, fmt.Errorf("backup: block %d at %.1fmm is not a rung in FontSizes %v",
+				i, b.SizeMM, FontSizes)
+		}
+		sizes[i] = b.SizeMM
+	}
+	// Spec 2.3's size/string invariant, refused here rather than panicked on in
+	// the engraver. A zero size with a non-empty string puts a whole row through
+	// the layout at fontSize 0, where LinesPerPlate divides by it; a non-zero
+	// size with an empty string is the same bug read the other way round.
+	if (title != "") != (titleSizeMM != 0) {
+		return Fitted{}, fmt.Errorf("backup: title %q at %.1fmm", title, titleSizeMM)
+	}
+	if (footer != "") != (footerSizeMM != 0) {
+		return Fitted{}, fmt.Errorf("backup: footer %q at %.1fmm", footer, footerSizeMM)
+	}
+	start, limit := yBudget(params, title, footer, titleSizeMM, footerSizeMM)
+	lines, faces, rowSizes, ok := wrapBlocks(params, blocks, sizes, nil, start, limit)
+	if !ok {
+		return Fitted{}, ErrTooLarge
+	}
+	// Mixed is MEASURED, never assumed. Every ladder composition genuinely
+	// mixes, so hardcoding true here passes every fixture this change ships --
+	// and then reports "0.0mm" on the confirm screen for the all-one-rung
+	// composition this entry point is public for, which spec 3 calls a defect
+	// rather than a fallback.
+	//
+	// The candidate is the FIRST BLOCK's size rather than rowSizes[0] only so
+	// this cannot index an empty slice; the two are the same value, since a
+	// successful wrap emits at least one row for every block and block 0's rows
+	// come first.
+	mixed := false
+	common := sizes[0]
+	for _, s := range rowSizes {
+		if s != common {
+			mixed = true
+		}
+	}
+	// Counting the title and the footer is what makes !Mixed mean that literally
+	// every glyph on the plate is one size, which is exactly what makes SizeMM
+	// printable. Each is consulted only when its string is non-empty -- the
+	// invariant above has already established that its size is 0 when it is not.
+	if title != "" && titleSizeMM != common {
+		mixed = true
+	}
+	if footer != "" && footerSizeMM != common {
+		mixed = true
+	}
+	sizeMM := common
+	if mixed {
+		// SizeMM is valid only when !Mixed, and 0 is how it says so.
+		sizeMM = 0
+	}
+	return Fitted{
+		Mixed:        mixed,
+		SizeMM:       sizeMM,
+		Sizes:        rowSizes,
+		Lines:        lines,
+		Faces:        faces,
+		Title:        title,
+		Footer:       footer,
+		TitleFace:    blocks[0].Face,
+		FooterFace:   blocks[len(blocks)-1].Face,
+		TitleSizeMM:  titleSizeMM,
+		FooterSizeMM: footerSizeMM,
 	}, nil
 }
 
@@ -273,11 +540,27 @@ func AdmissibleBlocks(params engrave.Params, blocks []Block, title, footer strin
 		// without a code to lay out around.
 		return 0, linesAvail, false
 	}
+	// The code is anchored at the plate's TOP MARGIN, not at the row the body
+	// starts on. This function reserves a title row unconditionally, which
+	// moves the first row of TEXT; it does not move the CODE. Anchoring at the
+	// body's start row instead shifts the whole band down one row, swapping
+	// charPerLine for charPerQRLine at both band edges, and the verdict this
+	// returns gates OK on the text and confirm steps for every ordinary
+	// QR-carrying plate.
+	qrAt := qrPlacementFor(params, qrc, params.F(size))
 	// Unbounded on purpose: a refusal that reported "26 / 26" for a text
 	// needing 300 lines would tell the operator nothing about how much to cut.
-	// The row a block starts on still decides its budget, so the blocks are
-	// counted in plate order from row 1 exactly as they are laid out.
-	l, _, _ := wrapBlocks(params, blocks, size, qrc, 1, math.MaxInt)
+	// The y a block starts at still decides its budget, so the blocks are
+	// counted in plate order from the body's first row exactly as they are laid
+	// out.
+	//
+	// start is a device-unit y now, and the row index 1 this passed before the
+	// change is type-correct as one -- one device unit below the plate's top
+	// edge, which moves FOUR rows into the top screw-hole band instead of two
+	// and over-reports every line count the readout shows. It is the title row
+	// this reserves unconditionally, so the translation is margin + one row.
+	l, _, _, _ := wrapBlocks(params, blocks, uniformSizes(blocks, size), qrAt,
+		params.I(outerMargin)+params.F(size), math.MaxInt)
 	return len(l), linesAvail, len(l) <= linesAvail
 }
 
@@ -294,12 +577,18 @@ func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer str
 // A one-block composition is answered without wrapping anything: every row is
 // that block's face, which is what the single-face capacity solver has always
 // assumed.
-func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, rows int) []*vector.Face {
+func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrp *qrPlacement, rows int) []*vector.Face {
 	out := make([]*vector.Face, rows)
 	last := blocks[len(blocks)-1].Face
 	var faces []*vector.Face
 	if len(blocks) > 1 {
-		_, faces, _ = wrapBlocks(params, blocks, fontMM, qrc, 0, math.MaxInt)
+		// start is a device-unit y: the plate's TOP MARGIN, which is where the
+		// row index 0 this passed before the change put the first row. The
+		// literal 0 carried over is the plate's top EDGE, three millimetres
+		// higher, which moves the screw-hole bands by a row and with them the
+		// face boundary.
+		_, faces, _, _ = wrapBlocks(params, blocks, uniformSizes(blocks, fontMM), qrp,
+			params.I(outerMargin), math.MaxInt)
 	}
 	for r := range rows {
 		if r < len(faces) {
@@ -309,25 +598,6 @@ func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Cod
 		}
 	}
 	return out
-}
-
-// faceLayouts is the per-face lineLayout cache. A composition has one or two
-// faces, so a linear scan beats a map and allocates nothing.
-type faceLayouts struct {
-	faces []*vector.Face
-	lays  []lineLayout
-}
-
-func (c *faceLayouts) at(params engrave.Params, fnt *vector.Face, fontSize int, qrc *qr.Code) lineLayout {
-	for i, f := range c.faces {
-		if f == fnt {
-			return c.lays[i]
-		}
-	}
-	lay := textLayout(params, fnt, fontSize, params.I(outerMargin), qrc, freeTextQRScale)
-	c.faces = append(c.faces, fnt)
-	c.lays = append(c.lays, lay)
-	return lay
 }
 
 // MaxCharsAtBlocks is the capacity solver behind the refusal message's live
@@ -350,11 +620,21 @@ func MaxCharsAtBlocks(params engrave.Params, blocks []Block, fontMM float32, use
 		return 0
 	}
 	rows := LinesPerPlate(params, fontMM)
-	faces := rowFaces(params, blocks, fontMM, qrc, rows)
-	var lays faceLayouts
+	// One placement for the plate, anchored at the top margin, shared by the
+	// wrap inside rowFaces and by every row counted below -- the same code, at
+	// the same y, for both halves of this answer.
+	qrAt := qrPlacementFor(params, qrc, params.F(fontMM))
+	faces := rowFaces(params, blocks, fontMM, qrAt, rows)
 	total := 0
 	for row := range rows {
-		n, _ := lays.at(params, faces[row], params.F(fontMM), qrc).at(row)
+		// One layout per row. The per-face cache this replaced hardcoded
+		// baseY = outerMargin and keyed on the face alone, so on a plate that
+		// cuts one face at two sizes it handed the second run the first run's
+		// grid -- and re-keying it on (face, size, baseY) would never hit,
+		// because 2.5 gives every row its own baseY. This is a value struct and
+		// one Face.Decode('W') per row, at most 26 rows.
+		lay := textLayout(params, faces[row], params.F(fontMM), params.I(outerMargin), qrAt)
+		n, _ := lay.at(row)
 		total += n
 	}
 	return total

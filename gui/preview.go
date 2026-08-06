@@ -15,6 +15,7 @@ package gui
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"seedhammer.com/backup"
@@ -52,7 +53,14 @@ type PreviewRow struct {
 type Preview struct {
 	Plate  Plate
 	SizeMM float32
-	Rows   []PreviewRow
+	// Sizes is the size each row is cut at, parallel to Rows.
+	//
+	// It is carried beside SizeMM rather than derived from it because a plate
+	// that MIXES sizes has no valid SizeMM -- it is 0 -- and a preview that
+	// printed that would say "0.0mm" for a size ladder, which is the very
+	// defect the ladder was added to look for.
+	Sizes []float32
+	Rows  []PreviewRow
 	// Title and Footer with the faces they are cut in, when the plate has them.
 	Title, TitleFace   string
 	Footer, FooterFace string
@@ -92,9 +100,14 @@ var previewBuilders = map[string]func(engrave.Params, PreviewOpts) (Preview, err
 	"textproof":  proofPreview(ftProofTriggerSH),
 	"constproof": proofPreview(ftProofTriggerConst),
 	"bothproof":  proofPreview(ftProofTriggerBoth),
-	"freetext":   freeTextPreview,
-	"seed":       seedPreview,
-	"passphrase": passphrasePreview,
+	// One entry per SIDE. The two sides are two independent plate programs and
+	// an operator flip; rendering them as one image would invent a relationship
+	// the firmware does not have.
+	"sizeproof-front": proofPreview(ftProofTriggerSizeFront),
+	"sizeproof-back":  proofPreview(ftProofTriggerSizeBack),
+	"freetext":        freeTextPreview,
+	"seed":            seedPreview,
+	"passphrase":      passphrasePreview,
 }
 
 // BuildPreview renders the named plate at params.
@@ -117,17 +130,25 @@ func proofPreview(trigger string) func(engrave.Params, PreviewOpts) (Preview, er
 		// A whole-plate proof drops the QR when it loads; mirror that here
 		// rather than fitting a plate the device would refuse to build.
 		qr := o.QR && !p.NeedsWholePlate()
-		// The mixed proof at a chosen rung goes through the SAME drop ladder
-		// the device walks, so a preview cannot show content the machine would
-		// have trimmed.
-		if o.SizeMM != 0 && p.Trigger == ftProofTriggerBoth {
-			text, plan, title, footer, err := ftBothAt(params, o.SizeMM, qr)
-			if err != nil {
-				return Preview{}, err
-			}
-			return fittedPreviewAt(params, plan, text, title, footer, qr, o.SizeMM)
+		// Through the SAME resolver the prompt and the loader use, never a
+		// third derivation of the four fields. It is what walks the mixed
+		// proof's drop ladder at a chosen rung, so a preview cannot show
+		// content the machine would have trimmed -- and it is what returns the
+		// per-proof footer, so a preview cannot put a footer on a plate the
+		// device engraves without one.
+		//
+		// The rung is only ever a CHOICE for a Sizeable proof. -size is a flag
+		// and reaches this for every plate name.
+		var rung float32
+		if p.Sizeable {
+			rung = o.SizeMM
 		}
-		return fittedPreviewAt(params, p.Plan, p.For(qr), p.Title, ftProofFooter, qr, o.SizeMM)
+		out := ftProofOutcomeFor(params, p, rung, qr)
+		// o.SizeMM rather than out.SizeMM: a non-Sizeable proof still honours
+		// -size by being fitted at that rung, exactly as it did before -- and a
+		// SIZE LADDER is refused there rather than flattened, because ftFitAt
+		// makes a rung beside per-block sizes an error.
+		return fittedPreviewAt(params, out.Plan, out.Text, out.Title, out.Footer, qr, o.SizeMM)
 	}
 }
 
@@ -143,18 +164,19 @@ func freeTextPreview(params engrave.Params, o PreviewOpts) (Preview, error) {
 	return fittedPreviewAt(params, plan, o.Text, o.Title, o.Footer, o.QR, o.SizeMM)
 }
 
-// fittedPreview is the one path every free-text-family plate takes: ONE
-// FitBlocks, whose result is both engraved and reported. The rows printed and
-// the rows cut cannot disagree because they are the same value.
+// fittedPreview is the one path every free-text-family plate takes: ONE fit,
+// whose result is both engraved and reported. The rows printed and the rows cut
+// cannot disagree because they are the same value.
+//
+// It goes through ftFitAt, the device's OWN router, rather than calling
+// FitBlocks or FitBlocksAt. Both of those ignore Block.SizeMM, so a preview
+// wired straight to them fitted a size ladder UNIFORMLY: FitBlocks succeeded at
+// some single rung, the listing printed one size, and the preview of a
+// permanent-steel plate showed a plate the device will not cut. The tool exists
+// to check the plate before it is cut, which makes that worse than a wrong
+// render, not better.
 func fittedPreviewAt(params engrave.Params, plan *ftPlan, text, title, footer string, qr bool, size float32) (Preview, error) {
-	blocks := plan.Blocks(text)
-	fit := backup.FitBlocks
-	if size != 0 {
-		fit = func(p engrave.Params, b []backup.Block, t, f string, q bool) (backup.Fitted, error) {
-			return backup.FitBlocksAt(p, b, t, f, q, size)
-		}
-	}
-	fitted, err := fit(params, blocks, title, footer, qr)
+	fitted, err := ftFitAt(params, plan.Blocks(text), title, footer, qr, size)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -165,6 +187,7 @@ func fittedPreviewAt(params engrave.Params, plan *ftPlan, text, title, footer st
 	pr := Preview{
 		Plate:      p,
 		SizeMM:     fitted.SizeMM,
+		Sizes:      slices.Clone(fitted.Sizes),
 		Title:      fitted.Title,
 		TitleFace:  previewFaceName(fitted.TitleFace),
 		Footer:     fitted.Footer,

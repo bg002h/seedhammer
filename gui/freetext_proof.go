@@ -67,6 +67,24 @@ const (
 	// The three triggers differ from their FIRST character, so none is a prefix
 	// of another and a mistyped one matches nothing.
 	ftProofTriggerBoth = "BOTHPROOF!"
+
+	// The SIZE LADDER, one trigger per side of one plate. Each side carries the
+	// complete 95-character sweep in BOTH faces at every rung it names, so the
+	// pair answers what a render cannot: which glyphs survive as the size drops.
+	//
+	// Two triggers and no bare SIZEPROOF!: the ladder has no default half, and
+	// defaulting would let a slip cut the wrong side onto steel already
+	// engraved. Neither may ever be marked Sizeable, or SIZEPROOF!FRONT4.4
+	// becomes ambiguous against the rung suffix parser -- and the rung the
+	// ladder resolves to is 0, which is what both of ftFitAt's routing rules
+	// depend on.
+	//
+	// The slot after the '!' names the SIDE, per LEXICON_proof_triggers.md: the
+	// root names an axis and the slot holds one kind. It is a side here and a
+	// rung after BOTHPROOF!, which is why this is a second trigger rather than
+	// a value in the first one's slot.
+	ftProofTriggerSizeFront = "SIZEPROOF!FRONT"
+	ftProofTriggerSizeBack  = "SIZEPROOF!BACK"
 )
 
 // The building blocks. Shared verbatim by all four patterns so a change to a
@@ -368,6 +386,12 @@ type ftProof struct {
 	Trigger string
 	Plan    *ftPlan
 	Title   string
+	// Footer is what the plate's last screw-hole row says. It is a FIELD rather
+	// than the ftProofFooter constant because the size ladder must not have one:
+	// measured, a footer at the title's rung refuses the front by 3.200mm and
+	// the back by 1.600mm, so both sides pass an empty string and the resolver
+	// returns THIS rather than a hardcoded default.
+	Footer string
 	// Text is the pattern with no QR; TextQR the one with a QR beside it.
 	//
 	// An EMPTY TextQR means this proof needs the whole plate and cannot carry a
@@ -376,8 +400,33 @@ type ftProof struct {
 	TextQR string
 	// Sizeable proofs accept a rung appended to the trigger and rebuild their
 	// content to reach it; see ftBothAt. The single-face patterns are tuned to
-	// land at 3.0mm and have no drop order, so they take no suffix.
+	// land at 3.0mm and have no drop order, so they take no suffix; the size
+	// ladders state their rungs in the PLAN and must never be Sizeable, or the
+	// side in their trigger would be read as a rung suffix.
 	Sizeable bool
+	// Side is which half of a two-sided plate this is, "FRONT" or "BACK", and
+	// empty for a proof that is one plate.
+	//
+	// It is a LABEL the prompt prints and nothing more: the firmware gains no
+	// relationship between the two sides -- no pairing, no flip prompt, no
+	// ordering. It exists because both sides prove IDENTICAL faces, so the face
+	// plan names them near-identically and the prompt could not tell the
+	// operator which trigger they typed. A mis-pick is engraved where a mistype
+	// is refused.
+	Side string
+}
+
+// Name is what the prompt calls this proof.
+//
+// A size ladder is named by its SIDE, never by Plan.Name(): the front's plan is
+// four runs naming itself "sh+constant+sh+constant" and the back's is six runs
+// naming itself "sh+constant+sh+constant+sh+constant", which are the same
+// sentence to an operator reading a 480-pixel panel.
+func (p *ftProof) Name() string {
+	if p.Side != "" {
+		return p.Side + " size ladder"
+	}
+	return p.Plan.Name()
 }
 
 // NeedsWholePlate reports that this proof has no QR variant.
@@ -402,12 +451,92 @@ func (p *ftProof) For(qr bool) string {
 	return p.Text
 }
 
-// ftProofs is every proof the free-text program offers, one per engraving face.
+// ---- the size ladder --------------------------------------------------------
+
+// The two ladder plans: one run per (face, rung) band, ONE part each.
+//
+// Each side alternates the two shipped faces down the rungs it names, so every
+// rung is proven in both -- a legibility answer for font/sh says nothing about
+// font/constant, and the seed, descriptor and passphrase plates are cut in the
+// latter. 6.0mm is absent by decision: the question the ladder answers is where
+// legibility STOPS, and the top of the range is not in doubt.
+//
+// The rungs are split across two sides because one plate does not hold five.
+// Measured (spec 1.1): the front's four bands end at 78.400mm of the 82.000mm
+// available and the back's six at 79.600mm. The two sides are two independent
+// plate programs and an operator flip; the firmware knows of no relationship
+// between them beyond the Side label the prompt prints.
+//
+// Blocks is 1 on EVERY run, including the last, so declaredParts is the run
+// count and ftPlan.Blocks' predicate has a number to match the field against.
+// The last run's Blocks is otherwise ignored by the walk -- it absorbs the
+// remainder either way -- which is exactly why the predicate cannot be on the
+// block count.
+var (
+	ftPlanSizeFront = ftPlan{Runs: []ftFaceRun{
+		{Face: ftFaceSH, Blocks: 1, SizeMM: 5.0},
+		{Face: ftFaceConst, Blocks: 1, SizeMM: 5.0},
+		{Face: ftFaceSH, Blocks: 1, SizeMM: 3.8},
+		{Face: ftFaceConst, Blocks: 1, SizeMM: 3.8},
+	}}
+	ftPlanSizeBack = ftPlan{Runs: []ftFaceRun{
+		{Face: ftFaceSH, Blocks: 1, SizeMM: 4.4},
+		{Face: ftFaceConst, Blocks: 1, SizeMM: 4.4},
+		{Face: ftFaceSH, Blocks: 1, SizeMM: 3.4},
+		{Face: ftFaceConst, Blocks: 1, SizeMM: 3.4},
+		{Face: ftFaceSH, Blocks: 1, SizeMM: 3.0},
+		{Face: ftFaceConst, Blocks: 1, SizeMM: 3.0},
+	}}
+)
+
+// ftSizeProofText is the ladder's pattern: ONE codepoint sweep per run, joined
+// by the '\n' the field's newline key produces.
+//
+// Derived from the plan rather than written out, because the part count is what
+// ftPlan.Blocks matches against: a hand-written pattern that fell one part out
+// of step with its plan would load and immediately revert to a uniform plate,
+// under a title still claiming a ladder.
+//
+// The sweep and NOTHING else. There is no prose, no confusable table and no
+// footer: a rung's whole job here is to show all 95 glyphs at that size in that
+// face, and the plate holds five rungs in two faces only because each band is
+// exactly one sweep.
+func ftSizeProofText(p *ftPlan) string {
+	parts := make([]string, len(p.Runs))
+	for i := range parts {
+		parts[i] = ftProofSweep
+	}
+	return strings.Join(parts, "\n")
+}
+
+var (
+	ftProofTextSizeFront = ftSizeProofText(&ftPlanSizeFront)
+	ftProofTextSizeBack  = ftSizeProofText(&ftPlanSizeBack)
+)
+
+// The ladder titles: the SIDE and the rungs that side carries, which is the
+// only thing that distinguishes two plates proving identical faces.
+//
+// They state no character grid, because a ladder has one per (face, rung) pair
+// and no single "COLSxROWS" is true of the plate. Both sit under MaxTitleLen
+// (13 and 16 against 18) AND fit the inset span they are centred in -- measured,
+// 13 <= 26 columns at font/sh 3.8mm and 16 <= 36 at font/sh 3.0mm.
+// TestSizeProofPlansAreWellFormed rebuilds them from the side and the plan, so
+// a title claiming a rung the plate does not carry is a failure rather than a
+// permanent lie in steel.
+const (
+	ftProofTitleSizeFront = "FRONT 5.0+3.8"
+	ftProofTitleSizeBack  = "BACK 4.4+3.4+3.0"
+)
+
+// ftProofs is every proof the free-text program offers: one per engraving face,
+// the mixed-face plate, and the two sides of the size ladder.
 var ftProofs = []ftProof{
 	{
 		Trigger: ftProofTriggerSH,
 		Plan:    &ftPlanSH,
 		Title:   ftProofTitleSH,
+		Footer:  ftProofFooter,
 		Text:    ftProofTextSH,
 		TextQR:  ftProofTextSHQR,
 	},
@@ -415,6 +544,7 @@ var ftProofs = []ftProof{
 		Trigger: ftProofTriggerConst,
 		Plan:    &ftPlanConst,
 		Title:   ftProofTitleConst,
+		Footer:  ftProofFooter,
 		Text:    ftProofTextConst,
 		TextQR:  ftProofTextConstQR,
 	},
@@ -423,9 +553,35 @@ var ftProofs = []ftProof{
 		Plan:     &ftPlanBoth,
 		Sizeable: true,
 		Title:    ftProofTitleBoth,
+		Footer:   ftProofFooter,
 		Text:     ftProofTextBoth,
 		// No QR variant: the pattern needs the whole plate. See
 		// NeedsWholePlate.
+		TextQR: "",
+	},
+	{
+		Trigger: ftProofTriggerSizeFront,
+		Plan:    &ftPlanSizeFront,
+		Side:    "FRONT",
+		Title:   ftProofTitleSizeFront,
+		// No footer: measured, one at the title's 3.8mm rung starts 3.200mm
+		// above where this side's body ends and the fit refuses the plate.
+		Footer: "",
+		Text:   ftProofTextSizeFront,
+		// No QR variant either, and here it is structural rather than a
+		// capacity judgement: FitSized has no parameter for a code, because the
+		// keep-out band is quantised by a single fontSize and a plate that
+		// mixes sizes has none. Empty is what makes the prompted drop apply.
+		TextQR: "",
+	},
+	{
+		Trigger: ftProofTriggerSizeBack,
+		Plan:    &ftPlanSizeBack,
+		Side:    "BACK",
+		Title:   ftProofTitleSizeBack,
+		// 1.600mm short at the title's 3.0mm rung.
+		Footer: "",
+		Text:   ftProofTextSizeBack,
 		TextQR: "",
 	},
 }
@@ -479,11 +635,13 @@ func ftProofForTrigger(typed string) (*ftProof, float32, bool) {
 // only this screen carries -- see TestProofNeedsTheWholeField.
 const ftProofPromptTitle = "Test Pattern"
 
-// ftProofAsk names the face plan in the question itself, because the triggers
-// differ ONLY in which faces they prove and the operator has to be able to
-// tell, from the screen, which of them they typed.
+// ftProofAsk names the proof in the question itself, because the triggers
+// differ ONLY in what they prove and the operator has to be able to tell, from
+// the screen, which of them they typed. For the face proofs that is the face
+// plan; for the size ladder it is the SIDE, since both sides prove the same two
+// faces -- see ftProof.Name.
 func ftProofAsk(p *ftProof) string {
-	return "Load the " + p.Plan.Name() + " test pattern?"
+	return "Load the " + p.Name() + " test pattern?"
 }
 
 // ftProofReplaces is the prompt's promise, and ftProofLoader is what keeps it.
@@ -516,30 +674,64 @@ type ftProofOutcome struct {
 
 // ftProofOutcomeFor resolves a proof and a chosen rung into the fields that
 // will be written. useQR must already reflect the whole-plate QR drop.
+//
+// The rung branch is gated on Sizeable, because what it does is rebuild the
+// MIXED pattern -- so reached with a rung and any other proof it would hand
+// back BOTHPROOF!'s plate under that proof's own trigger. ftProofForTrigger
+// only ever returns a non-zero rung for a Sizeable proof, but cmd/plateview's
+// -size is a flag and reaches this resolver directly.
+//
+// The footer comes from the PROOF. A hardcoded ftProofFooter here would put a
+// footer on the size ladder, which the fit then refuses outright: measured, one
+// at the title's rung is 3.200mm too low on the front and 1.600mm on the back.
 func ftProofOutcomeFor(params engrave.Params, p *ftProof, rung float32, useQR bool) ftProofOutcome {
-	if rung != 0 {
+	if rung != 0 && p.Sizeable {
 		if t, pl, ti, fo, err := ftBothAt(params, rung, useQR); err == nil {
 			return ftProofOutcome{Text: t, Title: ti, Footer: fo, Plan: pl, SizeMM: rung}
 		}
 	}
-	return ftProofOutcome{Text: p.For(useQR), Title: p.Title, Footer: ftProofFooter, Plan: p.Plan}
+	return ftProofOutcome{Text: p.For(useQR), Title: p.Title, Footer: p.Footer, Plan: p.Plan}
 }
 
 // ftRungLabel names the size the plate will be cut at, for the prompt the
-// operator reads before accepting. Without a chosen rung the pattern is tuned
-// to land at 3.0mm and auto-fit confirms it.
-func ftRungLabel(size float32) string {
-	if size == 0 {
+// operator reads before accepting.
+//
+// A plan that states its own rungs is a size LADDER and has no single size, so
+// the label is the list -- in plate order, the way the ladder's own title reads
+// it. Printing "3.0mm" here for a five-rung survey is the defect this whole
+// change exists to remove, arriving one screen earlier than the confirm screen.
+//
+// Without a chosen rung an ordinary pattern is tuned to land at 3.0mm and
+// auto-fit confirms it.
+func ftRungLabel(out ftProofOutcome) string {
+	if rungs := out.Plan.Rungs(); len(rungs) > 0 {
+		parts := make([]string, len(rungs))
+		for i, r := range rungs {
+			parts[i] = fmt.Sprintf("%.1f", r)
+		}
+		return strings.Join(parts, "+") + "mm"
+	}
+	if out.SizeMM == 0 {
 		return "3.0mm"
 	}
-	return fmt.Sprintf("%.1fmm, with the pattern trimmed to fit", size)
+	return fmt.Sprintf("%.1fmm, with the pattern trimmed to fit", out.SizeMM)
 }
 
 func ftProofReplaces(p *ftProof, out ftProofOutcome) string {
 	s := "This REPLACES ALL THREE fields, discarding whatever is in them now: " +
-		"Text becomes the proof pattern, Title becomes " + out.Title +
-		", Footer becomes " + out.Footer + ". The plate is cut in " +
-		out.Plan.Name() + " at " + ftRungLabel(out.SizeMM) + "."
+		"Text becomes the proof pattern, Title becomes " + out.Title + ", "
+	if out.Footer == "" {
+		// Naming the new value gives "Footer becomes ." when the new value is
+		// nothing at all, which reads as a rendering fault rather than as the
+		// deliberate clearing it is -- and the operator has to know the field
+		// they may have typed is going away.
+		s += "and the Footer is CLEARED"
+	} else {
+		s += "Footer becomes " + out.Footer
+	}
+	// The SIDE, not the plan: both ladder sides prove identical faces, so
+	// Plan.Name() gives the two of them near-identical prompts.
+	s += ". The plate is cut in " + p.Name() + " at " + ftRungLabel(out) + "."
 	if p.NeedsWholePlate() {
 		s += " It also REMOVES THE QR: this pattern needs the whole plate, " +
 			"so the plate will not be machine-readable."
