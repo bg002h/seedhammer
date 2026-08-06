@@ -933,7 +933,7 @@ func TestProofLoaderWritesEveryPromisedField(t *testing.T) {
 		plan := stale
 		useQR := tc.qr
 		var size float32
-		got := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(tc.proof, 0)
+		got := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size, new(bool))(tc.proof, 0)
 		if text != tc.proof.For(tc.qr) {
 			t.Errorf("%s: text not loaded", tc.name)
 		}
@@ -982,7 +982,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 				plan := &ftPlanSH
 				useQR := qr
 				var size float32
-				ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
+				ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size, new(bool))(p, 0)
 				if useQR != qr {
 					t.Errorf("%s: loading changed the QR choice from %v to %v", p.Name(), qr, useQR)
 				}
@@ -1003,7 +1003,7 @@ func TestProofWholePlateDropsTheQR(t *testing.T) {
 		plan := &ftPlanSH
 		useQR := true
 		var size float32
-		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
+		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size, new(bool))(p, 0)
 		if useQR {
 			t.Errorf("%s: the loader left the QR on; the pattern does not fit beside one", p.Plan.Name())
 		}
@@ -1246,6 +1246,7 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 
 			// Title and footer were written too, and the flow carries them.
 			ftOK(h)
+			ftPastSpeed(h)
 			h.mustReach("Title")
 			if got := ftKbd(h).Fragment; got != tc.proof.Title {
 				t.Errorf("the Title field holds %q, want %q", got, tc.proof.Title)
@@ -1343,7 +1344,9 @@ func TestProofE2EDecliningEngravesTheTypedText(t *testing.T) {
 			}
 			h.tapWidget("proofNo")
 			// Declining falls through to the field's own validation, which
-			// accepts the trigger as the ordinary text it is.
+			// accepts the trigger as the ordinary text it is -- and then
+			// through Speed, exactly as any other composition does.
+			ftPastSpeed(h)
 			h.mustReach("Title")
 			ftOK(h) // no title
 			h.mustReach("Footer")
@@ -1384,6 +1387,7 @@ func TestProofE2EIsScopedToTheTextField(t *testing.T) {
 			ftPastQR(h, false)
 			h.typeString("hi")
 			ftOK(h)
+			ftPastSpeed(h)
 			h.mustReach("Title")
 			if step == "Footer" {
 				ftOK(h)
@@ -1619,7 +1623,7 @@ func TestMixedProofConfirmScreenFitsThePanel(t *testing.T) {
 	}
 	start, seen, pages := 0, 0, 0
 	for {
-		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, ftProofFooter)
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, ftProofFooter, "")
 		if v.Size.Y > area.Dy() {
 			t.Fatalf("page %d needs %dpx of a %dpx area on a %v panel", pages, v.Size.Y, area.Dy(), dims)
 		}
@@ -1668,6 +1672,7 @@ func TestMixedProofE2EWithAQRChosen(t *testing.T) {
 		t.Errorf("the readout does not show the pattern fitting at 3.0mm; frame %q", h.content)
 	}
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")

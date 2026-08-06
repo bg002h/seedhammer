@@ -566,6 +566,11 @@ const (
 	// what it is rather than offering to change it.
 	ftFaceLeadFixed = "This pattern states its own faces. They are not a choice here."
 	ftSizeLeadFixed = "This pattern states its own sizes. They are not a choice here."
+	ftSpeedLead     = "How fast the needle travels while cutting. Slower spaces " +
+		"the hammer's dots more closely."
+	// Off a proof composition the feed is fixed, so seed, descriptor and
+	// passphrase plates can never carry a non-standard one.
+	ftSpeedLeadFixed = "The engraving speed is adjustable on test patterns only."
 )
 
 // ftFaceOptions is the Font screen's content: the labels, and the plan each one
@@ -630,6 +635,128 @@ func ftSizeOptions(plan *ftPlan, cur float32) ([]string, []float32) {
 		sizes = append(sizes, s)
 	}
 	return labels, sizes
+}
+
+// ftSpeedRungs is the engraving feeds the Speed screen offers, in mm/s.
+//
+// FIVE FIXED VALUES, and deliberately not a numeric box. The machine has no
+// motion safety envelope at all -- no StepperConfig.Validate, no bounds
+// constant, no planner guard -- and the degenerate cases were reproduced by
+// driving the real planner on 2026-08-06:
+//
+//	EngravingSpeed = 0   PANICS at engrave.go:1117 (timeScaler.Scale)
+//	Jerk           = 0   PANICS at engrave.go:1155 via bezier.go:300
+//	Acceleration   = 0   does not panic; plans at 3x its own velocity limit
+//
+// A list of non-zero values cannot reach any of those. The argument is not that
+// typing is hard, it is that the layer which would catch a typo does not exist.
+//
+// The list spans both sides of the shipped 4mm/s so 4-against-8 can be cut, and
+// stays inside ChoiceScreen's silent-overflow budget (it does not scroll, and
+// op.Layer draws content OVER the title past roughly seven entries).
+var ftSpeedRungs = []float32{8.0, 6.0, 4.0, 2.0, 1.0}
+
+// ftSpeedCeilingMM is the highest feed that may be offered, in mm/s.
+//
+// PHYSICAL, not a preference, for two independent reasons. It is what upstream
+// shipped and validated; and above it engraving crosses INTO the StallGuard
+// window -- minimumStallVelocity is 8*mm, giving TCOOLTHRS 234 against an
+// engraving TSTEP of 234.4 at exactly 8mm/s -- so a faster feed would start
+// reading the hammer's own strikes as stalls. See the worked table at
+// cmd/controller/platform_sh2.go's minimumStallVelocity.
+const ftSpeedCeilingMM = 8.0
+
+// ftDefaultSpeedMM is the machine's own engraving feed, in mm/s.
+func ftDefaultSpeedMM(params engrave.Params) float32 {
+	return float32(params.EngravingSpeed) / float32(params.Millimeter)
+}
+
+// ftParamsAtSpeed returns params with ONLY EngravingSpeed replaced. A zero
+// mmPerSec leaves them untouched.
+//
+// Speed and TicksPerSecond are deliberately not derived from it. Speed above
+// TicksPerSecond is silently rate-limited rather than rejected
+// (stepper.go:49-53 clamps to +-1 microstep per tick; fill() has no return value
+// and Driver.Knot() inspects no error), and the loss is permanent rather than
+// deferred, so every later stroke on the plate would be offset with no warning.
+func ftParamsAtSpeed(params engrave.Params, mmPerSec float32) engrave.Params {
+	if mmPerSec <= 0 {
+		return params
+	}
+	params.EngravingSpeed = uint(mmPerSec*float32(params.Millimeter) + 0.5)
+	return params
+}
+
+// ftSpeedNote is the confirm screen's suffix for a non-default feed, empty when
+// the machine default is in force.
+//
+// Nothing on the finished steel records the feed it was cut at, so the operator
+// must not be able to approve a non-default one without seeing it. Equally, an
+// ordinary plate must not grow a line that never varies.
+func ftSpeedNote(params engrave.Params, mmPerSec float32) string {
+	if mmPerSec <= 0 || mmPerSec == ftDefaultSpeedMM(params) {
+		return ""
+	}
+	return fmt.Sprintf("  speed: %.1fmm/s", mmPerSec)
+}
+
+// ftSpeedOptions is the Speed screen's content: the labels and the feed each one
+// selects, 0 meaning "leave the machine default alone".
+//
+// UNTIL A PROOF PATTERN IS LOADED IT IS ONE ENTRY, naming the default -- state,
+// not a decision, the same idiom Font and Size use. That gate is what keeps the
+// feed away from seed, descriptor and passphrase plates, and it is load-bearing
+// safety rather than a convenience: nothing on a finished plate records the feed
+// it was cut at, so an ordinary backup must not be able to carry a strange one.
+//
+// The gate is proofLoaded and NOT the plan, because TEXTPROOF! and CONSTPROOF!
+// resolve to plans the Font screen can produce on its own -- see ftProofLoader.
+func ftSpeedOptions(params engrave.Params, proofLoaded bool, cur float32) ([]string, []float32) {
+	def := ftDefaultSpeedMM(params)
+	if !proofLoaded {
+		return []string{fmt.Sprintf("%.1fmm/s (default)", def)}, []float32{cur}
+	}
+	labels := make([]string, 0, len(ftSpeedRungs))
+	speeds := make([]float32, 0, len(ftSpeedRungs))
+	for _, s := range ftSpeedRungs {
+		l := fmt.Sprintf("%.1fmm/s", s)
+		if s == def {
+			l += " (default)"
+		}
+		labels = append(labels, l)
+		speeds = append(speeds, s)
+	}
+	return labels, speeds
+}
+
+// ftSpeedChoiceFlow is step 5, and unlike Font and Size it sits AFTER the text.
+//
+// Those two precede the text because they change plate CAPACITY. The feed
+// changes no geometry at all -- only the tick counts on an already-decided
+// toolpath -- so it has no reason to come first, and coming last means the flow
+// already knows whether a proof keyword was used, since a proof is loaded ON the
+// text screen. A picker before Text would have needed a Back to see it.
+func ftSpeedChoiceFlow(ctx *Context, th *Colors, params engrave.Params, proofLoaded bool, prior float32) (float32, bool) {
+	labels, speeds := ftSpeedOptions(params, proofLoaded, prior)
+	cs := &ChoiceScreen{Title: "Speed", Lead: ftSpeedLead, Choices: labels}
+	if len(speeds) == 1 {
+		cs.Lead = ftSpeedLeadFixed
+	}
+	// Preserve a deliberate choice across Back; otherwise start on the machine
+	// default so the common path is still one checkmark.
+	want := prior
+	if want <= 0 {
+		want = ftDefaultSpeedMM(params)
+	}
+	if i := slices.Index(speeds, want); i > 0 {
+		cs.choice = i
+	}
+	hookPPWidget("speed", cs)
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return prior, false
+	}
+	return speeds[sel], true
 }
 
 // ftFaceChoiceFlow is step 2. It sits BEFORE the text screen because the face
@@ -937,13 +1064,16 @@ func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
 // code whatever the operator chose one step earlier (spec 2.7), and a screen
 // that reported the flag would promise a machine-readable plate that the
 // engraver does not cut.
-func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager string) (op.Op, image.Point) {
+// speedNote is appended only for a NON-DEFAULT engraving feed, so an ordinary
+// plate does not grow a line that never varies and a test pattern cannot be
+// approved without its feed on screen. See ftSpeedNote.
+func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager, speedNote string) (op.Op, image.Point) {
 	useQR := f.plate.QR != nil
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, fmt.Sprintf(
-		"%s  %d lines  QR: %s  font: %s",
+		"%s  %d lines  QR: %s  font: %s%s",
 		ftPlateRungs(f.plate), len(f.plate.Lines), ppYesNo(useQR),
-		ftFaceSummary(plan, f.plate.Faces, f.plate.Sizes)))
+		ftFaceSummary(plan, f.plate.Faces, f.plate.Sizes), speedNote))
 	if pager != "" {
 		rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, pager)
 	}
@@ -980,14 +1110,14 @@ type ftConfirmView struct {
 // at least one row, so the pager cannot stall; TestFTConfirmAlwaysFitsThePanel
 // pins that the budget on the real panel is at least one row even in the
 // tightest case.
-func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer string) ftConfirmView {
+func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer, speedNote string) ftConfirmView {
 	rows := ftConfirmRows(f, title, footer)
 	if start < 0 || start >= len(rows) {
 		start = 0
 	}
 	// Measured with a pager string of the same shape as the real one, so the
 	// reservation is exact rather than approximately right.
-	_, probe := ftConfirmSummary(ctx, th, width, f, plan, ftConfirmPager(0, 0, 0))
+	_, probe := ftConfirmSummary(ctx, th, width, f, plan, ftConfirmPager(0, 0, 0), speedNote)
 	budget := height - probe.Y
 
 	var rt richText
@@ -1011,7 +1141,7 @@ func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, 
 	if start > 0 || shown < len(rows) {
 		pager = ftConfirmPager(start, shown, len(rows))
 	}
-	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, pager)
+	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, pager, speedNote)
 	return ftConfirmView{
 		Content: op.Layer(rt.Content, sum.Offset(image.Pt(0, rt.Y))),
 		Size:    image.Pt(width, rt.Y+sumSz.Y),
@@ -1033,7 +1163,7 @@ func ftConfirmPager(start, shown, total int) string {
 // Three buttons, not two: Back, "next page" and OK. The page button appears
 // only when the preview does not fit at once, so a short text -- which is
 // almost every real one -- still shows the whole plate and two buttons.
-func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer string) bool {
+func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer, speedNote string) bool {
 	backBtn := &Clickable{Button: Button1}
 	pageBtn := &Clickable{Button: Button2}
 	okBtn := &Clickable{Button: Button3}
@@ -1060,7 +1190,7 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, foote
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer)
+		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer, speedNote)
 		body := view.Content.Offset(image.Point(area.Min))
 		btns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
@@ -1088,6 +1218,20 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, foote
 // no assertion on the size, the lines or the code can see. On a mixed-face
 // plate that includes engraving both halves in one face, or in each other's.
 var freetextPlateHook func(f backup.Fitted)
+
+// freetextEngraveHook receives the finished Plate at the moment the flow hands
+// it to the engraver. nil in production; mirrors freetextPlateHook and exists
+// for the same reason -- a defect in the CALLER cannot be caught by any unit
+// test of the callee.
+//
+// freetextPlateHook cannot cover this: it reports the backup.Fitted, which
+// carries the layout but not the motion config. A flow that computed the
+// operator's chosen feed and then handed ftBuildPlate the undecorated params
+// would pass every layout assertion in this package while engraving at the
+// wrong speed. That is not hypothetical -- mutation testing on 2026-08-06
+// dropped ftParamsAtSpeed from the engrave step and the whole suite stayed
+// green until this hook existed.
+var freetextEngraveHook func(p Plate)
 
 // ftBuildPlate turns the fitted composition into an engravable plate.
 //
@@ -1119,6 +1263,10 @@ const (
 	ftStepFace
 	ftStepSize
 	ftStepText
+	// Speed comes AFTER the text, unlike face and size: it changes no geometry,
+	// and by here the flow knows whether a proof keyword was used. See
+	// ftSpeedChoiceFlow.
+	ftStepSpeed
 	ftStepTitle
 	ftStepFooter
 	ftStepConfirm
@@ -1138,6 +1286,13 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 	// plan. Held here rather than in ftTextEntryFlow so it survives Back exactly
 	// as the other four fields do.
 	plan := &ftPlanSH
+	// The engraving feed in mm/s, or 0 for the machine's own. Held here beside
+	// the other fields so it survives Back exactly as they do, and discarded
+	// when the program returns -- there is no persistence, by design.
+	var speed float32
+	// Set by any accepted proof trigger; see ftProofLoader. This and not the
+	// plan is what unlocks the Speed screen.
+	var proofLoaded bool
 	step := ftStepQR
 	for !ctx.Done {
 		switch step {
@@ -1169,12 +1324,19 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			size = s
 		case ftStepText:
 			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR, &size,
-				ftProofLoader(params, &text, &title, &footer, &plan, &useQR, &size))
+				ftProofLoader(params, &text, &title, &footer, &plan, &useQR, &size, &proofLoaded))
 			if !ok {
 				step -= 2
 				break
 			}
 			text = s
+		case ftStepSpeed:
+			s, ok := ftSpeedChoiceFlow(ctx, th, params, proofLoaded, speed)
+			if !ok {
+				step -= 2
+				break
+			}
+			speed = s
 		case ftStepTitle:
 			s, ok := ftLineEntryFlow(ctx, th, "Title", title)
 			if !ok {
@@ -1190,7 +1352,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			footer = s
 		case ftStepConfirm:
-			f := ftEvaluate(params, plan, text, title, footer, useQR, size)
+			f := ftEvaluate(ftParamsAtSpeed(params, speed), plan, text, title, footer, useQR, size)
 			if f.err != nil || !f.ok {
 				// A title or footer entered after the text can only ever make
 				// the composition SMALLER on the plate, never inadmissible --
@@ -1200,17 +1362,20 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				step -= 2
 				break
 			}
-			if !ftConfirmFlow(ctx, th, f, plan, title, footer) {
+			if !ftConfirmFlow(ctx, th, f, plan, title, footer, ftSpeedNote(params, speed)) {
 				step -= 2
 				break
 			}
 		case ftStepEngrave:
-			plate, err := ftBuildPlate(params, plan, text, title, footer, useQR, size)
+			plate, err := ftBuildPlate(ftParamsAtSpeed(params, speed), plan, text, title, footer, useQR, size)
 			if err != nil {
 				// The message quotes no field content.
 				showError(ctx, th, "Text", "This text does not fit a plate.")
 				step -= 2
 				break
+			}
+			if freetextEngraveHook != nil {
+				freetextEngraveHook(plate)
 			}
 			if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
 				return

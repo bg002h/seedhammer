@@ -117,6 +117,21 @@ func ftPastFaceAndSize(h *ppHarness) {
 	ftChoose(h, "size", 0)
 }
 
+// ftPastSpeed takes the Speed screen at its default. It sits between Text and
+// Title, so every forward walk from the text field passes through it; a walk
+// that BACKS into Title does not.
+//
+// Index 0 is the default on both shapes: off a proof the screen has a single
+// entry, and on a proof the list starts at 8.0mm/s, which is exactly the test
+// platform's engravingSpeed. So these walks plan the same plate they planned
+// before this screen existed -- which is what keeps every pre-existing
+// assertion in this package meaningful, and what stops the goldens moving.
+func ftPastSpeed(h *ppHarness) {
+	h.t.Helper()
+	h.mustReach("Speed")
+	ftChoose(h, "speed", 0)
+}
+
 // ftBackToQR steps back from the text screen to the QR screen, through the two
 // pickers that now sit between them. ChoiceScreen owns its Back button
 // privately, so each picker is left by nav slot rather than by widget.
@@ -180,6 +195,7 @@ func TestFTFlowOrderIsQRFirst(t *testing.T) {
 	ftPastQR(h, false)
 	h.typeString("hi")
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	h.typeString("t")
 	ftOK(h)
@@ -201,6 +217,7 @@ func TestConfirmLinesEqualWrapText(t *testing.T) {
 	ftPastQR(h, false)
 	ftSetText(h, text)
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h) // skip
 	h.mustReach("Footer")
@@ -235,6 +252,7 @@ func TestConfirmLinesAreNotRewrapped(t *testing.T) {
 	ftPastQR(h, false)
 	ftSetText(h, text)
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")
@@ -346,6 +364,7 @@ func TestFTRefusalOffersTheQRRatherThanDroppingIt(t *testing.T) {
 	ftChoose(h, "refusal", 1)
 	h.mustReach("lines")
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 }
 
@@ -357,6 +376,7 @@ func TestFTTitleAndFooterCap(t *testing.T) {
 			ftPastQR(h, false)
 			h.typeString("hi")
 			ftOK(h)
+			ftPastSpeed(h)
 			h.mustReach("Title")
 			if step == "Footer" {
 				ftOK(h) // skip the title
@@ -387,6 +407,7 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	ftPastQR(h, true)
 	h.typeString("note")
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	h.typeString("TT")
 	ftOK(h)
@@ -406,7 +427,10 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	if got := ftKbd(h).Fragment; got != "TT" {
 		t.Errorf("title = %q after Back, want %q", got, "TT")
 	}
+	// Back out of Title lands on Speed, which sits between it and the text.
 	ftBack(h)
+	h.mustReach("Speed")
+	h.tapNav(Button1)
 	h.mustReach("lines")
 	if got := ftKbd(h).Fragment; got != "note" {
 		t.Errorf("text = %q after Back, want %q", got, "note")
@@ -439,6 +463,7 @@ func TestFTPlateIsWhatWasApproved(t *testing.T) {
 	ftPastQR(h, true)
 	ftSetText(h, text)
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftSetText(h, "TO MY HEIR")
 	ftOK(h)
@@ -501,6 +526,7 @@ func TestFTQREncodesTheTextOnly(t *testing.T) {
 	ftPastQR(h, true)
 	ftSetText(h, text)
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftSetText(h, "A TITLE")
 	ftOK(h)
@@ -538,6 +564,7 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 	ftPastQR(h, false)
 	h.typeString("hi")
 	ftOK(h)
+	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")
@@ -605,7 +632,7 @@ func TestConfirmLinesAreOwnUnwrappedLabels(t *testing.T) {
 	// not the pager. The paging itself is TestFTConfirmPagesEveryRowExactlyOnce.
 	const noPaging = 1 << 20
 	body := func(width int, f ftFit, title, footer string) image.Point {
-		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, &ftPlanSH, title, footer)
+		v := ftConfirmBody(ctx, th, width, noPaging, 0, f, &ftPlanSH, title, footer, "")
 		if v.Shown != v.Total {
 			t.Fatalf("the %dpx budget still paged: %d of %d rows", noPaging, v.Shown, v.Total)
 		}
@@ -761,6 +788,7 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 			ftPastQR(h, useQR)
 			h.typeString("hi")
 			ftOK(h)
+			ftPastSpeed(h)
 			h.mustReach("Title")
 			ftOK(h)
 			h.mustReach("Footer")
@@ -877,7 +905,7 @@ func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
 				useQR := f.plate.QR != nil
 				start, guard := 0, 0
 				for {
-					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1])
+					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1], "")
 					if v.Size.Y > area.Dy() {
 						t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q) page from row %d needs %dpx "+
 							"of a %dpx area: the size line and the warnings are off the %v panel",
@@ -927,7 +955,7 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	for i := 0; i < 24; i++ {
 		f.plate.Lines = append(f.plate.Lines, strings.Repeat("W", 44))
 	}
-	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, &ftPlanConst, cap18, cap18)
+	v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), 0, f, &ftPlanConst, cap18, cap18, "")
 	if v.Total != 26 {
 		t.Fatalf("worst case is %d rows, want 26 (title + 24 lines + footer)", v.Total)
 	}
@@ -936,7 +964,7 @@ func TestFTConfirmReservesRoomForTheWarnings(t *testing.T) {
 	}
 	// And the warnings themselves are what is being reserved for: the summary
 	// must be the taller part of the budget, or nothing was actually reserved.
-	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, &ftPlanConst, ftConfirmPager(0, 1, 26))
+	_, sum := ftConfirmSummary(ctx, th, area.Dx(), f, &ftPlanConst, ftConfirmPager(0, 1, 26), "")
 	if sum.Y <= 0 {
 		t.Fatal("the summary block measures nothing; the reservation is vacuous")
 	}
@@ -967,7 +995,7 @@ func TestFTConfirmPagesEveryRowExactlyOnce(t *testing.T) {
 	start := 0
 	pages := 0
 	for {
-		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, &ftPlanSH, cap18, cap18)
+		v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, &ftPlanSH, cap18, cap18, "")
 		if v.Total != len(rows) {
 			t.Fatalf("page %d reports %d rows, want %d", pages, v.Total, len(rows))
 		}

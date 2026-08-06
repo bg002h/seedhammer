@@ -474,6 +474,25 @@ func validateDescriptor(params engrave.Params, desc *bip380.Descriptor) ([]strin
 type Plate struct {
 	Duration uint
 	Spline   bspline.Curve
+	// Conf is the motion config the Spline was PLANNED with, snapshotted so the
+	// run cannot disagree with the plan.
+	//
+	// The per-knot tick counts in Spline already encode the velocity, so the cut
+	// itself is governed by the plan whatever the platform says later. The
+	// resume-after-interruption path is the exception: it has to synthesise
+	// catch-up motion, and reading the platform for that would compute it at a
+	// different feed than the plate was planned at. Harmless while there is one
+	// immutable config in the system; wrong the moment a feed is selectable.
+	//
+	// A ZERO Conf IS A PROGRAMMING ERROR, and a loud one: Jerk=0 divides by zero
+	// inside SafePointer.Resume, i.e. mid-job with the needle down. toPlate
+	// always sets it, so the only way there is a hand-built Plate literal. Not
+	// hypothetical -- one in gui_test.go did exactly that and panicked the suite
+	// the first time this field existed. Deliberately NOT defended by falling
+	// back to the platform's config: that would restore the silent plan/run
+	// divergence this field exists to remove, and a quiet wrong feed is worse
+	// than a crash.
+	Conf engrave.StepperConfig
 }
 
 func engraveSeed(params engrave.Params, m bip39.Mnemonic, mfp uint32) (Plate, error) {
@@ -2537,7 +2556,8 @@ func (s *DescriptorScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.O
 func NewEngraveScreen(ctx *Context, plate Plate) *EngraveScreen {
 	return &EngraveScreen{
 		duration: plate.Duration,
-		job:      newEngraverJob(ctx.Platform, plate.Spline, 0),
+		// The plate's OWN config, never the platform's: see Plate.Conf.
+		job: newEngraverJob(ctx.Platform, plate.Spline, plate.Conf, 0),
 	}
 }
 
@@ -2856,6 +2876,7 @@ func toPlate(plan engrave.Engraving, params engrave.Params) (Plate, error) {
 	return Plate{
 		Duration: attrs.Duration,
 		Spline:   spline,
+		Conf:     params.StepperConfig,
 	}, nil
 }
 

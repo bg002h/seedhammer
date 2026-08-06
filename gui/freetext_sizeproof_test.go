@@ -230,6 +230,9 @@ func TestSizeProofIsTheLadderEndToEnd(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
+				if step == "Title" {
+					ftPastSpeed(h)
+				}
 				h.mustReach(step)
 			}
 			ftOK(h)
@@ -564,7 +567,7 @@ func TestSizeProofNeedsTheWholePlate(t *testing.T) {
 		plan := &ftPlanSH
 		useQR := true
 		var size float32
-		got := ftProofLoader(P, &text, &title, &footer, &plan, &useQR, &size)(p, 0)
+		got := ftProofLoader(P, &text, &title, &footer, &plan, &useQR, &size, new(bool))(p, 0)
 		if useQR {
 			t.Errorf("%s: the loader left the QR on", trigger)
 		}
@@ -628,6 +631,9 @@ func TestSizeProofDropsTheQRTheOperatorChose(t *testing.T) {
 	h.mustReach("lines")
 	for _, step := range []string{"Title", "Footer", "Confirm"} {
 		ftOK(h)
+		if step == "Title" {
+			ftPastSpeed(h)
+		}
 		h.mustReach(step)
 	}
 	if uiContains(h.content, "QR: yes") {
@@ -703,6 +709,9 @@ func TestSizeProofQRStepStatesTheQRIsUnavailable(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
+				if step == "Title" {
+					ftPastSpeed(h)
+				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -967,6 +976,7 @@ func TestSizeProofAdvancesWithTheQRReEnabled(t *testing.T) {
 				t.Fatalf("the Text step refuses a ladder that fits, over a code it cannot carry; frame %q",
 					h.content)
 			}
+			ftPastSpeed(h)
 			h.mustReach("Title")
 
 			// The flag half, where the flag can still be true.
@@ -1089,6 +1099,9 @@ func TestSizeProofConfirmNamesTheRungs(t *testing.T) {
 			}
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
+				if step == "Title" {
+					ftPastSpeed(h)
+				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1140,7 +1153,7 @@ func ftRenderConfirmPages(t *testing.T, ctx *Context, f ftFit, plan *ftPlan, tit
 	area := ppConfirmArea(dims)
 	var pages []string
 	for start, guard := 0, 0; ; guard++ {
-		v := ftConfirmBody(ctx, &descriptorTheme, area.Dx(), area.Dy(), start, f, plan, title, footer)
+		v := ftConfirmBody(ctx, &descriptorTheme, area.Dx(), area.Dy(), start, f, plan, title, footer, "")
 		d := new(op.Drawer)
 		pages = append(pages, d.ExtractText(image.Rectangle{Max: dims}, v.Content))
 		if v.Shown < 1 {
@@ -1212,6 +1225,9 @@ func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
+				if step == "Title" {
+					ftPastSpeed(h)
+				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1244,6 +1260,9 @@ func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
 		h.typeString("hello")
 		for _, step := range []string{"Title", "Footer", "Confirm"} {
 			ftOK(h)
+			if step == "Title" {
+				ftPastSpeed(h)
+			}
 			h.mustReach(step)
 		}
 		pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1286,7 +1305,7 @@ func TestSizeProofConfirmFitsThePanel(t *testing.T) {
 		}
 		start, guard := 0, 0
 		for {
-			v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, p.Footer)
+			v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, p.Plan, p.Title, p.Footer, "")
 			if v.Size.Y > area.Dy() {
 				t.Fatalf("%s: the page from row %d needs %dpx of a %dpx area: the rung line and "+
 					"the warnings are off the %v panel", trigger, start, v.Size.Y, area.Dy(), dims)

@@ -171,6 +171,12 @@ func TestEngraveScreenCancel(t *testing.T) {
 					Spline: func(yield func(bspline.Knot) bool) {
 						time.Sleep(10 * time.Second)
 					},
+					// A real plate always carries the config it was
+					// planned with. Omitting it here left the resume path
+					// with Jerk=0, which divides by zero inside
+					// SafePointer.Resume -- so this line is load-bearing,
+					// not decoration.
+					Conf: p.EngraverParams().StepperConfig,
 				},
 			)
 			if ok := scr.Engrave(ctx, &engraveTheme); ok {

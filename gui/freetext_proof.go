@@ -845,7 +845,14 @@ func ftProofNav(noBtn, yesBtn *Clickable) []NavButton {
 // returned to the flow by writing through the pointer rather than by the return
 // value: the return value is the text, and the caller uses it to re-seed the
 // keyboard.
-func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ftPlan, useQR *bool, size *float32) func(*ftProof, float32) string {
+// loaded is set the moment any proof pattern is accepted, and is what unlocks
+// the Speed screen. It is EXPLICIT STATE rather than something inferred from
+// the plan, because the plan cannot carry the distinction: TEXTPROOF! and
+// CONSTPROOF! resolve to ftPlanSH and ftPlanConst, which are byte-identical to
+// what the Font screen produces when the operator simply picks a face. Gating
+// on plan identity would silently leave two of the five triggers unable to
+// unlock anything.
+func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ftPlan, useQR *bool, size *float32, loaded *bool) func(*ftProof, float32) string {
 	return func(p *ftProof, rung float32) string {
 		if p.NeedsWholePlate() {
 			// The one exception, and it is prompted: ftProofReplaces says this
@@ -860,6 +867,7 @@ func ftProofLoader(params engrave.Params, text, title, footer *string, plan **ft
 		// TestMixedProofFitsEveryRung.
 		out := ftProofOutcomeFor(params, p, rung, *useQR)
 		*text, *title, *footer, *plan, *size = out.Text, out.Title, out.Footer, out.Plan, out.SizeMM
+		*loaded = true
 		return *text
 	}
 }

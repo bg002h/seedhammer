@@ -227,7 +227,7 @@ func TestNamedRungIsTheRungEngraved(t *testing.T) {
 		useQR := false
 		var size float32
 		plan := &ftPlanSH
-		load := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)
+		load := ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size, new(bool))
 
 		p, rung, ok := ftProofForTrigger(fmt.Sprintf("BOTHPROOF!%.1f", want))
 		if !ok {
@@ -274,7 +274,7 @@ func TestProofPromptMatchesWhatTheLoaderWrites(t *testing.T) {
 		useQR := false
 		var size float32
 		plan := &ftPlanSH
-		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size)(p, rung)
+		ftProofLoader(engraverParams, &text, &title, &footer, &plan, &useQR, &size, new(bool))(p, rung)
 
 		out := ftProofOutcomeFor(engraverParams, p, rung, false)
 		prompt := ftProofReplaces(p, out)
@@ -349,6 +349,9 @@ func TestProofE2ENamedRungDrivesThePrompt(t *testing.T) {
 			// Straight through to the engrave, and the plate must be the rung's.
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
+				if step == "Title" {
+					ftPastSpeed(h)
+				}
 				h.mustReach(step)
 			}
 			ftOK(h)

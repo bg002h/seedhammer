@@ -18,7 +18,8 @@ func qaEngraveFlow(ctx *Context) {
 	dims := sz.Dims(params.Millimeter)
 	plan := engrave.PlanEngraving(params.StepperConfig,
 		qaPlan(params.Millimeter, dims))
-	e := newEngraverJob(p, plan, suppressStalls)
+	// The same config the plan was made with, two lines above.
+	e := newEngraverJob(p, plan, params.StepperConfig, suppressStalls)
 	e.Start()
 	defer e.Stop()
 	var eerr string

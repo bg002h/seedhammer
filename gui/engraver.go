@@ -15,7 +15,10 @@ type Engraver interface {
 type engraveJob struct {
 	pl     Platform
 	spline bspline.Curve
-	opts   jobOptions
+	// conf is the config the spline was PLANNED with, carried from Plate.Conf
+	// rather than read back from pl. See Plate.Conf for why.
+	conf engrave.StepperConfig
+	opts jobOptions
 
 	quit      chan<- struct{}
 	errs      <-chan error
@@ -52,12 +55,24 @@ const (
 	engraveDone
 )
 
-func newEngraverJob(p Platform, spline bspline.Curve, opts jobOptions) *engraveJob {
+func newEngraverJob(p Platform, spline bspline.Curve, conf engrave.StepperConfig, opts jobOptions) *engraveJob {
 	return &engraveJob{
 		pl:     p,
 		spline: spline,
+		conf:   conf,
 		opts:   opts,
 	}
+}
+
+// catchup is the motion that returns the head to the last safe point after an
+// interruption, planned with the PLATE's config rather than the platform's.
+//
+// Extracted so it can be asserted: Resume synthesises new motion, and computing
+// it at a feed the plate was not planned at is wrong the moment the feed is
+// selectable. Reading e.pl.EngraverParams() here instead broke no test until
+// this seam existed (mutation-tested 2026-08-06).
+func (e *engraveJob) catchup() []bspline.Knot {
+	return e.safePoint.Resume(e.conf)
 }
 
 func (e *engraveJob) Stop() {
@@ -144,8 +159,7 @@ func (e *engraveJob) runEngraving(quit <-chan struct{}, progress chan uint) (cer
 	}()
 
 	drv := stepper.NewDriver(d)
-	conf := e.pl.EngraverParams().StepperConfig
-	res := newSplineResumer(drv, e.safePoint.Resume(conf))
+	res := newSplineResumer(drv, e.catchup())
 	skipKnots := e.nknots
 	for k := range e.spline {
 		// TODO: use iter.Pull to resume the spline if the goroutine stack cost is
