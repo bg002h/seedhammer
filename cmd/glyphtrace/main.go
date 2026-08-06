@@ -71,6 +71,7 @@ func main() {
 		px       = flag.Int("px", 2000, "PNG width in pixels")
 		out      = flag.String("o", "glyphs.png", "output file; .png converts via rsvg-convert")
 		counters = flag.Bool("counters", false, "print the counter table for the whole face and exit")
+		word     = flag.String("word", "", "render this string as one engraved line instead of a glyph grid")
 	)
 	flag.Parse()
 
@@ -82,7 +83,12 @@ func main() {
 		counterTable(os.Stdout, face, faceName, float32(*sizeMM))
 		return
 	}
-	svg, err := render(face, faceName, []rune(*glyphs), float32(*sizeMM), *cols)
+	var svg []byte
+	if *word != "" {
+		svg, err = renderWord(face, faceName, *word, float32(*sizeMM))
+	} else {
+		svg, err = render(face, faceName, []rune(*glyphs), float32(*sizeMM), *cols)
+	}
 	if err != nil {
 		fail(err)
 	}
@@ -256,16 +262,28 @@ func (g glyph) tightest() (float64, bool) {
 // ink. Here they are drawn, because how many times the tool lifts inside one
 // glyph is a property worth seeing.
 func trace(face *vector.Face, r rune, em int, conf engrave.StepperConfig) glyph {
+	return traceString(face, string(r), em, conf, r)
+}
+
+// traceString plans any string -- one glyph, or a whole word for judging a
+// change in context. A cell shows what a glyph IS; a word shows whether it
+// sits on the baseline with its neighbours, which is the question a bar tilted
+// below the baseline actually raises.
+func traceString(face *vector.Face, txt string, em int, conf engrave.StepperConfig, r rune) glyph {
 	g := glyph{r: r}
-	adv, _, ok := face.Decode(r)
-	if !ok {
-		g.unmapped = true
-		return g
+	for _, c := range txt {
+		if _, _, ok := face.Decode(c); !ok {
+			g.unmapped = true
+			return g
+		}
 	}
-	g.advance = adv * em / face.Metrics().Height
+	for _, c := range txt {
+		adv, _, _ := face.Decode(c)
+		g.advance += adv * em / face.Metrics().Height
+	}
 
 	plan := func(yield func(engrave.Command) bool) {
-		engrave.String(face, em, string(r)).Engrave(yield)
+		engrave.String(face, em, txt).Engrave(yield)
 	}
 	spline := engrave.PlanEngraving(conf, plan)
 
@@ -509,4 +527,45 @@ func writePNG(out string, svg []byte, px int) error {
 	cmd.Stdin = bytes.NewReader(svg)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// renderWord draws a string as the machine would cut it, with the BASELINE
+// drawn in.
+//
+// A glyph cell cannot answer the question a tilted bottom bar raises. Dropping
+// the free end of an 'e' below the baseline opens its channel and also makes
+// the glyph a third of a millimetre taller -- and whether that reads as a
+// deliberate slant or as a letter sinking out of the line is not visible until
+// the letter has neighbours to sit beside.
+func renderWord(face *vector.Face, faceName, txt string, sizeMM float32) ([]byte, error) {
+	P := sh2.Params()
+	em, sw := P.F(sizeMM), P.StrokeWidth
+	g := traceString(face, txt, em, P.StepperConfig, ' ')
+	if g.unmapped {
+		return nil, fmt.Errorf("the face cannot cut every character of %q", txt)
+	}
+	// The baseline, from the face's OWN metrics rather than from the ink: a
+	// word whose letters have all sunk would put the line wherever they sank
+	// to, and draw a baseline that agrees with the defect.
+	m := face.Metrics()
+	base := em * m.Ascent / m.Height
+	pad := em
+	w, h := g.advance+2*pad, em*2+2*pad
+
+	var b bytes.Buffer
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">`, w, h, w, h)
+	fmt.Fprintf(&b, `<rect width="%d" height="%d" fill="#fff"/>`, w, h)
+	fmt.Fprintf(&b, `<style>
+	.ink  { fill:none; stroke:#d9d9d9; stroke-width:%d; stroke-linejoin:round; stroke-linecap:round; }
+	.mid  { fill:none; stroke:#0984e3; stroke-width:%d; stroke-linecap:round; }
+	.base { stroke:#e05a5a; stroke-width:%d; stroke-dasharray:%d %d; }
+	.hd   { font-family:sans-serif; font-size:%dpx; fill:#000; }
+</style>`, sw, max(em/90, 1), max(em/120, 1), em/14, em/14, int(0.30*float64(em)))
+	fmt.Fprintf(&b, `<text class="hd" x="%d" y="%d">font/%s at %.1fmm &#183; red dashes = the baseline</text>`,
+		pad, int(0.5*float64(em)), faceName, sizeMM)
+	fmt.Fprintf(&b, `<g transform="translate(%d,%d)">`, pad, pad)
+	fmt.Fprintf(&b, `<line class="base" x1="%d" y1="%d" x2="%d" y2="%d"/>`, -pad/2, base, g.advance+pad/2, base)
+	fmt.Fprintf(&b, `<path class="ink" d="%s"/><path class="mid" d="%s"/>`, g.ink, g.ink)
+	fmt.Fprintf(&b, `</g></svg>`)
+	return b.Bytes(), nil
 }
