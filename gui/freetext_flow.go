@@ -476,18 +476,53 @@ func ftSizeLabel(f ftFit) string {
 	return fmt.Sprintf("%s  %d/%d lines", size, f.linesUsed, f.linesAvail)
 }
 
+// The QR step's two leads. The first is the ordinary one: the choice is real,
+// and what it costs is that a photograph of the plate is a copy of the text.
+//
+// The second is what a SIZED composition gets. It states the plate carries no
+// code and, in the same breath, WHY -- an option that is merely missing teaches
+// the operator nothing, and this is the one screen where they can learn that the
+// pattern they just loaded needs the whole plate. Both are two lines at the panel
+// width, which is the height ChoiceScreen's lead band is measured for.
+const (
+	ftQRLead = "A QR is a machine-readable copy of the text. " +
+		"Anyone who photographs the plate can read it."
+	ftQRLeadSized = "This pattern is cut at several sizes and needs the whole plate. " +
+		"It carries no QR and is not machine-readable."
+)
+
 // ftQRChoiceFlow is step 1. It comes FIRST so the admission anchor is fixed
 // before any text is typed: choosing a QR afterwards would shrink the capacity
 // under text already accepted.
-func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
-	cs := &ChoiceScreen{
-		Title: "QR Code",
-		Lead: "A QR is a machine-readable copy of the text. " +
-			"Anyone who photographs the plate can read it.",
-		Choices: []string{"No QR", "Add QR"},
-	}
-	if prior {
-		cs.choice = 1 // preserve a deliberate opt-in across Back
+//
+// blocks is the composition CURRENTLY in the text field, which on the first pass
+// is empty and on any later pass is whatever Back was pressed over. When every
+// block states its own rung the plate is a size ladder, FitSized has no parameter
+// for a code (spec 2.7), and this screen states that instead of offering "Add QR"
+// -- spec 3.0. Accepting an answer and discarding it three functions downstream
+// is the silent substitution this program exists to avoid, and it was reachable:
+// the ladder's loader clears the flag under a prompt that says so, and Back
+// returned to a screen that knew nothing about what was loaded and re-seeded
+// itself with the very opt-in that had just been cleared.
+//
+// Scoped to SIZED compositions and nothing else. BOTHPROOF! keeps both answers:
+// a code is possible there in principle and merely does not fit, which the
+// prompted drop and the capacity refusal already handle out loud.
+func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block) (bool, bool) {
+	cs := &ChoiceScreen{Title: "QR Code"}
+	sized := ftSizedBlocks(blocks)
+	if sized {
+		cs.Lead = ftQRLeadSized
+		// ONE answer, and it is the state rather than a decision. The prior
+		// opt-in is deliberately NOT carried in here: it is the thing this
+		// screen exists to stop carrying.
+		cs.Choices = []string{"No QR"}
+	} else {
+		cs.Lead = ftQRLead
+		cs.Choices = []string{"No QR", "Add QR"}
+		if prior {
+			cs.choice = 1 // preserve a deliberate opt-in across Back
+		}
 	}
 	hookPPWidget("qr", cs)
 	// choice starts at 0, which is "No QR": the default is a property of this
@@ -496,6 +531,8 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 	if !ok {
 		return false, false
 	}
+	// Structurally false in the sized case -- index 1 is not on the screen -- so
+	// the flag cannot diverge from a plate that has no code to carry.
 	return sel == 1, true
 }
 
@@ -948,7 +985,11 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 	for !ctx.Done {
 		switch step {
 		case ftStepQR:
-			add, ok := ftQRChoiceFlow(ctx, th, useQR)
+			// The composition as it stands NOW: empty on the first pass, and on a
+			// Back into this step whatever is in the field. A size ladder there
+			// takes the whole plate, so the step states that rather than offering
+			// a code it would drop (spec 3.0).
+			add, ok := ftQRChoiceFlow(ctx, th, useQR, plan.Blocks(text))
 			if !ok {
 				return // Back out of the first step leaves the program.
 			}
