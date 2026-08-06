@@ -82,7 +82,7 @@
 <polyline id="p" class="st0" points="397,9 397,4 401,4 401,7 397,6 "/>
 <polyline id="q" class="st0" points="407,9 407,4 403,4 403,7 407,6 "/>
 <polyline id="r" class="st0" points="409,8 409,4 411,4 412,5 "/>
-<polyline id="s" class="st0" points="419,4 415,4 415,6 419,6 419,7.5 415,8 "/>
+<polyline id="s" class="st0" points="419,3.5 415,4 415,6 419,6 419,8 415,8.5 "/>
 <polyline id="t" class="st0" points="424,4 421,4 422,4 422,2 422,8 424,8 "/>
 <polyline id="u" class="st0" points="427,4 427,8 431,8 431,4 "/>
 <polyline id="v" class="st0" points="433,4 433,5 435,8 437,5 437,4 "/>
