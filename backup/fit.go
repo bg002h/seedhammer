@@ -421,6 +421,116 @@ func qrFitsPlate(params engrave.Params, qrp *qrPlacement) error {
 	return nil
 }
 
+// FitSized lays out a composition whose every block states its OWN size, and it
+// is the one function that resolves Block.SizeMM (spec 2.2). FitBlocks and
+// FitBlocksAt are untouched and go on ignoring it: they fit a whole composition
+// at ONE rung, which is what keeps spec 6's admission anchor true.
+//
+// There is no useQR parameter and no code. The QR band is quantised by a single
+// fontSize (spec 2.1), and a plate that mixes sizes has none -- so Fitted.QR and
+// its placement are both left nil, which makes spec 2.1.1's "QR != nil implies
+// !Mixed" STRUCTURALLY true rather than checked.
+//
+// ErrQRTooTall, the third of spec 2.1.1's invariants, is therefore never
+// returned from here, and that AGREES with fitBlocksAt rather than diverging
+// from it. fitBlocksAt resolves the placement before the wrap and checks its
+// bottom bound AFTER, so ErrTooLarge wins when both would fire and every
+// reachable case returns byte for byte what it returned before this change.
+// Here only one of the two refusals can ever fire -- qrFitsPlate(params, nil)
+// is unconditionally nil -- so there is no ordering to match and calling it
+// would be a call with one possible answer. Spec 7.7(d)'s FitSized half is
+// vacuous for the same reason. A future FitSized that took a code would owe
+// fitBlocksAt's order: the refusal that is a property of the whole
+// composition, ErrTooLarge, first.
+//
+// Every refusal below comes back as an ERROR and never as a panic. EngraveFitted
+// is reached only AFTER the confirm screen, so the same refusal arriving from
+// the engraver arrives mid-flow with a plate clamped in the machine.
+func FitSized(params engrave.Params, blocks []Block, title, footer string,
+	titleSizeMM, footerSizeMM float32) (Fitted, error) {
+	if len(blocks) == 0 {
+		return Fitted{}, ErrTooLarge
+	}
+	sizes := make([]float32, len(blocks))
+	for i, b := range blocks {
+		// The zero that means "the size the plate is fitted at" for every other
+		// entry point has no meaning here, and a zero reaching Fitted.Sizes is
+		// spec 2.3's per-entry invariant -- which EngraveFitted enforces as a
+		// panic, on nothing today. This is the matching ERROR, worded as that
+		// panic is and kept separate from the rung check below so a block that
+		// simply forgot its size is not reported as one that named a size off
+		// the ladder.
+		if b.SizeMM == 0 {
+			return Fitted{}, fmt.Errorf("backup: block %d is sized 0mm", i)
+		}
+		if !slices.Contains(FontSizes, b.SizeMM) {
+			return Fitted{}, fmt.Errorf("backup: block %d at %.1fmm is not a rung in FontSizes %v",
+				i, b.SizeMM, FontSizes)
+		}
+		sizes[i] = b.SizeMM
+	}
+	// Spec 2.3's size/string invariant, refused here rather than panicked on in
+	// the engraver. A zero size with a non-empty string puts a whole row through
+	// the layout at fontSize 0, where LinesPerPlate divides by it; a non-zero
+	// size with an empty string is the same bug read the other way round.
+	if (title != "") != (titleSizeMM != 0) {
+		return Fitted{}, fmt.Errorf("backup: title %q at %.1fmm", title, titleSizeMM)
+	}
+	if (footer != "") != (footerSizeMM != 0) {
+		return Fitted{}, fmt.Errorf("backup: footer %q at %.1fmm", footer, footerSizeMM)
+	}
+	start, limit := yBudget(params, title, footer, titleSizeMM, footerSizeMM)
+	lines, faces, rowSizes, ok := wrapBlocks(params, blocks, sizes, nil, start, limit)
+	if !ok {
+		return Fitted{}, ErrTooLarge
+	}
+	// Mixed is MEASURED, never assumed. Every ladder composition genuinely
+	// mixes, so hardcoding true here passes every fixture this change ships --
+	// and then reports "0.0mm" on the confirm screen for the all-one-rung
+	// composition this entry point is public for, which spec 3 calls a defect
+	// rather than a fallback.
+	//
+	// The candidate is the FIRST BLOCK's size rather than rowSizes[0] only so
+	// this cannot index an empty slice; the two are the same value, since a
+	// successful wrap emits at least one row for every block and block 0's rows
+	// come first.
+	mixed := false
+	common := sizes[0]
+	for _, s := range rowSizes {
+		if s != common {
+			mixed = true
+		}
+	}
+	// Counting the title and the footer is what makes !Mixed mean that literally
+	// every glyph on the plate is one size, which is exactly what makes SizeMM
+	// printable. Each is consulted only when its string is non-empty -- the
+	// invariant above has already established that its size is 0 when it is not.
+	if title != "" && titleSizeMM != common {
+		mixed = true
+	}
+	if footer != "" && footerSizeMM != common {
+		mixed = true
+	}
+	sizeMM := common
+	if mixed {
+		// SizeMM is valid only when !Mixed, and 0 is how it says so.
+		sizeMM = 0
+	}
+	return Fitted{
+		Mixed:        mixed,
+		SizeMM:       sizeMM,
+		Sizes:        rowSizes,
+		Lines:        lines,
+		Faces:        faces,
+		Title:        title,
+		Footer:       footer,
+		TitleFace:    blocks[0].Face,
+		FooterFace:   blocks[len(blocks)-1].Face,
+		TitleSizeMM:  titleSizeMM,
+		FooterSizeMM: footerSizeMM,
+	}, nil
+}
+
 // Fit is FitBlocks for a composition cut entirely in one face. The same text
 // fits differently in different faces, so fnt must be the face the composition
 // will be ENGRAVED in; see FreeTextFont.
