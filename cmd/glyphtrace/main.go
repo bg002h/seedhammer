@@ -72,6 +72,7 @@ func main() {
 		out      = flag.String("o", "glyphs.png", "output file; .png converts via rsvg-convert")
 		counters = flag.Bool("counters", false, "print the counter table for the whole face and exit")
 		word     = flag.String("word", "", "render this string as one engraved line instead of a glyph grid")
+		label    = flag.String("label", "", "banner drawn across the top, e.g. \"OPTION 2 - bottom bar angled down\"")
 	)
 	flag.Parse()
 
@@ -92,6 +93,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	svg = banner(svg, *label)
 	if strings.EqualFold(filepath.Ext(*out), ".png") {
 		if err := writePNG(*out, svg, *px); err != nil {
 			fail(err)
@@ -568,4 +570,35 @@ func renderWord(face *vector.Face, faceName, txt string, sizeMM float32) ([]byte
 	fmt.Fprintf(&b, `<path class="ink" d="%s"/><path class="mid" d="%s"/>`, g.ink, g.ink)
 	fmt.Fprintf(&b, `</g></svg>`)
 	return b.Bytes(), nil
+}
+
+// banner stamps a heading across the top of a rendered sheet, so a set of
+// variants can be talked about by NUMBER rather than by describing the picture.
+//
+// Applied to the finished SVG rather than threaded through both renderers: the
+// heading is not part of what is being measured, and a variant sheet that
+// disagreed with its own caption would be worse than no caption.
+func banner(svg []byte, label string) []byte {
+	if label == "" {
+		return svg
+	}
+	// The viewBox is the sheet's own coordinate system; the banner is sized
+	// from its width so it reads the same whatever rung was drawn.
+	var vx, vy, vw, vh int
+	if _, err := fmt.Sscanf(string(svg), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d"`,
+		&vx, &vy, &vw, &vh); err != nil {
+		return svg
+	}
+	head := vw / 14
+	open := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d" width="%d" height="%d">`,
+		vx, vy-head, vw, vh+head, vw, vh+head)
+	rest := string(svg)
+	if i := strings.Index(rest, ">"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	text := fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#f2f2f2"/>`+
+		`<text x="%d" y="%d" font-family="sans-serif" font-size="%d" font-weight="bold" fill="#111">%s</text>`,
+		vx, vy-head, vw, head,
+		vx+head/4, vy-head/4, head*55/100, esc(label))
+	return []byte(open + text + rest)
 }
