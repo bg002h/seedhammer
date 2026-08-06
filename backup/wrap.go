@@ -119,25 +119,34 @@ type lineLayout struct {
 	charPerLine   int // budget of an unobstructed line
 	charPerQRLine int // budget of a line running beside the QR
 	holeChars     int // characters lost to a screw-hole band, per side
-	holeLines     int // lines above the QR
-	qrLines       int // lines the QR spans
-	charWidth     int
-	fontSize      int
-	baseY         int // top of the block, device units
-	plateHeight   int
-	innerMargin   int
+	// qrTop and qrBottom are the code's keep-out band, [qrTop, qrBottom), in
+	// PLATE-ABSOLUTE device units -- copied from the one qrPlacement the plate
+	// resolved, never counted in rows off this layout's own baseY. A row index
+	// is relative to whatever block the layout belongs to, and the moment two
+	// blocks on one plate start at different y that index stops naming the same
+	// row as the code's. An empty band (both zero) is a plate with no code.
+	qrTop, qrBottom int
+	charWidth       int
+	fontSize        int
+	baseY           int // top of the block, device units
+	plateHeight     int
+	innerMargin     int
 }
 
 // at returns the character budget and left inset of output line i, reproducing
 // the arithmetic descriptor plates have always used -- including the clamp.
 func (l lineLayout) at(i int) (n, offx int) {
 	n = l.charPerLine
-	isQRLine := l.holeLines <= i && i < l.holeLines+l.qrLines
+	// Both predicates are now asked in the same currency -- absolute y -- so
+	// there is no index in this function that means one thing to the band and
+	// another to the code.
+	y := l.baseY + i*l.fontSize
+	isQRLine := l.qrTop <= y && y < l.qrBottom
 	if isQRLine {
 		n = l.charPerQRLine
 	}
 	// Avoid screw holes on the smaller plates on the first and last lines.
-	holeLine := l.baseY+i*l.fontSize < l.innerMargin ||
+	holeLine := y < l.innerMargin ||
 		l.baseY+(i+1)*l.fontSize > l.plateHeight-l.innerMargin
 	if holeLine {
 		if !isQRLine {
@@ -206,7 +215,13 @@ func qrPlaceAt(params engrave.Params, qrc *qr.Code, qrScale, fontSize, anchorY i
 // starting at baseY. It is the ONE place the screw-hole band and the QR
 // narrowing are computed, so the fit check, the confirm screen and the engraver
 // cannot drift apart by a character.
-func textLayout(params engrave.Params, fnt *vector.Face, fontSize, baseY int, qrc *qr.Code, qrScale int) lineLayout {
+//
+// qrp is the plate's ALREADY RESOLVED code placement, nil when there is no
+// code. It is taken rather than a (*qr.Code, qrScale) pair so that this
+// function cannot choose an anchor: the anchor is the caller's decision (see
+// qrPlaceAt) and the band this layout narrows against is the very band the
+// engraver draws the code in.
+func textLayout(params engrave.Params, fnt *vector.Face, fontSize, baseY int, qrp *qrPlacement) lineLayout {
 	charWidth := fixedCharWidth(fnt, fontSize)
 	margin := params.I(outerMargin)
 	inner := params.I(innerMargin)
@@ -214,18 +229,18 @@ func textLayout(params engrave.Params, fnt *vector.Face, fontSize, baseY int, qr
 	l := lineLayout{
 		charPerLine: width / charWidth,
 		holeChars:   int(math.Ceil(float64(inner-margin) / float64(charWidth))),
-		holeLines:   int(math.Ceil(float64(inner-margin) / float64(fontSize))),
 		charWidth:   charWidth,
 		fontSize:    fontSize,
 		baseY:       baseY,
 		plateHeight: params.F(plateSize),
 		innerMargin: inner,
 	}
-	if qrc != nil {
-		qrBorder := params.I(2)
-		qrsz := qrc.Size * params.StrokeWidth * qrScale
-		l.charPerQRLine = (width - 2*qrBorder - qrsz) / charWidth
-		l.qrLines = (qrsz + 2*qrBorder + fontSize - 1) / fontSize
+	if qrp != nil {
+		// KeepOutX is the code plus both its borders -- the whole width the
+		// code denies a line -- which is exactly the 2*qrBorder + qrsz this
+		// subtracted when it held the code itself.
+		l.charPerQRLine = (width - qrp.KeepOutX) / charWidth
+		l.qrTop, l.qrBottom = qrp.Top, qrp.Bottom
 	}
 	return l
 }

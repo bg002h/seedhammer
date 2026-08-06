@@ -187,10 +187,14 @@ func widthFor(lay lineLayout, startRow int) func(int) int {
 //
 // With a single block this is exactly the arithmetic Fit has always done: one
 // textLayout, one WrapText over [start, end).
-func wrapBlocks(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, start, end int) (lines []string, faces []*vector.Face, ok bool) {
+//
+// qrp is the plate's ONE resolved placement, shared by every block: the code is
+// one object on one plate and does not belong to a block, so a caller resolves
+// it once and every block narrows against the same band.
+func wrapBlocks(params engrave.Params, blocks []Block, fontMM float32, qrp *qrPlacement, start, end int) (lines []string, faces []*vector.Face, ok bool) {
 	row := start
 	for _, b := range blocks {
-		lay := textLayout(params, b.Face, params.F(fontMM), params.I(outerMargin), qrc, freeTextQRScale)
+		lay := textLayout(params, b.Face, params.F(fontMM), params.I(outerMargin), qrp)
 		l, fits := WrapText(b.Text, widthFor(lay, row), end-row)
 		if !fits {
 			return nil, nil, false
@@ -273,12 +277,16 @@ func FitBlocksAt(params engrave.Params, blocks []Block, title, footer string, us
 func fitBlocksAt(params engrave.Params, blocks []Block, title, footer string, qrc *qr.Code, size float32) (Fitted, error) {
 	rows := LinesPerPlate(params, size)
 	start, end := bodyRows(rows, title, footer)
-	lines, faces, ok := wrapBlocks(params, blocks, size, qrc, start, end)
+	// The placement is resolved BEFORE the wrap, because the wrap narrows
+	// against it -- but its bound is checked AFTER, so ErrTooLarge still wins
+	// when both would fire and every reachable case returns exactly what it
+	// returned before this change.
+	qrAt := qrPlacementFor(params, qrc, params.F(size))
+	lines, faces, ok := wrapBlocks(params, blocks, size, qrAt, start, end)
 	if !ok {
 		return Fitted{}, ErrTooLarge
 	}
-	qrAt, err := qrPlacementFor(params, qrc, params.F(size))
-	if err != nil {
+	if err := qrFitsPlate(params, qrAt); err != nil {
 		return Fitted{}, err
 	}
 	sizes := make([]float32, len(lines))
@@ -319,19 +327,29 @@ var ErrQRTooTall = errors.New("backup: the QR band runs past the bottom margin")
 
 // qrPlacementFor resolves the free-text plate's ONE code placement, anchored at
 // the plate's top margin -- one code on one plate, whatever block a row belongs
-// to -- and refuses a code whose band leaves the plate.
+// to.
 //
-// Returns nil, nil when there is no code, which is the nil half of the
-// "qrAt is nil exactly when QR is nil" invariant, satisfied at the constructor.
-func qrPlacementFor(params engrave.Params, qrc *qr.Code, fontSize int) (*qrPlacement, error) {
+// Returns nil when there is no code, which is the nil half of the "qrAt is nil
+// exactly when QR is nil" invariant, satisfied at the constructor.
+//
+// The bottom-margin bound is qrFitsPlate's, not this function's, because the
+// wrap needs the placement whether or not it fits and the ordering of the two
+// refusals is the caller's to choose; see fitBlocksAt.
+func qrPlacementFor(params engrave.Params, qrc *qr.Code, fontSize int) *qrPlacement {
 	if qrc == nil {
-		return nil, nil
+		return nil
 	}
 	p := qrPlaceAt(params, qrc, freeTextQRScale, fontSize, params.I(outerMargin))
-	if p.Bottom > params.F(plateSize)-params.I(outerMargin) {
-		return nil, ErrQRTooTall
+	return &p
+}
+
+// qrFitsPlate is ErrQRTooTall's one test: the band must end above the bottom
+// margin, or there is no room below it for the rows the plate carries.
+func qrFitsPlate(params engrave.Params, qrp *qrPlacement) error {
+	if qrp != nil && qrp.Bottom > params.F(plateSize)-params.I(outerMargin) {
+		return ErrQRTooTall
 	}
-	return &p, nil
+	return nil
 }
 
 // Fit is FitBlocks for a composition cut entirely in one face. The same text
@@ -367,11 +385,19 @@ func AdmissibleBlocks(params engrave.Params, blocks []Block, title, footer strin
 		// without a code to lay out around.
 		return 0, linesAvail, false
 	}
+	// The code is anchored at the plate's TOP MARGIN, not at the row the body
+	// starts on. This function reserves a title row unconditionally, which
+	// moves the first row of TEXT; it does not move the CODE. Anchoring at the
+	// body's start row instead shifts the whole band down one row, swapping
+	// charPerLine for charPerQRLine at both band edges, and the verdict this
+	// returns gates OK on the text and confirm steps for every ordinary
+	// QR-carrying plate.
+	qrAt := qrPlacementFor(params, qrc, params.F(size))
 	// Unbounded on purpose: a refusal that reported "26 / 26" for a text
 	// needing 300 lines would tell the operator nothing about how much to cut.
 	// The row a block starts on still decides its budget, so the blocks are
 	// counted in plate order from row 1 exactly as they are laid out.
-	l, _, _ := wrapBlocks(params, blocks, size, qrc, 1, math.MaxInt)
+	l, _, _ := wrapBlocks(params, blocks, size, qrAt, 1, math.MaxInt)
 	return len(l), linesAvail, len(l) <= linesAvail
 }
 
@@ -388,12 +414,12 @@ func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer str
 // A one-block composition is answered without wrapping anything: every row is
 // that block's face, which is what the single-face capacity solver has always
 // assumed.
-func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrc *qr.Code, rows int) []*vector.Face {
+func rowFaces(params engrave.Params, blocks []Block, fontMM float32, qrp *qrPlacement, rows int) []*vector.Face {
 	out := make([]*vector.Face, rows)
 	last := blocks[len(blocks)-1].Face
 	var faces []*vector.Face
 	if len(blocks) > 1 {
-		_, faces, _ = wrapBlocks(params, blocks, fontMM, qrc, 0, math.MaxInt)
+		_, faces, _ = wrapBlocks(params, blocks, fontMM, qrp, 0, math.MaxInt)
 	}
 	for r := range rows {
 		if r < len(faces) {
@@ -412,13 +438,13 @@ type faceLayouts struct {
 	lays  []lineLayout
 }
 
-func (c *faceLayouts) at(params engrave.Params, fnt *vector.Face, fontSize int, qrc *qr.Code) lineLayout {
+func (c *faceLayouts) at(params engrave.Params, fnt *vector.Face, fontSize int, qrp *qrPlacement) lineLayout {
 	for i, f := range c.faces {
 		if f == fnt {
 			return c.lays[i]
 		}
 	}
-	lay := textLayout(params, fnt, fontSize, params.I(outerMargin), qrc, freeTextQRScale)
+	lay := textLayout(params, fnt, fontSize, params.I(outerMargin), qrp)
 	c.faces = append(c.faces, fnt)
 	c.lays = append(c.lays, lay)
 	return lay
@@ -444,11 +470,15 @@ func MaxCharsAtBlocks(params engrave.Params, blocks []Block, fontMM float32, use
 		return 0
 	}
 	rows := LinesPerPlate(params, fontMM)
-	faces := rowFaces(params, blocks, fontMM, qrc, rows)
+	// One placement for the plate, anchored at the top margin, shared by the
+	// wrap inside rowFaces and by every row counted below -- the same code, at
+	// the same y, for both halves of this answer.
+	qrAt := qrPlacementFor(params, qrc, params.F(fontMM))
+	faces := rowFaces(params, blocks, fontMM, qrAt, rows)
 	var lays faceLayouts
 	total := 0
 	for row := range rows {
-		n, _ := lays.at(params, faces[row], params.F(fontMM), qrc).at(row)
+		n, _ := lays.at(params, faces[row], params.F(fontMM), qrAt).at(row)
 		total += n
 	}
 	return total

@@ -340,23 +340,28 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 		}
 		offy := params.I(outerMargin)
 		for i, p := range plate.Paragraphs {
-			qrsz := 0
-			qrBorder := params.I(2)
 			qrScale := p.QRScale
 			if qrScale == 0 {
 				qrScale = 2
 			}
+			// The descriptor's code belongs to its PARAGRAPH and moves with it,
+			// so the placement is anchored at offy -- this paragraph's top --
+			// and resolved once, here. The layout below narrows the lines
+			// against it and the offset below draws the code from it: one
+			// object, one y, read twice and derived never.
+			var qrp *qrPlacement
 			var qr engrave.Engraving
 			if p.QR != nil {
+				at := qrPlaceAt(params, p.QR, qrScale, fontSize, offy)
+				qrp = &at
 				qr = engrave.QR(params.StrokeWidth, qrScale, p.QR)
-				qrsz = p.QR.Size * params.StrokeWidth * qrScale
 			}
 			// baseY is this paragraph's top edge in DEVICE units. widthAt is
 			// indexed by output line, so the plate-row offset has to live
 			// inside the layout -- and for the descriptor path that offset is
 			// not row-aligned, because paragraphs after the first advance offy
 			// by lineno*fontSize + 1mm.
-			lay := textLayout(params, fnt, fontSize, offy, p.QR, qrScale)
+			lay := textLayout(params, fnt, fontSize, offy, qrp)
 			var lines []string
 			if len(p.Text) > 0 {
 				// The descriptor and mdmk callers keep an UNBOUNDED path:
@@ -381,15 +386,15 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 			}
 			lineno := len(lines)
 			if qr != nil {
-				qrx := plateDims.X - qrsz - margin - qrBorder
-				qry := lay.baseY + lay.holeLines*lay.fontSize + (lay.qrLines*lay.fontSize-qrsz)/2
+				qrx, qry := qrp.X, qrp.Y
 				// Keyed to the ORIGINAL text, never to len(lines): under
 				// spec 5.2 an empty string wraps to one empty line, and
 				// keying this to the line count displaces the QR-ONLY plate
 				// by (6.450, 2.300)mm at production stroke.
 				if len(p.Text) == 0 {
-					// Center QR.
-					qrx, qry = (plateDims.X-qrsz)/2, (plateDims.Y-qrsz)/2
+					// Center QR. A placement OVERRIDE, not a band question:
+					// the paragraph has no rows for a band to narrow.
+					qrx, qry = (plateDims.X-qrp.Size)/2, (plateDims.Y-qrp.Size)/2
 				}
 				t.Offset(qrx, qry)
 				qr(t.Yield)

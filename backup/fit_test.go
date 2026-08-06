@@ -9,10 +9,22 @@ import (
 	"seedhammer.com/font/sh"
 )
 
+// qrPlaceFor is a code's plate-absolute placement at a rung: the ONE object the
+// fit resolves, anchored at the top margin, that the layout narrows against and
+// the engraver draws from. nil for no code.
+func qrPlaceFor(size float32, qrc *qrpkg.Code, scale int) *qrPlacement {
+	if qrc == nil {
+		return nil
+	}
+	P := prodParams
+	p := qrPlaceAt(P, qrc, scale, P.F(size), P.I(outerMargin))
+	return &p
+}
+
 // layAt builds the plate-absolute layout at a rung, with the given code.
 func layAt(size float32, qrc *qrpkg.Code, scale int) (lineLayout, int) {
 	P := prodParams
-	return textLayout(P, sh.Font, P.F(size), P.I(outerMargin), qrc, scale), LinesPerPlate(P, size)
+	return textLayout(P, sh.Font, P.F(size), P.I(outerMargin), qrPlaceFor(size, qrc, scale)), LinesPerPlate(P, size)
 }
 
 // TestInsetRowsPerRung pins spec 5.1: the screw-hole inset is a BAND, not two

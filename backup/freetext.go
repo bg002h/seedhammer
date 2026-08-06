@@ -96,7 +96,7 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 			if s == "" {
 				return
 			}
-			lay := lays.at(params, fnt, fontSize, f.QR)
+			lay := lays.at(params, fnt, fontSize, f.qrAt)
 			cmd := engrave.String(fnt, fontSize, s)
 			w, _ := cmd.Measure()
 			inset := lay.holeChars * lay.charWidth
@@ -110,21 +110,18 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 		for i, l := range f.Lines {
 			fnt := f.Faces[i]
 			row := start + i
-			_, offx := lays.at(params, fnt, fontSize, f.QR).at(row)
+			_, offx := lays.at(params, fnt, fontSize, f.qrAt).at(row)
 			t.Offset(offx+margin, rowY(row))
 			engrave.String(fnt, fontSize, l).Engrave(t.Yield)
 		}
 
 		if f.QR != nil {
-			// holeLines and qrLines are plate geometry -- rows of a given
-			// height above and beside the code -- so they carry no face, and a
-			// mixed-face plate puts the QR exactly where a single-face one
-			// does.
-			lay := lays.at(params, f.TitleFace, fontSize, f.QR)
-			qrsz := f.QR.Size * params.StrokeWidth * freeTextQRScale
-			qrBorder := params.I(2)
-			t.Offset(plateW-qrsz-margin-qrBorder,
-				margin+lay.holeLines*fontSize+(lay.qrLines*fontSize-qrsz)/2)
+			// READ, never re-derived. The fit resolved this placement and the
+			// same placement narrowed the lines above, so the code cannot be
+			// drawn anywhere but the hole the text was broken around. It also
+			// carries no face: the code is plate geometry, so a mixed-face
+			// plate puts it exactly where a single-face one does.
+			t.Offset(f.qrAt.X, f.qrAt.Y)
 			engrave.QR(params.StrokeWidth, freeTextQRScale, f.QR)(t.Yield)
 		}
 	}

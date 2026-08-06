@@ -27,7 +27,7 @@ func mixedBlocks(a, b int) []Block {
 // the same lineLayout the wrap uses.
 func rowBudget(fnt *vector.Face, size float32, row int) int {
 	P := prodParams
-	lay := textLayout(P, fnt, P.F(size), P.I(outerMargin), nil, freeTextQRScale)
+	lay := textLayout(P, fnt, P.F(size), P.I(outerMargin), nil)
 	n, _ := lay.at(row)
 	return n
 }
@@ -432,7 +432,7 @@ func TestEngraveFittedInsetsEachRowInItsOwnFace(t *testing.T) {
 	row := rows - 1
 
 	insetOf := func(fnt *vector.Face) int {
-		lay := textLayout(P, fnt, P.F(size), P.I(outerMargin), nil, freeTextQRScale)
+		lay := textLayout(P, fnt, P.F(size), P.I(outerMargin), nil)
 		_, offx := lay.at(row)
 		return offx
 	}
