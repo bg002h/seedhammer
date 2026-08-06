@@ -157,6 +157,51 @@ func (l lineLayout) at(i int) (n, offx int) {
 	return n, offx
 }
 
+// qrPlacement is where a code sits, in DEVICE units, and the band of y the text
+// must keep out of. It is computed ONCE per plate (free text) or per paragraph
+// (descriptor) and is read by BOTH the layout that narrows the lines and the
+// engraver that draws the code, so the two cannot drift.
+//
+// fontSize is the size the band is quantised to. A plate that MIXES sizes has
+// no single value here and carries no QR; see Fitted.Mixed.
+type qrPlacement struct {
+	Top, Bottom int // the narrowed band, [Top, Bottom), PLATE-ABSOLUTE
+	X, Y        int // the code's own top-left corner
+	Size        int // the code's side
+	KeepOutX    int // horizontal space the code denies a line: Size + 2*qrBorder
+}
+
+// qrPlaceAt resolves a code's placement against a plate whose text starts at
+// anchorY, in device units.
+//
+// The ANCHOR is the caller's decision and the reason this takes one rather than
+// reading a baseY off a layout: the free-text plate's code is one object on one
+// plate and is anchored at the plate's top margin whatever block a row belongs
+// to, while the descriptor's code belongs to a paragraph and moves with it.
+//
+// KeepOutX is carried rather than re-derived because charPerQRLine is
+// (width - 2*qrBorder - qrsz) / charWidth, and once a caller holds a placement
+// instead of a (*qr.Code, qrScale) pair, qrBorder is recoverable only by
+// inverting X. That it happens to equal params.I(2) today is a coincidence, not
+// a definition.
+func qrPlaceAt(params engrave.Params, qrc *qr.Code, qrScale, fontSize, anchorY int) qrPlacement {
+	margin := params.I(outerMargin)
+	inner := params.I(innerMargin)
+	qrBorder := params.I(2)
+	qrsz := qrc.Size * params.StrokeWidth * qrScale
+	holeLines := int(math.Ceil(float64(inner-margin) / float64(fontSize)))
+	qrLines := (qrsz + 2*qrBorder + fontSize - 1) / fontSize
+	top := anchorY + holeLines*fontSize
+	return qrPlacement{
+		Top:      top,
+		Bottom:   top + qrLines*fontSize,
+		X:        params.F(plateSize) - qrsz - margin - qrBorder,
+		Y:        top + (qrLines*fontSize-qrsz)/2,
+		Size:     qrsz,
+		KeepOutX: qrsz + 2*qrBorder,
+	}
+}
+
 // textLayout builds the per-line character grid of a text block at fontSize,
 // starting at baseY. It is the ONE place the screw-hole band and the QR
 // narrowing are computed, so the fit check, the confirm screen and the engraver

@@ -293,16 +293,58 @@ func TestEngraveFittedCutsEachLineInItsOwnFace(t *testing.T) {
 // TestEngraveFittedRefusesAFaceMapThatDoesNotCoverTheLines: a short face map
 // would otherwise engrave the uncovered rows in whatever face was at hand,
 // which is a wrong plate rather than a failure.
+//
+// The size map here is COMPLETE and the Faces guard is evaluated first, so the
+// panic observed is the face map's. Left short, this test would recover from
+// the Sizes guard instead and go on passing while testing nothing it names.
 func TestEngraveFittedRefusesAFaceMapThatDoesNotCoverTheLines(t *testing.T) {
 	P := prodParams
 	f := Fitted{
 		SizeMM: 3.0,
 		Lines:  []string{"one", "two"},
 		Faces:  []*vector.Face{sh.Font},
+		Sizes:  []float32{3.0, 3.0},
 	}
 	defer func() {
-		if recover() == nil {
+		v := recover()
+		if v == nil {
 			t.Error("a face map covering one of two lines was accepted")
+			return
+		}
+		// Which guard fired is asserted, not just that one did: recovering from
+		// ANY panic is how a fixture goes on passing after the thing it names
+		// stopped being reached.
+		if got := fmt.Sprint(v); !strings.Contains(got, "faces") {
+			t.Errorf("a short face map panicked with %q; another guard answered for it", got)
+		}
+	}()
+	EngraveFitted(P, f)
+}
+
+// TestEngraveFittedRefusesASizeMapThatDoesNotCoverTheLines is the Sizes half of
+// the guard above, and it exists for the same reason: Sizes is parallel to
+// Lines and is the ONLY channel a row's size travels on, so a short size map
+// would leave the uncovered rows to be cut at whatever size was at hand -- a
+// wrong plate rather than a failure.
+//
+// The face map here is COMPLETE, so the Faces guard cannot fire and the panic
+// observed is this guard's.
+func TestEngraveFittedRefusesASizeMapThatDoesNotCoverTheLines(t *testing.T) {
+	P := prodParams
+	f := Fitted{
+		SizeMM: 3.0,
+		Lines:  []string{"one", "two"},
+		Faces:  []*vector.Face{sh.Font, sh.Font},
+		Sizes:  []float32{3.0},
+	}
+	defer func() {
+		v := recover()
+		if v == nil {
+			t.Error("a size map covering one of two lines was accepted")
+			return
+		}
+		if got := fmt.Sprint(v); !strings.Contains(got, "sizes") {
+			t.Errorf("a short size map panicked with %q; another guard answered for it", got)
 		}
 	}()
 	EngraveFitted(P, f)
@@ -403,15 +445,23 @@ func TestEngraveFittedInsetsEachRowInItsOwnFace(t *testing.T) {
 	}
 
 	// Every line empty but the last, so the ink bounds ARE that line's.
+	//
+	// Sizes is UNIFORM at SizeMM, and that is the only fill that measures what
+	// this test names. insetOf's reference is plate-absolute, so any other fill
+	// still satisfies the length guard and every assertion below while silently
+	// comparing a different row. Title and Footer are empty, so their sizes are
+	// 0 and Mixed is false.
 	mk := func(rest *vector.Face) Fitted {
 		lines := make([]string, rows)
 		faces := make([]*vector.Face, rows)
+		sizes := make([]float32, rows)
 		for i := range faces {
 			faces[i] = rest
+			sizes[i] = size
 		}
 		lines[row] = "WWWW"
 		faces[row] = constant.Font
-		return Fitted{SizeMM: size, Lines: lines, Faces: faces,
+		return Fitted{SizeMM: size, Sizes: sizes, Lines: lines, Faces: faces,
 			TitleFace: faces[0], FooterFace: constant.Font}
 	}
 	mixed := inkBounds(t, P, EngraveFitted(P, mk(sh.Font)))

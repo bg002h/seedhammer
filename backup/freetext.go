@@ -31,11 +31,53 @@ import (
 // measured against, which no assertion on the size, the lines or the code can
 // see.
 func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
+	// The Faces guard is evaluated FIRST, and deliberately: the test that pins
+	// it hands in a short face map with a correct size map, so a Sizes guard
+	// ahead of it would answer for it and the face map would stop being tested.
 	if len(f.Faces) != len(f.Lines) {
 		// A face map that does not cover every line is a caller bug, and the
 		// alternative to failing here is engraving some rows in whatever face
 		// happened to be at hand.
 		panic(fmt.Errorf("backup: %d lines but %d faces", len(f.Lines), len(f.Faces)))
+	}
+	if len(f.Sizes) != len(f.Lines) {
+		// Same shape, same reason: a size map that does not cover every line
+		// leaves the uncovered rows to be cut at whatever size was at hand.
+		panic(fmt.Errorf("backup: %d lines but %d sizes", len(f.Lines), len(f.Sizes)))
+	}
+	for i, s := range f.Sizes {
+		if s == 0 {
+			panic(fmt.Errorf("backup: line %d is sized 0mm", i))
+		}
+	}
+	// The size/string invariant. A zero size with a non-empty string puts a
+	// whole row through the layout at fontSize 0 -- LinesPerPlate divides by it
+	// and fixedCharWidth returns 0, so the width division is a second divide by
+	// zero. A non-zero size with an empty string is the same bug read the other
+	// way round: a size was resolved for a row that does not exist.
+	if (f.Title != "") != (f.TitleSizeMM != 0) {
+		panic(fmt.Errorf("backup: title %q at %.1fmm", f.Title, f.TitleSizeMM))
+	}
+	if (f.Footer != "") != (f.FooterSizeMM != 0) {
+		panic(fmt.Errorf("backup: footer %q at %.1fmm", f.Footer, f.FooterSizeMM))
+	}
+	// The QR guards. Each is a caller bug with no operator-facing meaning:
+	// there is no correct plate to fall back to, so there is nothing to return.
+	if (f.QR == nil) != (f.qrAt == nil) {
+		panic(fmt.Errorf("backup: QR %v but placement %v", f.QR != nil, f.qrAt != nil))
+	}
+	if f.QR != nil && f.Mixed {
+		// The band is quantised by a SINGLE fontSize via qrLines, so a plate
+		// that mixes sizes has no single band to quantise it to. FitSized makes
+		// this structurally true by having no QR parameter at all; the check is
+		// here for the constructor that has not been written yet.
+		panic(fmt.Errorf("backup: a mixed-size plate carries a QR"))
+	}
+	if f.qrAt != nil && f.qrAt.Bottom > params.F(plateSize)-params.I(outerMargin) {
+		// Defensive: the fit already refused this as ErrQRTooTall. Reaching it
+		// here means a Fitted was built by something other than the fit.
+		panic(fmt.Errorf("backup: the QR band ends at %d, past the %d bottom margin",
+			f.qrAt.Bottom, params.F(plateSize)-params.I(outerMargin)))
 	}
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
@@ -97,17 +139,39 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 func EngraveFreeText(params engrave.Params, fnt *vector.Face, fontMM float32,
 	title string, lines []string, footer string, qrc *qr.Code) engrave.Engraving {
 	faces := make([]*vector.Face, len(lines))
+	sizes := make([]float32, len(lines))
 	for i := range faces {
 		faces[i] = fnt
+		sizes[i] = fontMM
+	}
+	var titleSize, footerSize float32
+	if title != "" {
+		titleSize = fontMM
+	}
+	if footer != "" {
+		footerSize = fontMM
+	}
+	// The placement is resolved HERE, at the constructor, which is what makes
+	// this the one-size case of the general path: Mixed stays false, every
+	// entry of Sizes is the same value, and the code has exactly one y, which
+	// nothing downstream re-derives.
+	var qrAt *qrPlacement
+	if qrc != nil {
+		p := qrPlaceAt(params, qrc, freeTextQRScale, params.F(fontMM), params.I(outerMargin))
+		qrAt = &p
 	}
 	return EngraveFitted(params, Fitted{
-		SizeMM:     fontMM,
-		Lines:      lines,
-		Faces:      faces,
-		QR:         qrc,
-		Title:      title,
-		Footer:     footer,
-		TitleFace:  fnt,
-		FooterFace: fnt,
+		SizeMM:       fontMM,
+		Sizes:        sizes,
+		Lines:        lines,
+		Faces:        faces,
+		QR:           qrc,
+		qrAt:         qrAt,
+		Title:        title,
+		Footer:       footer,
+		TitleFace:    fnt,
+		FooterFace:   fnt,
+		TitleSizeMM:  titleSize,
+		FooterSizeMM: footerSize,
 	})
 }

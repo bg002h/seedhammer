@@ -52,9 +52,19 @@ var ErrTooLarge = errors.New("backup: text does not fit a plate")
 // The composition text is the block texts joined by '\n' (CompositionText), so a
 // caller that split a string into blocks gets exactly that string back, and the
 // QR the plate carries is a copy of what is engraved rather than of a fragment.
+//
+// SizeMM is the size this block's rows are cut at. Zero means "the size the
+// plate is fitted at", which is what every caller but FitSized passes, so the
+// zero value preserves every existing composition and every golden.
+//
+// SizeMM is data the composition CARRIES; the wrap never reads it. FitSized is
+// the one function that resolves it into the per-block sizes the wrap is
+// handed, and every other entry point passes its own single rung for every
+// block. FitBlocks and FitBlocksAt therefore ignore it outright.
 type Block struct {
-	Face *vector.Face
-	Text string
+	Face   *vector.Face
+	Text   string
+	SizeMM float32
 }
 
 // CompositionText is the whole composition as one string: the block texts joined by '\n',
@@ -82,8 +92,24 @@ func CompositionText(blocks []Block) string {
 // that mapping anywhere downstream is the one way this feature can silently
 // engrave lines wide of the grid they were broken to, so nothing downstream
 // may: read Faces.
+//
+// Sizes is parallel to Lines for the same reason and under the same
+// prohibition. It is ALWAYS populated, uniform plates included, so the engraver
+// has one path and the existing goldens prove that path reproduces the special
+// case rather than running beside it.
 type Fitted struct {
+	// Mixed is true when the plate does NOT cut everything at one size --
+	// counting the title and the footer, so !Mixed means literally every glyph
+	// on the plate is one size, which is exactly what makes SizeMM printable.
+	//
+	// Mixed rather than Uniform because the zero value has to be the safe,
+	// legacy branch: every hand-built Fitted literal leaves it false, and false
+	// must mean "one size everywhere", which is what those literals are.
+	Mixed bool
+	// SizeMM is valid only when !Mixed. A reader that prints it regardless
+	// prints "0.0mm" for a mixed plate, which is a defect and not a fallback.
 	SizeMM float32
+	Sizes  []float32
 	Lines  []string
 	Faces  []*vector.Face
 	QR     *qr.Code
@@ -93,6 +119,23 @@ type Fitted struct {
 	// -- see FitBlocks.
 	Title, Footer         string
 	TitleFace, FooterFace *vector.Face
+
+	// TitleSizeMM and FooterSizeMM are EXPLICIT, never inherited from the
+	// blocks they border: the title of a size-ladder plate sits at the side's
+	// SMALLEST rung, not at the first block's. Each is non-zero exactly when
+	// its string is non-empty; EngraveFitted panics on any other combination,
+	// because LinesPerPlate(params, 0) is a divide by zero and a title at
+	// fontSize 0 is one too.
+	TitleSizeMM, FooterSizeMM float32
+
+	// qrAt is the code's resolved placement: computed ONCE, by the fit, and
+	// never re-derived. It is nil exactly when QR is nil.
+	//
+	// Unexported because the only Fitted literals outside this package feed the
+	// readout and never engrave, and a literal that set QR without a placement
+	// and then engraved it must fail loudly rather than draw a code at a y
+	// nobody computed.
+	qrAt *qrPlacement
 }
 
 // qrFor returns the code the plate will carry, or nil when want is false.
@@ -221,6 +264,12 @@ func FitBlocksAt(params engrave.Params, blocks []Block, title, footer string, us
 
 // fitBlocksAt is the single rung attempt both entry points share, so the
 // laddered and the fixed-size paths cannot lay a plate out differently.
+//
+// It fills Sizes with one entry per line, all at size, and sets TitleSizeMM and
+// FooterSizeMM to size exactly when the corresponding string is non-empty. That
+// is what makes this the ONE-SIZE CASE of the general path rather than a second
+// path beside it: Mixed stays false and every golden that runs through here is
+// engraved by the same code a mixed plate will be.
 func fitBlocksAt(params engrave.Params, blocks []Block, title, footer string, qrc *qr.Code, size float32) (Fitted, error) {
 	rows := LinesPerPlate(params, size)
 	start, end := bodyRows(rows, title, footer)
@@ -228,16 +277,61 @@ func fitBlocksAt(params engrave.Params, blocks []Block, title, footer string, qr
 	if !ok {
 		return Fitted{}, ErrTooLarge
 	}
+	qrAt, err := qrPlacementFor(params, qrc, params.F(size))
+	if err != nil {
+		return Fitted{}, err
+	}
+	sizes := make([]float32, len(lines))
+	for i := range sizes {
+		sizes[i] = size
+	}
+	var titleSize, footerSize float32
+	if title != "" {
+		titleSize = size
+	}
+	if footer != "" {
+		footerSize = size
+	}
 	return Fitted{
-		SizeMM:     size,
-		Lines:      lines,
-		Faces:      faces,
-		QR:         qrc,
-		Title:      title,
-		Footer:     footer,
-		TitleFace:  blocks[0].Face,
-		FooterFace: blocks[len(blocks)-1].Face,
+		SizeMM:       size,
+		Sizes:        sizes,
+		Lines:        lines,
+		Faces:        faces,
+		QR:           qrc,
+		qrAt:         qrAt,
+		Title:        title,
+		Footer:       footer,
+		TitleFace:    blocks[0].Face,
+		FooterFace:   blocks[len(blocks)-1].Face,
+		TitleSizeMM:  titleSize,
+		FooterSizeMM: footerSize,
 	}, nil
+}
+
+// ErrQRTooTall means the code's keep-out band runs past the bottom margin, so
+// there is no room below it for the rows the plate is supposed to carry.
+//
+// It is a property of the COMPOSITION, which is why it comes back from the fit
+// as an error rather than out of the engraver as a panic: EngraveFitted is
+// reached only AFTER the confirm screen, so a check that belongs at the fit but
+// lives in the engraver crashes mid-flow with a plate clamped in the machine.
+var ErrQRTooTall = errors.New("backup: the QR band runs past the bottom margin")
+
+// qrPlacementFor resolves the free-text plate's ONE code placement, anchored at
+// the plate's top margin -- one code on one plate, whatever block a row belongs
+// to -- and refuses a code whose band leaves the plate.
+//
+// Returns nil, nil when there is no code, which is the nil half of the
+// "qrAt is nil exactly when QR is nil" invariant, satisfied at the constructor.
+func qrPlacementFor(params engrave.Params, qrc *qr.Code, fontSize int) (*qrPlacement, error) {
+	if qrc == nil {
+		return nil, nil
+	}
+	p := qrPlaceAt(params, qrc, freeTextQRScale, fontSize, params.I(outerMargin))
+	if p.Bottom > params.F(plateSize)-params.I(outerMargin) {
+		return nil, ErrQRTooTall
+	}
+	return &p, nil
 }
 
 // Fit is FitBlocks for a composition cut entirely in one face. The same text
