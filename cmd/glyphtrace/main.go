@@ -109,26 +109,35 @@ func fail(err error) {
 // glyph instead of to a written list.
 func minFeature(sw int) int { return 2 * sw }
 
-// counterTable grades every glyph the face can cut, tightest counter first.
+// counterTable grades every glyph the face can cut: the enclosed counters it
+// holds, and the narrowest CHANNEL between two of its strokes.
 //
-// Each glyph is measured TWICE: at the rung asked for, and at 6.0mm, the top of
-// the range and the size nobody doubts. The 6.0mm pass is the reference for
-// what the glyph is SUPPOSED to enclose, because the interesting failure is not
-// a counter that got smaller -- every counter does, the stroke is 0.30mm at
-// every rung while the glyph shrinks -- but a counter that stopped existing.
-// A glyph with two counters at 6.0mm and one at 3.0mm has filled one in, and no
-// measurement of the survivor would say so.
+// Two different hazards, and the second is the one the first is blind to. A
+// counter is enclosed and a flood fill cannot reach it; a channel is the gap
+// between two roughly parallel strokes and is usually open at one end -- the
+// space between an 'e's top bar and its bottom bar, which no counter metric
+// ever sees. Below some floor separation a channel stops reading as a gap and
+// the two strokes read as one thick line (operator's principle, 2026-08-05).
+//
+// Each glyph is also measured at 6.0mm, because the failure that matters is not
+// a gap that shrank -- they all shrink, the stroke is 0.30mm at every rung while
+// the glyph scales -- but one that stopped existing.
 func counterTable(w io.Writer, face *vector.Face, faceName string, sizeMM float32) {
 	P := sh2.Params()
 	sw := P.StrokeWidth
 	swMM := float64(sw) / float64(P.Millimeter)
+	// The floor, pending a verdict from steel: two stroke widths of bare metal.
+	// It is the same number the house minimum-feature rule uses, applied to the
+	// gap between strokes rather than to a feature's own size.
+	floorMM := 2 * swMM
 
 	type row struct {
 		g        glyph
-		ref      int     // counters at 6.0mm
-		lost     int     // counters 6.0mm has that this rung does not
-		tight    float64 // narrowest surviving counter, mm
+		lost     int
+		tight    float64
 		hasTight bool
+		ch       channel
+		hasCh    bool
 	}
 	var rows []row
 	for r := rune(0); r < 0x2000; r++ {
@@ -139,57 +148,56 @@ func counterTable(w io.Writer, face *vector.Face, faceName string, sizeMM float3
 		if !g.hasInk {
 			continue
 		}
-		g.counters = rasterize(g.runs, sw, P.Millimeter).findCounters(P.Millimeter)
+		ras := rasterize(g.runs, sw, P.Millimeter)
+		g.counters = ras.findCounters(P.Millimeter)
+		ch, hasCh := worstChannel(ras.findChannels(), floorMM)
+
 		ref := trace(face, r, P.F(6.0), P.StepperConfig)
 		refc := rasterize(ref.runs, sw, P.Millimeter).findCounters(P.Millimeter)
 		t, ok := g.tightest()
 		rows = append(rows, row{
-			g: g, ref: len(refc), lost: max(len(refc)-len(g.counters), 0),
-			tight: t, hasTight: ok,
+			g: g, lost: max(len(refc)-len(g.counters), 0),
+			tight: t, hasTight: ok, ch: ch, hasCh: hasCh,
 		})
 	}
-	// Worst first: everything that lost a counter, then by how little bare
-	// metal the tightest survivor has.
+	// Longest run under the floor first: that is the ranking the opening-up
+	// work follows, because it is how far the glyph reads as one thick line.
 	sort.Slice(rows, func(i, j int) bool {
-		if (rows[i].lost > 0) != (rows[j].lost > 0) {
-			return rows[i].lost > 0
-		}
-		if rows[i].hasTight != rows[j].hasTight {
-			return rows[i].hasTight
-		}
-		return rows[i].tight < rows[j].tight
+		return rows[i].ch.RunBelow(floorMM) > rows[j].ch.RunBelow(floorMM)
 	})
 
 	fmt.Fprintf(w, "font/%s at %.1fmm, stroke %.2fmm.\n", faceName, sizeMM, swMM)
-	fmt.Fprintf(w, "A counter must stay at least one stroke wide (%.2fmm) to read; "+
-		"'lost' counts counters present at 6.0mm and gone here.\n\n", swMM)
-	fmt.Fprintf(w, "%-9s %-3s %-9s %-6s %-9s  %s\n",
-		"glyph", "k", "counters", "lost", "tightest", "verdict")
+	fmt.Fprintf(w, "channel = the narrowest white gap between two strokes, and how far it runs at that width.\n")
+	fmt.Fprintf(w, "counter = enclosed bare metal; 'lost' counts counters present at 6.0mm and gone here.\n\n")
+	fmt.Fprintf(w, "the FLOOR is %.2fmm (%.0f strokes): under it, two parallel strokes read as one thick line.\n\n",
+		floorMM, floorMM/swMM)
+	fmt.Fprintf(w, "%-9s %-3s %-8s %-5s %-9s %-10s %-9s %s\n",
+		"glyph", "k", "counters", "lost", "counter", "under-floor", "median", "verdict")
 
-	closed, thin := 0, 0
 	for _, rw := range rows {
 		g := rw.g
-		tight := "     -   "
-		switch {
-		case rw.hasTight:
+		tight, under, med := "    -   ", "    -    ", "    -   "
+		if rw.hasTight {
 			tight = fmt.Sprintf("%6.3fmm", rw.tight)
+		}
+		below := rw.ch.RunBelow(floorMM)
+		if rw.hasCh {
+			under = fmt.Sprintf("%6.2fmm", below)
+			med = fmt.Sprintf("%6.3fmm", rw.ch.Median())
 		}
 		verdict := "ok"
 		switch {
-		case rw.lost > 0:
-			verdict = fmt.Sprintf("CLOSED: %d counter(s) filled in", rw.lost)
-			closed++
-		case !rw.hasTight:
-			verdict = "no counter to lose"
-		case rw.tight < swMM:
-			verdict = fmt.Sprintf("THIN: under one %.2fmm stroke", swMM)
-			thin++
+		case below >= 1.0:
+			verdict = "MERGES: parallel under the floor for over a millimetre"
+		case below >= 0.5:
+			verdict = "tight: half a millimetre under the floor"
 		}
-		fmt.Fprintf(w, "%-9s %-3d %-9d %-6d %-9s  %s\n",
-			caption(g.r), g.strokes, len(g.counters), rw.lost, tight, verdict)
+		if rw.lost > 0 {
+			verdict = fmt.Sprintf("CLOSED: %d counter(s) filled in", rw.lost)
+		}
+		fmt.Fprintf(w, "%-9s %-3d %-8d %-5d %-9s %-10s %-9s %s\n",
+			caption(g.r), g.strokes, len(g.counters), rw.lost, tight, under, med, verdict)
 	}
-	fmt.Fprintf(w, "\nAt %.1fmm: %d glyphs lost a counter outright, %d more are under one stroke wide, "+
-		"of %d that cut anything.\n", sizeMM, closed, thin, len(rows))
 }
 
 func faceFor(name string) (*vector.Face, string, error) {
