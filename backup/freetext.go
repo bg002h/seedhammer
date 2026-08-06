@@ -13,10 +13,19 @@ import (
 //
 // f.Title and f.Footer are engraved VERBATIM -- never through TitleString,
 // which upper-cases and truncates at 18, so it would engrave something the
-// operator never approved -- and are centered in the INSET SPAN, not the full
-// plate width. Row 0 and the last row are both screw-hole rows: centering a
-// 20-character title at 6.0mm on the full width inks x[7.127, 77.962]mm, which
-// crosses both screw-hole bands while every check passes.
+// operator never approved. Row 0 and the last row are both screw-hole rows, and
+// what keeps their ink clear of the holes is the 18-character CAP, measured at
+// every rung by TestTitleCapFitsAtEveryRung: 6.0mm is the tight one, where an
+// 18-character title clears by 0.620mm and 20 characters do not clear at all.
+//
+// centerInset centres them in the inset span rather than on the full plate
+// width, and that term states an intent rather than enforcing one. Centring is
+// symmetric about the plate's midline either way, so the inset moves a title by
+// at most one device unit and by none at all when the gap is even. MEASURED at
+// spec 7.19: zeroing it leaves this repository's whole suite green and every
+// golden byte for byte identical. An earlier version of this comment claimed
+// full-width centring put a 20-character 6.0mm title across both screw-hole
+// bands; it puts it in exactly the same place, and the cap is what refuses it.
 //
 // f must be the fit's output for the same composition. Its lines are engraved
 // down a running y in DEVICE units, each row advancing by its OWN size, which
@@ -37,9 +46,14 @@ import (
 // mixed plate's zero would put LinesPerPlate and the width division through a
 // divide by zero, mid-flow, with a plate clamped in the machine.
 func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
-	// The Faces guard is evaluated FIRST, and deliberately: the test that pins
-	// it hands in a short face map with a correct size map, so a Sizes guard
-	// ahead of it would answer for it and the face map would stop being tested.
+	// The ORDER of these two guards is not load-bearing, and an earlier version
+	// of this comment claimed it was -- it said a Sizes guard placed ahead of
+	// the Faces one would answer for the short-face-map fixture and stop it
+	// testing the face map. It would not: that fixture hands in a COMPLETE size
+	// map and its partner a complete face map, so exactly one guard can fire in
+	// each. MEASURED at spec 7.19: swapping them leaves both fixtures green.
+	// What tells the two apart is that each fixture asserts WHICH panic it
+	// recovered; recover() != nil is not an assertion.
 	if len(f.Faces) != len(f.Lines) {
 		// A face map that does not cover every line is a caller bug, and the
 		// alternative to failing here is engraving some rows in whatever face
@@ -95,10 +109,10 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 		// engraver's own differs from it by the LinesPerPlate remainder.
 		start, limit := yBudget(params, f.Title, f.Footer, f.TitleSizeMM, f.FooterSizeMM)
 
-		// centerInset engraves s centered between the screw-hole bands, in its
-		// own face AND at its own size: the inset is a whole number of THAT
-		// face's characters at THAT size, and the title of a size-ladder plate
-		// is not cut at the body's rung.
+		// centerInset engraves s centred on the plate, in its own face AND at
+		// its own size: the title of a size-ladder plate is not cut at the
+		// body's rung. The inset is a whole number of THAT face's characters at
+		// THAT size; see the doc comment above for what it does and does not do.
 		centerInset := func(s string, fnt *vector.Face, sizeMM float32, y int) {
 			if s == "" {
 				return

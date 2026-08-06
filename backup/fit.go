@@ -149,30 +149,6 @@ func qrFor(text string, want bool) (*qr.Code, error) {
 	return qr.Encode(text, qr.L)
 }
 
-// bodyRows is the half-open range of plate rows the body may use. A title takes
-// row 0 and a footer the last row -- but only when they exist, which is what
-// makes spec 4's "Plain" column the full plate. Admission is the one place that
-// reserves both unconditionally; see Admissible.
-//
-// The FIT no longer asks the question in rows: a plate that mixes sizes has no
-// row pitch, so yBudget states the same window in y and the wrap counts against
-// that. This survives as the row-index form the uniform-plate tests are written
-// in, where the two are measured to agree at every rung and every title/footer
-// combination.
-func bodyRows(rows int, title, footer string) (start, end int) {
-	start, end = 0, rows
-	if title != "" {
-		start++
-	}
-	if footer != "" {
-		end--
-	}
-	if end < start {
-		end = start
-	}
-	return start, end
-}
-
 // widthFor turns a plate layout into the widthAt closure WrapText wants:
 // indexed by OUTPUT line, with the plate-row offset applied inside.
 func widthFor(lay lineLayout, startRow int) func(int) int {

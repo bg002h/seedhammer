@@ -27,6 +27,33 @@ func layAt(size float32, qrc *qrpkg.Code, scale int) (lineLayout, int) {
 	return textLayout(P, sh.Font, P.F(size), P.I(outerMargin), qrPlaceFor(size, qrc, scale)), LinesPerPlate(P, size)
 }
 
+// bodyRows is the half-open range of plate rows the body may use. A title takes
+// row 0 and a footer the last row -- but only when they exist, which is what
+// makes spec 4's "Plain" column the full plate. Admission is the one place that
+// reserves both unconditionally; see Admissible.
+//
+// It is a TEST helper and no longer production code. P3 gave the fit a y budget
+// instead: a plate that mixes sizes has no row pitch, so yBudget states the same
+// window in y and the wrap counts against that, and nothing in the package has
+// asked the question in rows since. It survives here because the uniform-plate
+// fixtures are written in the row-index form -- where the two are measured to
+// agree at every rung and every title/footer combination -- and rewriting them
+// in y would rewrite the very pins that hold P2 and P3 still. Left in fit.go it
+// was dead code that read as a second, unused definition of the body window.
+func bodyRows(rows int, title, footer string) (start, end int) {
+	start, end = 0, rows
+	if title != "" {
+		start++
+	}
+	if footer != "" {
+		end--
+	}
+	if end < start {
+		end = start
+	}
+	return start, end
+}
+
 // TestInsetRowsPerRung pins spec 5.1: the screw-hole inset is a BAND, not two
 // rows. At 3.0mm FIVE rows are inset, and a model that assumes "first and last"
 // puts ink through a screw hole on three of them.

@@ -458,18 +458,39 @@ func TestOneRunSizedPlanStillClears(t *testing.T) {
 
 // TestUnsizedPlansAreUntouchedByTheClearing: the clearing is scoped to SizeMM
 // alone, so every plan that shipped before the ladder splits exactly as it did.
+//
+// The EXACT branch has to be reached, and none of the texts this test carried
+// until spec 7.19's mutation pass reached it. declaredParts is the SUM of the
+// runs' Blocks, and every shipped unsized plan leaves its last run's Blocks at
+// 0 -- so ftPlanSH and ftPlanConst declare 0 parts, which strings.Split can
+// never return, and ftPlanBoth declares its sh half's 4 against texts of 1, 2,
+// 6 and 9. exact was false every time, sizeOf returned 0 down its FIRST branch,
+// and a sizeOf that invented a rung for an unsized run was invisible. Measured:
+// returning 3.0 for a zero SizeMM left this test green.
 func TestUnsizedPlansAreUntouchedByTheClearing(t *testing.T) {
+	reachedExact := 0
 	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst, &ftPlanBoth} {
 		if plan.Sized() {
 			t.Errorf("%s carries sizes; the shipped plans must not", plan.Name())
 		}
-		for _, text := range []string{"", "one", "one\ntwo", ftProofTextBoth, ftSweeps(6)} {
+		texts := []string{"", "one", "one\ntwo", ftProofTextBoth, ftSweeps(6)}
+		// The text whose part count MATCHES the plan's declaration, which is
+		// the only shape that takes the stamping branch at all.
+		if n := plan.declaredParts(); n >= 1 {
+			texts = append(texts, ftSweeps(n))
+			reachedExact++
+		}
+		for _, text := range texts {
 			for i, b := range plan.Blocks(text) {
 				if b.SizeMM != 0 {
 					t.Errorf("%s: block %d of %.20q carries %.1fmm", plan.Name(), i, text, b.SizeMM)
 				}
 			}
 		}
+	}
+	if reachedExact == 0 {
+		t.Error("no unsized plan declares a part count a text can match, so none of them ever " +
+			"reaches the branch that stamps a size and this test cannot see one being invented")
 	}
 }
 
