@@ -58,11 +58,11 @@
 <polyline id="star" class="st0" points="291,2 291,4 289.27,3 291,4 289.27,5 291,4 291,6 291,4 292.73,5 291,4 292.73,3 291,4 "/>
 <polyline id="at" class="st0" points="299,7 298,8 296,8 295,7 295,3 296,2 298,2 299,3 299,6 298,6 296,6 296,4 298,4 298,7 "/>
 <line id="dash" class="st0" x1="301" y1="5" x2="305" y2="5"/>
-<polyline id="a" class="st0" points="307,3.5 310,4 311,5 311,8.5 307,8 307,6 311,5.5 "/>
+<polyline id="a" class="st0" points="307,3 310,3.375 311,4.375 311,9 307,8.5 307,6.25 311,5.75 "/>
 <polyline id="b" class="st0" points="313,2 313,8 317,8 317,5 313,5 "/>
 <polyline id="c" class="st0" points="323,4 319,4 319,8 323,8 "/>
 <polyline id="d" class="st0" points="329,2 329,8 325,8 325,5 329,5 "/>
-<polyline id="e" class="st0" points="331,6 335,6 335,3.5 331,4 331,8 335,8.5 "/>
+<polyline id="e" class="st0" points="331,6 335,6 335,3 331,3.5 331,8.5 335,9 "/>
 <polyline id="f" class="st0" points="341,3.5 340.619,2 339,2 339,5 337,4.75 340.25,5.15625 339,5 339,8 "/>
 <polyline id="g" class="st0" points="344,9 347,9 347,4 343,4 343,7 347,7 "/>
 <polyline id="h" class="st0" points="349,2 349,8 349,4 353,4 353,8 "/>
@@ -82,7 +82,7 @@
 <polyline id="p" class="st0" points="397,9 397,4 401,4 401,7 397,6 "/>
 <polyline id="q" class="st0" points="407,9 407,4 403,4 403,7 407,6 "/>
 <polyline id="r" class="st0" points="409,8 409,4 411,4 412,5 "/>
-<polyline id="s" class="st0" points="419,3.5 415,4 415,6 419,6 419,8 415,8.5 "/>
+<polyline id="s" class="st0" points="419,3 415,3.5 415,6 419,6 419,8.5 415,9 "/>
 <polyline id="t" class="st0" points="424,4 421,4 422,4 422,2 422,8 424,8 "/>
 <polyline id="u" class="st0" points="427,4 427,8 431,8 431,4 "/>
 <polyline id="v" class="st0" points="433,4 433,5 435,8 437,5 437,4 "/>
