@@ -22,9 +22,11 @@ const (
 	// MM is the number of (micro-)steps per millimeter: 6400.
 	MM = FullStepsPerRevolution / MMPerRevolution * tmc2209.Microsteps
 
-	StrokeWidth    = 0.3 * MM
-	TopSpeed       = 30 * MM
-	EngravingSpeed = 8 * MM
+	StrokeWidth = 0.3 * MM
+	TopSpeed    = 30 * MM
+	// EngravingSpeed is HALF the upstream 8mm/s; see the rationale on
+	// cmd/controller/platform_sh2.go's engravingSpeed, which this copies.
+	EngravingSpeed = 4 * MM
 	Acceleration   = 250 * MM
 	Jerk           = 2600 * MM
 )

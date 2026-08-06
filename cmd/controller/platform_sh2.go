@@ -187,8 +187,20 @@ const (
 	// strokeWidth of engraving lines.
 	strokeWidth = 0.3 * mm
 	// Speeds in steps/second.
+	//
+	// engravingSpeed is HALF the upstream 8mm/s. The needle fires on a fixed
+	// 25ms period (needlePeriod below), so dot spacing is feed x 25ms and
+	// nothing else: 8mm/s spaces 0.30mm dots 0.20mm apart, 4mm/s spaces them
+	// 0.10mm apart. Measured on hard steel 2026-08-06 -- dots visibly closer,
+	// retrace widening much improved. Costs ~11% plate time.
+	//
+	// internal/sh2/params.go carries a copy for host tools, and
+	// TestParamsMatchTheMachine fails if the two diverge. The four TEST-local
+	// copies (engrave, backup, gui, stepper) deliberately stay at 8mm/s so
+	// goldens do not move on a machine-speed change; that decoupling is a known
+	// gap, not an oversight.
 	topSpeed       = 30 * mm
-	engravingSpeed = 8 * mm
+	engravingSpeed = 4 * mm
 	homingSpeed    = 15 * mm
 	// acceleration in steps/s².
 	acceleration = 250 * mm
