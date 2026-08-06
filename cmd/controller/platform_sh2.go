@@ -171,6 +171,29 @@ const (
 	stallThreshold = 110
 	// minimumStallVelocity is the speed in steps/second for
 	// StallGuard to be enabled.
+	//
+	// STALLGUARD PROTECTS TRAVEL AND HOMING, NEVER THE CUT. It becomes
+	// TCOOLTHRS (driver/tmc2209.SetMinimumStallVelocity), and the TMC2209
+	// datasheet is explicit that the stall output "become[s] enabled when
+	// exceeding this velocity and disabled again once the velocity falls below
+	// this threshold" -- i.e. StallGuard is live only ABOVE this speed.
+	//
+	// Worked through with the driver's own constants (fclk 12MHz, Microsteps
+	// 256, so scale 1), TCOOLTHRS = 12e6/51200 = 234:
+	//
+	//	travel    topSpeed 30mm/s   TSTEP  62   armed
+	//	homing             15mm/s   TSTEP 125   armed
+	//	engraving          8mm/s    TSTEP 234.4 NOT armed (stock, and exclusive)
+	//	engraving          4mm/s    TSTEP 469   NOT armed (today)
+	//
+	// This is set to EXACTLY the upstream engraving speed, and the comparison
+	// is exclusive, so engraving has never been inside the StallGuard window --
+	// not at 8mm/s and not at the 4mm/s we cut at now. Halving the feed
+	// therefore disarmed nothing. Whether the equality was intended is not
+	// recorded upstream, but a hammering load would throw false stalls, so
+	// treating the cut as unprotected is the only reading consistent with the
+	// numbers. Checked 2026-08-06 because a recon agent reported the feed
+	// change as having disabled blockage detection; it had not.
 	minimumStallVelocity = 8 * mm
 	// fullStepsPerRevolution is the number of full-steps for a full
 	// motor revolution.
