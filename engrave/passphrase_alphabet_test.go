@@ -86,7 +86,17 @@ func TestPassphraseRunPartition(t *testing.T) {
 		// 'x' joined this set deliberately: it used to draw an X in ONE run by
 		// retracing two of its arms, cutting them twice. Two clean diagonals cost
 		// one extra unit of per-run quantisation and look right.
-		2: "!\"$%:;=?ijx",
+		//
+		// 'z' joined it for the same reason, 2026-08-05. Its crossbar was drawn
+		// 459 -> 458 -> 460 -> 459, which cuts EVERY part of the bar twice: a
+		// second pass cuts deeper and therefore wider, so the bar came out
+		// heavier than every other stroke in the glyph. Lifting the crossbar into
+		// its own run draws the diagonal unbroken from (461,3.5) to (457,8.5) --
+		// through exactly (459,6) -- with the bar crossing it, and every stroke
+		// cut once. Max k is still 2, so the disclosure bound is untouched, and
+		// runeDuration is unchanged: removing a double-cut can only make a glyph
+		// cheaper, never dearer.
+		2: "!\"$%:;=?ijxz",
 		3: "",
 		4: "",
 	}
@@ -95,7 +105,7 @@ func TestPassphraseRunPartition(t *testing.T) {
 			t.Errorf("glyphs with %d runs: got %q, want %q", k, got, w)
 		}
 	}
-	if got, want := len(byRuns[1]), 96-1-11; got != want {
+	if got, want := len(byRuns[1]), 96-1-12; got != want {
 		t.Errorf("single-run glyphs: got %d, want %d", got, want)
 	}
 	if !s.hasMultiRun {
