@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -638,6 +639,127 @@ func TestSizeProofDropsTheQRTheOperatorChose(t *testing.T) {
 	}
 }
 
+// ---- a stale QR choice must not narrow the admission band -------------------
+
+// TestSizeProofAdmissionIgnoresAStaleQRChoice pins the agreement between
+// admission and the router: ftFitAt sends a sized composition to FitSized,
+// which has no QR parameter at all (spec 2.7) and ignores useQR, so
+// AdmissibleBlocks must not reserve a QR band for it either.
+//
+// Asserted as an EQUALITY between the two flag values rather than against the
+// measured figures, because the figures are what spec 6 pins elsewhere
+// (TestAdmissibleBlocksVerdictDoesNotMove) and because the front sits four
+// lines under the cliff: a test written only against the back's numbers passes
+// on the front while the defect is still there. The property is that the flag
+// makes NO difference to a sized composition, which holds on both sides.
+func TestSizeProofAdmissionIgnoresAStaleQRChoice(t *testing.T) {
+	P := proofParams()
+	for _, trigger := range []string{ftProofTriggerSizeFront, ftProofTriggerSizeBack} {
+		t.Run(trigger, func(t *testing.T) {
+			p := ftSizeProofFor(t, trigger)
+			if !ftSizedBlocks(p.Plan.Blocks(p.Text)) {
+				t.Fatal("this test needs a sized composition")
+			}
+			off := ftEvaluate(P, p.Plan, p.Text, p.Title, p.Footer, false, 0)
+			on := ftEvaluate(P, p.Plan, p.Text, p.Title, p.Footer, true, 0)
+			if off.err != nil || on.err != nil {
+				t.Fatalf("the ladder does not fit: qr off %v, qr on %v", off.err, on.err)
+			}
+			if !off.ok {
+				t.Fatalf("the ladder is inadmissible with the QR off (%d/%d lines)",
+					off.linesUsed, off.linesAvail)
+			}
+			if !on.ok {
+				t.Errorf("a stale QR choice makes the ladder inadmissible: %d/%d lines with the "+
+					"QR on against %d/%d with it off, while FitSized lays out %d rows either way",
+					on.linesUsed, on.linesAvail, off.linesUsed, off.linesAvail, len(on.plate.Lines))
+			}
+			if on.linesUsed != off.linesUsed || on.linesAvail != off.linesAvail {
+				t.Errorf("the QR flag moved the readout on a plate that cannot carry a code: "+
+					"%d/%d lines with it on, %d/%d with it off",
+					on.linesUsed, on.linesAvail, off.linesUsed, off.linesAvail)
+			}
+		})
+	}
+}
+
+// TestSizeProofAdvancesWithTheQRReEnabled is the same defect through the real
+// flow, on the path spec 3.2 names as reachable on shipped firmware: the loader
+// clears the QR the operator chose, the operator goes Back to the QR screen and
+// turns it on again, and nothing on that screen knows a ladder is loaded.
+//
+// The Text step must still ADVANCE. Before the fix the back was refused here
+// with "Removing the QR frees about 476 characters" -- a remedy naming a code
+// this plate structurally cannot carry.
+func TestSizeProofAdvancesWithTheQRReEnabled(t *testing.T) {
+	for _, trigger := range []string{ftProofTriggerSizeFront, ftProofTriggerSizeBack} {
+		t.Run(trigger, func(t *testing.T) {
+			h, _ := startFT(t)
+			ftPastQR(h, false)
+			ftTypeTrigger(h, trigger)
+			ftOK(h)
+			h.tapWidget("proofYes")
+			h.mustReach("lines")
+			ftBack(h)
+			h.mustReach("QRCode")
+			ftChoose(h, "qr", 1) // "Add QR" -- the choice the loader cleared
+			h.mustReach("lines")
+			ftOK(h)
+			if uiContains(h.content, "TooLong") || uiContains(h.content, "Remove the QR") {
+				t.Fatalf("the Text step refuses a ladder that fits, over a code it cannot carry; frame %q",
+					h.content)
+			}
+			h.mustReach("Title")
+		})
+	}
+}
+
+// TestSizeProofRefusalDoesNotOfferAQRTheLadderCannotCarry is the other half of
+// the same rule, at the refusal rather than the admission: an EDITED ladder that
+// keeps its part count -- so its rungs survive -- but overflows them is refused
+// by FitSized, and the refusal must not offer to remove a code the plate never
+// had. Removing it frees nothing.
+func TestSizeProofRefusalDoesNotOfferAQRTheLadderCannotCarry(t *testing.T) {
+	P := proofParams()
+	p := ftSizeProofFor(t, ftProofTriggerSizeFront)
+	parts := strings.Split(p.Text, "\n")
+	parts[0] += strings.Repeat("X", 24)
+	grown := strings.Join(parts, "\n")
+	// The premise: still a ladder, admissible at the 3.0mm anchor, and refused
+	// by its own rungs. Without all three this test would be measuring some
+	// other refusal.
+	f := ftEvaluate(P, p.Plan, grown, p.Title, p.Footer, true, 0)
+	if !ftSizedBlocks(p.Plan.Blocks(grown)) {
+		t.Fatal("the edit cleared the ladder's sizes; the premise has moved")
+	}
+	if !f.ok {
+		t.Fatalf("the edited ladder is inadmissible (%d/%d lines); the premise has moved",
+			f.linesUsed, f.linesAvail)
+	}
+	if !errors.Is(f.err, backup.ErrTooLarge) {
+		t.Fatalf("the edited ladder fits its rungs (err %v); the premise has moved", f.err)
+	}
+
+	h, _ := startFT(t)
+	ftPastQR(h, false)
+	ftTypeTrigger(h, ftProofTriggerSizeFront)
+	ftOK(h)
+	h.tapWidget("proofYes")
+	h.mustReach("lines")
+	ftBack(h)
+	h.mustReach("QRCode")
+	ftChoose(h, "qr", 1)
+	h.mustReach("lines")
+	ftSetText(h, grown)
+	ftOK(h)
+	if uiContains(h.content, "Remove the QR") || uiContains(h.content, "machine-readable") {
+		t.Errorf("the refusal offers to remove a QR the ladder cannot carry; frame %q", h.content)
+	}
+	if !uiContains(h.content, "Shorten the Text field") {
+		t.Errorf("the refusal does not name the one remedy there is; frame %q", h.content)
+	}
+}
+
 // ---- spec 7.17: the confirm screen ------------------------------------------
 
 // TestSizeProofConfirmNamesTheRungs is spec 7.17(a): the one screen the
@@ -702,6 +824,82 @@ func TestSizeProofConfirmNamesTheRungs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSizeProofConfirmReportsTheQRFromTheFit is spec 7.17(a2), written as the
+// item words it: load a ladder, go Back to the QR screen, RE-ENABLE the QR, and
+// the confirm screen must still read "QR: no" and must not carry the privacy
+// warning.
+//
+// Index 1 -- "Add QR" -- is the whole item. TestSizeProofDropsTheQRTheOperatorChose
+// walks the same path and re-picks index 0, which leaves useQR false, so the
+// state that distinguishes the shipped ftConfirmSummary (which reads
+// f.plate.QR) from a regression reading the flow's flag is never rendered.
+// Here useQR is true and f.plate.QR is nil all the way to the confirm screen.
+//
+// The warning is asserted BOTH ways, on the same panel: absent for the ladder,
+// present for an ordinary plate that really does carry a code. Absence alone is
+// satisfied by a warning that never renders at all.
+func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
+	for _, trigger := range []string{ftProofTriggerSizeFront, ftProofTriggerSizeBack} {
+		t.Run(trigger, func(t *testing.T) {
+			h, r := startFT(t)
+			// Chosen, cleared by the loader, then chosen AGAIN: "re-enable".
+			ftPastQR(h, true)
+			ftTypeTrigger(h, trigger)
+			ftOK(h)
+			h.tapWidget("proofYes")
+			h.mustReach("lines")
+			ftBack(h)
+			h.mustReach("QRCode")
+			ftChoose(h, "qr", 1)
+			h.mustReach("lines")
+			for _, step := range []string{"Title", "Footer", "Confirm"} {
+				ftOK(h)
+				h.mustReach(step)
+			}
+			pages := strings.Join(ftConfirmPages(h), "\n")
+			if !uiContains(pages, "QR: no") {
+				t.Errorf("the confirm screen does not read \"QR: no\"; pages %q", pages)
+			}
+			if uiContains(pages, "QR: yes") {
+				t.Errorf("the confirm screen claims a QR the plate cannot carry; pages %q", pages)
+			}
+			if uiContains(pages, ftWarnQR) {
+				t.Errorf("the confirm screen carries the QR privacy warning for a plate with no code; pages %q",
+					pages)
+			}
+			// The plate itself, so "QR: no" is the truth about the steel and not
+			// a second reading of the same flag.
+			ftOK(h)
+			h.step()
+			if !r.gotPlate {
+				t.Fatal("the flow never built a plate")
+			}
+			if r.got.QR != nil {
+				t.Error("the ladder plate carries a QR")
+			}
+		})
+	}
+	// Non-vacuity: the same assertions on a plate that DOES carry a code.
+	t.Run("a plate with a QR still warns", func(t *testing.T) {
+		h, _ := startFT(t)
+		ftPastQR(h, true)
+		h.typeString("hello")
+		for _, step := range []string{"Title", "Footer", "Confirm"} {
+			ftOK(h)
+			h.mustReach(step)
+		}
+		pages := strings.Join(ftConfirmPages(h), "\n")
+		if !uiContains(pages, "QR: yes") {
+			t.Errorf("the confirm screen does not read \"QR: yes\" for a plate that carries one; pages %q",
+				pages)
+		}
+		if !uiContains(pages, ftWarnQR) {
+			t.Errorf("the confirm screen omits the QR privacy warning for a plate that carries a code, "+
+				"so the ladder's absence assertion proves nothing; pages %q", pages)
+		}
+	})
 }
 
 // TestSizeProofConfirmFitsThePanel is spec 7.17(b), measured as RECTANGLES on

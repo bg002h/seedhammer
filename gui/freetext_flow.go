@@ -308,10 +308,35 @@ type ftFit struct {
 // ftEvaluate answers every live question at once, from ONE encode. Splitting it
 // would let the readout, the refusal figure and the engraving disagree about
 // the same text.
+//
+// ADMISSION MUST AGREE WITH THE ROUTER about the QR. ftFitAt sends a sized
+// composition to FitSized, which has no QR parameter at all (spec 2.7) and so
+// ignores useQR entirely -- while AdmissibleBlocks reserves a whole QR band
+// whenever the flag is set. Handing it the raw flag therefore narrows the band
+// for a plate that can never carry a code: the operator loads a ladder (which
+// clears the flag), goes Back to the QR screen and turns it on again -- spec
+// 3.2's reachable path -- and comes back to a plate that FitSized lays out
+// perfectly being refused, over a code it cannot hold. Measured before the fix:
+// SIZEPROOF!BACK went from (18, 24, ok) to (30, 24, REFUSED) on the flag alone,
+// and the front sat four lines under the same cliff.
+//
+// The stale flag is dropped HERE and not in AdmissibleBlocks. Spec 6 pins that
+// function at the uniform 3.0mm anchor -- it never reads Block.SizeMM -- and
+// TestAdmissibleBlocksVerdictDoesNotMove holds its verdict to measured cliff
+// values. Counting a sized composition at its OWN rungs is the better answer
+// and would also make the readout's line count describe the rows actually cut
+// (spec 6 accepts that divergence); it changes that function's contract, so it
+// is left to the phase that next touches admission rather than made at a gate.
+//
+// Dropping the flag is not the WHOLE answer either: spec 3.0 requires the QR
+// step to stop offering a choice it will not honour, rather than accepting one
+// and discarding it downstream. That is the QR step's own change, and its own
+// follow-up.
 func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) ftFit {
 	var f ftFit
 	blocks := plan.Blocks(text)
-	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, useQR)
+	admitQR := useQR && !ftSizedBlocks(blocks)
+	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, admitQR)
 	f.plate, f.err = ftFitAt(params, blocks, title, footer, useQR, size)
 	return f
 }
@@ -480,14 +505,20 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 // The QR is never dropped automatically: it changes what a scanner returns from
 // the plate, and doing that on the operator's behalf to make room is exactly
 // the silent substitution this program exists to avoid.
+//
+// A SIZED composition is never offered that remedy, whatever the flag says. It
+// is laid out by FitSized, which has no QR (spec 2.7), so removing a code the
+// plate does not carry frees nothing -- and an edited ladder that overflows its
+// own rungs is refused by the fit, not by the QR band. Shortening the text is
+// the only remedy there is, so it is the only one offered.
 func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f ftFit, text string, useQR bool) bool {
-	if !useQR {
+	blocks := plan.Blocks(text)
+	if !useQR || ftSizedBlocks(blocks) {
 		showError(ctx, th, "Text", fmt.Sprintf(
 			"The text needs %d lines and a plate holds %d, at the smallest size. Shorten the Text field.",
 			f.linesUsed, f.linesAvail))
 		return false
 	}
-	blocks := plan.Blocks(text)
 	smallest := backup.FontSizes[len(backup.FontSizes)-1]
 	freed := backup.MaxCharsAtBlocks(params, blocks, smallest, false) -
 		backup.MaxCharsAtBlocks(params, blocks, smallest, true)
