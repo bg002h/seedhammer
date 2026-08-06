@@ -590,6 +590,14 @@ func banner(svg []byte, label string) []byte {
 		return svg
 	}
 	head := vw / 14
+	// SIZED TO FIT. A fixed fraction of the width overran and rsvg-convert
+	// clipped it mid-word without complaint -- "OPTION 3 - top line up AND
+	// bottom bar dropped be" is worse than no caption, because the reader
+	// cannot tell it was truncated.
+	size := head * 55 / 100
+	if n := len([]rune(label)); n > 0 {
+		size = min(size, (vw-head/2)*10/(n*6))
+	}
 	open := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="%d %d %d %d" width="%d" height="%d">`,
 		vx, vy-head, vw, vh+head, vw, vh+head)
 	rest := string(svg)
@@ -599,6 +607,6 @@ func banner(svg []byte, label string) []byte {
 	text := fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#f2f2f2"/>`+
 		`<text x="%d" y="%d" font-family="sans-serif" font-size="%d" font-weight="bold" fill="#111">%s</text>`,
 		vx, vy-head, vw, head,
-		vx+head/4, vy-head/4, head*55/100, esc(label))
+		vx+head/4, vy-head/4, size, esc(label))
 	return []byte(open + text + rest)
 }
