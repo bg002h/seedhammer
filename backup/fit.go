@@ -564,6 +564,104 @@ func AdmissibleBlocks(params engrave.Params, blocks []Block, title, footer strin
 	return len(l), linesAvail, len(l) <= linesAvail
 }
 
+// AdmissibleSized is AdmissibleBlocks' sibling for a composition that states its
+// OWN rungs -- the shape FitSized lays out -- counted where FitSized counts it.
+//
+// AdmissibleBlocks lays every composition out uniformly at FontSizes' smallest
+// rung, which is spec 6's anchor and stays exactly as it is. For a size ladder
+// that anchor describes a DIFFERENT PLATE: measured, it reports 12 rows for the
+// front while FitSized cuts 16, and 18 for the back against 20, so the readout's
+// line count and the refusal's figures were about neither the plate nor a bound
+// on it -- and an edited ladder that overflowed its own rungs was refused by the
+// fit while admission still said "ok" with room to spare, the refusal's own
+// numbers contradicting the refusal.
+//
+// It is a SIBLING and not a widening because AdmissibleBlocks' verdict is held
+// to measured cliff values by TestAdmissibleBlocksVerdictDoesNotMove: that
+// verdict gates OK on the text and confirm steps for every ordinary
+// QR-carrying plate, the path seeds and passphrases take.
+//
+// THE TITLE ROW IS RESERVED UNCONDITIONALLY, at the plate's smallest rung, which
+// is the size ftFitAt cuts a sized composition's title and footer at. Neither
+// the title string nor the footer string is READ -- that is what makes admission
+// monotone, so entering either after the text can never retroactively invalidate
+// text already accepted.
+//
+// THE FOOTER ROW IS NOT RESERVED, and that is a measurement rather than an
+// omission. Spec 5 measured a footer refusing the front ladder by 3.200mm and
+// the back by 1.600mm: the front's whole spare is 3.600mm against a 3.800mm
+// smallest rung, and the back's is 2.400mm against 3.000mm. So the smallest row
+// this plate can reserve is larger than the room either side has, and reserving
+// one would refuse both plates the machine cuts today -- it would move the
+// verdict, which is precisely what this change must not do. AdmissibleBlocks'
+// "-2" is not a bound for a sized composition either way: at 3.0mm it reserves
+// two rows of a plate that is not the one being cut.
+//
+// The consequence is stated rather than hidden: "ok" here does not survive a
+// FOOTER being entered, and the FIT is the authority that refuses it, at the
+// confirm step. That was already true before this change -- admission said 12/24
+// ok for a front that FitSized refuses the moment it carries a footer -- so
+// nothing that held has been given up.
+//
+// There is no useQR parameter. FitSized has no code (spec 2.7), so a flag cannot
+// reach the layout, and leaving the parameter off is what makes that structural
+// rather than remembered.
+func AdmissibleSized(params engrave.Params, blocks []Block, title, footer string) (linesUsed, linesAvail int, ok bool) {
+	if len(blocks) == 0 {
+		return 0, 0, false
+	}
+	sizes := make([]float32, len(blocks))
+	rung := blocks[0].SizeMM
+	for i, b := range blocks {
+		if b.SizeMM <= 0 {
+			// Not a sized composition: this is the shape FitSized refuses as
+			// "sized 0mm", and laying it out here would put a whole block through
+			// the wrap at fontSize 0, where the rows-that-fit division is by zero.
+			return 0, 0, false
+		}
+		sizes[i] = b.SizeMM
+		if b.SizeMM < rung {
+			rung = b.SizeMM
+		}
+	}
+	// The screw-hole rung, and the same one ftFitAt hands FitSized: the plate's
+	// SMALLEST, never the first block's. yBudget then starts the body exactly
+	// here for a titled composition.
+	start := params.I(outerMargin) + params.F(rung)
+	limit := params.F(plateSize) - params.I(outerMargin)
+	// Unbounded on purpose, for AdmissibleBlocks' reason: a refusal reporting
+	// "20 lines and the plate holds 20" for a composition needing forty says
+	// nothing about how much to cut.
+	lines, _, rowSizes, _ := wrapBlocks(params, blocks, sizes, nil, start, math.MaxInt)
+	// linesAvail is the composition's OWN rows that fit the window, and then rows
+	// at the LAST block's rung -- the block that would grow into them, which is
+	// rowFaces' rule for the face read in the currency of size. A row count is
+	// the only currency the readout has, and on a plate whose rows are different
+	// heights there is no composition-independent number: 24 rows is a fact about
+	// a 3.0mm plate, not about this one.
+	y, avail := start, 0
+	whole := true
+	for _, s := range rowSizes {
+		h := params.F(s)
+		if y+h > limit {
+			whole = false
+			break
+		}
+		y, avail = y+h, avail+1
+	}
+	if whole {
+		// A rung that quantises to zero device units would spin here forever;
+		// FontSizes holds no such rung, and this is what keeps that a fact about
+		// the data rather than an assumption about it.
+		if last := params.F(blocks[len(blocks)-1].SizeMM); last > 0 {
+			for y+last <= limit {
+				y, avail = y+last, avail+1
+			}
+		}
+	}
+	return len(lines), avail, len(lines) <= avail
+}
+
 // Admissible is AdmissibleBlocks for a composition cut entirely in one face.
 func Admissible(params engrave.Params, fnt *vector.Face, text, title, footer string, qr bool) (linesUsed, linesAvail int, ok bool) {
 	return AdmissibleBlocks(params, []Block{{Face: fnt, Text: text}}, title, footer, qr)

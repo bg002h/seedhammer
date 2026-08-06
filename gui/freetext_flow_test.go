@@ -982,7 +982,10 @@ func TestFTQRChoiceLabelsBindToMeaning(t *testing.T) {
 	} {
 		h := newPPHarness(t)
 		var got, ok bool
-		h.start(func() { got, ok = ftQRChoiceFlow(h.ctx, &descriptorTheme, false) })
+		// The composition the first pass through this step actually sees: an
+		// empty field in the default face plan, which states no rungs.
+		blocks := ftPlanSH.Blocks("")
+		h.start(func() { got, ok = ftQRChoiceFlow(h.ctx, &descriptorTheme, false, blocks) })
 		h.mustReach("QRCode")
 		cs, isCS := h.widget("qr").(*ChoiceScreen)
 		if !isCS {
