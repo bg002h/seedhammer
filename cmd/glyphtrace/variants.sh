@@ -36,14 +36,15 @@ restore() { git checkout -- font/constant/ 2>/dev/null || true
 trap restore EXIT
 
 glyph=$1; word=$2; shift 2
+id=${ID:-$glyph}
 
 # The glyph's current points, read from the file rather than passed in, so an
 # option can never be compared against a stale idea of the original.
 orig=$(python3 -c "
 import re,sys
 s=open('$SVG').read()
-m=re.search(r'<polyline id=\"%s\" class=\"st0\" points=\"([^\"]*)\"' % re.escape('$glyph'), s)
-if not m: sys.exit('no polyline id=\"$glyph\" in $SVG')
+m=re.search(r'<polyline id=\"%s\" class=\"st0\" points=\"([^\"]*)\"' % re.escape('$id'), s)
+if not m: sys.exit('no polyline id=\"$id\" in $SVG (pass ID= if the SVG id is not the character)')
 print(m.group(1))
 ")
 echo "option 1 (as it is): $orig"
@@ -68,9 +69,9 @@ render() { # $1=label
 
 apply() { python3 -c "
 s=open('$SVG').read()
-old='<polyline id=\"$glyph\" class=\"st0\" points=\"$orig\"/>'
+old='<polyline id=\"$id\" class=\"st0\" points=\"$orig\"/>'
 assert old in s, 'anchor missing -- did the glyph change under us?'
-open('$SVG','w').write(s.replace(old, '<polyline id=\"$glyph\" class=\"st0\" points=\"$1\"/>'))
+open('$SVG','w').write(s.replace(old, '<polyline id=\"$id\" class=\"st0\" points=\"$1\"/>'))
 "
   nix develop --command go generate ./font/constant/ >/dev/null 2>&1
 }
