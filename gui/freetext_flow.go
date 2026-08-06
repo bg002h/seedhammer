@@ -869,6 +869,11 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 	hookPPWidget("kbd", kbd)
 	hookPPWidget("back", backBtn)
 	hookPPWidget("ok", okBtn)
+	// Button2, the middle nav slot, is free on this screen. layoutNavigation
+	// indexes a FIXED [3]int by Button-Button1, so a fourth affordance would
+	// panic rather than lay out badly -- Back, Clear and OK is the whole budget.
+	clearBtn := &Clickable{Button: Button2}
+	hookPPWidget("clear", clearBtn)
 
 	// The evaluation is cached on (text, qr, plan) because it encodes a QR, and
 	// the screen redraws every frame while the text changes only on a
@@ -899,6 +904,14 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 		}
 		if backBtn.Clicked(ctx) {
 			return "", false
+		}
+		if clearBtn.Clicked(ctx) {
+			// Guarded on the field, not on the button being drawn: a click can
+			// be delivered in the same frame the last character is deleted.
+			if kbd.Fragment != "" && ftClearPrompt(ctx, th, len(kbd.Fragment)) {
+				kbd.Fragment = ""
+			}
+			continue
 		}
 		if okBtn.Clicked(ctx) {
 			// The trigger check runs BEFORE this field's own validation, and
@@ -949,14 +962,40 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 		kbd.MaxHeight = content.Dy()
 		kbdOp, kbdsz := kbd.Layout(ctx, th)
 		kbdOp = kbdOp.Offset(content.S(kbdsz))
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
-		}...)
+		// Clear appears only when there IS something to clear, so the screen
+		// never offers an action that would do nothing.
+		navs := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
+		if kbd.Fragment != "" {
+			navs = append(navs, NavButton{Clickable: clearBtn, Style: StyleSecondary, Icon: assets.IconDiscard})
+		}
+		navs = append(navs, NavButton{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navs...)
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Text")
 		ctx.Frame(op.Layer(kbdOp, cntOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return "", false
+}
+
+// ftClearPrompt asks before discarding the whole Text field, and returns true
+// only on an explicit yes.
+//
+// It exists because the field is uncapped -- a loaded proof pattern runs to
+// several hundred characters, and clearing one by backspace is hundreds of taps.
+// It is PROMPTED because the same gesture would otherwise destroy a long
+// composition with no undo: the field is the only copy until the plate is built.
+//
+// "Keep the text" is index 0, so the default answer is the harmless one. That is
+// a property of this ordering and nothing else states it -- do not reorder.
+func ftClearPrompt(ctx *Context, th *Colors, n int) bool {
+	cs := &ChoiceScreen{
+		Title: "Clear Text",
+		Lead: fmt.Sprintf(
+			"Clear all %d characters? The text cannot be recovered afterwards.", n),
+		Choices: []string{"Keep the text", "Clear it"},
+	}
+	hookPPWidget("clearPrompt", cs)
+	sel, ok := cs.Choose(ctx, th)
+	return ok && sel == 1
 }
 
 // ftLineEntryFlow is steps 3 and 4: one optional line, capped at ftMaxLineLen.
