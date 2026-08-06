@@ -125,3 +125,50 @@ func firstRune(s string) string {
 	}
 	return ""
 }
+
+// TestCounterOfOMatchesArithmetic anchors the raster against a number that can
+// be worked out by hand. 'o' is a square: its centrelines ink 1.33mm apart and
+// the tool lays 0.30mm down the middle of them, so 1.03mm of bare metal is left
+// and the largest disc that fits is that wide.
+//
+// It is the only glyph on the sheet whose answer is checkable without the
+// raster, which is exactly why it is the one pinned. A resolution or margin
+// change that shifted every figure would still agree with itself.
+func TestCounterOfOMatchesArithmetic(t *testing.T) {
+	P := sh2.Params()
+	g := trace(constant.Font, 'o', P.F(3.0), P.StepperConfig)
+	cs := rasterize(g.runs, P.StrokeWidth, P.Millimeter).findCounters(P.Millimeter)
+	if len(cs) != 1 {
+		t.Fatalf("'o' encloses %d regions, want exactly 1", len(cs))
+	}
+	const want = 1.03
+	if got := cs[0].WidthMM; got < want-0.04 || got > want+0.04 {
+		t.Errorf("'o' counter is %.3fmm wide, want %.2fmm "+
+			"(1.33mm between centrelines less the 0.30mm stroke)", got, want)
+	}
+}
+
+// TestCountersCloseAsTheGlyphShrinks is the measurement's own falsifiability.
+//
+// The stroke is 0.30mm at every rung while the glyph scales, so counters must
+// survive at 6.0mm and die somewhere below. A metric that returned the same
+// count at both would be measuring nothing, and would have reported the
+// reassuring "0 lost" that the 3.0mm sweep reports for real.
+func TestCountersCloseAsTheGlyphShrinks(t *testing.T) {
+	P := sh2.Params()
+	count := func(r rune, mm float32) int {
+		g := trace(constant.Font, r, P.F(mm), P.StepperConfig)
+		return len(rasterize(g.runs, P.StrokeWidth, P.Millimeter).findCounters(P.Millimeter))
+	}
+	// 'a' and 'e' hold one counter each at the rungs that ship, and lose it
+	// well below them.
+	for _, r := range []rune{'a', 'e'} {
+		big, ship, tiny := count(r, 6.0), count(r, 3.0), count(r, 1.0)
+		if big != 1 || ship != 1 {
+			t.Errorf("%q encloses %d at 6.0mm and %d at 3.0mm, want 1 at both", r, big, ship)
+		}
+		if tiny != 0 {
+			t.Errorf("%q still encloses %d regions at 1.0mm; the measurement cannot detect a closure", r, tiny)
+		}
+	}
+}

@@ -25,9 +25,12 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"seedhammer.com/bezier"
@@ -61,18 +64,23 @@ var glyphNames = map[rune]string{
 
 func main() {
 	var (
-		glyphs  = flag.String("glyphs", problemGlyphs, "the glyphs to draw, as a string")
-		faceArg = flag.String("face", "const", "engraving face: const or sh")
-		sizeMM  = flag.Float64("size", 3.0, "the rung to draw at, in mm; 3.0 is the ladder's smallest")
-		cols    = flag.Int("cols", 4, "cells per row")
-		px      = flag.Int("px", 2000, "PNG width in pixels")
-		out     = flag.String("o", "glyphs.png", "output file; .png converts via rsvg-convert")
+		glyphs   = flag.String("glyphs", problemGlyphs, "the glyphs to draw, as a string")
+		faceArg  = flag.String("face", "const", "engraving face: const or sh")
+		sizeMM   = flag.Float64("size", 3.0, "the rung to draw at, in mm; 3.0 is the ladder's smallest")
+		cols     = flag.Int("cols", 4, "cells per row")
+		px       = flag.Int("px", 2000, "PNG width in pixels")
+		out      = flag.String("o", "glyphs.png", "output file; .png converts via rsvg-convert")
+		counters = flag.Bool("counters", false, "print the counter table for the whole face and exit")
 	)
 	flag.Parse()
 
 	face, faceName, err := faceFor(*faceArg)
 	if err != nil {
 		fail(err)
+	}
+	if *counters {
+		counterTable(os.Stdout, face, faceName, float32(*sizeMM))
+		return
 	}
 	svg, err := render(face, faceName, []rune(*glyphs), float32(*sizeMM), *cols)
 	if err != nil {
@@ -92,6 +100,96 @@ func main() {
 func fail(err error) {
 	fmt.Fprintf(os.Stderr, "glyphtrace: %v\n", err)
 	os.Exit(1)
+}
+
+// minFeature is the rule the counter table is graded against: a feature must
+// clear TWO stroke widths centre to centre, which leaves one stroke width of
+// bare metal at the tightest point. It is the house rule already applied by
+// hand in font/constant's glyph_rules_test.go; here it is applied to every
+// glyph instead of to a written list.
+func minFeature(sw int) int { return 2 * sw }
+
+// counterTable grades every glyph the face can cut, tightest counter first.
+//
+// Each glyph is measured TWICE: at the rung asked for, and at 6.0mm, the top of
+// the range and the size nobody doubts. The 6.0mm pass is the reference for
+// what the glyph is SUPPOSED to enclose, because the interesting failure is not
+// a counter that got smaller -- every counter does, the stroke is 0.30mm at
+// every rung while the glyph shrinks -- but a counter that stopped existing.
+// A glyph with two counters at 6.0mm and one at 3.0mm has filled one in, and no
+// measurement of the survivor would say so.
+func counterTable(w io.Writer, face *vector.Face, faceName string, sizeMM float32) {
+	P := sh2.Params()
+	sw := P.StrokeWidth
+	swMM := float64(sw) / float64(P.Millimeter)
+
+	type row struct {
+		g        glyph
+		ref      int     // counters at 6.0mm
+		lost     int     // counters 6.0mm has that this rung does not
+		tight    float64 // narrowest surviving counter, mm
+		hasTight bool
+	}
+	var rows []row
+	for r := rune(0); r < 0x2000; r++ {
+		if _, _, ok := face.Decode(r); !ok {
+			continue
+		}
+		g := trace(face, r, P.F(sizeMM), P.StepperConfig)
+		if !g.hasInk {
+			continue
+		}
+		g.counters = rasterize(g.runs, sw, P.Millimeter).findCounters(P.Millimeter)
+		ref := trace(face, r, P.F(6.0), P.StepperConfig)
+		refc := rasterize(ref.runs, sw, P.Millimeter).findCounters(P.Millimeter)
+		t, ok := g.tightest()
+		rows = append(rows, row{
+			g: g, ref: len(refc), lost: max(len(refc)-len(g.counters), 0),
+			tight: t, hasTight: ok,
+		})
+	}
+	// Worst first: everything that lost a counter, then by how little bare
+	// metal the tightest survivor has.
+	sort.Slice(rows, func(i, j int) bool {
+		if (rows[i].lost > 0) != (rows[j].lost > 0) {
+			return rows[i].lost > 0
+		}
+		if rows[i].hasTight != rows[j].hasTight {
+			return rows[i].hasTight
+		}
+		return rows[i].tight < rows[j].tight
+	})
+
+	fmt.Fprintf(w, "font/%s at %.1fmm, stroke %.2fmm.\n", faceName, sizeMM, swMM)
+	fmt.Fprintf(w, "A counter must stay at least one stroke wide (%.2fmm) to read; "+
+		"'lost' counts counters present at 6.0mm and gone here.\n\n", swMM)
+	fmt.Fprintf(w, "%-9s %-3s %-9s %-6s %-9s  %s\n",
+		"glyph", "k", "counters", "lost", "tightest", "verdict")
+
+	closed, thin := 0, 0
+	for _, rw := range rows {
+		g := rw.g
+		tight := "     -   "
+		switch {
+		case rw.hasTight:
+			tight = fmt.Sprintf("%6.3fmm", rw.tight)
+		}
+		verdict := "ok"
+		switch {
+		case rw.lost > 0:
+			verdict = fmt.Sprintf("CLOSED: %d counter(s) filled in", rw.lost)
+			closed++
+		case !rw.hasTight:
+			verdict = "no counter to lose"
+		case rw.tight < swMM:
+			verdict = fmt.Sprintf("THIN: under one %.2fmm stroke", swMM)
+			thin++
+		}
+		fmt.Fprintf(w, "%-9s %-3d %-9d %-6d %-9s  %s\n",
+			caption(g.r), g.strokes, len(g.counters), rw.lost, tight, verdict)
+	}
+	fmt.Fprintf(w, "\nAt %.1fmm: %d glyphs lost a counter outright, %d more are under one stroke wide, "+
+		"of %d that cut anything.\n", sizeMM, closed, thin, len(rows))
 }
 
 func faceFor(name string) (*vector.Face, string, error) {
@@ -116,6 +214,23 @@ type glyph struct {
 	bounds   bspline.Bounds
 	hasInk   bool
 	unmapped bool
+
+	// runs is the flattened centreline, kept so the ink can be rasterised and
+	// its counters measured without re-planning. See counters.go.
+	runs [][]bezier.Point
+	// counters is the enclosed bare metal, widest first. Empty means the glyph
+	// encloses nothing at this rung -- which is correct for 'l' and a finding
+	// for 'o'.
+	counters []counter
+}
+
+// tightest is the narrowest counter the glyph still has, in mm, and whether it
+// has one at all.
+func (g glyph) tightest() (float64, bool) {
+	if len(g.counters) == 0 {
+		return 0, false
+	}
+	return g.counters[len(g.counters)-1].WidthMM, true
 }
 
 // trace plans one glyph exactly as the device would and splits the result into
@@ -183,8 +298,61 @@ func trace(face *vector.Face, r rune, em int, conf engrave.StepperConfig) glyph 
 	g.ink, g.travel = ink.String(), travel.String()
 	if g.hasInk {
 		g.bounds = bspline.Measure(engrave.PlanEngraving(conf, plan)).Bounds
+		g.runs = flatten(engrave.PlanEngraving(conf, plan))
 	}
 	return g
+}
+
+// flattenSteps is how finely each cubic is sampled before distances are taken.
+// The glyphs are polylines in practice -- C1 and C2 sit on the line -- so this
+// is mostly about not missing the inside of a corner.
+const flattenSteps = 16
+
+// flatten samples the ENGRAVED segments into polylines, one per run. Travels
+// are excluded: the tool is off the work, so the distance across a lift is not
+// a gap in the glyph.
+func flatten(spline bspline.Curve) [][]bezier.Point {
+	var runs [][]bezier.Point
+	var cur []bezier.Point
+	var seg bspline.Segment
+	for k := range spline {
+		c, dt, line := seg.Knot(k)
+		if dt == 0 {
+			continue
+		}
+		if !line {
+			if len(cur) > 1 {
+				runs = append(runs, cur)
+			}
+			cur = nil
+			continue
+		}
+		if len(cur) == 0 {
+			cur = append(cur, c.C0)
+		}
+		for i := 1; i <= flattenSteps; i++ {
+			t := float64(i) / flattenSteps
+			cur = append(cur, cubicAt(c, t))
+		}
+	}
+	if len(cur) > 1 {
+		runs = append(runs, cur)
+	}
+	return runs
+}
+
+func cubicAt(c bezier.Cubic, t float64) bezier.Point {
+	u := 1 - t
+	a, b, d, e := u*u*u, 3*u*u*t, 3*u*t*t, t*t*t
+	return bezier.Point{
+		X: int(a*float64(c.C0.X) + b*float64(c.C1.X) + d*float64(c.C2.X) + e*float64(c.C3.X)),
+		Y: int(a*float64(c.C0.Y) + b*float64(c.C1.Y) + d*float64(c.C2.Y) + e*float64(c.C3.Y)),
+	}
+}
+
+func dist(a, b bezier.Point) float64 {
+	dx, dy := float64(a.X-b.X), float64(a.Y-b.Y)
+	return math.Sqrt(dx*dx + dy*dy)
 }
 
 func render(face *vector.Face, faceName string, runes []rune, sizeMM float32, cols int) ([]byte, error) {
