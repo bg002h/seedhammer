@@ -150,25 +150,47 @@ func TestCounterOfOMatchesArithmetic(t *testing.T) {
 
 // TestCountersCloseAsTheGlyphShrinks is the measurement's own falsifiability.
 //
-// The stroke is 0.30mm at every rung while the glyph scales, so counters must
-// survive at 6.0mm and die somewhere below. A metric that returned the same
-// count at both would be measuring nothing, and would have reported the
-// reassuring "0 lost" that the 3.0mm sweep reports for real.
+// The stroke is 0.30mm at every rung while the glyph scales, so a counter must
+// survive across the shipping range and die somewhere below it. A metric that
+// returned the same count at every size would be measuring nothing, and would
+// report the same reassuring "0 lost" over the shipping rungs that this one
+// reports for real.
+//
+// THE CLOSURE SIZE IS SEARCHED FOR, NOT PINNED. An earlier version asserted the
+// counter was gone at exactly 1.0mm, and the opening-up pass broke it: 'e' grew
+// from 5 to 6 units tall for the same stroke, so its counter now survives 1.0mm
+// and closes at 0.9mm. That was a stale fixture reporting a defect in the font,
+// which is the failure mode a golden pass can least afford -- every glyph in
+// this pass gets taller, so any hardcoded closure size is a tripwire under
+// future work rather than a test of anything.
 func TestCountersCloseAsTheGlyphShrinks(t *testing.T) {
 	P := sh2.Params()
 	count := func(r rune, mm float32) int {
 		g := trace(constant.Font, r, P.F(mm), P.StepperConfig)
 		return len(rasterize(g.runs, P.StrokeWidth, P.Millimeter).findCounters(P.Millimeter))
 	}
-	// 'a' and 'e' hold one counter each at the rungs that ship, and lose it
-	// well below them.
+	// The shipping range: every rung the ladder cuts at, plus the top of the
+	// scale. A counter must survive all of them.
 	for _, r := range []rune{'a', 'e'} {
-		big, ship, tiny := count(r, 6.0), count(r, 3.0), count(r, 1.0)
-		if big != 1 || ship != 1 {
-			t.Errorf("%q encloses %d at 6.0mm and %d at 3.0mm, want 1 at both", r, big, ship)
+		for _, mm := range []float32{6.0, 5.0, 4.4, 3.8, 3.4, 3.0} {
+			if got := count(r, mm); got != 1 {
+				t.Errorf("%q encloses %d regions at %.1fmm, want 1", r, got, mm)
+			}
 		}
-		if tiny != 0 {
-			t.Errorf("%q still encloses %d regions at 1.0mm; the measurement cannot detect a closure", r, tiny)
+		// And it must die somewhere below, or the measurement cannot see a
+		// closure at all. Searched down in tenths rather than assumed.
+		closed := float32(0)
+		for mm := float32(2.9); mm >= 0.4; mm -= 0.1 {
+			if count(r, mm) == 0 {
+				closed = mm
+				break
+			}
 		}
+		if closed == 0 {
+			t.Errorf("%q still encloses a counter at every size down to 0.4mm; "+
+				"the measurement cannot detect a closure", r)
+			continue
+		}
+		t.Logf("%q holds its counter through the shipping range and closes at %.1fmm", r, closed)
 	}
 }
