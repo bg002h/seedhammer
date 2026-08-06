@@ -1,0 +1,329 @@
+// Command glyphtrace renders the ENGRAVING TRACE of individual glyphs into one
+// image, for judging a glyph before it is cut into steel.
+//
+// It is a picture of the TOOLPATH, not of constant.svg: the geometry comes from
+// engrave.PlanEngraving, the same planner the device runs, so what is drawn is
+// what the machine would move. Each cell carries three things a font editor
+// does not show:
+//
+//   - the INK, stroked at the real 0.3mm width against the glyph's real size at
+//     the chosen rung. Ink that closes a counter here closes it on the plate.
+//   - the CENTERLINE, so the path is visible inside a stroke wide enough to
+//     hide it.
+//   - the TRAVEL moves, dashed, between one stroke and the next. Their count is
+//     k-1 for a k-stroke glyph, which is the quantity the disclosure bound
+//     T_row = rowLen + n_row is stated over -- so a glyph that quietly became
+//     three strokes is visible here as two dashes.
+//
+// Usage:
+//
+//	go run ./cmd/glyphtrace -o /tmp/glyphs.png
+//	go run ./cmd/glyphtrace -glyphs 'aeso' -size 5.0 -face sh -o /tmp/x.png
+package main
+
+import (
+	"bytes"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"seedhammer.com/bezier"
+	"seedhammer.com/bspline"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/constant"
+	"seedhammer.com/font/sh"
+	"seedhammer.com/font/vector"
+	"seedhammer.com/internal/sh2"
+)
+
+// problemGlyphs is the set under review (operator, 2026-08-05): the closed
+// counters that fill in, the strokes that lose their identity, and the six
+// brackets that have to stay distinguishable from each other.
+const problemGlyphs = "aeszOo8@*&<>(){}"
+
+// glyphNames disambiguates a caption where the character alone does not.
+// 'O' against 'o' and '(' against '{' are exactly the pairs the sheet is being
+// read for, and at caption size the two are no easier to tell apart than the
+// engraved glyphs are.
+//
+// The character itself always leads, so the caption for '<' contains a literal
+// '<'. That is deliberate: it is what keeps esc below on the live path rather
+// than defensive, and three of the sixteen glyphs under review are the three
+// characters XML reserves.
+var glyphNames = map[rune]string{
+	'O': "cap", 'o': "low", '@': "at", '*': "star", '&': "amp",
+	'<': "lt", '>': "gt",
+	'(': "lparen", ')': "rparen", '{': "lbrace", '}': "rbrace",
+}
+
+func main() {
+	var (
+		glyphs  = flag.String("glyphs", problemGlyphs, "the glyphs to draw, as a string")
+		faceArg = flag.String("face", "const", "engraving face: const or sh")
+		sizeMM  = flag.Float64("size", 3.0, "the rung to draw at, in mm; 3.0 is the ladder's smallest")
+		cols    = flag.Int("cols", 4, "cells per row")
+		px      = flag.Int("px", 2000, "PNG width in pixels")
+		out     = flag.String("o", "glyphs.png", "output file; .png converts via rsvg-convert")
+	)
+	flag.Parse()
+
+	face, faceName, err := faceFor(*faceArg)
+	if err != nil {
+		fail(err)
+	}
+	svg, err := render(face, faceName, []rune(*glyphs), float32(*sizeMM), *cols)
+	if err != nil {
+		fail(err)
+	}
+	if strings.EqualFold(filepath.Ext(*out), ".png") {
+		if err := writePNG(*out, svg, *px); err != nil {
+			fail(err)
+		}
+	} else if err := os.WriteFile(*out, svg, 0o644); err != nil {
+		fail(err)
+	}
+	fmt.Fprintf(os.Stderr, "glyphtrace: %d glyphs of font/%s at %.1fmm -> %s\n",
+		len([]rune(*glyphs)), faceName, *sizeMM, *out)
+}
+
+func fail(err error) {
+	fmt.Fprintf(os.Stderr, "glyphtrace: %v\n", err)
+	os.Exit(1)
+}
+
+func faceFor(name string) (*vector.Face, string, error) {
+	switch name {
+	case "const", "constant":
+		return constant.Font, "constant", nil
+	case "sh":
+		return sh.Font, "sh", nil
+	}
+	return nil, "", fmt.Errorf("unknown face %q (want const or sh)", name)
+}
+
+// glyph is one cell's worth of measured geometry.
+type glyph struct {
+	r        rune
+	ink      string // the engraved path, as SVG path data
+	travel   string // the lifts between strokes
+	ctrl     []bezier.Point
+	starts   []bezier.Point // where each run begins, so stroke order is readable
+	strokes  int            // k: how many separate runs the tool cuts
+	advance  int            // the glyph's cell width in device units
+	bounds   bspline.Bounds
+	hasInk   bool
+	unmapped bool
+}
+
+// trace plans one glyph exactly as the device would and splits the result into
+// the segments that CUT and the moves that do not.
+//
+// The split is the whole point: bspline.Segment.Knot reports `line` false for a
+// travel, and Vectorize throws those away because a golden only cares about
+// ink. Here they are drawn, because how many times the tool lifts inside one
+// glyph is a property worth seeing.
+func trace(face *vector.Face, r rune, em int, conf engrave.StepperConfig) glyph {
+	g := glyph{r: r}
+	adv, _, ok := face.Decode(r)
+	if !ok {
+		g.unmapped = true
+		return g
+	}
+	g.advance = adv * em / face.Metrics().Height
+
+	plan := func(yield func(engrave.Command) bool) {
+		engrave.String(face, em, string(r)).Engrave(yield)
+	}
+	spline := engrave.PlanEngraving(conf, plan)
+
+	var ink, travel strings.Builder
+	var seg bspline.Segment
+	var last bezier.Point
+	inRun := false
+	for k := range spline {
+		c, dt, line := seg.Knot(k)
+		if dt == 0 {
+			continue
+		}
+		if line {
+			// EVERY run opens with an M. A path beginning with a C is invalid
+			// and rsvg-convert drops the whole element without a word, which
+			// renders as a glyph that cuts nothing -- the exact reading this
+			// tool exists to give, arrived at by a bug rather than by the font.
+			if !inRun {
+				fmt.Fprintf(&ink, " M %d %d", c.C0.X, c.C0.Y)
+				g.starts = append(g.starts, c.C0)
+				g.ctrl = append(g.ctrl, c.C0)
+				g.strokes++
+				inRun = true
+			}
+			fmt.Fprintf(&ink, " C %d %d, %d %d, %d %d",
+				c.C1.X, c.C1.Y, c.C2.X, c.C2.Y, c.C3.X, c.C3.Y)
+			// The knot's own control point, which is the thing edited in
+			// constant.svg -- NOT c.C3, the curve's endpoint. On a B-spline
+			// those are different points, and it is the control point that
+			// moves when a `points="..."` coordinate is changed.
+			g.ctrl = append(g.ctrl, k.Ctrl)
+			g.hasInk = true
+		} else {
+			// A lift BETWEEN runs, drawn from where the tool was. The approach
+			// move that precedes the first run is not one of these: it comes
+			// from wherever the previous glyph ended, so on a single-glyph
+			// drawing it is an artifact of the crop rather than the glyph's.
+			if inRun {
+				fmt.Fprintf(&travel, " M %d %d L %d %d", last.X, last.Y, c.C3.X, c.C3.Y)
+			}
+			inRun = false
+		}
+		last = c.C3
+	}
+	g.ink, g.travel = ink.String(), travel.String()
+	if g.hasInk {
+		g.bounds = bspline.Measure(engrave.PlanEngraving(conf, plan)).Bounds
+	}
+	return g
+}
+
+func render(face *vector.Face, faceName string, runes []rune, sizeMM float32, cols int) ([]byte, error) {
+	P := sh2.Params()
+	em := P.F(sizeMM)
+	sw := P.StrokeWidth
+
+	glyphs := make([]glyph, 0, len(runes))
+	for _, r := range runes {
+		glyphs = append(glyphs, trace(face, r, em, P.StepperConfig))
+	}
+
+	// The cell is sized from the EM, so every glyph is drawn at the same scale
+	// and the picture answers "which of these is denser" rather than only
+	// "what shape is this".
+	const (
+		padF   = 0.45 // cell padding, in ems
+		labelF = 0.95 // room under the glyph for its two caption lines, in ems
+		capF   = 0.19 // caption text size, in ems
+		hdF    = 0.30 // header text size, in ems
+	)
+	pad := int(padF * float64(em))
+	label := int(labelF * float64(em))
+	capPx := int(capF * float64(em))
+	cellW, cellH := em*2+2*pad, em+label+2*pad
+	rows := (len(glyphs) + cols - 1) / cols
+	head := int(1.6 * float64(em))
+	w, h := cols*cellW, rows*cellH+head
+
+	// The header is SIZED TO FIT rather than set to a fixed fraction of the em.
+	// At 0.30em the legend ran off the right edge and rsvg-convert clipped it
+	// without complaint -- a caption that silently loses its second half is
+	// worse on a reference image than no caption.
+	const legendChars = 104 // the longer of the two lines below, rounded up
+	hdPx := min(int(hdF*float64(em)), (w-2*pad)*10/(legendChars*6))
+
+	var b bytes.Buffer
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">`,
+		w, h, w, h)
+	fmt.Fprintf(&b, `<rect width="%d" height="%d" fill="#fff"/>`, w, h)
+	// The ink is the metal REMOVED, so it is drawn as a pale slab and the
+	// skeleton rides on top of it. Drawn the other way round -- black ink over
+	// a thin line -- a 0.3mm stroke at 3.0mm swallows the path completely,
+	// which is the whole difficulty of judging one of these glyphs.
+	fmt.Fprintf(&b, `<style>
+	.ink    { fill:none; stroke:#d9d9d9; stroke-width:%d; stroke-linejoin:round; stroke-linecap:round; }
+	.mid    { fill:none; stroke:#0984e3; stroke-width:%d; stroke-linecap:round; }
+	.travel { fill:none; stroke:#9aa0a6; stroke-width:%d; stroke-dasharray:%d %d; }
+	.box    { fill:none; stroke:#d0d0d0; stroke-width:%d; }
+	.cap    { font-family:monospace; font-size:%dpx; fill:#222; }
+	.sub    { font-family:monospace; font-size:%dpx; fill:#777; }
+	.hd     { font-family:sans-serif; font-size:%dpx; fill:#000; }
+	.warn   { fill:#c00000; }
+</style>`, sw, max(em/70, 1), max(em/110, 1), em/22, em/22, max(sw/12, 1),
+		capPx, capPx, hdPx)
+
+	l1 := fmt.Sprintf("font/%s at %.1fmm — grey slab = ink at the real %.1fmm stroke, blue = centreline",
+		faceName, sizeMM, float64(sw)/float64(P.Millimeter))
+	l2 := "red dots = the control points you edit in the SVG · green ring = where a stroke starts · " +
+		"k = strokes · thin box = the advance cell"
+	fmt.Fprintf(&b, `<text class="hd" x="%d" y="%d">%s</text>`, pad, int(0.55*float64(em)), esc(l1))
+	fmt.Fprintf(&b, `<text class="hd" x="%d" y="%d">%s</text>`, pad, int(1.05*float64(em)), esc(l2))
+
+	for i, g := range glyphs {
+		cx, cy := (i%cols)*cellW, head+(i/cols)*cellH
+		fmt.Fprintf(&b, `<g transform="translate(%d,%d)">`, cx, cy)
+
+		// The advance cell, so the glyph is seen inside the box it must not
+		// leave -- and so its density against its neighbours is visible.
+		fmt.Fprintf(&b, `<rect class="box" x="%d" y="%d" width="%d" height="%d"/>`,
+			pad, pad, g.advance, em)
+
+		capY := pad + em + int(0.42*float64(em))
+		if g.unmapped {
+			fmt.Fprintf(&b, `<text class="cap warn" x="%d" y="%d">%s: NOT IN FACE</text>`,
+				pad, capY, esc(caption(g.r)))
+			fmt.Fprint(&b, `</g>`)
+			continue
+		}
+		// engrave.String lays the glyph out from the origin, so the spline is
+		// already in the cell's own coordinates and only the padding shifts it.
+		fmt.Fprintf(&b, `<g transform="translate(%d,%d)">`, pad, pad)
+		if g.ink != "" {
+			fmt.Fprintf(&b, `<path class="ink" d="%s"/>`, g.ink)
+			fmt.Fprintf(&b, `<path class="mid" d="%s"/>`, g.ink)
+		}
+		if g.travel != "" {
+			fmt.Fprintf(&b, `<path class="travel" d="%s"/>`, g.travel)
+		}
+		dot := max(em/55, 1)
+		for _, p := range g.ctrl {
+			fmt.Fprintf(&b, `<circle cx="%d" cy="%d" r="%d" fill="#d81b1b"/>`, p.X, p.Y, dot)
+		}
+		for _, p := range g.starts {
+			fmt.Fprintf(&b, `<circle cx="%d" cy="%d" r="%d" fill="none" stroke="#0a8f3c" stroke-width="%d"/>`,
+				p.X, p.Y, 2*dot, max(dot/2, 1))
+		}
+		fmt.Fprint(&b, `</g>`)
+
+		// Two lines, because one does not fit the cell: the glyph and its
+		// stroke count, then the ink's own extent. Those are the numbers a
+		// legibility judgement is actually made on -- a counter's height in mm
+		// against the 0.3mm the tool lays down on each side of it.
+		fmt.Fprintf(&b, `<text class="cap" x="%d" y="%d">%s   k=%d</text>`,
+			pad, capY, esc(caption(g.r)), g.strokes)
+		sub := "no ink"
+		if g.hasInk {
+			sub = fmt.Sprintf("%.2f x %.2f mm",
+				float64(g.bounds.Dx())/float64(P.Millimeter),
+				float64(g.bounds.Dy())/float64(P.Millimeter))
+		}
+		fmt.Fprintf(&b, `<text class="sub" x="%d" y="%d">%s</text>`,
+			pad, capY+int(0.30*float64(em)), sub)
+		fmt.Fprint(&b, `</g>`)
+	}
+	fmt.Fprint(&b, `</svg>`)
+	return b.Bytes(), nil
+}
+
+func caption(r rune) string {
+	if n, ok := glyphNames[r]; ok {
+		return string(r) + " " + n
+	}
+	return string(r)
+}
+
+// esc is the minimum XML text escaping. '<', '>' and '&' are three of the
+// glyphs under review, so a caption that skipped this would produce an SVG that
+// does not parse -- for exactly the characters most in need of looking at.
+func esc(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+func writePNG(out string, svg []byte, px int) error {
+	if _, err := exec.LookPath("rsvg-convert"); err != nil {
+		return fmt.Errorf("PNG output needs rsvg-convert on PATH (%v); write .svg instead", err)
+	}
+	cmd := exec.Command("rsvg-convert", "-w", fmt.Sprint(px), "-b", "white", "-o", out)
+	cmd.Stdin = bytes.NewReader(svg)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
