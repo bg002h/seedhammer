@@ -996,19 +996,29 @@ func TestSizeProofRefusalDoesNotOfferAQRTheLadderCannotCarry(t *testing.T) {
 	parts := strings.Split(p.Text, "\n")
 	parts[0] += strings.Repeat("X", 24)
 	grown := strings.Join(parts, "\n")
-	// The premise: still a ladder, admissible at the 3.0mm anchor, and refused
-	// by its own rungs. Without all three this test would be measuring some
-	// other refusal.
+	// The premise: still a ladder, and refused by its own rungs -- with the QR
+	// flag set, which is the state the flow can no longer reach and the one this
+	// test exists for. Without both this would be measuring some other refusal.
+	//
+	// Admission now AGREES with that refusal, which it did not before: counted at
+	// the 3.0mm anchor this composition was "ok" with room to spare while the fit
+	// refused it, so the refusal quoted figures that contradicted it. Counted at
+	// its own rungs it is inadmissible, and the numbers on the screen are the
+	// numbers of the plate that was refused.
 	f := ftEvaluate(P, p.Plan, grown, p.Title, p.Footer, true, 0)
 	if !ftSizedBlocks(p.Plan.Blocks(grown)) {
 		t.Fatal("the edit cleared the ladder's sizes; the premise has moved")
 	}
-	if !f.ok {
-		t.Fatalf("the edited ladder is inadmissible (%d/%d lines); the premise has moved",
-			f.linesUsed, f.linesAvail)
-	}
 	if !errors.Is(f.err, backup.ErrTooLarge) {
 		t.Fatalf("the edited ladder fits its rungs (err %v); the premise has moved", f.err)
+	}
+	if f.ok {
+		t.Errorf("the fit refuses the edited ladder and admission calls it ok (%d/%d lines): "+
+			"the refusal's figures contradict the refusal", f.linesUsed, f.linesAvail)
+	}
+	if f.linesUsed <= f.linesAvail {
+		t.Errorf("the refusal reports %d lines needed of %d available, which is not a refusal",
+			f.linesUsed, f.linesAvail)
 	}
 
 	h, _ := startFT(t)
@@ -1031,6 +1041,24 @@ func TestSizeProofRefusalDoesNotOfferAQRTheLadderCannotCarry(t *testing.T) {
 	}
 	if !uiContains(h.content, "Shorten the Text field") {
 		t.Errorf("the refusal does not name the one remedy there is; frame %q", h.content)
+	}
+	// The FIGURES on the screen are the refused plate's own. MEASURED: 17 rows
+	// needed of the 16 this pattern's rungs hold. At the 3.0mm anchor the same
+	// screen read 13 of 24 -- a refusal quoting a plate with eleven rows to spare.
+	if f.linesUsed != 17 || f.linesAvail != 16 {
+		t.Fatalf("the refused plate is %d/%d lines, want the measured 17/16", f.linesUsed, f.linesAvail)
+	}
+	if !uiContains(h.content, "needs 17 lines") || !uiContains(h.content, "hold 16") {
+		t.Errorf("the refusal does not carry the refused plate's figures (17/16); frame %q", h.content)
+	}
+	if uiContains(h.content, "24") {
+		t.Errorf("the refusal quotes the 3.0mm anchor's capacity; frame %q", h.content)
+	}
+	// And the SENTENCE those figures sit in. "A plate holds N, at the smallest
+	// size" is true of a plate cut at one rung and false of a ladder, whose
+	// capacity is a property of the pattern.
+	if uiContains(h.content, "at the smallest size") {
+		t.Errorf("the refusal describes a plate cut at one rung; frame %q", h.content)
 	}
 }
 
@@ -1284,6 +1312,78 @@ func TestSizeProofConfirmFitsThePanel(t *testing.T) {
 }
 
 // ---- the readouts -----------------------------------------------------------
+
+// TestSizeProofReadoutCountsTheRowsItCuts is the follow-up
+// `sizeproof-admission-count-at-its-own-rungs` at the screen the operator reads
+// while typing: the line count beside the rungs must be the rows the plate is
+// CUT with, not the rows a uniform 3.0mm plate would need for the same
+// characters.
+//
+// Both numbers are asserted. The literal row count is what a font change must
+// fail against -- it is spec 1.1's measurement, 16 rows on the front and 20 on
+// the back. The equality with len(f.plate.Lines) is what a readout describing
+// some OTHER plate must fail against, and it is not self-referential: one side
+// comes from AdmissibleSized and the other from FitSized, two layouts that have
+// to arrive at the same plate.
+//
+// The 3.0mm anchor's answer is asserted to DIFFER, so this cannot pass by the
+// sibling collapsing back onto it.
+func TestSizeProofReadoutCountsTheRowsItCuts(t *testing.T) {
+	P := proofParams()
+	for _, tc := range []struct {
+		trigger string
+		rows    int
+		avail   int
+	}{
+		{ftProofTriggerSizeFront, 16, 16},
+		{ftProofTriggerSizeBack, 20, 20},
+	} {
+		t.Run(tc.trigger, func(t *testing.T) {
+			p := ftSizeProofFor(t, tc.trigger)
+			f := ftEvaluate(P, p.Plan, p.Text, p.Title, p.Footer, false, 0)
+			if f.err != nil {
+				t.Fatalf("the ladder does not fit: %v", f.err)
+			}
+			if got := len(f.plate.Lines); got != tc.rows {
+				t.Fatalf("FitSized lays out %d rows, want spec 1.1's %d", got, tc.rows)
+			}
+			if f.linesUsed != len(f.plate.Lines) {
+				t.Errorf("the readout counts %d rows and the plate is cut with %d",
+					f.linesUsed, len(f.plate.Lines))
+			}
+			if f.linesUsed != tc.rows || f.linesAvail != tc.avail {
+				t.Errorf("the readout is %d/%d lines, want %d/%d",
+					f.linesUsed, f.linesAvail, tc.rows, tc.avail)
+			}
+			if !f.ok {
+				t.Errorf("the ladder is inadmissible at its own rungs")
+			}
+			anchor, anchorAvail, anchorOK := backup.AdmissibleBlocks(
+				P, p.Plan.Blocks(p.Text), p.Title, p.Footer, false)
+			if anchor == f.linesUsed {
+				t.Fatalf("the 3.0mm anchor also reports %d rows; this side cannot tell the two apart",
+					anchor)
+			}
+			t.Logf("own rungs %d/%d ok=%v, 3.0mm anchor %d/%d ok=%v",
+				f.linesUsed, f.linesAvail, f.ok, anchor, anchorAvail, anchorOK)
+			// The string the readout actually draws.
+			if want := fmt.Sprintf("%d/%d lines", tc.rows, tc.avail); !strings.Contains(ftSizeLabel(f), want) {
+				t.Errorf("the readout is %q, want it to carry %q", ftSizeLabel(f), want)
+			}
+			// And on the panel, through the flow.
+			h, _ := startFT(t)
+			ftPastQR(h, false)
+			ftTypeTrigger(h, tc.trigger)
+			ftOK(h)
+			h.tapWidget("proofYes")
+			h.mustReach("lines")
+			if !uiContains(h.content, fmt.Sprintf("%d/%d lines", tc.rows, tc.avail)) {
+				t.Errorf("the text step does not read %d/%d lines; frame %q",
+					tc.rows, tc.avail, h.content)
+			}
+		})
+	}
+}
 
 // TestSizeLabelsNeverPrintZero pins both readouts directly, on a Fitted that is
 // Mixed. Each site has its OWN "%.1fmm" and neither can be covered by the

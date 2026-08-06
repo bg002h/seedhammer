@@ -320,23 +320,31 @@ type ftFit struct {
 // SIZEPROOF!BACK went from (18, 24, ok) to (30, 24, REFUSED) on the flag alone,
 // and the front sat four lines under the same cliff.
 //
-// The stale flag is dropped HERE and not in AdmissibleBlocks. Spec 6 pins that
-// function at the uniform 3.0mm anchor -- it never reads Block.SizeMM -- and
-// TestAdmissibleBlocksVerdictDoesNotMove holds its verdict to measured cliff
-// values. Counting a sized composition at its OWN rungs is the better answer
-// and would also make the readout's line count describe the rows actually cut
-// (spec 6 accepts that divergence); it changes that function's contract, so it
-// is left to the phase that next touches admission rather than made at a gate.
+// It now agrees about the ROWS as well, and on the SAME predicate ftFitAt routes
+// on: a sized composition goes to AdmissibleSized, which counts it at its own
+// rungs, where AdmissibleBlocks laid it out uniformly at the 3.0mm anchor and so
+// described a different plate. Measured before: the front reported 12 of 24 used
+// while FitSized cuts 16 rows, the back 18 of 24 against 20, and an edited ladder
+// that overflowed its own rungs was refused by the fit while admission still said
+// "ok" with room to spare.
 //
-// Dropping the flag is not the WHOLE answer either: spec 3.0 requires the QR
-// step to stop offering a choice it will not honour, rather than accepting one
-// and discarding it downstream. That is the QR step's own change, and its own
-// follow-up.
+// AdmissibleBlocks itself is untouched. Spec 6 pins it at the uniform 3.0mm
+// anchor -- it never reads Block.SizeMM -- and TestAdmissibleBlocksVerdictDoesNotMove
+// holds its verdict to measured cliff values for every ordinary plate.
+//
+// admitQR is kept and is now BELT AND BRACES. The router sends a sized
+// composition to a function that has no QR parameter at all, so this expression
+// can no longer be the thing that drops the flag; it stays so that a future
+// re-route cannot silently re-open the defect it closed.
 func ftEvaluate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) ftFit {
 	var f ftFit
 	blocks := plan.Blocks(text)
 	admitQR := useQR && !ftSizedBlocks(blocks)
-	f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, admitQR)
+	if ftSizedBlocks(blocks) {
+		f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleSized(params, blocks, title, footer)
+	} else {
+		f.linesUsed, f.linesAvail, f.ok = backup.AdmissibleBlocks(params, blocks, title, footer, admitQR)
+	}
 	f.plate, f.err = ftFitAt(params, blocks, title, footer, useQR, size)
 	return f
 }
@@ -548,9 +556,22 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block)
 // plate does not carry frees nothing -- and an edited ladder that overflows its
 // own rungs is refused by the fit, not by the QR band. Shortening the text is
 // the only remedy there is, so it is the only one offered.
+//
+// It does not get the OTHER message either. "A plate holds N, at the smallest
+// size" is a true sentence about a plate cut at one rung and a false one about a
+// ladder, whose rows are several sizes and whose capacity is a property of the
+// pattern rather than of the plate. The figures are now the ladder's own
+// (AdmissibleSized), so the sentence has to be too, or the refusal quotes
+// numbers under a sentence that disowns them.
 func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f ftFit, text string, useQR bool) bool {
 	blocks := plan.Blocks(text)
-	if !useQR || ftSizedBlocks(blocks) {
+	if ftSizedBlocks(blocks) {
+		showError(ctx, th, "Text", fmt.Sprintf(
+			"The text needs %d lines and this pattern's own sizes hold %d. Shorten the Text field.",
+			f.linesUsed, f.linesAvail))
+		return false
+	}
+	if !useQR {
 		showError(ctx, th, "Text", fmt.Sprintf(
 			"The text needs %d lines and a plate holds %d, at the smallest size. Shorten the Text field.",
 			f.linesUsed, f.linesAvail))

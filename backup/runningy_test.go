@@ -378,3 +378,163 @@ func TestMaxCharsAtBlocksPinsTheFaceBoundaryOnAScrewHoleRow(t *testing.T) {
 			got, want, boundary, cN, shN)
 	}
 }
+
+// ---- spec 6's sibling: a sized composition counted at its OWN rungs ----------
+
+// sizedPair builds a two-rung composition with row counts KNOWN by
+// construction: n0 rows of font/sh at 5.0mm from the body's first row, then n1
+// rows of font/constant at 3.0mm from where the first block ends.
+//
+// The body's first row is the plate margin plus ONE ROW AT THE SMALLEST RUNG,
+// which is where FitSized starts it for a titled composition and where
+// AdmissibleSized starts it unconditionally.
+func sizedPair(n0, n1 int) []Block {
+	P := prodParams
+	base := P.I(outerMargin) + P.F(3.0)
+	return []Block{
+		{Face: sh.Font, Text: fillAt("a", sh.Font, 5.0, base, n0), SizeMM: 5.0},
+		{Face: constant.Font, Text: fillAt("b", constant.Font, 3.0, base+n0*P.F(5.0), n1), SizeMM: 3.0},
+	}
+}
+
+// TestAdmissibleSizedCountsTheRowsTheFitLaysOut is the follow-up
+// `sizeproof-admission-count-at-its-own-rungs` in one assertion: the readout's
+// line count must be the rows the plate is CUT with, not the rows a uniform
+// 3.0mm plate would need for the same characters.
+//
+// The two counts are compared against each other on the same composition, so the
+// test fails if the sibling ever collapses back onto the anchor -- an assertion
+// on the number alone would pass a function that returned the anchor's answer at
+// a fixture where the two agree.
+func TestAdmissibleSizedCountsTheRowsTheFitLaysOut(t *testing.T) {
+	P := prodParams
+	const title = "LADDER"
+	blocks := sizedPair(4, 5)
+	f, err := FitSized(P, blocks, title, "", 3.0, 0)
+	if err != nil {
+		t.Fatalf("the fixture does not fit: %v", err)
+	}
+	if len(f.Lines) != 9 {
+		t.Fatalf("the fixture lays out %d rows, want the 4+5 it was built from", len(f.Lines))
+	}
+	used, avail, ok := AdmissibleSized(P, blocks, title, "")
+	if used != len(f.Lines) {
+		t.Errorf("admission counts %d rows and FitSized lays out %d", used, len(f.Lines))
+	}
+	if !ok || used > avail {
+		t.Errorf("a composition the fit accepts is inadmissible: %d/%d lines, ok %v", used, avail, ok)
+	}
+	anchor, anchorAvail, _ := AdmissibleBlocks(P, blocks, title, "", false)
+	if anchor == used {
+		t.Fatalf("the 3.0mm anchor also reports %d rows; this fixture cannot tell the two apart", anchor)
+	}
+	t.Logf("own rungs %d/%d, 3.0mm anchor %d/%d", used, avail, anchor, anchorAvail)
+}
+
+// TestAdmissibleSizedAgreesWithFitSizedAtTheCliff is the property the figures
+// have to have for the REFUSAL to make sense: a composition admission accepts is
+// one the fit lays out, and one it refuses is one the fit refuses, over a sweep
+// that crosses the boundary.
+//
+// Before the sibling the two disagreed by construction -- an edited ladder that
+// overflowed its own rungs was refused by FitSized while admission still said
+// "ok" with room to spare, so the refusal's own numbers contradicted the
+// refusal.
+//
+// The sweep is the falsifiable part: a single at-capacity case is satisfied by
+// any function that says yes, and a single over-capacity case by any function
+// that says no.
+func TestAdmissibleSizedAgreesWithFitSizedAtTheCliff(t *testing.T) {
+	P := prodParams
+	const title = "LADDER"
+	crossings := 0
+	prev := true
+	for n1 := 1; n1 <= 24; n1++ {
+		blocks := sizedPair(4, n1)
+		_, fitErr := FitSized(P, blocks, title, "", 3.0, 0)
+		fits := fitErr == nil
+		used, avail, ok := AdmissibleSized(P, blocks, title, "")
+		if ok != fits {
+			t.Errorf("%d rows at 3.0mm: admission says ok=%v (%d/%d lines) and the fit says %v",
+				n1, ok, used, avail, fitErr)
+		}
+		if n1 > 1 && prev != fits {
+			crossings++
+		}
+		prev = fits
+	}
+	if crossings != 1 {
+		t.Fatalf("the sweep crossed the capacity boundary %d times, want exactly 1; "+
+			"without a crossing this test agrees about nothing", crossings)
+	}
+}
+
+// TestAdmissibleSizedReportsTheUntruncatedCount: an over-capacity composition
+// must report the rows it ACTUALLY needs, not the rows that fit. A refusal
+// reading "20 lines and the plate holds 20" tells the operator nothing about how
+// much to cut, which is AdmissibleBlocks' reason for wrapping unbounded and is
+// the same reason here.
+func TestAdmissibleSizedReportsTheUntruncatedCount(t *testing.T) {
+	P := prodParams
+	const title = "LADDER"
+	small := sizedPair(4, 1)
+	_, avail, ok := AdmissibleSized(P, small, title, "")
+	if !ok {
+		t.Fatal("the small fixture is already inadmissible")
+	}
+	over := sizedPair(4, avail+6)
+	used, overAvail, overOK := AdmissibleSized(P, over, title, "")
+	if overOK {
+		t.Fatalf("a composition %d rows past capacity is admissible", 6)
+	}
+	if overAvail != avail {
+		t.Errorf("linesAvail moved from %d to %d as the text grew past capacity", avail, overAvail)
+	}
+	if used <= avail {
+		t.Errorf("linesUsed = %d for a composition needing more than the %d that fit; "+
+			"the count is truncated and the refusal cannot say how much to cut", used, avail)
+	}
+}
+
+// TestAdmissibleSizedIgnoresTitleAndFooter is spec 6's monotonicity property,
+// kept on the sized path: entering a title or a footer after the text must never
+// retroactively invalidate text already accepted, so neither string is read.
+//
+// Swept across the capacity boundary rather than checked at one length, because
+// the only place a dependence could show is where the verdict changes.
+func TestAdmissibleSizedIgnoresTitleAndFooter(t *testing.T) {
+	P := prodParams
+	saw := map[bool]bool{}
+	for n1 := 1; n1 <= 24; n1++ {
+		blocks := sizedPair(4, n1)
+		bareUsed, bareAvail, bareOK := AdmissibleSized(P, blocks, "", "")
+		fullUsed, fullAvail, fullOK := AdmissibleSized(P, blocks,
+			strings.Repeat("W", MaxTitleLen), strings.Repeat("m", MaxTitleLen))
+		if bareUsed != fullUsed || bareAvail != fullAvail || bareOK != fullOK {
+			t.Fatalf("%d rows: admission moved when a title and footer were entered: "+
+				"(%d/%d %v) -> (%d/%d %v)", n1, bareUsed, bareAvail, bareOK, fullUsed, fullAvail, fullOK)
+		}
+		saw[bareOK] = true
+	}
+	if !saw[true] || !saw[false] {
+		t.Fatal("the sweep never crossed the capacity boundary; the invariance proves nothing there")
+	}
+}
+
+// TestAdmissibleSizedRefusesAnUnsizedComposition: the readout must keep working
+// rather than divide by zero. A block at 0mm is not a sized composition -- every
+// caller routes on "every block states a rung" and FitSized refuses it outright
+// -- and laying one out would put a whole block through the wrap at fontSize 0,
+// where the rows-that-fit division is by zero.
+func TestAdmissibleSizedRefusesAnUnsizedComposition(t *testing.T) {
+	P := prodParams
+	blocks := sizedPair(4, 5)
+	blocks[1].SizeMM = 0
+	used, avail, ok := AdmissibleSized(P, blocks, "", "")
+	if ok {
+		t.Errorf("a composition with an unsized block is admissible (%d/%d lines)", used, avail)
+	}
+	if _, _, ok := AdmissibleSized(P, nil, "", ""); ok {
+		t.Error("an empty composition is admissible")
+	}
+}
