@@ -62,7 +62,7 @@
 <polyline id="b" class="st0" points="313,2 313,8 317,8 317,5 313,5 "/>
 <polyline id="c" class="st0" points="323,4 319,4 319,8 323,8 "/>
 <polyline id="d" class="st0" points="329,2 329,8 325,8 325,5 329,5 "/>
-<polyline id="e" class="st0" points="331,6 335,6 335,4 331,4 331,8 335,8 "/>
+<polyline id="e" class="st0" points="331,6 335,6 335,3.5 331,4 331,8 335,8.5 "/>
 <polyline id="f" class="st0" points="341,3.5 340.619,2 339,2 339,5 337,4.75 340.25,5.15625 339,5 339,8 "/>
 <polyline id="g" class="st0" points="344,9 347,9 347,4 343,4 343,7 347,7 "/>
 <polyline id="h" class="st0" points="349,2 349,8 349,4 353,4 353,8 "/>
