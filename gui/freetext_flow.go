@@ -445,6 +445,13 @@ func ftPlateRungs(f backup.Fitted) string {
 			rungs = append(rungs, s)
 		}
 	}
+	return ftRungsLabel(rungs)
+}
+
+// ftRungsLabel joins rungs the way the ladder titles join them. ONE joiner, so
+// the Size screen and the confirm screen cannot disagree about what a given
+// ladder is called.
+func ftRungsLabel(rungs []float32) string {
 	if len(rungs) == 0 {
 		return "--"
 	}
@@ -542,6 +549,131 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block)
 	// Structurally false in the sized case -- index 1 is not on the screen -- so
 	// the flag cannot diverge from a plate that has no code to carry.
 	return sel == 1, true
+}
+
+// ftSizeAutoFit is the Size screen's first entry and the program's default: the
+// fit takes the largest rung the composition holds at, which is what free text
+// did before this screen existed.
+const ftSizeAutoFit = "Auto-fit"
+
+const (
+	ftFaceLead = "The face the whole plate is cut in. font/sh is this " +
+		"program's own; font/constant is the face every seed, descriptor and " +
+		"passphrase plate uses."
+	ftSizeLead = "The size the whole plate is cut at. Auto-fit takes the " +
+		"largest that holds the text."
+	// A proof composition states its own faces and rungs, so both screens say
+	// what it is rather than offering to change it.
+	ftFaceLeadFixed = "This pattern states its own faces. They are not a choice here."
+	ftSizeLeadFixed = "This pattern states its own sizes. They are not a choice here."
+)
+
+// ftFaceOptions is the Font screen's content: the labels, and the plan each one
+// selects.
+//
+// A PROOF composition is deliberately not in the list. It is STATE rather than
+// a decision, so it yields ONE entry naming itself and taking that entry
+// changes nothing -- exactly what ftQRChoiceFlow does for a sized composition,
+// and for the same reason: a pinned proof plate must not be half-edited into a
+// composition nothing measures.
+//
+// The labels are READ FROM THE FACES and never spelled again here, so this
+// screen and ftFaceSummary cannot drift apart.
+func ftFaceOptions(cur *ftPlan) ([]string, []*ftPlan) {
+	if ftPlanIsProof(cur) {
+		return []string{cur.Name()}, []*ftPlan{cur}
+	}
+	return []string{ftFaceSH.Name, ftFaceConst.Name}, []*ftPlan{&ftPlanSH, &ftPlanConst}
+}
+
+// ftPlanIsProof reports a composition that came from a proof trigger rather
+// than from the Font screen.
+//
+// The predicate is deliberately NOT plan.Sized(). ftPlanBoth states no rungs
+// and so is not Sized, but its faces and its CONTENT were built together --
+// ftProofOutcomeFor reaches a named rung by calling ftBothAt, which rebuilds
+// and trims the mixed pattern to fit it. Editing the rung from the Size screen
+// cannot do that, so it would leave the pattern's text as it was and cut a
+// plate no trigger ever produces. Neither field is editable here for the same
+// reason: the proof's parts are only correct together.
+func ftPlanIsProof(p *ftPlan) bool {
+	return p != &ftPlanSH && p != &ftPlanConst
+}
+
+// ftSizeOptions is the Size screen's content: the labels and the rung each one
+// selects, 0 meaning auto-fit. cur is handed straight back for a plan that
+// states its own rungs, so taking the only entry cannot move the size.
+//
+// Built by RANGING OVER backup.FontSizes rather than a list written out here.
+// That set is the only one every capacity number in backup is measured against,
+// so a rung that is offered is a rung that is pinned; a hand-written list is
+// how an unpinned size gets onto the screen.
+func ftSizeOptions(plan *ftPlan, cur float32) ([]string, []float32) {
+	if ftPlanIsProof(plan) {
+		// A ladder names its own rungs; any other proof names the size it is
+		// currently pinned at, which is auto-fit unless a trigger set one.
+		switch {
+		case plan.Sized():
+			return []string{ftRungsLabel(plan.Rungs())}, []float32{cur}
+		case cur == 0:
+			return []string{ftSizeAutoFit}, []float32{cur}
+		default:
+			return []string{fmt.Sprintf("%.1fmm", cur)}, []float32{cur}
+		}
+	}
+	labels := make([]string, 0, len(backup.FontSizes)+1)
+	sizes := make([]float32, 0, len(backup.FontSizes)+1)
+	labels = append(labels, ftSizeAutoFit)
+	sizes = append(sizes, 0)
+	for _, s := range backup.FontSizes {
+		labels = append(labels, fmt.Sprintf("%.1fmm", s))
+		sizes = append(sizes, s)
+	}
+	return labels, sizes
+}
+
+// ftFaceChoiceFlow is step 2. It sits BEFORE the text screen because the face
+// changes plate CAPACITY -- 44 columns at 3.0mm in font/sh against 39 in
+// font/constant -- and letting the operator type against a capacity that then
+// changes underneath them is exactly what the QR step is already placed early
+// to avoid.
+func ftFaceChoiceFlow(ctx *Context, th *Colors, prior *ftPlan) (*ftPlan, bool) {
+	labels, plans := ftFaceOptions(prior)
+	cs := &ChoiceScreen{Title: "Font", Lead: ftFaceLead, Choices: labels}
+	if len(plans) == 1 {
+		cs.Lead = ftFaceLeadFixed
+	}
+	// Preserve the live face across Back, as the QR step preserves a deliberate
+	// opt-in. choice starts at 0, which is sh: the default is a property of
+	// ftFaceOptions' ordering, so do not reorder it.
+	if i := slices.Index(plans, prior); i > 0 {
+		cs.choice = i
+	}
+	hookPPWidget("face", cs)
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return prior, false
+	}
+	return plans[sel], true
+}
+
+// ftSizeChoiceFlow is step 3, and it follows the face for the reason the face
+// follows the QR: each one narrows what the next screen can hold.
+func ftSizeChoiceFlow(ctx *Context, th *Colors, plan *ftPlan, prior float32) (float32, bool) {
+	labels, sizes := ftSizeOptions(plan, prior)
+	cs := &ChoiceScreen{Title: "Size", Lead: ftSizeLead, Choices: labels}
+	if len(sizes) == 1 {
+		cs.Lead = ftSizeLeadFixed
+	}
+	if i := slices.Index(sizes, prior); i > 0 {
+		cs.choice = i
+	}
+	hookPPWidget("size", cs)
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return prior, false
+	}
+	return sizes[sel], true
 }
 
 // ftRefuse explains an over-capacity text and, when a QR is present, offers
@@ -982,6 +1114,10 @@ type ftStep int
 
 const (
 	ftStepQR ftStep = iota
+	// Face and size come BEFORE the text: both change plate capacity, and the
+	// QR step is already placed first for that reason. See ftFaceChoiceFlow.
+	ftStepFace
+	ftStepSize
 	ftStepText
 	ftStepTitle
 	ftStepFooter
@@ -1015,6 +1151,22 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				return // Back out of the first step leaves the program.
 			}
 			useQR = add
+		case ftStepFace:
+			p, ok := ftFaceChoiceFlow(ctx, th, plan)
+			if !ok {
+				step -= 2
+				break
+			}
+			plan = p
+		case ftStepSize:
+			// Handed the LIVE plan, not the prior one: a face chosen on the
+			// previous screen decides whether this one offers rungs at all.
+			s, ok := ftSizeChoiceFlow(ctx, th, plan, size)
+			if !ok {
+				step -= 2
+				break
+			}
+			size = s
 		case ftStepText:
 			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR, &size,
 				ftProofLoader(params, &text, &title, &footer, &plan, &useQR, &size))

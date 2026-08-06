@@ -613,8 +613,7 @@ func TestSizeProofDropsTheQRTheOperatorChose(t *testing.T) {
 	h.tapWidget("proofYes")
 	h.mustReach("lines")
 	// Back to the QR screen, which now knows what is loaded.
-	ftBack(h)
-	h.mustReach("QRCode")
+	ftBackToQR(h)
 	cs, ok := h.widget("qr").(*ChoiceScreen)
 	if !ok {
 		t.Fatal(`widget "qr" is not a *ChoiceScreen`)
@@ -625,6 +624,7 @@ func TestSizeProofDropsTheQRTheOperatorChose(t *testing.T) {
 	// Forward again and all the way through: no code, and the confirm screen
 	// does not claim one.
 	ftChoose(h, "qr", 0)
+	ftPastFaceAndSize(h)
 	h.mustReach("lines")
 	for _, step := range []string{"Title", "Footer", "Confirm"} {
 		ftOK(h)
@@ -669,8 +669,7 @@ func TestSizeProofQRStepStatesTheQRIsUnavailable(t *testing.T) {
 			ftOK(h)
 			h.tapWidget("proofYes")
 			h.mustReach("lines")
-			ftBack(h)
-			h.mustReach("QRCode")
+			ftBackToQR(h)
 			cs, ok := h.widget("qr").(*ChoiceScreen)
 			if !ok {
 				t.Fatal(`widget "qr" is not a *ChoiceScreen`)
@@ -700,6 +699,7 @@ func TestSizeProofQRStepStatesTheQRIsUnavailable(t *testing.T) {
 			// undrawn, off-panel or covered, which is what a lead grown past its
 			// band would do to it.
 			ftChoose(h, "qr", 0)
+			ftPastFaceAndSize(h)
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
@@ -732,8 +732,7 @@ func TestSizeProofQRStepBackStillLeavesTheProgram(t *testing.T) {
 	ftOK(h)
 	h.tapWidget("proofYes")
 	h.mustReach("lines")
-	ftBack(h)
-	h.mustReach("QRCode")
+	ftBackToQR(h)
 	cs, ok := h.widget("qr").(*ChoiceScreen)
 	if !ok {
 		t.Fatal(`widget "qr" is not a *ChoiceScreen`)
@@ -836,8 +835,7 @@ func TestQRStepStillOffersBothAnswersOffTheLadder(t *testing.T) {
 		h, _ := startFT(t)
 		ftPastQR(h, true)
 		h.typeString("hello")
-		ftBack(h)
-		h.mustReach("QRCode")
+		ftBackToQR(h)
 		cs, ok := h.widget("qr").(*ChoiceScreen)
 		if !ok {
 			t.Fatal(`widget "qr" is not a *ChoiceScreen`)
@@ -868,8 +866,7 @@ func TestQRStepStillOffersBothAnswersOffTheLadder(t *testing.T) {
 		if ftSizedBlocks(ftPlanBoth.Blocks(ftKbd(h).Fragment)) {
 			t.Fatal("BOTHPROOF! loaded a SIZED composition; this test's premise has moved")
 		}
-		ftBack(h)
-		h.mustReach("QRCode")
+		ftBackToQR(h)
 		cs, ok := h.widget("qr").(*ChoiceScreen)
 		if !ok {
 			t.Fatal(`widget "qr" is not a *ChoiceScreen`)
@@ -884,6 +881,7 @@ func TestQRStepStillOffersBothAnswersOffTheLadder(t *testing.T) {
 		// pressing OK reaches the capacity refusal that offers to remove it,
 		// which is the remedy the ladder must never be offered.
 		ftChoose(h, "qr", 1)
+		ftPastFaceAndSize(h)
 		h.mustReach("lines")
 		ftOK(h)
 		if !uiContains(h.content, "Remove the QR") {
@@ -960,9 +958,9 @@ func TestSizeProofAdvancesWithTheQRReEnabled(t *testing.T) {
 			ftOK(h)
 			h.tapWidget("proofYes")
 			h.mustReach("lines")
-			ftBack(h)
-			h.mustReach("QRCode")
+			ftBackToQR(h)
 			ftChoose(h, "qr", 0) // the one answer the ladder's QR step offers
+			ftPastFaceAndSize(h)
 			h.mustReach("lines")
 			ftOK(h)
 			if uiContains(h.content, "TooLong") || uiContains(h.content, "Remove the QR") {
@@ -1027,12 +1025,12 @@ func TestSizeProofRefusalDoesNotOfferAQRTheLadderCannotCarry(t *testing.T) {
 	ftOK(h)
 	h.tapWidget("proofYes")
 	h.mustReach("lines")
-	ftBack(h)
-	h.mustReach("QRCode")
+	ftBackToQR(h)
 	// Index 0 is the only answer this screen offers over a loaded ladder (spec
 	// 3.0). The stale-flag half of this test is the ftEvaluate above, which is
 	// called with useQR true.
 	ftChoose(h, "qr", 0)
+	ftPastFaceAndSize(h)
 	h.mustReach("lines")
 	ftSetText(h, grown)
 	ftOK(h)
@@ -1208,9 +1206,9 @@ func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
 			ftOK(h)
 			h.tapWidget("proofYes")
 			h.mustReach("lines")
-			ftBack(h)
-			h.mustReach("QRCode")
+			ftBackToQR(h)
 			ftChoose(h, "qr", 0)
+			ftPastFaceAndSize(h)
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)

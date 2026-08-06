@@ -85,7 +85,14 @@ func ftChoose(h *ppHarness, name string, i int) {
 	h.tapNav(Button3)
 }
 
-// ftPastQR taps through step 1.
+// ftPastQR taps through steps 1 to 3: the QR choice, then the Font and Size
+// screens at their DEFAULTS.
+//
+// The defaults are walked deliberately rather than skipped. Every caller of
+// this helper asserts behaviour that predates the two pickers, so taking index
+// 0 on both is what keeps those assertions meaningful -- and if either default
+// ever moved, all of them would start failing at once, which is the alarm we
+// want rather than a silent change of plate.
 func ftPastQR(h *ppHarness, add bool) {
 	h.t.Helper()
 	h.mustReach("QRCode")
@@ -94,7 +101,33 @@ func ftPastQR(h *ppHarness, add bool) {
 		sel = 1
 	}
 	ftChoose(h, "qr", sel)
+	ftPastFaceAndSize(h)
 	h.mustReach("lines")
+}
+
+// ftPastFaceAndSize takes index 0 on both pickers: font/sh and Auto-fit.
+//
+// Index 0 is also the ONLY entry when a proof composition is loaded, so this
+// works unchanged on the way forward through a ladder.
+func ftPastFaceAndSize(h *ppHarness) {
+	h.t.Helper()
+	h.mustReach("Font")
+	ftChoose(h, "face", 0)
+	h.mustReach("Size")
+	ftChoose(h, "size", 0)
+}
+
+// ftBackToQR steps back from the text screen to the QR screen, through the two
+// pickers that now sit between them. ChoiceScreen owns its Back button
+// privately, so each picker is left by nav slot rather than by widget.
+func ftBackToQR(h *ppHarness) {
+	h.t.Helper()
+	ftBack(h)
+	h.mustReach("Size")
+	h.tapNav(Button1)
+	h.mustReach("Font")
+	h.tapNav(Button1)
+	h.mustReach("QRCode")
 }
 
 func ftOK(h *ppHarness) {
@@ -378,8 +411,7 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	if got := ftKbd(h).Fragment; got != "note" {
 		t.Errorf("text = %q after Back, want %q", got, "note")
 	}
-	ftBack(h)
-	h.mustReach("QRCode")
+	ftBackToQR(h)
 	cs, ok := h.widget("qr").(*ChoiceScreen)
 	if !ok {
 		t.Fatal("widget \"qr\" is not a *ChoiceScreen")
@@ -389,6 +421,7 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	}
 	// Forward again: every field is still there.
 	ftChoose(h, "qr", 1)
+	ftPastFaceAndSize(h)
 	h.mustReach("lines")
 	if got := ftKbd(h).Fragment; got != "note" {
 		t.Errorf("text = %q after going forward again, want %q", got, "note")
