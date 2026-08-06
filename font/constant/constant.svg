@@ -26,7 +26,7 @@
 <polyline id="T" class="st0" points="117,2 115,2 119,2 117,2 117,8 "/>
 <polyline id="U" class="st0" points="121,2 121,7 122,8 124,8 125,7 125,2 "/>
 <polyline id="V" class="st0" points="127,2 129,8 131,2 "/>
-<polyline id="W" class="st0" points="133,2 134,8 135,4 136,8 137,2 "/>
+<polyline id="W" class="st0" points="133,2 133,8 135,4 137,8 137,2 "/>
 <polyline id="X" class="st0" points="139,2 141,5 139,8 141,5 143,8 141,5 143,2 "/>
 <polyline id="Y" class="st0" points="145,2 147,5 147,8 147,5 149,2 "/>
 <polyline id="Z" class="st0" points="151,2 155,2 151,8 155,8 "/>
@@ -66,7 +66,7 @@
 <polyline id="c" class="st0" points="323,4 319,4 319,8 323,8 "/>
 <polyline id="d" class="st0" points="329,2 329,8 325,8 325,5 329,5 "/>
 <polyline id="e" class="st0" points="331,6 335,6 335,3 331,3.5 331,8.5 335,9 "/>
-<polyline id="f" class="st0" points="341,3.5 340.619,2 339,2 339,5 337,4.75 340.25,5.15625 339,5 339,8 "/>
+<polyline id="f" class="st0" points="341,3.5 340.619,2 339,2 339,5.45 337,5.2 340.25,5.60625 339,5.45 339,8 "/>
 <polyline id="g" class="st0" points="344,9 347,9 347,4 343,4 343,7 347,7 "/>
 <polyline id="h" class="st0" points="349,2 349,8 349,4 353,4 353,8 "/>
 <g id="i">
@@ -97,7 +97,7 @@
 <polyline id="y" class="st0" points="451,4 453,7 455,4 453,7 452,9 "/>
 <g id="z">
 	<polyline class="st0" points="457,3 461,3.5 457,8.5 461,9 "/>
-	<polyline class="st0" points="458,6 460,6 "/>
+	<polyline class="st0" points="457.5,6 460,6 "/>
 </g>
 <g id="exclam">
 	<polyline class="st0" points="465,2 465,5 "/>
@@ -136,7 +136,7 @@
 <polyline id="_" class="st0" points="541,9 545,9 "/>
 <polyline id="grave" class="st0" points="548,2 549.5,5 "/>
 <polyline id="bar" class="st0" points="555,1 555,9 "/>
-<polyline id="asciitilde" class="st0" points="559,5.5 560,4.5 562,5.5 563,4.5 "/>
+<polyline id="asciitilde" class="st0" points="559,6 560,4 562,6 563,4 "/>
 <polyline id="space_mark" class="st0" points="565,9 567,9 567,6 567,9 569,9 "/>
 <line id="height" class="st0" x1="6" y1="0" x2="6" y2="9"/>
 <line id="advance" class="st0" x1="0" y1="8" x2="6" y2="8"/>

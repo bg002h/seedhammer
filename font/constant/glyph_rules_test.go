@@ -441,11 +441,20 @@ func TestFCrossbarAndHookFollowTheHouseAngle(t *testing.T) {
 	barL, barR := f[4], f[5]
 	stemBottom := f[7]
 
-	// The crossbar crosses the stem at the stem's vertical midpoint.
+	// The crossbar crosses HALF A STROKE BELOW the stem's vertical midpoint
+	// (operator, 2026-08-06). It sat exactly on the midpoint until then; the
+	// drop is deliberate and is stated as an exact offset rather than a range,
+	// so a later edit cannot drift downward a little at a time.
+	//
+	// Half a stroke is 0.45 cell units: the stroke is 0.30mm at every rung and
+	// the em is 3.0mm over 9 units at the smallest one, so a stroke is 0.9
+	// units and the font stores 100 units per cell unit.
+	const halfStroke = 0.3 / 3.0 * 9 / 2 * scale // 45 font units
 	mid := (float64(stemTop.Y) + float64(stemBottom.Y)) / 2
-	if float64(cross.Y) != mid {
-		t.Errorf("the crossbar crosses at y=%d; the stem spans %d..%d, whose midpoint is %.0f",
-			cross.Y, stemTop.Y, stemBottom.Y, mid)
+	if want := mid + halfStroke; float64(cross.Y) != want {
+		t.Errorf("the crossbar crosses at y=%d; the stem spans %d..%d, whose midpoint is %.0f, "+
+			"and the crossbar belongs half a stroke (%.0f units) below it at %.0f",
+			cross.Y, stemTop.Y, stemBottom.Y, mid, halfStroke, want)
 	}
 
 	// The house angle, decoded from 'n' rather than written down, so flattening

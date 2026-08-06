@@ -417,12 +417,18 @@ func render(face *vector.Face, faceName string, runes []rune, sizeMM float32, co
 	head := int(1.6 * float64(em))
 	w, h := cols*cellW, rows*cellH+head
 
-	// The header is SIZED TO FIT rather than set to a fixed fraction of the em.
-	// At 0.30em the legend ran off the right edge and rsvg-convert clipped it
-	// without complaint -- a caption that silently loses its second half is
-	// worse on a reference image than no caption.
-	const legendChars = 104 // the longer of the two lines below, rounded up
-	hdPx := min(int(hdF*float64(em)), (w-2*pad)*10/(legendChars*6))
+	l1 := fmt.Sprintf("font/%s at %.1fmm — grey slab = ink at the real %.1fmm stroke, blue = centreline",
+		faceName, sizeMM, float64(sw)/float64(P.Millimeter))
+	l2 := "red dots = the control points you edit in the SVG · green ring = where a stroke starts · " +
+		"k = strokes · grey box = the advance cell · green dashed = the ink's own bounds"
+
+	// The header is SIZED TO FIT rather than set to a fixed fraction of the em,
+	// and from the ACTUAL line length rather than a constant. At 0.30em the
+	// legend ran off the right edge and rsvg-convert clipped it without
+	// complaint; a hardcoded character count then clipped it again the first
+	// time the legend grew. A caption that silently loses its second half is
+	// worse on a reference image than no caption, so the count is measured.
+	hdPx := min(int(hdF*float64(em)), (w-2*pad)*10/(max(len(l1), len(l2))*6))
 
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">`,
@@ -437,17 +443,14 @@ func render(face *vector.Face, faceName string, runes []rune, sizeMM float32, co
 	.mid    { fill:none; stroke:#0984e3; stroke-width:%d; stroke-linecap:round; }
 	.travel { fill:none; stroke:#9aa0a6; stroke-width:%d; stroke-dasharray:%d %d; }
 	.box    { fill:none; stroke:#d0d0d0; stroke-width:%d; }
+	.inkbox { fill:none; stroke:#0a8f3c; stroke-width:%d; stroke-dasharray:%d %d; }
 	.cap    { font-family:monospace; font-size:%dpx; fill:#222; }
 	.sub    { font-family:monospace; font-size:%dpx; fill:#777; }
 	.hd     { font-family:sans-serif; font-size:%dpx; fill:#000; }
 	.warn   { fill:#c00000; }
 </style>`, sw, max(em/70, 1), max(em/110, 1), em/22, em/22, max(sw/12, 1),
-		capPx, capPx, hdPx)
+		max(sw/12, 1), em/40, em/40, capPx, capPx, hdPx)
 
-	l1 := fmt.Sprintf("font/%s at %.1fmm — grey slab = ink at the real %.1fmm stroke, blue = centreline",
-		faceName, sizeMM, float64(sw)/float64(P.Millimeter))
-	l2 := "red dots = the control points you edit in the SVG · green ring = where a stroke starts · " +
-		"k = strokes · thin box = the advance cell"
 	fmt.Fprintf(&b, `<text class="hd" x="%d" y="%d">%s</text>`, pad, int(0.55*float64(em)), esc(l1))
 	fmt.Fprintf(&b, `<text class="hd" x="%d" y="%d">%s</text>`, pad, int(1.05*float64(em)), esc(l2))
 
@@ -459,6 +462,14 @@ func render(face *vector.Face, faceName string, runes []rune, sizeMM float32, co
 		// leave -- and so its density against its neighbours is visible.
 		fmt.Fprintf(&b, `<rect class="box" x="%d" y="%d" width="%d" height="%d"/>`,
 			pad, pad, g.advance, em)
+		// The INK's own bounding box, which is a different question from the
+		// advance cell: the cell is what the glyph is allotted, this is what it
+		// actually uses. Drawn from bspline.Measure, so it unions engraved
+		// segments only and excludes the travel moves.
+		if g.hasInk {
+			fmt.Fprintf(&b, `<rect class="inkbox" x="%d" y="%d" width="%d" height="%d"/>`,
+				pad+g.bounds.Min.X, pad+g.bounds.Min.Y, g.bounds.Dx(), g.bounds.Dy())
+		}
 
 		capY := pad + em + int(0.42*float64(em))
 		if g.unmapped {
