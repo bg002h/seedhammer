@@ -163,7 +163,10 @@ func counterTable(w io.Writer, face *vector.Face, faceName string, sizeMM float3
 	// Longest run under the floor first: that is the ranking the opening-up
 	// work follows, because it is how far the glyph reads as one thick line.
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].ch.RunBelow(floorMM) > rows[j].ch.RunBelow(floorMM)
+		if rows[i].hasCh != rows[j].hasCh {
+			return rows[i].hasCh
+		}
+		return rows[i].ch.SustainedMax(sustainMM) < rows[j].ch.SustainedMax(sustainMM)
 	})
 
 	fmt.Fprintf(w, "font/%s at %.1fmm, stroke %.2fmm.\n", faceName, sizeMM, swMM)
@@ -171,32 +174,36 @@ func counterTable(w io.Writer, face *vector.Face, faceName string, sizeMM float3
 	fmt.Fprintf(w, "counter = enclosed bare metal; 'lost' counts counters present at 6.0mm and gone here.\n\n")
 	fmt.Fprintf(w, "the FLOOR is %.2fmm (%.0f strokes): under it, two parallel strokes read as one thick line.\n\n",
 		floorMM, floorMM/swMM)
-	fmt.Fprintf(w, "%-9s %-3s %-8s %-5s %-9s %-10s %-9s %s\n",
-		"glyph", "k", "counters", "lost", "counter", "under-floor", "median", "verdict")
+	fmt.Fprintf(w, "widest = the widest the gap gets and HOLDS; the eye takes that and projects it across.\n\n")
+	fmt.Fprintf(w, "%-9s %-3s %-8s %-9s %-9s %-9s %-9s %s\n",
+		"glyph", "k", "counters", "counter", "widest", "median", "runs", "verdict")
 
 	for _, rw := range rows {
 		g := rw.g
-		tight, under, med := "    -   ", "    -    ", "    -   "
+		tight, wide, med, runs := "    -   ", "    -   ", "    -   ", "    -   "
 		if rw.hasTight {
 			tight = fmt.Sprintf("%6.3fmm", rw.tight)
 		}
-		below := rw.ch.RunBelow(floorMM)
+		widest := rw.ch.SustainedMax(sustainMM)
 		if rw.hasCh {
-			under = fmt.Sprintf("%6.2fmm", below)
+			wide = fmt.Sprintf("%6.3fmm", widest)
 			med = fmt.Sprintf("%6.3fmm", rw.ch.Median())
+			runs = fmt.Sprintf("%6.2fmm", rw.ch.RunMM)
 		}
 		verdict := "ok"
-		switch {
-		case below >= 1.0:
-			verdict = "MERGES: parallel under the floor for over a millimetre"
-		case below >= 0.5:
-			verdict = "tight: half a millimetre under the floor"
+		if rw.hasCh {
+			switch {
+			case widest < floorMM/2:
+				verdict = "MERGES: never opens past half the floor"
+			case widest < floorMM:
+				verdict = "tight: never reaches the floor"
+			}
 		}
 		if rw.lost > 0 {
 			verdict = fmt.Sprintf("CLOSED: %d counter(s) filled in", rw.lost)
 		}
-		fmt.Fprintf(w, "%-9s %-3d %-8d %-5d %-9s %-10s %-9s %s\n",
-			caption(g.r), g.strokes, len(g.counters), rw.lost, tight, under, med, verdict)
+		fmt.Fprintf(w, "%-9s %-3d %-8d %-9s %-9s %-9s %-9s %s\n",
+			caption(g.r), g.strokes, len(g.counters), tight, wide, med, runs, verdict)
 	}
 }
 

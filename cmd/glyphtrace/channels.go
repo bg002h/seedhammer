@@ -1,6 +1,9 @@
 package main
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // Channels: the white gap between two roughly parallel strokes.
 //
@@ -65,7 +68,7 @@ func (c channel) RunBelow(w float64) float64 {
 	return float64(best) * pxMM
 }
 
-// Median is the channel's typical gap, which is what the eye averages over.
+// Median is the channel's typical gap.
 func (c channel) Median() float64 {
 	if len(c.Widths) == 0 {
 		return 0
@@ -74,6 +77,48 @@ func (c channel) Median() float64 {
 	sort.Float64s(s)
 	return s[len(s)/2]
 }
+
+// SustainedMax is the WIDEST the gap gets and holds for at least sustainMM: the
+// widest window of the channel, measured by its narrowest point.
+//
+// THIS IS THE NUMBER THAT DECIDES WHETHER A GAP READS, and it is neither the
+// median nor the minimum. Operator, 2026-08-05: "the human eye will naturally
+// be drawn to the widest portion and mentally project that gap across as if the
+// house angle wasn't there and the line was truly horizontal. It's an illusion."
+//
+// So a WEDGE reads as its wide end. A pair of strokes that diverge from nothing
+// to 0.8mm is seen as 0.8mm apart along their whole length, and reads as two
+// lines. A pair that runs at a uniform 0.375mm never offers the eye anything
+// wider, and reads as one thick line however long it is.
+//
+// That is why the divergence trick works at all, and it is the reverse of what
+// RunBelow scores. RunBelow answers "how much of this gap is tight", which is
+// the right question for a PARALLEL pair and the wrong one for a wedge -- a
+// wedge is tight for most of its length by construction and legible anyway.
+// Ranking by RunBelow put the diagonals of N, V, W and M near the top, which are
+// wedges already and need nothing.
+//
+// The sustain window exists because a single wide pixel is not a perception. A
+// gap has to be open over some distance before the eye takes it as the gap.
+func (c channel) SustainedMax(sustainMM float64) float64 {
+	n := max(int(sustainMM*counterRes), 1)
+	if len(c.Widths) < n {
+		return 0
+	}
+	best := 0.0
+	for i := 0; i+n <= len(c.Widths); i++ {
+		lo := c.Widths[i]
+		for _, x := range c.Widths[i : i+n] {
+			lo = math.Min(lo, x)
+		}
+		best = math.Max(best, lo)
+	}
+	return best
+}
+
+// sustainMM is how far a gap must stay open before the eye reads it as open.
+// Half a stroke; below that it is a nick in the ink, not a separation.
+const sustainMM = 0.15
 
 // minChannelRunMM is how far a gap must persist before it counts.
 //
@@ -196,12 +241,20 @@ func (r *inkRaster) findChannels() []channel {
 	return append(group(vgaps, true), group(hgaps, false)...)
 }
 
-// worstChannel is the gap that spends the longest distance under the floor:
-// the place in the glyph most likely to read as one thick line.
+// worstChannel is the gap that never opens up: the one whose widest sustained
+// point is narrowest, and so the place in the glyph most likely to read as a
+// single thick line.
+//
+// Channels shorter than the floor are skipped. A gap between two strokes that
+// only run alongside each other for less than the floor's own width cannot read
+// as a long merged line -- it is a notch.
 func worstChannel(cs []channel, floor float64) (channel, bool) {
 	best, found := channel{}, false
 	for _, c := range cs {
-		if !found || c.RunBelow(floor) > best.RunBelow(floor) {
+		if c.RunMM < floor {
+			continue
+		}
+		if !found || c.SustainedMax(sustainMM) < best.SustainedMax(sustainMM) {
 			best, found = c, true
 		}
 	}
