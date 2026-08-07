@@ -735,13 +735,16 @@ func ftSpeedOptions(params engrave.Params, proofLoaded bool, cur float32) ([]str
 	return labels, speeds
 }
 
-// ftSpeedChoiceFlow is step 5, and unlike Font and Size it sits AFTER the text.
+// ftSpeedChoiceFlow is the Speed screen, reached from the settings gear rather
+// than from a step of engraveTextFlow's own -- see ftSettingsFlow, which calls
+// it and writes the result back through *speed.
 //
-// Those two precede the text because they change plate CAPACITY. The feed
-// changes no geometry at all -- only the tick counts on an already-decided
-// toolpath -- so it has no reason to come first, and coming last means the flow
-// already knows whether a proof keyword was used, since a proof is loaded ON the
-// text screen. A picker before Text would have needed a Back to see it.
+// It never precedes the text the way Font and Size do: those change plate
+// CAPACITY, but the feed changes no geometry at all, only the tick counts on
+// an already-decided toolpath. Gating it on proofLoaded, rather than moving it
+// earlier, is what lets it stay behind the gear at all: by the time the
+// operator can reach it the flow already knows whether a proof keyword was
+// used, since a proof is loaded ON the text screen.
 func ftSpeedChoiceFlow(ctx *Context, th *Colors, params engrave.Params, proofLoaded bool, prior float32) (float32, bool) {
 	labels, speeds := ftSpeedOptions(params, proofLoaded, prior)
 	cs := &ChoiceScreen{Title: "Speed", Lead: ftSpeedLead, Choices: labels}

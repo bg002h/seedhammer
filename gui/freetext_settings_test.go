@@ -291,6 +291,17 @@ func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
 	if got.Duration <= one.Duration {
 		t.Errorf("two passes planned %d ticks against one pass's %d", got.Duration, one.Duration)
 	}
+	// The DIRECTION check above passes for ANY pass count above 1 -- 8 passes
+	// on a 2-pass choice would still read "more ticks than one pass" and reach
+	// steel uncaught. So the plate the operator's 2-pass choice actually
+	// produced must match a plate explicitly built at 2 passes, exactly.
+	two, err := ftBuildPlate(P, &ftPlanConst, loaded, ftProofTitleConst, ftProofFooter, false, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Duration != two.Duration {
+		t.Errorf("the plate runs %d ticks, the two-pass composition %d", got.Duration, two.Duration)
+	}
 }
 
 // ftTapKey taps the ACTIVE page's key carrying the given action. h.point fails
