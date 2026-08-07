@@ -93,6 +93,26 @@ func NewTextKeyboard(ctx *Context) *PassphraseKeyboard {
 	return newPPKeyboard(ctx, true, true)
 }
 
+// NewLineKeyboard is NewTextKeyboard WITHOUT the gear, for the Title and Footer
+// fields.
+//
+// Those two screens are ftLineEntryFlow, which never calls Settings(): it has no
+// engraving settings of its own and the values the gear edits belong to the
+// plate, which the Text screen owns. Built as a text keyboard, the gear was
+// drawn there, was tappable, and did NOTHING AT ALL -- a live-looking control
+// that swallows the press, on the machine where the next thing the operator
+// approves is cut into steel. Compare the newline key, which these screens do
+// keep: it is also inherited, but pressing it produces an explicit error rather
+// than silence, which is why it stays and the gear goes.
+//
+// Removing it, rather than wiring it up, is deliberate and NOT a placeholder:
+// whether the Title and Footer screens should reach engraving settings is a
+// question for the operator, and drawing a dead key is the one answer that is
+// wrong under every outcome. See TestGearIsNotOnTheTitleOrFooterScreens.
+func NewLineKeyboard(ctx *Context) *PassphraseKeyboard {
+	return newPPKeyboard(ctx, true, false)
+}
+
 func newPPKeyboard(ctx *Context, newline, settings bool) *PassphraseKeyboard {
 	k := new(PassphraseKeyboard)
 	style := ctx.Styles.keyboard

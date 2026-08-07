@@ -1129,7 +1129,9 @@ func ftClearPrompt(ctx *Context, th *Colors, n int) bool {
 // ftLineEntryFlow is steps 3 and 4: one optional line, capped at ftMaxLineLen.
 // Skippable -- OK on an empty field means "no title".
 func ftLineEntryFlow(ctx *Context, th *Colors, what, prior string) (string, bool) {
-	kbd := NewTextKeyboard(ctx)
+	// NewLineKeyboard, NOT NewTextKeyboard: this flow never calls Settings(),
+	// so a gear key here is drawn, tappable and dead. See NewLineKeyboard.
+	kbd := NewLineKeyboard(ctx)
 	kbd.Fragment = prior
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}

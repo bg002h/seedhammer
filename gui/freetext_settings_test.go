@@ -173,6 +173,60 @@ func TestGearIsNotOnThePassphraseKeyboard(t *testing.T) {
 	}
 }
 
+// TestGearIsNotOnTheTitleOrFooterScreens is the third leg of the same rule, and
+// the one the branch shipped wrong. ftLineEntryFlow -- Title and Footer -- never
+// calls Settings(), so a gear key there is drawn, is tappable, and does NOTHING:
+// the press is swallowed with no screen, no error and no change, two steps
+// before the operator approves a plate that gets cut into steel.
+//
+// It walks the flow rather than constructing a keyboard, because the defect was
+// in the CALL SITE and not in newPPKeyboard: the gating parameter was already
+// there and correct, and NewTextKeyboard was simply the wrong constructor to
+// reach for on these two screens.
+//
+// Two non-vacuity guards, because "no gear found" is exactly what a test looking
+// at the wrong widget also reports: the Text screen is checked to HAVE one on
+// the way through, and the newline key -- inherited by the same screens, and
+// deliberately kept because pressing it raises an explicit error rather than
+// doing nothing -- is checked to still BE there.
+func TestGearIsNotOnTheTitleOrFooterScreens(t *testing.T) {
+	h, _ := startFT(t)
+	ftPastQR(h, false)
+	ftSetText(h, "abc")
+	if !ftHasKey(h, ppSettings) {
+		t.Fatal("no gear on the Text screen: this test cannot tell a removed key from a mislocated one")
+	}
+
+	for _, what := range []string{"Title", "Footer"} {
+		ftOK(h)
+		h.mustReach(what)
+		if ftHasKey(h, ppSettings) {
+			t.Errorf("the %s screen draws a gear key; that flow never calls Settings(), so it does nothing", what)
+		}
+		if !ftHasNewline(h) {
+			t.Errorf("the %s screen lost its newline key; only the gear was meant to go", what)
+		}
+	}
+}
+
+// ftHasNewline reports whether the ACTIVE page carries the newline key. It is
+// its own helper because newline is a ppRune (the '\n' rune), not an action of
+// its own, so ftHasKey cannot see it.
+func ftHasNewline(h *ppHarness) bool {
+	kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
+	if !ok {
+		return false
+	}
+	for _, row := range kbd.keys() {
+		for _, k := range row {
+			if k.action == ppRune && k.r == '\n' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ftHasKey reports whether the ACTIVE page's grid carries an action.
 func ftHasKey(h *ppHarness, a ppAction) bool {
 	kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
