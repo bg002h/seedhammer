@@ -250,7 +250,7 @@ func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
 	freetextEngraveHook = func(p Plate) { got, seen = p, true }
 	t.Cleanup(func() { freetextEngraveHook = nil })
 
-	h, _ := startFT(t)
+	h, r := startFT(t)
 	ftPastQR(h, false)
 	ftTypeTrigger(h, ftProofTriggerConst)
 	ftOK(h)
@@ -288,6 +288,24 @@ func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
 
 	if !seen {
 		t.Fatal("the flow never handed a plate to the engraver")
+	}
+	// THE INDEPENDENT WITNESS, and it has to come before the two baselines
+	// below. Everything after this line compares the engraved plate against
+	// plates built by ftBuildPlate itself, so a bug INSIDE ftBuildPlate -- the
+	// one line that sets fitted.Passes -- cancels out of both sides and is
+	// invisible. Mutating it to `fitted.Passes = passes + 1` left all 46
+	// packages green (whole-branch review, 2026-08-06): the operator picks 2,
+	// the confirm screen says 2, and each glyph is cut 3 times into steel.
+	//
+	// freetextPlateHook reports the backup.Fitted as EngraveFitted received it,
+	// so this reads the value the ENGRAVER was given rather than one this test
+	// re-derived. It must precede the ftBuildPlate calls below: those fire the
+	// same hook and overwrite r.got.
+	if !r.gotPlate {
+		t.Fatal("the flow never built a fitted composition")
+	}
+	if r.got.Passes != 2 {
+		t.Errorf("the plate was built with Passes=%d, want the 2 the operator chose", r.got.Passes)
 	}
 	// The same composition at one pass is the baseline. Capture the loaded
 	// pattern from the field itself rather than rebuilding it -- ftProofOutcomeFor
