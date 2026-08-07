@@ -1529,24 +1529,26 @@ func (s *StringCmd) engrave(yield func(Command) bool) (bezier.Point, bool) {
 	dot := bezier.Pt(0, (m.Ascent*s.em+mh-1)/mh)
 	lheight := s.em * s.LineHeight
 	cont := true
+	passes := max(1, s.Passes)
 	for _, r := range s.txt {
 		if r == '\n' {
 			dot.X = 0
 			dot.Y += lheight
 			continue
 		}
-		adv, _, found := s.face.Decode(r)
+		adv, spline, found := s.face.Decode(r)
 		if !found {
 			panic(fmt.Errorf("unsupported rune: %s", string(r)))
 		}
 		if yield != nil {
-			passes := max(1, s.Passes)
+			// spline is safe to pass to engraveSpline once per pass:
+			// engraveSpline takes it BY VALUE, and UniformBSpline.Next has a
+			// pointer receiver that advances only the callee's local copy
+			// (its position is a []byte slice header, itself copied on
+			// every call) -- the caller's spline here is left untouched, so
+			// each pass iterates it from the start.
 			for range passes {
-				// Decode afresh: UniformBSpline is an ITERATOR and is consumed
-				// by engraveSpline, so re-using it would engrave nothing on the
-				// second pass and the test would still see more knots.
-				_, sp, _ := s.face.Decode(r)
-				cont = cont && engraveSpline(yield, dot, s.em, mh, sp)
+				cont = cont && engraveSpline(yield, dot, s.em, mh, spline)
 			}
 		}
 		dot.X += adv * s.em / mh

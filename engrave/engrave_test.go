@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"path/filepath"
 	"reflect"
@@ -172,41 +171,60 @@ func TestFonts(t *testing.T) {
 	}
 }
 
-// TestStringPassesRepeatsInPlace is the load-bearing test for the whole feature:
-// a pass count wired to a label and never to the planner passes everything else.
+// cmds drains an Engraving into its raw Command stream: move-vs-line kind
+// and exact (X, Y) coordinates, before stepper planning. Planning collapses
+// move-vs-line into knot count alone, so a pass that only moves the pen
+// without ever cutting is invisible to a knot-count check but not to this
+// one.
+func cmds(e Engraving) []Command {
+	var out []Command
+	for c := range e {
+		out = append(out, c)
+	}
+	return out
+}
+
+// TestStringPassesRepeatsInPlace is the load-bearing test for the whole
+// feature: a pass count wired to a label and never to the planner passes
+// everything else. Assertions run over the raw Command stream rather than
+// planned knots or an X extent, so a pass that shifts position (Y included),
+// or that traverses the glyph without ever lowering the tool, or that
+// repeats the whole string instead of each glyph, all fail it.
 func TestStringPassesRepeatsInPlace(t *testing.T) {
-	// conf is the package-level StepperConfig at engrave_test.go:122.
+	// One glyph: engraving it twice in place must reproduce the exact same
+	// command stream twice over -- same kind (move vs line) and same
+	// coordinates each time, since nothing about the glyph or its position
+	// changes between passes.
 	once := String(constant.Font, 2000, "B")
 	twice := String(constant.Font, 2000, "B")
 	twice.Passes = 2
+	a, b := cmds(once.Engrave), cmds(twice.Engrave)
+	if len(a) == 0 {
+		t.Fatal("one pass produced no commands to compare against")
+	}
+	if want := slices.Concat(a, a); !slices.Equal(b, want) {
+		t.Errorf("two passes over one glyph did not reproduce one pass's command stream twice")
+	}
 
-	var a, b []bspline.Knot
-	for k := range PlanEngraving(conf, once.Engrave) {
-		a = append(a, k)
+	// Two glyphs "AB": a single-glyph string can't distinguish "repeat each
+	// glyph in place" (A,A,B,B) from "repeat the whole string" (A,B,A,B) --
+	// with only one glyph, both touch it twice in the same relative order.
+	// Locate glyph A's span within one pass over "AB" by its own length
+	// (glyph A alone starts at the same dot as glyph A within "AB").
+	glyphA := cmds(String(constant.Font, 2000, "A").Engrave)
+	onePassAB := cmds(String(constant.Font, 2000, "AB").Engrave)
+	if n := len(glyphA); n == 0 || n >= len(onePassAB) {
+		t.Fatalf("glyph 'A' alone produced %d commands, string \"AB\" produced %d; can't locate the split", n, len(onePassAB))
 	}
-	for k := range PlanEngraving(conf, twice.Engrave) {
-		b = append(b, k)
-	}
-	if len(b) <= len(a) {
-		t.Fatalf("two passes planned %d knots against one pass's %d", len(b), len(a))
-	}
-	// IN PLACE: the second pass must occupy the same coordinates as the first.
-	// Advancing dot.X between passes would shift every control point.
-	var minA, maxA, minB, maxB int
-	minA, maxA = extentX(a)
-	minB, maxB = extentX(b)
-	if minA != minB || maxA != maxB {
-		t.Errorf("two passes span x[%d,%d] against one pass's x[%d,%d]; the glyph moved between passes",
-			minB, maxB, minA, maxA)
-	}
-}
+	glyphAInAB, glyphB := onePassAB[:len(glyphA)], onePassAB[len(glyphA):]
 
-func extentX(ks []bspline.Knot) (lo, hi int) {
-	lo, hi = math.MaxInt, math.MinInt
-	for _, k := range ks {
-		lo, hi = min(lo, k.Ctrl.X), max(hi, k.Ctrl.X)
+	twiceAB := String(constant.Font, 2000, "AB")
+	twiceAB.Passes = 2
+	twoPassesAB := cmds(twiceAB.Engrave)
+	wantInPlace := slices.Concat(glyphAInAB, glyphAInAB, glyphB, glyphB)
+	if !slices.Equal(twoPassesAB, wantInPlace) {
+		t.Errorf("two passes over \"AB\" did not engrave A,A,B,B (each glyph repeated in place before the pen advances)")
 	}
-	return
 }
 
 func TestConstantFont(t *testing.T) {
