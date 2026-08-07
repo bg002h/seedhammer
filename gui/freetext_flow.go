@@ -571,6 +571,12 @@ const (
 	// Off a proof composition the feed is fixed, so seed, descriptor and
 	// passphrase plates can never carry a non-standard one.
 	ftSpeedLeadFixed = "The engraving speed is adjustable on test patterns only."
+	ftSettingsLead   = "Engraving parameters for this plate. They are not saved."
+	ftPassLead       = "How many times each character is cut, without moving. " +
+		"More passes cut deeper and take proportionally longer."
+	// Off a proof composition the pass count is fixed, for the same reason the
+	// feed is: neither may vary on a seed, descriptor or passphrase plate.
+	ftPassLeadFixed = "Passes are adjustable on test patterns only."
 )
 
 // ftFaceOptions is the Font screen's content: the labels, and the plan each one
@@ -757,6 +763,104 @@ func ftSpeedChoiceFlow(ctx *Context, th *Colors, params engrave.Params, proofLoa
 		return prior, false
 	}
 	return speeds[sel], true
+}
+
+// ftPassRungs is how many times each glyph may be engraved IN PLACE.
+//
+// Time is LINEAR in passes: a full proof plate at 4mm/s goes from about 15
+// minutes at 1 to about two hours at 8, so the ceiling is a practical one
+// rather than a safety one. Six entries, inside ChoiceScreen's budget.
+var ftPassRungs = []int{1, 2, 3, 4, 5, 8}
+
+// ftPassOptions is the Passes screen's content: the labels and the pass count
+// each one selects.
+//
+// UNTIL A PROOF PATTERN IS LOADED IT IS ONE ENTRY, handing cur straight back --
+// state, not a decision, the same idiom ftSpeedOptions uses. The gate is
+// proofLoaded and NOT the plan, for the same reason ftSpeedOptions' is: TEXTPROOF!
+// and CONSTPROOF! resolve to plans the Font screen can produce on its own.
+func ftPassOptions(proofLoaded bool, cur int) ([]string, []int) {
+	if !proofLoaded {
+		return []string{"1 (default)"}, []int{cur}
+	}
+	labels := make([]string, 0, len(ftPassRungs))
+	out := make([]int, 0, len(ftPassRungs))
+	for _, n := range ftPassRungs {
+		l := fmt.Sprintf("%d", n)
+		if n == 1 {
+			l += " (default)"
+		}
+		labels, out = append(labels, l), append(out, n)
+	}
+	return labels, out
+}
+
+// ftPassChoiceFlow is the Passes screen, reached from the settings gear rather
+// than from the main step sequence.
+func ftPassChoiceFlow(ctx *Context, th *Colors, proofLoaded bool, prior int) (int, bool) {
+	labels, passes := ftPassOptions(proofLoaded, prior)
+	cs := &ChoiceScreen{Title: "Passes", Lead: ftPassLead, Choices: labels}
+	if len(passes) == 1 {
+		cs.Lead = ftPassLeadFixed
+	}
+	want := prior
+	if want <= 0 {
+		want = 1
+	}
+	if i := slices.Index(passes, want); i > 0 {
+		cs.choice = i
+	}
+	hookPPWidget("passes", cs)
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return prior, false
+	}
+	return passes[sel], true
+}
+
+// ftSettingsFlow is the gear's first level: pick a parameter, then its value.
+//
+// TWO LEVELS rather than one flat list, because ChoiceScreen does not scroll and
+// op.Layer draws content over its own title past roughly seven entries -- so a
+// flat list cannot hold this family once acceleration and jerk join it.
+//
+// Nothing calls this yet: the gear key that reaches it is a later task. It is
+// exercised directly by this package's tests in the meantime.
+func ftSettingsFlow(ctx *Context, th *Colors, params engrave.Params, proofLoaded bool, speed *float32, passes *int) {
+	for !ctx.Done {
+		cs := &ChoiceScreen{
+			Title: "Engraving",
+			Lead:  ftSettingsLead,
+			Choices: []string{
+				fmt.Sprintf("Speed: %s", ftSpeedLabel(params, *speed)),
+				fmt.Sprintf("Passes: %d", max(1, *passes)),
+			},
+		}
+		hookPPWidget("settings", cs)
+		sel, ok := cs.Choose(ctx, th)
+		if !ok {
+			return // Back leaves settings and returns to the keyboard.
+		}
+		switch sel {
+		case 0:
+			if v, ok := ftSpeedChoiceFlow(ctx, th, params, proofLoaded, *speed); ok {
+				*speed = v
+			}
+		case 1:
+			if v, ok := ftPassChoiceFlow(ctx, th, proofLoaded, *passes); ok {
+				*passes = v
+			}
+		}
+	}
+}
+
+// ftSpeedLabel is the settings row's value text: the chosen feed, or the
+// machine's own when untouched.
+func ftSpeedLabel(params engrave.Params, mmPerSec float32) string {
+	if mmPerSec <= 0 {
+		return fmt.Sprintf("%.1fmm/s", ftDefaultSpeedMM(params))
+	}
+	return fmt.Sprintf("%.1fmm/s", mmPerSec)
 }
 
 // ftFaceChoiceFlow is step 2. It sits BEFORE the text screen because the face
