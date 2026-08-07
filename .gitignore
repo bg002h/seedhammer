@@ -1,4 +1,10 @@
 seedhammerii-*.uf2
+# Test builds named by their config rather than by version -- e.g.
+# test-e4-a125-j1300.signed.uf2, a halved-accel/jerk build that was the ONLY
+# copy of the firmware on the machine for a day. Build outputs are never
+# committed (the fork is kept clean for upstream PRs), and an unignored one is
+# a git add -A away from being.
+test-*.uf2
 _artifacts
 
 # Boot-signing keys and OTP json must NEVER be committed -- this remote is public.
