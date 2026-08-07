@@ -136,6 +136,11 @@ type Fitted struct {
 	// and then engraved it must fail loudly rather than draw a code at a y
 	// nobody computed.
 	qrAt *qrPlacement
+
+	// Passes is how many times each glyph is engraved in place. 0 and 1 mean
+	// once. Only the FREE-TEXT path constructs a Fitted, which is what keeps a
+	// pass count away from seed and passphrase plates.
+	Passes int
 }
 
 // qrFor returns the code the plate will carry, or nil when want is false.

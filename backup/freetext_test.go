@@ -2,6 +2,7 @@ package backup
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -9,7 +10,9 @@ import (
 	"seedhammer.com/bezier"
 	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
+	"seedhammer.com/font/constant"
 	"seedhammer.com/font/sh"
+	"seedhammer.com/font/vector"
 	"seedhammer.com/internal/golden"
 )
 
@@ -395,5 +398,44 @@ func TestWrappedBlankLinesReachThePlate(t *testing.T) {
 	b := ftBounds(t, sizeB, "", linesB, "", nil)
 	if got, want := a.Max.Y-b.Max.Y, 2*P.F(sizeA); got != want {
 		t.Errorf("two blank lines moved the last row by %d, want %d", got, want)
+	}
+}
+
+// TestFittedPassesReachTheEngraving proves Fitted.Passes actually reaches the
+// glyph engraving, not just the struct.
+func TestFittedPassesReachTheEngraving(t *testing.T) {
+	// prodParams is the package-level Params at backup/sizes_test.go:21.
+	P := prodParams
+	size, lines, qrc, err := Fit(P, constant.Font, "BEEF", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(passes int) int {
+		f := Fitted{
+			SizeMM: size, Lines: lines, QR: qrc,
+			Faces:  []*vector.Face{constant.Font},
+			Sizes:  []float32{size},
+			Passes: passes,
+		}
+		n := 0
+		for range engrave.PlanEngraving(P.StepperConfig, EngraveFitted(P, f)) {
+			n++
+		}
+		return n
+	}
+	n, one := mk(3), mk(1)
+	if n <= one {
+		t.Errorf("three passes planned %d knots against one pass's %d", n, one)
+	}
+}
+
+// TestConstantStringerHasNoPasses is a COMPILE-TIME claim written as a runtime
+// test: if ConstantStringer ever gains a Passes field, this stops compiling and
+// somebody has to read SPEC_seedhammer_engraving_settings.md section 3.
+func TestConstantStringerHasNoPasses(t *testing.T) {
+	typ := reflect.TypeOf(engrave.ConstantStringer{})
+	if _, ok := typ.FieldByName("Passes"); ok {
+		t.Fatal("ConstantStringer gained a Passes field; constant-time engraving " +
+			"needs a proof before a pass count may reach a seed plate")
 	}
 }

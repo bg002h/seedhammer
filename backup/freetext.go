@@ -151,7 +151,9 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 			// a drift no assertion on the size, the lines or the code can see.
 			_, offx := textLayout(params, fnt, fontSize, y, f.qrAt).at(0)
 			t.Offset(offx+margin, y)
-			engrave.String(fnt, fontSize, l).Engrave(t.Yield)
+			cmd := engrave.String(fnt, fontSize, l)
+			cmd.Passes = f.Passes
+			cmd.Engrave(t.Yield)
 			y += fontSize
 		}
 
