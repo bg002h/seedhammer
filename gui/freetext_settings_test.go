@@ -187,3 +187,51 @@ func ftHasKey(h *ppHarness, a ppAction) bool {
 	}
 	return false
 }
+
+// TestGearOpensSettingsByTouch is the WIRING half that TestGearIsOnTheText-
+// KeyboardOnly does not cover. That test (and every structural test in this
+// file) only checks that the key exists in the grid, drawn and reachable, or
+// drives ftSettingsFlow directly -- neither notices a keyboard whose gear key
+// is present but does nothing when pressed. Either of these would leave every
+// other test in the package green:
+//
+//   - deleting the `if kbd.Settings() { ftSettingsFlow(...); continue }`
+//     block from ftTextEntryFlow
+//   - deleting `case ppSettings: k.settingsReq = true` from commit()
+//
+// So this test taps the drawn key -- via its Clickable tag, exactly as
+// TestTextKeyboardEveryKeyReachableByTouch and TestNewlineKeyTypesANewline-
+// ByTouch do, never a synthesized button event -- and checks the flow
+// actually reacts: it reaches the settings screen, Back returns to the SAME
+// Text screen with the field untouched, and the latch does not immediately
+// reopen the screen it was just consumed to open.
+func TestGearOpensSettingsByTouch(t *testing.T) {
+	h, _ := startFT(t)
+	ftPastQR(h, false)
+	ftSetText(h, "abc")
+
+	kbd := ftKbd(h)
+	gear := ppTagFor(kbd, func(k ppKey) bool { return k.action == ppSettings })
+	if gear == nil {
+		t.Fatal("no settings key on the current page")
+	}
+	h.tapAt(h.point(gear, "settings key"))
+	h.next("after tapping the settings key")
+	h.mustReach("Engraving")
+
+	// Back out at the settings screen's top level -- ftSettingsFlow's own
+	// Back, not the Text screen's.
+	h.tapNav(Button1)
+	h.mustReach("lines") // back on the Text screen's counter readout
+
+	if got := ftKbd(h).Fragment; got != "abc" {
+		t.Errorf("Fragment = %q after a settings round trip, want unchanged %q", got, "abc")
+	}
+
+	// SINGLE-SHOT: Settings() clears the latch when it is consumed, so the
+	// very next frame must not reopen Engraving on its own.
+	c := h.next("after returning from settings")
+	if uiContains(c, "Engraving") {
+		t.Error("the settings screen reopened on its own after Back -- the gear latch is not single-shot")
+	}
+}

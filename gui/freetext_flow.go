@@ -824,8 +824,9 @@ func ftPassChoiceFlow(ctx *Context, th *Colors, proofLoaded bool, prior int) (in
 // op.Layer draws content over its own title past roughly seven entries -- so a
 // flat list cannot hold this family once acceleration and jerk join it.
 //
-// Nothing calls this yet: the gear key that reaches it is a later task. It is
-// exercised directly by this package's tests in the meantime.
+// Called from ftTextEntryFlow's update loop when kbd.Settings() reports a
+// gear press. Also exercised directly by this package's tests, which drive it
+// without going through the keyboard at all.
 func ftSettingsFlow(ctx *Context, th *Colors, params engrave.Params, proofLoaded bool, speed *float32, passes *int) {
 	for !ctx.Done {
 		cs := &ChoiceScreen{
