@@ -230,9 +230,6 @@ func TestSizeProofIsTheLadderEndToEnd(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
-				if step == "Title" {
-					ftPastSpeed(h)
-				}
 				h.mustReach(step)
 			}
 			ftOK(h)
@@ -631,9 +628,6 @@ func TestSizeProofDropsTheQRTheOperatorChose(t *testing.T) {
 	h.mustReach("lines")
 	for _, step := range []string{"Title", "Footer", "Confirm"} {
 		ftOK(h)
-		if step == "Title" {
-			ftPastSpeed(h)
-		}
 		h.mustReach(step)
 	}
 	if uiContains(h.content, "QR: yes") {
@@ -709,9 +703,6 @@ func TestSizeProofQRStepStatesTheQRIsUnavailable(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
-				if step == "Title" {
-					ftPastSpeed(h)
-				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -976,7 +967,6 @@ func TestSizeProofAdvancesWithTheQRReEnabled(t *testing.T) {
 				t.Fatalf("the Text step refuses a ladder that fits, over a code it cannot carry; frame %q",
 					h.content)
 			}
-			ftPastSpeed(h)
 			h.mustReach("Title")
 
 			// The flag half, where the flag can still be true.
@@ -1099,9 +1089,6 @@ func TestSizeProofConfirmNamesTheRungs(t *testing.T) {
 			}
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
-				if step == "Title" {
-					ftPastSpeed(h)
-				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1225,9 +1212,6 @@ func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
 			h.mustReach("lines")
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
-				if step == "Title" {
-					ftPastSpeed(h)
-				}
 				h.mustReach(step)
 			}
 			pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1260,9 +1244,6 @@ func TestSizeProofConfirmReportsTheQRFromTheFit(t *testing.T) {
 		h.typeString("hello")
 		for _, step := range []string{"Title", "Footer", "Confirm"} {
 			ftOK(h)
-			if step == "Title" {
-				ftPastSpeed(h)
-			}
 			h.mustReach(step)
 		}
 		pages := strings.Join(ftConfirmPages(h), "\n")
@@ -1637,7 +1618,7 @@ func TestSizeProofPreviewIsTheDevicePlate(t *testing.T) {
 			// And the plate GEOMETRY is the device's, not merely the row list:
 			// a preview that reported the ladder and rendered a uniform plate
 			// would pass every assertion above.
-			want, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, p.Footer, false, 0)
+			want, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, p.Footer, false, 0, 0)
 			if err != nil {
 				t.Fatal(err)
 			}

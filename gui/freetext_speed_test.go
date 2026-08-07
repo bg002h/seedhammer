@@ -85,11 +85,11 @@ func TestSpeedReachesTheMotion(t *testing.T) {
 	P := newPlatform().EngraverParams()
 	const text = "the wallet is in the safe"
 
-	fast, err := ftBuildPlate(ftParamsAtSpeed(P, 8.0), &ftPlanConst, text, "", "", false, 3.0)
+	fast, err := ftBuildPlate(ftParamsAtSpeed(P, 8.0), &ftPlanConst, text, "", "", false, 3.0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slow, err := ftBuildPlate(ftParamsAtSpeed(P, 1.0), &ftPlanConst, text, "", "", false, 3.0)
+	slow, err := ftBuildPlate(ftParamsAtSpeed(P, 1.0), &ftPlanConst, text, "", "", false, 3.0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,11 +117,11 @@ func TestDefaultSpeedReproducesTodaysPlate(t *testing.T) {
 	const text = "the wallet is in the safe"
 
 	def := ftDefaultSpeedMM(P)
-	got, err := ftBuildPlate(ftParamsAtSpeed(P, def), &ftPlanConst, text, "", "", false, 3.0)
+	got, err := ftBuildPlate(ftParamsAtSpeed(P, def), &ftPlanConst, text, "", "", false, 3.0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := ftBuildPlate(P, &ftPlanConst, text, "", "", false, 3.0)
+	want, err := ftBuildPlate(P, &ftPlanConst, text, "", "", false, 3.0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,12 +219,16 @@ func TestFlowCarriesTheChosenSpeedToTheEngraver(t *testing.T) {
 	ftOK(h)
 	h.tapWidget("proofYes")
 	h.mustReach("lines")
-	ftOK(h)
 
-	// Pick the slowest rung, which is the furthest from the default.
-	h.mustReach("Speed")
+	// Pick the slowest rung, which is the furthest from the default, through
+	// the gear -- the flow no longer stops on a Speed step of its own.
+	ftTapKey(h, ppSettings)
+	ftChoose(h, "settings", 0) // Speed
 	slowest := len(ftSpeedRungs) - 1
 	ftChoose(h, "speed", slowest)
+	h.tapNav(Button1) // leave settings
+	h.mustReach("lines")
+	ftOK(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")

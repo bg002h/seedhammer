@@ -245,7 +245,7 @@ func TestNamedRungIsTheRungEngraved(t *testing.T) {
 		if f.plate.SizeMM != want {
 			t.Errorf("%.1fmm: the readout would say %.1fmm", want, f.plate.SizeMM)
 		}
-		if _, err := ftBuildPlate(engraverParams, plan, text, title, footer, useQR, size); err != nil {
+		if _, err := ftBuildPlate(engraverParams, plan, text, title, footer, useQR, size, 0); err != nil {
 			t.Errorf("%.1fmm: build refused: %v", want, err)
 		}
 	}
@@ -349,9 +349,6 @@ func TestProofE2ENamedRungDrivesThePrompt(t *testing.T) {
 			// Straight through to the engrave, and the plate must be the rung's.
 			for _, step := range []string{"Title", "Footer", "Confirm"} {
 				ftOK(h)
-				if step == "Title" {
-					ftPastSpeed(h)
-				}
 				h.mustReach(step)
 			}
 			ftOK(h)

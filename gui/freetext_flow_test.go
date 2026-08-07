@@ -117,21 +117,6 @@ func ftPastFaceAndSize(h *ppHarness) {
 	ftChoose(h, "size", 0)
 }
 
-// ftPastSpeed takes the Speed screen at its default. It sits between Text and
-// Title, so every forward walk from the text field passes through it; a walk
-// that BACKS into Title does not.
-//
-// Index 0 is the default on both shapes: off a proof the screen has a single
-// entry, and on a proof the list starts at 8.0mm/s, which is exactly the test
-// platform's engravingSpeed. So these walks plan the same plate they planned
-// before this screen existed -- which is what keeps every pre-existing
-// assertion in this package meaningful, and what stops the goldens moving.
-func ftPastSpeed(h *ppHarness) {
-	h.t.Helper()
-	h.mustReach("Speed")
-	ftChoose(h, "speed", 0)
-}
-
 // ftBackToQR steps back from the text screen to the QR screen, through the two
 // pickers that now sit between them. ChoiceScreen owns its Back button
 // privately, so each picker is left by nav slot rather than by widget.
@@ -195,7 +180,6 @@ func TestFTFlowOrderIsQRFirst(t *testing.T) {
 	ftPastQR(h, false)
 	h.typeString("hi")
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	h.typeString("t")
 	ftOK(h)
@@ -217,7 +201,6 @@ func TestConfirmLinesEqualWrapText(t *testing.T) {
 	ftPastQR(h, false)
 	ftSetText(h, text)
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h) // skip
 	h.mustReach("Footer")
@@ -252,7 +235,6 @@ func TestConfirmLinesAreNotRewrapped(t *testing.T) {
 	ftPastQR(h, false)
 	ftSetText(h, text)
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")
@@ -364,7 +346,6 @@ func TestFTRefusalOffersTheQRRatherThanDroppingIt(t *testing.T) {
 	ftChoose(h, "refusal", 1)
 	h.mustReach("lines")
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 }
 
@@ -376,7 +357,6 @@ func TestFTTitleAndFooterCap(t *testing.T) {
 			ftPastQR(h, false)
 			h.typeString("hi")
 			ftOK(h)
-			ftPastSpeed(h)
 			h.mustReach("Title")
 			if step == "Footer" {
 				ftOK(h) // skip the title
@@ -407,7 +387,6 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	ftPastQR(h, true)
 	h.typeString("note")
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	h.typeString("TT")
 	ftOK(h)
@@ -427,10 +406,9 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	if got := ftKbd(h).Fragment; got != "TT" {
 		t.Errorf("title = %q after Back, want %q", got, "TT")
 	}
-	// Back out of Title lands on Speed, which sits between it and the text.
+	// Back out of Title lands on the text step directly: Speed no longer sits
+	// between them.
 	ftBack(h)
-	h.mustReach("Speed")
-	h.tapNav(Button1)
 	h.mustReach("lines")
 	if got := ftKbd(h).Fragment; got != "note" {
 		t.Errorf("text = %q after Back, want %q", got, "note")
@@ -463,7 +441,6 @@ func TestFTPlateIsWhatWasApproved(t *testing.T) {
 	ftPastQR(h, true)
 	ftSetText(h, text)
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftSetText(h, "TO MY HEIR")
 	ftOK(h)
@@ -526,7 +503,6 @@ func TestFTQREncodesTheTextOnly(t *testing.T) {
 	ftPastQR(h, true)
 	ftSetText(h, text)
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftSetText(h, "A TITLE")
 	ftOK(h)
@@ -564,7 +540,6 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 	ftPastQR(h, false)
 	h.typeString("hi")
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")
@@ -592,7 +567,7 @@ func TestFTBuildPlateEncodesOnce(t *testing.T) {
 	freetextPlateHook = func(f backup.Fitted) { got = f.QR }
 	t.Cleanup(func() { freetextPlateHook = nil })
 	P := newPlatform().EngraverParams()
-	if _, err := ftBuildPlate(P, &ftPlanSH, text, "T", "F", true, 0); err != nil {
+	if _, err := ftBuildPlate(P, &ftPlanSH, text, "T", "F", true, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	_, _, want, err := backup.Fit(P, sh.Font, text, "T", "F", true)
@@ -695,7 +670,7 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
 	for _, useQR := range []bool{false, true} {
-		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR, 0)
+		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -736,7 +711,7 @@ func TestFTBuiltPlateIsCutInTheFittedFace(t *testing.T) {
 	P := newPlatform().EngraverParams()
 	for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst} {
 		face := plan.Runs[0].Face
-		got, err := ftBuildPlate(P, plan, text, "TO MY HEIR", "2026 COPY 1", false, 0)
+		got, err := ftBuildPlate(P, plan, text, "TO MY HEIR", "2026 COPY 1", false, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -788,7 +763,6 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 			ftPastQR(h, useQR)
 			h.typeString("hi")
 			ftOK(h)
-			ftPastSpeed(h)
 			h.mustReach("Title")
 			ftOK(h)
 			h.mustReach("Footer")

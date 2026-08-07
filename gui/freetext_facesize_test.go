@@ -173,12 +173,12 @@ func TestAutoFitIsUnchangedByTheDefaults(t *testing.T) {
 	_, sizes := ftSizeOptions(&ftPlanSH, 0)
 	defPlan, defSize := plans[0], sizes[0]
 
-	got, err := ftBuildPlate(P, defPlan, text, "TO MY HEIR", "2026 COPY 1", false, defSize)
+	got, err := ftBuildPlate(P, defPlan, text, "TO MY HEIR", "2026 COPY 1", false, defSize, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The pre-feature call: the hardcoded plan and the zero size.
-	want, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", false, 0)
+	want, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", false, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -632,7 +632,7 @@ func TestProofRunesDecodeInTheirOwnFace(t *testing.T) {
 					t.Errorf("%s: building the plate panicked: %v", tc.name, p)
 				}
 			}()
-			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, tc.proof.Footer, tc.qr, 0); err != nil {
+			if _, err := ftBuildPlate(P, tc.proof.Plan, text, tc.proof.Title, tc.proof.Footer, tc.qr, 0, 0); err != nil {
 				t.Errorf("%s: the plate does not build: %v", tc.name, err)
 			}
 		}()
@@ -1246,7 +1246,6 @@ func TestProofE2ELoadsTheWholePlate(t *testing.T) {
 
 			// Title and footer were written too, and the flow carries them.
 			ftOK(h)
-			ftPastSpeed(h)
 			h.mustReach("Title")
 			if got := ftKbd(h).Fragment; got != tc.proof.Title {
 				t.Errorf("the Title field holds %q, want %q", got, tc.proof.Title)
@@ -1344,9 +1343,7 @@ func TestProofE2EDecliningEngravesTheTypedText(t *testing.T) {
 			}
 			h.tapWidget("proofNo")
 			// Declining falls through to the field's own validation, which
-			// accepts the trigger as the ordinary text it is -- and then
-			// through Speed, exactly as any other composition does.
-			ftPastSpeed(h)
+			// accepts the trigger as the ordinary text it is.
 			h.mustReach("Title")
 			ftOK(h) // no title
 			h.mustReach("Footer")
@@ -1387,7 +1384,6 @@ func TestProofE2EIsScopedToTheTextField(t *testing.T) {
 			ftPastQR(h, false)
 			h.typeString("hi")
 			ftOK(h)
-			ftPastSpeed(h)
 			h.mustReach("Title")
 			if step == "Footer" {
 				ftOK(h)
@@ -1527,7 +1523,7 @@ func TestMixedProofQualifiesBothFacesOnOnePlate(t *testing.T) {
 func TestMixedProofPlateIsCutInBothFaces(t *testing.T) {
 	P := proofParams()
 	p := ftMixedProof(t)
-	got, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, ftProofFooter, false, 0)
+	got, err := ftBuildPlate(P, p.Plan, p.Text, p.Title, ftProofFooter, false, 0, 0)
 	if err != nil {
 		t.Fatalf("the mixed plate does not build: %v", err)
 	}
@@ -1672,7 +1668,6 @@ func TestMixedProofE2EWithAQRChosen(t *testing.T) {
 		t.Errorf("the readout does not show the pattern fitting at 3.0mm; frame %q", h.content)
 	}
 	ftOK(h)
-	ftPastSpeed(h)
 	h.mustReach("Title")
 	ftOK(h)
 	h.mustReach("Footer")

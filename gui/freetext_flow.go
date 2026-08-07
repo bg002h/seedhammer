@@ -1393,11 +1393,12 @@ var freetextEngraveHook func(p Plate)
 // artifact and the fit's faces ARE the faces the lines were measured against,
 // so the fit path and the build path cannot disagree about what a scanner will
 // return or about which face any row is cut in.
-func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32) (Plate, error) {
+func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32, passes int) (Plate, error) {
 	fitted, err := ftFitAt(params, plan.Blocks(text), title, footer, useQR, size)
 	if err != nil {
 		return Plate{}, err
 	}
+	fitted.Passes = passes
 	if freetextPlateHook != nil {
 		freetextPlateHook(fitted)
 	}
@@ -1415,10 +1416,6 @@ const (
 	ftStepFace
 	ftStepSize
 	ftStepText
-	// Speed comes AFTER the text, unlike face and size: it changes no geometry,
-	// and by here the flow knows whether a proof keyword was used. See
-	// ftSpeedChoiceFlow.
-	ftStepSpeed
 	ftStepTitle
 	ftStepFooter
 	ftStepConfirm
@@ -1486,13 +1483,6 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				break
 			}
 			text = s
-		case ftStepSpeed:
-			s, ok := ftSpeedChoiceFlow(ctx, th, params, proofLoaded, speed)
-			if !ok {
-				step -= 2
-				break
-			}
-			speed = s
 		case ftStepTitle:
 			s, ok := ftLineEntryFlow(ctx, th, "Title", title)
 			if !ok {
@@ -1523,7 +1513,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				break
 			}
 		case ftStepEngrave:
-			plate, err := ftBuildPlate(ftParamsAtSpeed(params, speed), plan, text, title, footer, useQR, size)
+			plate, err := ftBuildPlate(ftParamsAtSpeed(params, speed), plan, text, title, footer, useQR, size, passes)
 			if err != nil {
 				// The message quotes no field content.
 				showError(ctx, th, "Text", "This text does not fit a plate.")

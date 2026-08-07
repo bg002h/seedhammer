@@ -235,3 +235,81 @@ func TestGearOpensSettingsByTouch(t *testing.T) {
 		t.Error("the settings screen reopened on its own after Back -- the gear latch is not single-shot")
 	}
 }
+
+// TestFlowCarriesPassesToTheEngraver drives the WHOLE program, picks a pass
+// count through the gear, and asserts the plate handed to the engraver
+// carries it. Everything else could pass with the value wired to a screen and
+// never to the planner -- that exact failure has already happened twice in
+// this program, once for speed and once for the gear's own wiring.
+func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
+	var got Plate
+	var seen bool
+	freetextEngraveHook = func(p Plate) { got, seen = p, true }
+	t.Cleanup(func() { freetextEngraveHook = nil })
+
+	h, _ := startFT(t)
+	ftPastQR(h, false)
+	ftTypeTrigger(h, ftProofTriggerConst)
+	ftOK(h)
+	h.tapWidget("proofYes")
+	h.mustReach("lines")
+	loaded := ftKbd(h).Fragment // the pattern the loader wrote, for the baseline
+
+	// Tap the gear: it is a KEY in the grid, so it is tapped through the
+	// keyboard's own key bounds, not as a nav button.
+	ftTapKey(h, ppSettings)
+	ftChoose(h, "settings", 1) // Passes
+	ftChoose(h, "passes", 1)   // 2 passes
+	h.tapNav(Button1)          // leave settings
+	h.mustReach("lines")
+	ftOK(h)
+	h.mustReach("Title")
+	ftOK(h)
+	h.mustReach("Footer")
+	ftOK(h)
+	h.mustReach("Confirm")
+	ftOK(h)
+	h.step()
+
+	if !seen {
+		t.Fatal("the flow never handed a plate to the engraver")
+	}
+	// The same composition at one pass is the baseline. Capture the loaded
+	// pattern from the field itself rather than rebuilding it -- ftProofOutcomeFor
+	// is what wrote it, and re-deriving it here would test the test. The title
+	// and footer are NOT empty: accepting the proof loads ftProofTitleConst and
+	// ftProofFooter into those fields too (ftProofLoader), and both Title and
+	// Footer screens were OK'd without retyping, so the engraved plate still
+	// carries them -- a baseline built with "" would differ from the real
+	// plate in more than the pass count, and durations would diverge for the
+	// wrong reason.
+	P := h.ctx.Platform.EngraverParams()
+	one, err := ftBuildPlate(P, &ftPlanConst, loaded, ftProofTitleConst, ftProofFooter, false, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Duration <= one.Duration {
+		t.Errorf("two passes planned %d ticks against one pass's %d", got.Duration, one.Duration)
+	}
+}
+
+// ftTapKey taps the ACTIVE page's key carrying the given action. h.point fails
+// if it is undrawn, off-panel or covered -- which is what a gear appended past
+// the grid's right edge would be.
+func ftTapKey(h *ppHarness, a ppAction) {
+	h.t.Helper()
+	kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
+	if !ok {
+		h.t.Fatal(`widget "kbd" is not a *PassphraseKeyboard`)
+	}
+	for i := range kbd.keys() {
+		for j := range kbd.keys()[i] {
+			if k := &kbd.keys()[i][j]; k.action == a {
+				h.tapAt(h.point(&k.clk, "keyboard key"))
+				h.next("after tapping the %v key", a)
+				return
+			}
+		}
+	}
+	h.t.Fatalf("no key with action %v on the active page", a)
+}
