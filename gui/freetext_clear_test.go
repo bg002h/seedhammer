@@ -70,6 +70,73 @@ func TestClearIsNotOfferedOnAnEmptyField(t *testing.T) {
 	}
 }
 
+// TestTitleAndFooterClearWithoutAPrompt: the Title and Footer fields get the
+// same Clear button as the Text screen, but WITHOUT ftClearPrompt. The
+// asymmetry is intentional, in the operator's own words -- a title or footer
+// is at most one line, so not much can be lost by accident, and the
+// confirmation tracks the COST of the error, not the identity of the button.
+// Do not "fix" it into asking.
+func TestTitleAndFooterClearWithoutAPrompt(t *testing.T) {
+	for _, step := range []string{"Title", "Footer"} {
+		t.Run(step, func(t *testing.T) {
+			h, _ := startFT(t)
+			ftPastQR(h, false)
+			ftSetText(h, "body")
+			ftOK(h)
+			h.mustReach("Title")
+			if step == "Footer" {
+				ftOK(h)
+				h.mustReach("Footer")
+			}
+			h.typeString("ABC")
+			h.tapWidget("clear")
+			// No prompt: one line cannot lose much, so a confirmation costs
+			// more than the mistake.
+			h.mustReach(step)
+			if got := ftKbd(h).Fragment; got != "" {
+				t.Errorf("%s still holds %q after Clear", step, got)
+			}
+		})
+	}
+}
+
+// TestTitleAndFooterClearNotOfferedOnEmptyField mirrors
+// TestClearIsNotOfferedOnAnEmptyField for the Title and Footer fields: the
+// screen must not present an action that would do nothing, and Back/Clear/OK
+// is the WHOLE nav budget on ftLineEntryFlow too -- layoutNavigation indexes a
+// fixed [3]int by Button-Button1, so a fourth affordance panics rather than
+// laying out badly.
+func TestTitleAndFooterClearNotOfferedOnEmptyField(t *testing.T) {
+	for _, step := range []string{"Title", "Footer"} {
+		t.Run(step, func(t *testing.T) {
+			h, _ := startFT(t)
+			ftPastQR(h, false)
+			ftSetText(h, "body")
+			ftOK(h)
+			h.mustReach("Title")
+			if step == "Footer" {
+				ftOK(h)
+				h.mustReach("Footer")
+			}
+			if got := ftKbd(h).Fragment; got != "" {
+				t.Fatalf("this test needs an empty %s field; got %q", step, got)
+			}
+			clear, ok := h.widget("clear").(*Clickable)
+			if !ok {
+				t.Fatal(`widget "clear" is not a *Clickable`)
+			}
+			if _, drawn := h.drawer().TagBounds(clear); drawn {
+				t.Errorf("Clear is drawn over an empty %s field", step)
+			}
+			// And it appears as soon as there is something to clear.
+			h.typeString("x")
+			if _, drawn := h.drawer().TagBounds(clear); !drawn {
+				t.Errorf("Clear is not drawn over a non-empty %s field", step)
+			}
+		})
+	}
+}
+
 // TestClearPromptDefaultsToKeeping pins the ORDER, not just the behaviour.
 // ChoiceScreen starts at index 0, so the safe answer being first is the only
 // thing making the default harmless -- nothing else states it, and a reorder

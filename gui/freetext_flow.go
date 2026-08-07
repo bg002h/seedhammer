@@ -1124,11 +1124,32 @@ func ftLineEntryFlow(ctx *Context, th *Colors, what, prior string) (string, bool
 	hookPPWidget("kbd", kbd)
 	hookPPWidget("back", backBtn)
 	hookPPWidget("ok", okBtn)
+	// Button2, the middle nav slot, is free on this screen. layoutNavigation
+	// indexes a FIXED [3]int by Button-Button1, so a fourth affordance would
+	// panic rather than lay out badly -- Back, Clear and OK is the whole budget.
+	clearBtn := &Clickable{Button: Button2}
+	hookPPWidget("clear", clearBtn)
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
 		if backBtn.Clicked(ctx) {
 			return "", false
+		}
+		if clearBtn.Clicked(ctx) {
+			// Guarded on the field, not on the button being drawn: a click can be
+			// delivered in the same frame the last character is deleted.
+			//
+			// NO PROMPT, unlike the Text field's Clear (ftClearPrompt) -- and that
+			// asymmetry is deliberate, not an oversight to "fix" for consistency.
+			// A title or footer is capped at ftMaxLineLen (one line), so a mis-tap
+			// costs seconds of retyping. The Text field is uncapped and is the
+			// only copy of the composition until the plate is built, so a mis-tap
+			// there has no undo; the confirmation tracks the COST of the error,
+			// not the identity of the button.
+			if kbd.Fragment != "" {
+				kbd.Fragment = ""
+			}
+			continue
 		}
 		if okBtn.Clicked(ctx) {
 			if strings.ContainsRune(kbd.Fragment, '\n') {
@@ -1154,10 +1175,14 @@ func ftLineEntryFlow(ctx *Context, th *Colors, what, prior string) (string, bool
 		kbd.MaxHeight = content.Dy()
 		kbdOp, kbdsz := kbd.Layout(ctx, th)
 		kbdOp = kbdOp.Offset(content.S(kbdsz))
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
-		}...)
+		// Clear appears only when there IS something to clear, so the screen
+		// never offers an action that would do nothing.
+		navs := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
+		if kbd.Fragment != "" {
+			navs = append(navs, NavButton{Clickable: clearBtn, Style: StyleSecondary, Icon: assets.IconDiscard})
+		}
+		navs = append(navs, NavButton{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navs...)
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, what)
 		ctx.Frame(op.Layer(kbdOp, cntOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
