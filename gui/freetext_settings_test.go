@@ -304,6 +304,25 @@ func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
 	}
 }
 
+// TestConfirmNamesANonDefaultPassCount is the pass-count half of the rule
+// TestSpeedNoteOnlyAppearsWhenNonDefault already pins for feed (freetext_speed_
+// test.go): nothing on the finished steel records how many times each glyph
+// was struck, so the operator must not be able to approve a non-default pass
+// count without seeing it, and an ordinary plate must not grow a line that
+// never varies.
+func TestConfirmNamesANonDefaultPassCount(t *testing.T) {
+	P := newPlatform().EngraverParams()
+	if got := ftSettingsNote(P, 0, 0); got != "" {
+		t.Errorf("untouched settings noted %q, want nothing", got)
+	}
+	if got := ftSettingsNote(P, 0, 1); got != "" {
+		t.Errorf("one pass noted %q, want nothing", got)
+	}
+	if got := ftSettingsNote(P, 0, 3); got == "" {
+		t.Error("three passes produced no note; the operator would approve it unseen")
+	}
+}
+
 // ftTapKey taps the ACTIVE page's key carrying the given action. h.point fails
 // if it is undrawn, off-panel or covered -- which is what a gear appended past
 // the grid's right edge would be.

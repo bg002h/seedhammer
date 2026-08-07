@@ -706,6 +706,18 @@ func ftSpeedNote(params engrave.Params, mmPerSec float32) string {
 	return fmt.Sprintf("  speed: %.1fmm/s", mmPerSec)
 }
 
+// ftSettingsNote is the confirm screen's suffix for anything not at its
+// default: nothing on the finished steel records the feed or the pass count,
+// so the operator must not be able to approve either without seeing it.
+// Equally, an ordinary plate must not grow a line that never varies.
+func ftSettingsNote(params engrave.Params, mmPerSec float32, passes int) string {
+	note := ftSpeedNote(params, mmPerSec)
+	if passes > 1 {
+		note += fmt.Sprintf("  passes: %d", passes)
+	}
+	return note
+}
+
 // ftSpeedOptions is the Speed screen's content: the labels and the feed each one
 // selects, 0 meaning "leave the machine default alone".
 //
@@ -1244,9 +1256,10 @@ func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
 // code whatever the operator chose one step earlier (spec 2.7), and a screen
 // that reported the flag would promise a machine-readable plate that the
 // engraver does not cut.
-// speedNote is appended only for a NON-DEFAULT engraving feed, so an ordinary
-// plate does not grow a line that never varies and a test pattern cannot be
-// approved without its feed on screen. See ftSpeedNote.
+// speedNote is appended only for a NON-DEFAULT engraving feed or pass count,
+// so an ordinary plate does not grow a line that never varies and a test
+// pattern cannot be approved without its feed or pass count on screen. See
+// ftSettingsNote.
 func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager, speedNote string) (op.Op, image.Point) {
 	useQR := f.plate.QR != nil
 	var rt richText
@@ -1536,7 +1549,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 				step -= 2
 				break
 			}
-			if !ftConfirmFlow(ctx, th, f, plan, title, footer, ftSpeedNote(params, speed)) {
+			if !ftConfirmFlow(ctx, th, f, plan, title, footer, ftSettingsNote(params, speed, passes)) {
 				step -= 2
 				break
 			}
