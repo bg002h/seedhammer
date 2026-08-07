@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"path/filepath"
 	"reflect"
@@ -169,6 +170,43 @@ func TestFonts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStringPassesRepeatsInPlace is the load-bearing test for the whole feature:
+// a pass count wired to a label and never to the planner passes everything else.
+func TestStringPassesRepeatsInPlace(t *testing.T) {
+	// conf is the package-level StepperConfig at engrave_test.go:122.
+	once := String(constant.Font, 2000, "B")
+	twice := String(constant.Font, 2000, "B")
+	twice.Passes = 2
+
+	var a, b []bspline.Knot
+	for k := range PlanEngraving(conf, once.Engrave) {
+		a = append(a, k)
+	}
+	for k := range PlanEngraving(conf, twice.Engrave) {
+		b = append(b, k)
+	}
+	if len(b) <= len(a) {
+		t.Fatalf("two passes planned %d knots against one pass's %d", len(b), len(a))
+	}
+	// IN PLACE: the second pass must occupy the same coordinates as the first.
+	// Advancing dot.X between passes would shift every control point.
+	var minA, maxA, minB, maxB int
+	minA, maxA = extentX(a)
+	minB, maxB = extentX(b)
+	if minA != minB || maxA != maxB {
+		t.Errorf("two passes span x[%d,%d] against one pass's x[%d,%d]; the glyph moved between passes",
+			minB, maxB, minA, maxA)
+	}
+}
+
+func extentX(ks []bspline.Knot) (lo, hi int) {
+	lo, hi = math.MaxInt, math.MinInt
+	for _, k := range ks {
+		lo, hi = min(lo, k.Ctrl.X), max(hi, k.Ctrl.X)
+	}
+	return
 }
 
 func TestConstantFont(t *testing.T) {

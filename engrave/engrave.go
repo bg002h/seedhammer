@@ -1498,15 +1498,24 @@ func String(face *vector.Face, em int, txt string) *StringCmd {
 
 type StringCmd struct {
 	LineHeight int
+	// Passes is how many times each glyph is engraved IN PLACE before the pen
+	// advances. 0 and 1 both mean once.
+	//
+	// In place, not a second pass over the whole string: re-cutting where the
+	// tool already stands carries no repositioning error between passes, while a
+	// whole-plate repeat accumulates one.
+	//
+	// ConstantStringer has no equivalent and must not gain one without the
+	// constant-time proof -- see SPEC_seedhammer_engraving_settings.md section 3.
+	Passes int
 
 	face *vector.Face
 	em   int
 	txt  string
 }
 
-func (s *StringCmd) Engrave(yield func(Command) bool) bool {
-	_, ok := s.engrave(yield)
-	return ok
+func (s *StringCmd) Engrave(yield func(Command) bool) {
+	s.engrave(yield)
 }
 
 func (s *StringCmd) Measure() (int, int) {
@@ -1526,12 +1535,19 @@ func (s *StringCmd) engrave(yield func(Command) bool) (bezier.Point, bool) {
 			dot.Y += lheight
 			continue
 		}
-		adv, spline, found := s.face.Decode(r)
+		adv, _, found := s.face.Decode(r)
 		if !found {
 			panic(fmt.Errorf("unsupported rune: %s", string(r)))
 		}
 		if yield != nil {
-			cont = cont && engraveSpline(yield, dot, s.em, mh, spline)
+			passes := max(1, s.Passes)
+			for range passes {
+				// Decode afresh: UniformBSpline is an ITERATOR and is consumed
+				// by engraveSpline, so re-using it would engrave nothing on the
+				// second pass and the test would still see more knots.
+				_, sp, _ := s.face.Decode(r)
+				cont = cont && engraveSpline(yield, dot, s.em, mh, sp)
+			}
 		}
 		dot.X += adv * s.em / mh
 	}
