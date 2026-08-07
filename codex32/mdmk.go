@@ -41,6 +41,13 @@ const (
 	mdmkShortSyms = 13 // regular code: 13-symbol checksum (BCH(93,80,8))
 	mdmkLongSyms  = 15 // long code: 15-symbol checksum (BCH(108,93,8))
 
+	// MD codeword cap, from md-codec's REGULAR_CODE_SYMBOLS_MAX
+	// (descriptor-mnemonic codex32.rs:32) = 80 data + 13 checksum. BCH(93,80,8)
+	// is defined over a GF(32) beta of order 93, so degrees d and d+93 alias:
+	// past 93 symbols the code stops separating errors and the checksum no
+	// longer means what it claims. Rust rejects with StringSymbolCountOutOfRange.
+	mdRegularMaxLen = 93
+
 	// MK data-part length gate, from mk-codec's bch_code_for_length
 	// (mnemonic-key string_layer/bch.rs:117): regular for 14..=93, long for
 	// 96..=108, with 94..=95 and out-of-range lengths reserved-invalid.
@@ -119,9 +126,18 @@ func verifyMDMK(s, hrp string, generator []fe, targetHi, targetLo uint64, n int)
 
 // ValidMD reports whether s is a structurally valid, BCH-correct md1 string.
 // md1 uses the regular code only (md-codec dropped the long code). The data part
-// must be at least the 13-symbol checksum; md-codec applies no further data-part
-// length bracket (md-codec codex32.rs:144-155).
+// must be at least the 13-symbol checksum and at most mdRegularMaxLen symbols.
+//
+// The upper bound is a CONVERGENCE fix (F-67, 2026-08-07): md-codec enforces
+// REGULAR_CODE_SYMBOLS_MAX at codex32.rs:174 and this port did not, so a clean
+// BCH-valid 509-symbol md1 was accepted here and rejected by Rust with
+// StringSymbolCountOutOfRange. Rust was already correct, so the fix lands in Go
+// only. This function is normative for the sealed-payload public-section decode,
+// where host and device MUST agree on what is admissible.
 func ValidMD(s string) bool {
+	if _, data := splitHRP(s); len(data) > mdRegularMaxLen {
+		return false
+	}
 	return verifyMDMK(s, "md", newShortChecksum().generator,
 		mdRegularTargetHi, mdRegularTargetLo, mdmkShortSyms)
 }

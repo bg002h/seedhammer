@@ -119,3 +119,26 @@ func TestMDMKNoPanicOnMalformed(t *testing.T) {
 		}
 	}
 }
+
+// F-67 convergence: md-codec enforces REGULAR_CODE_SYMBOLS_MAX (93 = 80 data +
+// 13 checksum) at codex32.rs:174 and this port did not, so a clean BCH-valid
+// over-long md1 was accepted here and rejected by Rust with
+// StringSymbolCountOutOfRange. Measured before the fix: n=496 data symbols gave
+// ValidMD == true.
+//
+// Built with AssembleMD1 so the string is genuinely BCH-valid -- a random
+// over-long string would be rejected by the checksum and prove nothing.
+func TestValidMDRejectsOverLongCodeword(t *testing.T) {
+	for _, n := range []int{80, 81, 496} {
+		s := AssembleMD1(make([]byte, n))
+		_, data := splitHRP(s)
+		want := len(data) <= mdRegularMaxLen
+		if got := ValidMD(s); got != want {
+			t.Errorf("n=%d (codeword %d syms): ValidMD = %v, want %v",
+				n, len(data), got, want)
+		}
+		if _, err := MDDataSymbols(s); (err == nil) != want {
+			t.Errorf("n=%d: MDDataSymbols err = %v, want err==nil to be %v", n, err, want)
+		}
+	}
+}
