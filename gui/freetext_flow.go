@@ -1256,17 +1256,17 @@ func ftConfirmRows(f ftFit, title, footer string) []ftConfirmRow {
 // code whatever the operator chose one step earlier (spec 2.7), and a screen
 // that reported the flag would promise a machine-readable plate that the
 // engraver does not cut.
-// speedNote is appended only for a NON-DEFAULT engraving feed or pass count,
+// settingsNote is appended only for a NON-DEFAULT engraving feed or pass count,
 // so an ordinary plate does not grow a line that never varies and a test
 // pattern cannot be approved without its feed or pass count on screen. See
 // ftSettingsNote.
-func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager, speedNote string) (op.Op, image.Point) {
+func ftConfirmSummary(ctx *Context, th *Colors, width int, f ftFit, plan *ftPlan, pager, settingsNote string) (op.Op, image.Point) {
 	useQR := f.plate.QR != nil
 	var rt richText
 	rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, fmt.Sprintf(
 		"%s  %d lines  QR: %s  font: %s%s",
 		ftPlateRungs(f.plate), len(f.plate.Lines), ppYesNo(useQR),
-		ftFaceSummary(plan, f.plate.Faces, f.plate.Sizes), speedNote))
+		ftFaceSummary(plan, f.plate.Faces, f.plate.Sizes), settingsNote))
 	if pager != "" {
 		rt.Add(&ctx.B, ctx.Styles.subtitle, width, th.Text, pager)
 	}
@@ -1303,14 +1303,14 @@ type ftConfirmView struct {
 // at least one row, so the pager cannot stall; TestFTConfirmAlwaysFitsThePanel
 // pins that the budget on the real panel is at least one row even in the
 // tightest case.
-func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer, speedNote string) ftConfirmView {
+func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, plan *ftPlan, title, footer, settingsNote string) ftConfirmView {
 	rows := ftConfirmRows(f, title, footer)
 	if start < 0 || start >= len(rows) {
 		start = 0
 	}
 	// Measured with a pager string of the same shape as the real one, so the
 	// reservation is exact rather than approximately right.
-	_, probe := ftConfirmSummary(ctx, th, width, f, plan, ftConfirmPager(0, 0, 0), speedNote)
+	_, probe := ftConfirmSummary(ctx, th, width, f, plan, ftConfirmPager(0, 0, 0), settingsNote)
 	budget := height - probe.Y
 
 	var rt richText
@@ -1334,7 +1334,7 @@ func ftConfirmBody(ctx *Context, th *Colors, width, height, start int, f ftFit, 
 	if start > 0 || shown < len(rows) {
 		pager = ftConfirmPager(start, shown, len(rows))
 	}
-	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, pager, speedNote)
+	sum, sumSz := ftConfirmSummary(ctx, th, width, f, plan, pager, settingsNote)
 	return ftConfirmView{
 		Content: op.Layer(rt.Content, sum.Offset(image.Pt(0, rt.Y))),
 		Size:    image.Pt(width, rt.Y+sumSz.Y),
@@ -1356,7 +1356,7 @@ func ftConfirmPager(start, shown, total int) string {
 // Three buttons, not two: Back, "next page" and OK. The page button appears
 // only when the preview does not fit at once, so a short text -- which is
 // almost every real one -- still shows the whole plate and two buttons.
-func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer, speedNote string) bool {
+func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, footer, settingsNote string) bool {
 	backBtn := &Clickable{Button: Button1}
 	pageBtn := &Clickable{Button: Button2}
 	okBtn := &Clickable{Button: Button3}
@@ -1383,7 +1383,7 @@ func ftConfirmFlow(ctx *Context, th *Colors, f ftFit, plan *ftPlan, title, foote
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer, speedNote)
+		view = ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, title, footer, settingsNote)
 		body := view.Content.Offset(image.Point(area.Min))
 		btns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},

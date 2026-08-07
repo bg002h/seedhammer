@@ -1,6 +1,9 @@
 package gui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The Passes and Engraving-settings screens are tested through their option
 // builders and through the flow itself, never through a label -- the same
@@ -268,6 +271,18 @@ func TestFlowCarriesPassesToTheEngraver(t *testing.T) {
 	h.mustReach("Footer")
 	ftOK(h)
 	h.mustReach("Confirm")
+	// The invisible-note risk this task exists to close: nothing before this
+	// line ever inspected the RENDERED confirm screen, so a call site that
+	// silently dropped the pass count (reverting to ftSpeedNote(params,
+	// speed)) would still engrave at 2 passes and pass every other assertion
+	// here. uiContains lowercases and strips spaces from the needle, and
+	// ExtractText never sees the space glyph either (it inks nothing), so
+	// "passes: 2" collapses to "passes:2" on both sides. The VALUE is
+	// asserted, not mere presence -- a passes+1 bug would show "passes: 3"
+	// and this would still fail.
+	if !uiContains(h.content, "passes: 2") {
+		t.Errorf("the confirm screen does not name the chosen pass count; frame %q", h.content)
+	}
 	ftOK(h)
 	h.step()
 
@@ -320,6 +335,18 @@ func TestConfirmNamesANonDefaultPassCount(t *testing.T) {
 	}
 	if got := ftSettingsNote(P, 0, 3); got == "" {
 		t.Error("three passes produced no note; the operator would approve it unseen")
+	}
+	// The note is a CONCATENATION of two independent halves (ftSpeedNote's
+	// return plus the passes suffix), and nothing above exercises them
+	// together -- a fold that dropped one half while the other stayed
+	// non-default would pass every case above.
+	def := ftDefaultSpeedMM(P)
+	other := float32(1.0)
+	if def == other {
+		other = 2.0
+	}
+	if got := ftSettingsNote(P, other, 3); !strings.Contains(got, "speed:") || !strings.Contains(got, "passes: 3") {
+		t.Errorf("both settings non-default at once produced %q, want both a speed and a passes clause", got)
 	}
 }
 
