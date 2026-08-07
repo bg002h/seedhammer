@@ -120,6 +120,7 @@ func EngraveFitted(params engrave.Params, f Fitted) engrave.Engraving {
 			fontSize := params.F(sizeMM)
 			lay := textLayout(params, fnt, fontSize, y, f.qrAt)
 			cmd := engrave.String(fnt, fontSize, s)
+			cmd.Passes = f.Passes
 			w, _ := cmd.Measure()
 			inset := lay.holeChars * lay.charWidth
 			t.Offset(margin+inset+(plateW-2*margin-2*inset-w)/2, y)

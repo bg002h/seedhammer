@@ -439,3 +439,58 @@ func TestConstantStringerHasNoPasses(t *testing.T) {
 			"needs a proof before a pass count may reach a seed plate")
 	}
 }
+
+// TestFittedTitleAndFooterHonourPasses closes the gap the round-0 review
+// found: the title and footer are OPERATOR-ENTERED text (freetext.go:14), not
+// plate chrome, so f.Passes must reach centerInset the same way it already
+// reaches the body loop.
+//
+// The delta between Passes=3 and Passes=1 isolates the title/footer's own
+// contribution: with a title and footer present, tripling the pass count must
+// add MORE commands than tripling it on the body alone, or centerInset is not
+// honouring f.Passes.
+func TestFittedTitleAndFooterHonourPasses(t *testing.T) {
+	P := prodParams
+	size, lines, qrc, err := Fit(P, constant.Font, "BEEF", "TITLE", "FOOTER", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := Fitted{
+		SizeMM: size, Lines: lines, QR: qrc,
+		Faces: []*vector.Face{constant.Font},
+		Sizes: []float32{size},
+	}
+	withTF := base
+	withTF.Title, withTF.TitleFace, withTF.TitleSizeMM = "TITLE", constant.Font, size
+	withTF.Footer, withTF.FooterFace, withTF.FooterSizeMM = "FOOTER", constant.Font, size
+
+	plan := func(f Fitted, passes int) int {
+		f.Passes = passes
+		n := 0
+		for range engrave.PlanEngraving(P.StepperConfig, EngraveFitted(P, f)) {
+			n++
+		}
+		return n
+	}
+
+	bodyOnlyDelta := plan(base, 3) - plan(base, 1)
+	withTFDelta := plan(withTF, 3) - plan(withTF, 1)
+	if withTFDelta <= bodyOnlyDelta {
+		t.Errorf("title+footer contributed %d extra commands from tripling passes, no more than the body alone's %d; the title/footer are not honouring Passes",
+			withTFDelta, bodyOnlyDelta)
+	}
+
+	// And the title must not MOVE: multiple passes retrace the same spline in
+	// place, so a title's ink bounds at Passes=1 and Passes=3 must be
+	// identical. A shift here would mean the pass count leaked into layout,
+	// not just into ink -- a real defect and not the hazard it resembles,
+	// because centerInset's Measure() call runs the engrave with yield==nil,
+	// where the per-pass loop never executes.
+	titleOnly := Fitted{Title: "TITLE", TitleFace: constant.Font, TitleSizeMM: size}
+	one := inkBounds(t, P, EngraveFitted(P, titleOnly))
+	titleOnly.Passes = 3
+	three := inkBounds(t, P, EngraveFitted(P, titleOnly))
+	if one != three {
+		t.Errorf("title bounds moved from %v at Passes=1 to %v at Passes=3", one, three)
+	}
+}
