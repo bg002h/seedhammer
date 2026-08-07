@@ -39,7 +39,13 @@ func (r FileReader) Read() ([]byte, error) {
 	}
 	defer f.Close()
 
-	buf := make([]byte, RegionLen)
+	// One byte MORE than the region, deliberately: it makes clampRegion the
+	// thing that bounds the result rather than the buffer size. Sized at
+	// exactly RegionLen the clamp is decorative here — measured, by deleting
+	// it: TestFileReaderNeverReturnsMoreThanTheRegion still passed, because
+	// io.ReadFull could not overfill the buffer anyway. With the extra byte
+	// that mutant is caught.
+	buf := make([]byte, RegionLen+1)
 	// A region shorter than 64 KiB is normal, not an error — the device reads
 	// a fixed window and the blob simply ends earlier.
 	n, err := io.ReadFull(f, buf)
