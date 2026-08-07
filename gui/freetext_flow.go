@@ -965,7 +965,7 @@ func ftRefuse(ctx *Context, th *Colors, params engrave.Params, plan *ftPlan, f f
 // plan, which is why it takes pointers, and RETURNS the text it wrote so this
 // screen re-seeds from the value that was actually stored rather than
 // recomputing it.
-func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, plan **ftPlan, useQR *bool, size *float32, loadProof func(*ftProof, float32) string) (string, bool) {
+func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior string, title, footer *string, plan **ftPlan, useQR *bool, size *float32, proofLoaded *bool, speed *float32, passes *int, loadProof func(*ftProof, float32) string) (string, bool) {
 	kbd := NewTextKeyboard(ctx)
 	kbd.Fragment = prior
 	backBtn := &Clickable{Button: Button1}
@@ -1005,6 +1005,14 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 
 	for !ctx.Done {
 		for kbd.Update(ctx) {
+		}
+		if kbd.Settings() {
+			// The keyboard only LATCHES the gear press (ppSettings must not
+			// mutate Fragment, and opening a screen from inside kbd.Update
+			// would nest frame loops); this is where it is consumed. continue
+			// restarts the frame loop cleanly once the settings screen returns.
+			ftSettingsFlow(ctx, th, params, *proofLoaded, speed, passes)
+			continue
 		}
 		if backBtn.Clicked(ctx) {
 			return "", false
@@ -1433,8 +1441,12 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 	// the other fields so it survives Back exactly as they do, and discarded
 	// when the program returns -- there is no persistence, by design.
 	var speed float32
+	// How many times each character is cut, in place, or 0 for the machine's
+	// own single pass. Held beside speed for the same reason: it survives Back
+	// and is discarded when the program returns.
+	var passes int
 	// Set by any accepted proof trigger; see ftProofLoader. This and not the
-	// plan is what unlocks the Speed screen.
+	// plan is what unlocks the Speed and Passes screens.
 	var proofLoaded bool
 	step := ftStepQR
 	for !ctx.Done {
@@ -1466,7 +1478,7 @@ func engraveTextFlow(ctx *Context, th *Colors) {
 			}
 			size = s
 		case ftStepText:
-			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR, &size,
+			s, ok := ftTextEntryFlow(ctx, th, params, text, &title, &footer, &plan, &useQR, &size, &proofLoaded, &speed, &passes,
 				ftProofLoader(params, &text, &title, &footer, &plan, &useQR, &size, &proofLoaded))
 			if !ok {
 				step -= 2

@@ -21,17 +21,18 @@ func funcRow(k *PassphraseKeyboard, p int) []ppKey {
 	return rows[len(rows)-1]
 }
 
-// TestTextKeyboardConstruction: five function-row keys, the newline APPENDED
-// last so the reveal key keeps index 2, on every page.
+// TestTextKeyboardConstruction: six function-row keys, the newline and then
+// the settings gear each APPENDED last in turn so the reveal key keeps index
+// 2, on every page.
 func TestTextKeyboardConstruction(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	k := NewTextKeyboard(ctx)
 	for p := range len(ppPages) {
 		fr := funcRow(k, p)
-		if len(fr) != 5 {
-			t.Fatalf("page %d function row: %d keys, want 5 (page-cycle/space/reveal/backspace/newline)", p, len(fr))
+		if len(fr) != 6 {
+			t.Fatalf("page %d function row: %d keys, want 6 (page-cycle/space/reveal/backspace/newline/settings)", p, len(fr))
 		}
-		want := []ppAction{ppPageCycle, ppRune, ppReveal, ppBackspace, ppRune}
+		want := []ppAction{ppPageCycle, ppRune, ppReveal, ppBackspace, ppRune, ppSettings}
 		for i, a := range want {
 			if fr[i].action != a {
 				t.Errorf("page %d funcrow[%d].action = %v, want %v", p, i, fr[i].action, a)
@@ -48,6 +49,12 @@ func TestTextKeyboardConstruction(t *testing.T) {
 		}
 		if nl.label != "nl" {
 			t.Errorf("page %d newline key label = %q, want \"nl\"", p, nl.label)
+		}
+		// The settings gear is APPENDED after the newline, for the same reason
+		// the newline is appended after backspace: the reveal key's index is
+		// asserted, and that assertion outranks key ordering.
+		if fr[5].action != ppSettings {
+			t.Errorf("page %d: settings key is not last, at index 5", p)
 		}
 	}
 	// It types a newline, not a literal "nl".
@@ -107,9 +114,10 @@ func TestNewlineLabelHasATapTarget(t *testing.T) {
 	if got := ctx.Styles.keyboard.Measure(1<<30, "%s", "nl").X; got != 24 {
 		t.Errorf("\"nl\" measures %dpx, not the 24px the row width was sized from", got)
 	}
-	// The whole function row, pinned: 285px on page 0 against a 480px panel.
-	if got := ppRowWidth(funcRow(k, 0), 2); got != 285 {
-		t.Errorf("free-text function row is %dpx, want the measured 285px", got)
+	// The whole function row, pinned: 328px on page 0 against a 480px panel
+	// (285px before the settings gear joined the row alongside newline).
+	if got := ppRowWidth(funcRow(k, 0), 2); got != 328 {
+		t.Errorf("free-text function row is %dpx, want the measured 328px", got)
 	}
 	if got := ppRowWidth(funcRow(NewPassphraseKeyboard(ctx), 0), 2); got != 253 {
 		t.Errorf("passphrase function row is %dpx, want the measured 253px", got)

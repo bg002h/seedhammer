@@ -148,3 +148,42 @@ func TestSettingsFlowLocksPassesAndSpeedWithoutAProof(t *testing.T) {
 	}
 	h.tapNav(Button1)
 }
+
+// TestGearIsOnTheTextKeyboardOnly and TestGearIsNotOnThePassphraseKeyboard pin
+// where the gear key lives: on the free-text keyboard, and NEVER on the
+// passphrase keyboard -- offering engraving settings while a passphrase is
+// being typed is a defect (see newPPKeyboard's settings parameter).
+func TestGearIsOnTheTextKeyboardOnly(t *testing.T) {
+	h, _ := startFT(t)
+	ftPastQR(h, false)
+	if !ftHasKey(h, ppSettings) {
+		t.Error("the text keyboard has no gear key")
+	}
+}
+
+func TestGearIsNotOnThePassphraseKeyboard(t *testing.T) {
+	h := newPPHarness(t)
+	h.start(func() { engravePassphraseFlow(h.ctx, &descriptorTheme) })
+	h.mustReach("Passphrase")
+	if ftHasKey(h, ppSettings) {
+		t.Error("the passphrase keyboard offers engraving settings")
+	}
+}
+
+// ftHasKey reports whether the ACTIVE page's grid carries an action.
+func ftHasKey(h *ppHarness, a ppAction) bool {
+	kbd, ok := h.widget("kbd").(*PassphraseKeyboard)
+	if !ok {
+		return false
+	}
+	// keys() returns [][]ppKey -- rows of keys, not a flat slice
+	// (passphrase_keyboard.go:246).
+	for _, row := range kbd.keys() {
+		for _, k := range row {
+			if k.action == a {
+				return true
+			}
+		}
+	}
+	return false
+}

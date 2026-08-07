@@ -35,6 +35,7 @@ const (
 	ppPageCycle                 // page = (page+1) % len(ppPages)
 	ppReveal                    // toggle revealed
 	ppBackspace                 // delete last rune
+	ppSettings                  // open the engraving settings screen
 )
 
 type ppKey struct {
@@ -57,9 +58,10 @@ type PassphraseKeyboard struct {
 	// bottom alignment is Max.Y-size.Y, and CutTop leaves Max.Y untouched, so
 	// the reservation does not move the block by even a pixel. The bound has to
 	// reach the thing whose height varies. 0 means unbounded.
-	MaxHeight int
-	page      int
-	revealed  bool
+	MaxHeight   int
+	page        int
+	revealed    bool
+	settingsReq bool // set by ppSettings, cleared by Settings()
 
 	pages [4][][]ppKey
 	size  [4]image.Point
@@ -72,22 +74,26 @@ type PassphraseKeyboard struct {
 // rows + a shared-shape function row) with per-key positions, adapting
 // NewKeyboard's cell-sizing + row-centering.
 func NewPassphraseKeyboard(ctx *Context) *PassphraseKeyboard {
-	return newPPKeyboard(ctx, false)
+	return newPPKeyboard(ctx, false, false)
 }
 
-// NewTextKeyboard is NewPassphraseKeyboard plus a newline key, for the
-// free-text plate.
+// NewTextKeyboard is NewPassphraseKeyboard plus a newline key and the gear
+// key that opens the engraving settings screen, for the free-text plate.
 //
-// The key is a PER-INSTANCE opt-in, not a fourth shared page entry, because
-// PassphraseKeyboard is also NewAddressKeyboard and BIP-85 index entry, and
-// passphrase.ValidatePassphrase rejects '\n' with ErrNonASCII -- an
+// The newline key is a PER-INSTANCE opt-in, not a fourth shared page entry,
+// because PassphraseKeyboard is also NewAddressKeyboard and BIP-85 index
+// entry, and passphrase.ValidatePassphrase rejects '\n' with ErrNonASCII -- an
 // unconditional key would give the passphrase program a key that types
 // something OK then refuses.
+//
+// The gear key is gated the same way, and for a sharper reason: a passphrase
+// screen offering engraving settings is not merely useless, it is a defect
+// (see TestGearIsNotOnThePassphraseKeyboard).
 func NewTextKeyboard(ctx *Context) *PassphraseKeyboard {
-	return newPPKeyboard(ctx, true)
+	return newPPKeyboard(ctx, true, true)
 }
 
-func newPPKeyboard(ctx *Context, newline bool) *PassphraseKeyboard {
+func newPPKeyboard(ctx *Context, newline, settings bool) *PassphraseKeyboard {
 	k := new(PassphraseKeyboard)
 	style := ctx.Styles.keyboard
 	cell := style.Measure(math.MaxInt, "W") // uniform letter-cell glyph extent
@@ -120,6 +126,11 @@ func newPPKeyboard(ctx *Context, newline bool) *PassphraseKeyboard {
 			// ctx.Styles.keyboard, which leaves an 8px tap target a synthetic
 			// touch test would still pass and a finger would not find.
 			fr = append(fr, ppKey{r: '\n', label: "nl", action: ppRune})
+		}
+		if settings {
+			// APPENDED for the same reason newline is: the reveal key's index
+			// is asserted, and that assertion is worth more than the key order.
+			fr = append(fr, ppKey{action: ppSettings})
 		}
 		for i := range fr {
 			fr[i].size = ppKeyExtent(ctx, fr[i], cell)
@@ -180,6 +191,9 @@ func ppKeyExtent(ctx *Context, key ppKey, cell image.Point) image.Point {
 	case ppBackspace:
 		b := assets.KeyBackspace.Bounds()
 		return image.Pt(b.Min.X*2+b.Dx(), cell.Y) // R0 I-1: include the Min.X margin (matches NewKeyboard gui.go:868)
+	case ppSettings:
+		b := assets.IconGear.Bounds()
+		return image.Pt(b.Min.X*2+b.Dx(), cell.Y) // sized as ppBackspace is, above
 	case ppReveal:
 		// The reveal cap toggles "show"/"hide" at render time, so size the cell to
 		// the WIDER of the two — else a wider label would overflow/clip its tap
@@ -240,7 +254,19 @@ func (k *PassphraseKeyboard) commit(key ppKey) {
 		k.col = len(rows[k.row]) / 2
 	case ppReveal:
 		k.revealed = !k.revealed
+	case ppSettings:
+		k.settingsReq = true
 	}
+}
+
+// Settings reports and CLEARS a pending gear press. A latch rather than a
+// callback, because Update already returns to a caller that owns the screen
+// stack -- opening a screen from inside the keyboard's own update would nest
+// frame loops.
+func (k *PassphraseKeyboard) Settings() bool {
+	req := k.settingsReq
+	k.settingsReq = false
+	return req
 }
 
 func (k *PassphraseKeyboard) keys() [][]ppKey { return k.pages[k.page] }
@@ -452,6 +478,10 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 			switch {
 			case key.action == ppBackspace:
 				icn := assets.KeyBackspace
+				sz = image.Pt(bgsz.X, icn.Bounds().Dy())
+				keyOp = op.Compose(op.Color(&ctx.B, col), op.Mask(&ctx.B, icn))
+			case key.action == ppSettings:
+				icn := assets.IconGear
 				sz = image.Pt(bgsz.X, icn.Bounds().Dy())
 				keyOp = op.Compose(op.Color(&ctx.B, col), op.Mask(&ctx.B, icn))
 			case key.label != "" && key.action == ppReveal:
