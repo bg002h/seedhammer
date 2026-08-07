@@ -88,6 +88,13 @@ var (
 	//go:embed icon-edit.bin
 	IconEditData string
 
+	IconGear = &alpha4.Image{
+		Pix:  unsafe.Slice(unsafe.StringData(IconGearData), len(IconGearData)),
+		Rect: alpha4.Rectangle{MinX: 4, MinY: 4, MaxX: 31, MaxY: 31},
+	}
+	//go:embed icon-gear.bin
+	IconGearData string
+
 	IconHammer = &alpha4.Image{
 		Pix:  unsafe.Slice(unsafe.StringData(IconHammerData), len(IconHammerData)),
 		Rect: alpha4.Rectangle{MinX: 6, MinY: 7, MaxX: 29, MaxY: 29},
