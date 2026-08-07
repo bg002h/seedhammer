@@ -1146,7 +1146,7 @@ func TestPassphrasePlateBuildsWorstCase(t *testing.T) {
 // length, so a field that changed nothing about the plan would be a field that
 // was dropped on the way.
 func TestPassphrasePlateCarriesEveryField(t *testing.T) {
-	build := func(t *testing.T, secret, seedFP, combFP string, qr bool) uint {
+	build := func(t *testing.T, secret, seedFP, combFP string, qr bool) uint64 {
 		t.Helper()
 		p, err := ppBuildPlate(engraverParams, []byte(secret), seedFP, combFP, qr)
 		if err != nil {

@@ -472,7 +472,10 @@ func validateDescriptor(params engrave.Params, desc *bip380.Descriptor) ([]strin
 }
 
 type Plate struct {
-	Duration uint
+	// Duration is the plate's whole tick count -- uint64, not uint, because
+	// the firmware target is 32 bits and the widest real plate is past
+	// MaxUint32. See bspline.Attributes.Duration for the measurements.
+	Duration uint64
 	Spline   bspline.Curve
 	// Conf is the motion config the Spline was PLANNED with, snapshotted so the
 	// run cannot disagree with the plan.
@@ -2562,7 +2565,9 @@ func NewEngraveScreen(ctx *Context, plate Plate) *EngraveScreen {
 }
 
 type EngraveScreen struct {
-	duration uint
+	// duration is uint64 for the reason Plate.Duration is: see
+	// bspline.Attributes.Duration.
+	duration uint64
 	job      *engraveJob
 }
 
@@ -2632,6 +2637,58 @@ frames:
 	return false
 }
 
+// engraveRemaining is the countdown the engrave screen shows while a job runs:
+// the ticks still to cut, rounded UP to whole seconds and formatted "MMM:SS".
+//
+// It is a function rather than four lines inside draw so the arithmetic can be
+// asserted at durations no test can reach by actually engraving. Two things
+// are load-bearing here and neither is visible from the call site:
+//
+//   - EVERY OPERAND IS 64-BIT. The firmware target is RP2350, where uint is 32
+//     bits, and a plate's tick count no longer fits there. See the measured
+//     table below: speed alone tops out at 0.155x MaxUint32 -- 6.4x of
+//     headroom, which is why the speed slice needed nothing -- and passes
+//     multiply that by 7.8x, carrying all three proof patterns over. On device
+//     the wrapped CONSTPROOF! value displayed 80 minutes for a
+//     seven-and-a-half-hour job.
+//
+//   - THE SUBTRACTION SATURATES. completed is what the driver reported, and a
+//     job resumed after an interruption also cuts synthesised catch-up motion
+//     (SafePointer.Resume) that the planned duration never counted, so it can
+//     legitimately run PAST duration. Unsigned, duration-completed would then
+//     wrap to something near 2^64 and the screen would read a number of hours
+//     with ten digits in it. Clamping to zero shows "0:00" and stalls there,
+//     which is wrong by at most the catch-up and is honest about the sign.
+//
+// Engraving itself never consults either number: the job goroutine signals
+// completion on its error channel. This is the operator's estimate, not a
+// control input.
+//
+// Measured over the proof patterns the settings screen unlocks, as a fraction
+// of MaxUint32 (4,294,967,295 ticks, 6h13m at 192,000 ticks/s):
+//
+//	                8.0mm/s x1  1.0mm/s x1  1.0mm/s x8
+//	CONSTPROOF!         0.045x      0.155x      1.216x  (5,221,685,814 = 453m)
+//	TEXTPROOF!          0.042x      0.154x      1.198x  (5,143,579,063 = 446m)
+//	BOTHPROOF!          0.038x      0.130x      1.018x  (4,371,747,550 = 379m)
+//
+// The 7.8x rather than 8x is travel: the move between glyphs is cut once
+// however many times each glyph is struck.
+func engraveRemaining(duration, completed uint64, ticksPerSecond uint) string {
+	var rem uint64
+	if duration > completed {
+		rem = duration - completed
+	}
+	tps := uint64(ticksPerSecond)
+	if tps == 0 {
+		// A zero-tick machine is a programming error, not an input; report it
+		// rather than dividing by zero mid-job with the needle down.
+		return "--:--"
+	}
+	remSec := (rem + tps - 1) / tps
+	return fmt.Sprintf("%d:%.2d", remSec/60, remSec%60)
+}
+
 func (s *EngraveScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 	r := layout.Rectangle{Max: dims}
 
@@ -2666,12 +2723,9 @@ func (s *EngraveScreen) draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 		contentOp = bodyOp.Offset(content.Center(bodysz))
 	case engraveRunning:
 		middle, lead := content.CutBottom(leadingSize)
-		// Remaining seconds, rounded up.
-		rem := s.duration - st.Completed
 		tps := ctx.Platform.EngraverParams().TicksPerSecond
-		remSec := (rem + tps - 1) / tps
-		min, sec := remSec/60, remSec%60
-		remOp, sz := widget.Labelf(&ctx.B, ctx.Styles.progress, th.Text, "%d:%.2d", min, sec)
+		remOp, sz := widget.Label(&ctx.B, ctx.Styles.progress, th.Text,
+			engraveRemaining(s.duration, st.Completed, tps))
 		remOp = remOp.Offset(middle.Center(sz))
 		const leadTxt = "Engraving plate"
 		leadOp, leadsz := widget.Labelw(&ctx.B, ctx.Styles.lead, dims.X-2*margin, th.Text, leadTxt)

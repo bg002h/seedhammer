@@ -147,8 +147,20 @@ func ComputeKinematics(spline []Knot, scale uint) (v, a, j uint) {
 }
 
 type Attributes struct {
-	Bounds   Bounds
-	Duration uint
+	Bounds Bounds
+	// Duration is the whole spline's tick count, and it is uint64 rather than
+	// uint BECAUSE THE FIRMWARE TARGET IS 32-BIT. Knot.T is a per-knot count
+	// and stays uint; the SUM is what overflows.
+	//
+	// Measured on the real proof patterns at 1.0mm/s with 8 passes:
+	// CONSTPROOF! plans 5,221,685,814 ticks and TEXTPROOF! 5,143,579,063 --
+	// both past MaxUint32 (4,294,967,295) by about 1.2x. On RP2350 a uint
+	// accumulator wrapped CONSTPROOF! to ~926.7M, which the engrave screen
+	// then displayed as a 80-minute countdown for a seven-and-a-half-hour job
+	// before underflowing partway through. The cut itself was never affected
+	// -- completion is signalled by the job goroutine's error channel, not by
+	// this count -- but the number the operator plans around was off by 5x.
+	Duration uint64
 }
 
 // Bounds is like [image.Rectangle] with its upper
@@ -197,10 +209,13 @@ func Measure(spline Curve) Attributes {
 		Max: bezier.Point{X: math.MinInt32, Y: math.MinInt32},
 	}
 	bounds := inf
-	var t uint
+	// uint64, not uint: see Attributes.Duration. The widest real plate is
+	// ~1.2x MaxUint32, so this accumulator wraps on the 32-bit firmware target
+	// and nowhere else -- which is exactly why no host test caught it.
+	var t uint64
 	var bsb segmentBounds
 	for c := range spline {
-		t += c.T
+		t += uint64(c.T)
 		if bb, engrave := bsb.Knot(c); engrave {
 			bounds = bounds.Union(bb)
 		}

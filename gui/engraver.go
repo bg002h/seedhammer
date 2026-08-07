@@ -22,7 +22,7 @@ type engraveJob struct {
 
 	quit      chan<- struct{}
 	errs      <-chan error
-	progress  <-chan uint
+	progress  <-chan uint64
 	lock      chan Engraver
 	status    engraveStatus
 	nknots    int
@@ -38,7 +38,13 @@ const (
 type engraveStatus struct {
 	State engraveState
 	// Completed is the number of engraver ticks completed.
-	Completed uint
+	//
+	// uint64, not uint: this is a RUNNING TOTAL over a whole job and the
+	// firmware target is 32-bit. The widest real plate is ~1.2x MaxUint32
+	// (see bspline.Attributes.Duration), so a uint counter wraps partway
+	// through and the countdown that subtracts it goes backwards. The
+	// progress channel is 64-bit for the same reason -- see reportProgress.
+	Completed uint64
 	// Error is the error message, in case of state
 	// engraveFailed.
 	Error string
@@ -92,7 +98,7 @@ func (e *engraveJob) Start() {
 		return
 	}
 	errs := make(chan error, 1)
-	progress := make(chan uint, 1)
+	progress := make(chan uint64, 1)
 	quit := make(chan struct{})
 	e.lock = make(chan Engraver, 1)
 	e.errs = errs
@@ -144,7 +150,7 @@ func (e *engraveJob) Status() engraveStatus {
 	return e.status
 }
 
-func (e *engraveJob) runEngraving(quit <-chan struct{}, progress chan uint) (cerr error) {
+func (e *engraveJob) runEngraving(quit <-chan struct{}, progress chan uint64) (cerr error) {
 	stall := e.opts&suppressStalls == 0
 	d, err := e.pl.Engraver(stall)
 	if err != nil {
@@ -172,15 +178,24 @@ func (e *engraveJob) runEngraving(quit <-chan struct{}, progress chan uint) (cer
 		t, err := res.Knot(k)
 		e.safePoint.Knot(k)
 		e.safePoint.Progress(t)
-		if !reportProgress(quit, progress, t) || err != nil {
+		if !reportProgress(quit, progress, uint64(t)) || err != nil {
 			return err
 		}
 	}
 	return drv.Flush()
 }
 
-func reportProgress(quit <-chan struct{}, progress chan uint, t uint) bool {
-	var p0 uint
+// reportProgress hands the driver's per-knot tick count to the UI through a
+// one-slot channel, folding into whatever report is still unread.
+//
+// uint64 because the fold makes it an ACCUMULATOR, not a delta: every knot the
+// UI does not collect is added to the pending value, so an unread channel
+// carries a running total of the whole job. In practice the engrave screen
+// collects it twice a second, but "the UI is prompt" is not a bound the type
+// should have to rely on -- see engraveStatus.Completed for what the total
+// reaches.
+func reportProgress(quit <-chan struct{}, progress chan uint64, t uint64) bool {
+	var p0 uint64
 	select {
 	case <-quit:
 		return false

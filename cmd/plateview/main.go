@@ -130,8 +130,12 @@ func sizeLabel(p gui.Preview) string {
 // the device's own progress screen does -- divide by TicksPerSecond, round up
 // (gui.go's engraveRunning case). A preview that estimated differently from
 // the machine would be a second answer to a question with one.
-func engraveDuration(ticks uint) string {
-	tps := uint(engraverParams.TicksPerSecond)
+// The tick count is uint64 for the reason the firmware's is: the widest real
+// plate is past MaxUint32 (see bspline.Attributes.Duration). This tool runs on
+// a 64-bit host where uint would work, but a preview whose arithmetic differed
+// in WIDTH from the machine's is the second answer this comment warns about.
+func engraveDuration(ticks uint64) string {
+	tps := uint64(engraverParams.TicksPerSecond)
 	secs := (ticks + tps - 1) / tps
 	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
 }
