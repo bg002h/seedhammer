@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -842,6 +843,30 @@ func ftWorstCompositions(t *testing.T, P engrave.Params) []ftFit {
 	return out
 }
 
+// ftWidestSettingsNote is the longest suffix ftSettingsNote can produce, over
+// every speed rung and pass rung the settings screen offers.
+//
+// Chosen by MEASURED WIDTH and not by string length, because every speed rung
+// formats to the same character count ("8.0mm/s" .. "1.0mm/s") -- which of them
+// is widest is a glyph-width question about the digits, not a counting one. It
+// is derived from the rung tables rather than written out, so a rung added
+// later widens the probe instead of silently escaping it.
+func ftWidestSettingsNote(ctx *Context) string {
+	P := ctx.Platform.EngraverParams()
+	widest, w := "", -1
+	for _, s := range ftSpeedRungs {
+		for _, p := range ftPassRungs {
+			n := ftSettingsNote(P, s, p)
+			// ftConfirmSummary draws the note in ctx.Styles.subtitle, appended
+			// to the summary line; measure it in the same style.
+			if sz := ctx.Styles.subtitle.Measure(math.MaxInt, "%s", n); sz.X > w {
+				widest, w = n, sz.X
+			}
+		}
+	}
+	return widest
+}
+
 // TestFTConfirmAlwaysFitsThePanel is M6, the defect the text-only safety test
 // could not see: the confirm screen must show the size line and all three
 // warnings for EVERY composition the flow will admit, on the panel the machine
@@ -867,6 +892,27 @@ func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
 	}
 	area := ppConfirmArea(dims)
 	th := &descriptorTheme
+	// The note is APPENDED to the summary line, so it is part of the budget
+	// this test exists to guard, and passing "" measured a screen the flow can
+	// no longer produce now that the gear can put a speed and a pass count
+	// there. Both cases are kept: the noteless screen is not superseded, it is
+	// what every ordinary plate still shows.
+	//
+	// What this actually discriminates, measured rather than assumed. A longer
+	// note does NOT overflow the panel by itself -- it grows the summary, the
+	// summary takes its room out of the preview's budget, and the preview pages
+	// one row sooner. That is correct behaviour, not a defect, and it is why
+	// doubling and tripling today's note both still pass. The failure it does
+	// catch is the note growing until the FIXED part -- summary plus warnings,
+	// the block that cannot be paged away -- no longer fits: at 4x today's note
+	// the worst case needs 281px of the 270px area and this test fails.
+	//
+	// Worst page today: 267px of 270 with the widest note, 269px without it
+	// (noteless is tighter, since it spends the slack on another preview row).
+	notes := []string{"", ftWidestSettingsNote(ctx)}
+	if notes[1] == "" {
+		t.Fatal("no non-default settings note exists; the probe would measure the empty case twice")
+	}
 	worst := ftWorstCompositions(t, ctx.Platform.EngraverParams())
 	if len(worst) != 12 {
 		t.Fatalf("expected 12 worst cases, got %d", len(worst))
@@ -876,31 +922,33 @@ func TestFTConfirmAlwaysFitsThePanel(t *testing.T) {
 	for i, f := range worst {
 		for _, plan := range []*ftPlan{&ftPlanSH, &ftPlanConst, &ftPlanBoth} {
 			for _, tf := range [][2]string{{"", ""}, {cap18, cap18}} {
-				useQR := f.plate.QR != nil
-				start, guard := 0, 0
-				for {
-					v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1], "")
-					if v.Size.Y > area.Dy() {
-						t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q) page from row %d needs %dpx "+
-							"of a %dpx area: the size line and the warnings are off the %v panel",
-							i, len(f.plate.Lines), useQR, plan.Name(), tf[0], start, v.Size.Y, area.Dy(), dims)
-					}
-					if v.Size.X > area.Dx() {
-						t.Fatalf("case %d page from row %d is %dpx wide in a %dpx area", i, start, v.Size.X, area.Dx())
-					}
-					if v.Shown < 1 && v.Total > 0 {
-						t.Fatalf("case %d page from row %d drew no rows: the pager cannot advance", i, start)
-					}
-					if v.Shown < v.Total {
-						sawPaging = true
-					}
-					guard++
-					if guard > 200 {
-						t.Fatalf("case %d never finished paging", i)
-					}
-					start += v.Shown
-					if start >= v.Total {
-						break
+				for _, note := range notes {
+					useQR := f.plate.QR != nil
+					start, guard := 0, 0
+					for {
+						v := ftConfirmBody(ctx, th, area.Dx(), area.Dy(), start, f, plan, tf[0], tf[1], note)
+						if v.Size.Y > area.Dy() {
+							t.Fatalf("case %d (%d lines, qr=%v, face=%s, title=%q, note=%q) page from row %d needs %dpx "+
+								"of a %dpx area: the size line and the warnings are off the %v panel",
+								i, len(f.plate.Lines), useQR, plan.Name(), tf[0], note, start, v.Size.Y, area.Dy(), dims)
+						}
+						if v.Size.X > area.Dx() {
+							t.Fatalf("case %d page from row %d is %dpx wide in a %dpx area", i, start, v.Size.X, area.Dx())
+						}
+						if v.Shown < 1 && v.Total > 0 {
+							t.Fatalf("case %d page from row %d drew no rows: the pager cannot advance", i, start)
+						}
+						if v.Shown < v.Total {
+							sawPaging = true
+						}
+						guard++
+						if guard > 200 {
+							t.Fatalf("case %d never finished paging", i)
+						}
+						start += v.Shown
+						if start >= v.Total {
+							break
+						}
 					}
 				}
 			}
