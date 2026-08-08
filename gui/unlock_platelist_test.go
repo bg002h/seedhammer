@@ -304,6 +304,31 @@ func TestPlateListPagesThroughEveryRecord(t *testing.T) {
 			t.Errorf("record %d (%s) is unreachable by paging", i, plateLabel(recs[i], i))
 		}
 	}
+
+	// AND THE LAST PAGE WRAPS BACK TO THE FIRST. §10.3's nav table makes
+	// Button2 "advance the paged list, WRAPPING". Deleting the else branch that
+	// resets start to 0 left the whole suite green -- measured, whole-diff
+	// review round 0 -- because the loop above walks forward and stops as soon
+	// as every label has been seen, so it never needs the last page to return.
+	//
+	// Without the wrap an operator who pages past the plate they wanted can
+	// only get back via Back, which IS Lock (§10.3). Harmless in B1; in B2 it
+	// discards the session and costs twelve words and a ~31 s KDF.
+	restart, ok := frame()
+	if !ok {
+		t.Fatal("no frame while looking for the wrap")
+	}
+	for page := 0; page < len(recs)+2; page++ {
+		tapNavSlot(t, ctx, drawer(), Button2)
+		content, ok := frame()
+		if !ok {
+			t.Fatalf("no frame while paging for the wrap, step %d", page)
+		}
+		if content == restart {
+			return // wrapped
+		}
+	}
+	t.Errorf("paging never returned to the first page; Button2 does not wrap")
 }
 
 // Back is the session exit and must work from ANY page, not only the first.
@@ -369,11 +394,28 @@ func TestPlateListOKEngravesTheSelectedRecord(t *testing.T) {
 // fifteen-record bundle gets one engraved twice and another not at all.
 func TestPlateListReturnsToTheSamePageAfterEngrave(t *testing.T) {
 	recs := plateRecords(t, "G")
+	var gotRecord []byte
+	unlockEngraveHook = func(_ string, rec []byte) { gotRecord = rec }
+	t.Cleanup(func() { unlockEngraveHook = nil })
+
 	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), recs)
 	defer quit()
-	if _, ok := frame(); !ok {
+	first, ok := frame()
+	if !ok {
 		t.Fatal("the plate list produced no frame")
 	}
+	// How many entries page 1 drew. Because the page button sets sel = start,
+	// that count IS the index of page 2's selection.
+	onFirst := 0
+	for i := range recs {
+		if uiContains(first, plateLabel(recs[i], i)) {
+			onFirst++
+		}
+	}
+	if onFirst == 0 || onFirst >= len(recs) {
+		t.Fatalf("page 1 drew %d of %d entries; this test needs a genuine second page", onFirst, len(recs))
+	}
+
 	tapNavSlot(t, ctx, drawer(), Button2) // page 2
 	page2, ok := frame()
 	if !ok {
@@ -382,6 +424,23 @@ func TestPlateListReturnsToTheSamePageAfterEngrave(t *testing.T) {
 	tapNavSlot(t, ctx, drawer(), Button3) // OK on page 2's selection
 	if content, ok := pumpUntil(frame, "Choose engraving", 32); !ok {
 		t.Fatalf("OK did not reach the engrave-variant choice; got %q", content)
+	}
+
+	// THE SELECTION MUST HAVE FOLLOWED THE PAGE. Deleting `sel = start` from
+	// unlockPlateListFlow left the entire suite green -- measured, whole-diff
+	// review round 0 -- because this test only ever asserted that SOME variant
+	// screen appeared, never WHICH record it was for. With the selection left
+	// behind, OK on page 3 of a 2-of-3 cuts record 0: ~21 minutes on the wrong
+	// plate, with the right one still showing as uncut.
+	if gotRecord == nil {
+		t.Fatal("the engrave path never saw a record")
+	}
+	if string(gotRecord) != string(recs[onFirst].Record) {
+		t.Errorf("OK engraved %q, want page 2's first entry %q (index %d)",
+			gotRecord, recs[onFirst].Record, onFirst)
+	}
+	if string(gotRecord) == string(recs[0].Record) {
+		t.Errorf("OK engraved record 0 from page 2 -- the selection did not follow the page")
 	}
 	tapNavSlot(t, ctx, drawer(), Button1) // Back out of the variant choice
 	content, ok := pumpUntil(frame, "Sealed Payload", 32)

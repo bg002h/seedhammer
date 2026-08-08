@@ -67,8 +67,28 @@ func TestUnlockShowsTheHashItsCountAndItsShape(t *testing.T) {
 			if !uiContains(content, "5 records") {
 				t.Errorf("the hash screen does not show the public record count; got %q", content)
 			}
-			if !uiContains(content, tc.shape) {
+			// ANCHORED, and the anchor is the whole point: "SEALED" is a
+			// SUBSTRING of "UNSEALED" and uiContains is strings.Contains, so a
+			// bare "SEALED" needle is satisfied by a screen reading UNSEALED.
+			// Hardcoding unlockShape to return "UNSEALED" passed the ENTIRE
+			// suite -- measured, whole-diff review round 0. The gap was
+			// one-directional (the opposite mutant was caught), which is
+			// exactly why it read as correct.
+			//
+			// unlockHashBody emits "(%d records, %s):", so the leading comma
+			// binds directly to the "s": ", SEALED):" cannot match
+			// ", UNSEALED):".
+			if !uiContains(content, ", "+tc.shape+"):") {
 				t.Errorf("the hash screen does not show the %s shape; got %q", tc.shape, content)
+			}
+			// ...and the other word must be ABSENT, so neither direction can
+			// pass by accident.
+			other := "SEALED"
+			if tc.shape == "SEALED" {
+				other = "UNSEALED"
+			}
+			if uiContains(content, ", "+other+"):") {
+				t.Errorf("the hash screen shows %s on a %s payload; got %q", other, tc.shape, content)
 			}
 		})
 	}
