@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"machine"
 	"time"
+	"unsafe"
 
 	"seedhammer.com/seal"
 )
@@ -56,7 +57,34 @@ func main() {
 	// Let the CDC endpoint come up before the first line.
 	time.Sleep(3 * time.Second)
 
+	// SECOND READ, at an address that EXISTS on a 4 MB Pico 2.
+	//
+	// PayloadAddr (0x10E00000) is 14 MB into flash and only exists on a 16 MB
+	// part -- the SH2, or a Pico PLUS 2. On a plain Pico 2 (4 MB, measured:
+	// "flash size: 4096K") an XIP read there ALIASES to 0x10200000, so the
+	// first read below returns a plausible "no payload" for the wrong reason.
+	//
+	// This exercises the IDENTICAL expression at testAddr, which is inside this
+	// board's flash and clear of sealread's own image (which ends ~0x10029600).
+	// It proves the read MECHANISM -- that a fixed-address unsafe.Slice returns
+	// the real flash bytes -- which is what Phase A actually needs from
+	// hardware. The normative address itself is fixed by §5's arithmetic and by
+	// the SH2's 16 MB part, not by this board.
+	const testAddr = 0x10300000
+
 	for {
+		probe := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(testAddr))), 64)
+		fmt.Printf("sealread: probe @%#08x first 16: % x\n", testAddr, probe[:16])
+		if string(probe[:8]) == "MNEMBLOB" {
+			fmt.Printf("sealread: probe MAGIC PRESENT — parsing header at test address\n")
+			if h, herr := seal.ParseHeader(probe[:]); herr != nil {
+				fmt.Printf("sealread: probe header: %v\n", herr)
+			} else {
+				fmt.Printf("sealread: probe header OK — pub_len=%d ct_len=%d sealed=%v\n",
+					h.PubLen, h.CtLen, h.Sealed())
+			}
+		}
+
 		b, err := seal.XIPReader{}.Read()
 
 		switch {
