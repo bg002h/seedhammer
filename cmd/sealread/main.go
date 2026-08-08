@@ -137,7 +137,30 @@ func main() {
 // TinyGo 0.41.1, EXECUTES on RP2350 silicon, and reads erased flash correctly.
 // That was Phase A's one claim with no precedent anywhere in this repo.
 //
-// POSITIVE PATH STILL UNVERIFIED: no blob has yet been loaded at 0x10E00000, so
-// the read has never returned real BYTES and ParseHeader has never run on
-// target. That needs `picotool load` of a payload UF2, which needs another
-// BOOTSEL replug -- a running TinyGo app has no reset interface.
+// POSITIVE PATH VERIFIED -- at testAddr, NOT at PayloadAddr.
+//
+// Loaded a real `me seal` payload (3 public md1 records) and read it back:
+//
+//	probe @0x10300000 first 16: 4d 4e 45 4d 42 4c 4f 42 01 00 00 00 00 00 00 00
+//	probe MAGIC PRESENT — parsing header at test address
+//	probe header OK — pub_len=203 ct_len=0 sealed=false
+//
+// Byte-exact against what the host wrote, and pub_len=203 is independently
+// right: 3 records x 67 chars + 2 LF separators. So the read MECHANISM and
+// ParseHeader both work on silicon.
+//
+// WHAT REMAINS UNVERIFIED, and it is not a small caveat: the read at the
+// NORMATIVE PayloadAddr (0x10E00000). That address is 14 MB into flash and this
+// Pico 2 has 4 MB ("flash size: 4096K", measured), so the region does not exist
+// here. picotool refuses the load outright --
+//
+//	ERROR: File size 0x100 starting at 0xe00000 is too big to fit in
+//	       flash size 0x400000
+//
+// -- and an XIP read there silently ALIASES to 0x10200000. The FIRST read in
+// main() therefore reports a plausible "no payload" for the WRONG REASON on
+// this board. Do not read that negative result as evidence about 0x10E00000.
+//
+// Closing that gap needs a 16 MB part: a Pico PLUS 2 (which is why the fork's
+// own build target is pico-plus2) or the SH2 itself. The PBKDF2 rate on an
+// RP2350B is likewise still open -- this board is an RP2350A.
