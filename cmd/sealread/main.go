@@ -34,6 +34,12 @@
 // Then read the output. This kernel has no cdc_acm, so there is no
 // /dev/ttyACM*: use scripts/cdcread.py from mnemonic-engrave.
 //
+// LIKE cmd/kdfbench, THIS IS TINYGO-ONLY. It imports `machine`, which is not in
+// the host Go standard library, so `go build`, `go vet` and `go test ./...`
+// cannot touch it — they report "package machine is not in std [setup failed]".
+// That means the repo's sanctioned-green baseline is now TWO setup failures,
+// kdfbench and sealread, not one. Only `tinygo build -target pico2` compiles it.
+//
 // It prints in a LOOP on purpose. TinyGo's CDC drops output when no host is
 // attached, so a one-shot print is simply lost.
 package main
