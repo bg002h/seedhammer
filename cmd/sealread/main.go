@@ -95,3 +95,21 @@ func main() {
 		_ = machine.Serial
 	}
 }
+
+// ON-TARGET RESULT — 2026-08-07, Pico 2, chipid 0x66d3d60ff20abf2f
+//
+// NEGATIVE PATH VERIFIED. Flashed signed with rehearsal-work/my-key.pem and
+// booted (secure boot: 1, so booting at all proves the OTP trusts that key --
+// and picotool showed the PREVIOUS image carried the same pubkey 9EC00C33...).
+// Output, read with scripts/cdcread.py:
+//
+//	sealread: no payload at 0x10e00000 (magic absent) — this is the CLEAN state
+//
+// So seal.XIPReader's unsafe.Slice over a fixed XIP address COMPILES under
+// TinyGo 0.41.1, EXECUTES on RP2350 silicon, and reads erased flash correctly.
+// That was Phase A's one claim with no precedent anywhere in this repo.
+//
+// POSITIVE PATH STILL UNVERIFIED: no blob has yet been loaded at 0x10E00000, so
+// the read has never returned real BYTES and ParseHeader has never run on
+// target. That needs `picotool load` of a payload UF2, which needs another
+// BOOTSEL replug -- a running TinyGo app has no reset interface.
