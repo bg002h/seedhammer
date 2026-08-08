@@ -431,3 +431,22 @@ func insertAt(src []string, i int, s string) []string {
 	out = append(out, s)
 	return append(out, src[i:]...)
 }
+
+// wipe() itself must actually zero. This does NOT cover its call sites in
+// AdmitSection — `out` is never returned on those paths, so no test can observe
+// them without unsafe, and deleting the calls leaves the suite green. See the
+// comment on wipe. A no-op wipe is caught here; a removed call is not.
+func TestWipeZeroesAPartialResult(t *testing.T) {
+	recs := []AdmittedRecord{
+		{Record: []byte("ms10entrsqqg5y2z9pzs3gg"), Class: ClassCodex32Secret},
+		{Record: []byte("bacon bacon bacon"), Class: ClassMnemonic},
+	}
+	wipe(recs)
+	for i, r := range recs {
+		for j, b := range r.Record {
+			if b != 0 {
+				t.Fatalf("record %d byte %d = %#x after wipe, want 0", i, j, b)
+			}
+		}
+	}
+}

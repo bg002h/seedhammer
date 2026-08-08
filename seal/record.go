@@ -336,7 +336,14 @@ func decodePublicSet(records []string) error {
 }
 
 // wipe zeroes records already copied into a partial result that is about to be
-// discarded. Whole-payload rejection means the caller never sees them, but they
+// discarded.
+//
+// ITS CALL SITES ARE NOT REGRESSION-TESTED, and cannot cheaply be: `out` is
+// never returned on the paths that call this, so no test can observe those
+// bytes through the public API without `unsafe`. Deleting both calls leaves the
+// whole suite green — measured. TestWipeZeroesAPartialResult below covers this
+// function's own behaviour, so a no-op `wipe` is caught; a REMOVED call is not.
+// Saying so beats a contorted test that pretends otherwise. Whole-payload rejection means the caller never sees them, but they
 // are copies of possibly-secret bytes and clearing them costs nothing.
 func wipe(recs []AdmittedRecord) {
 	for _, r := range recs {
