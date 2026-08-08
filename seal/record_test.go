@@ -52,7 +52,7 @@ func TestRefusesAnUppercaseRecord(t *testing.T) {
 		{"encrypted", SectionEncrypted, []string{upperMS}},
 		{"encrypted md1", SectionEncrypted, []string{upperMD}},
 	} {
-		got, err := AdmitSection(c.records, c.section)
+		got, err := AdmitSection(bs(c.records), c.section)
 		if !errors.Is(err, ErrNotLowercase) {
 			t.Errorf("%s: uppercase record must be refused, got %v", c.name, err)
 		}
@@ -74,10 +74,10 @@ func TestPublicSectionRefusesDebugCommand(t *testing.T) {
 	if len(recs) != 6 {
 		t.Fatalf("the section must be 6 records for this to bind, got %d", len(recs))
 	}
-	if Classify(recs[2]) != ClassDebugCommand {
-		t.Fatalf("record 2 must classify as a debug command, got %v", Classify(recs[2]))
+	if Classify([]byte(recs[2])) != ClassDebugCommand {
+		t.Fatalf("record 2 must classify as a debug command, got %v", Classify([]byte(recs[2])))
 	}
-	got, err := AdmitSection(recs, SectionPublic)
+	got, err := AdmitSection(bs(recs), SectionPublic)
 	if !errors.Is(err, ErrRecordNotPermitted) {
 		t.Errorf("a debug command must reject the payload, got %v", err)
 	}
@@ -88,7 +88,7 @@ func TestPublicSectionRefusesDebugCommand(t *testing.T) {
 		t.Errorf("%d records admitted on a rejected payload — nothing may be engraved", len(got))
 	}
 	// The encrypted section is not a loophole either.
-	if _, err := AdmitSection([]string{"command: lock-boot"}, SectionEncrypted); !errors.Is(err, ErrRecordNotPermitted) {
+	if _, err := AdmitSection(bs([]string{"command: lock-boot"}), SectionEncrypted); !errors.Is(err, ErrRecordNotPermitted) {
 		t.Errorf("a debug command must be refused in the encrypted section too, got %v", err)
 	}
 }
@@ -100,11 +100,11 @@ func TestPublicSectionRefusesAddressAndDescriptor(t *testing.T) {
 		addr = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 		desc = "wpkh([00000000/84h/0h/0h]xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V/<0;1>/*)"
 	)
-	if got := Classify(addr); got != ClassAddress {
-		t.Errorf("Classify(address) = %v, want %v", got, ClassAddress)
+	if got := Classify([]byte(addr)); got != ClassAddress {
+		t.Errorf("Classify([]byte(address)) = %v, want %v", got, ClassAddress)
 	}
-	if got := Classify(desc); got != ClassDescriptor {
-		t.Errorf("Classify(descriptor) = %v, want %v", got, ClassDescriptor)
+	if got := Classify([]byte(desc)); got != ClassDescriptor {
+		t.Errorf("Classify([]byte(descriptor)) = %v, want %v", got, ClassDescriptor)
 	}
 	// Bind the allow-list branch directly. Neither classification is permitted
 	// in EITHER section, which is what makes this an allow-list: a deny-list
@@ -121,7 +121,7 @@ func TestPublicSectionRefusesAddressAndDescriptor(t *testing.T) {
 	// An address is all-lowercase, so it reaches the allow-list and is
 	// refused there — the end-to-end path this test exists for.
 	for _, sec := range []Section{SectionPublic, SectionEncrypted} {
-		got, err := AdmitSection(insertAt(d.Public, 2, addr), sec)
+		got, err := AdmitSection(bs(insertAt(d.Public, 2, addr)), sec)
 		if !errors.Is(err, ErrRecordNotPermitted) {
 			t.Errorf("%s section, address: got %v", sec, err)
 		}
@@ -135,7 +135,7 @@ func TestPublicSectionRefusesAddressAndDescriptor(t *testing.T) {
 	// rejected with nothing admitted, which is the guarantee §11.2 asks for;
 	// the allow-list branch itself is bound by the permitted() table above.
 	for _, sec := range []Section{SectionPublic, SectionEncrypted} {
-		got, err := AdmitSection(insertAt(d.Public, 2, desc), sec)
+		got, err := AdmitSection(bs(insertAt(d.Public, 2, desc)), sec)
 		if err == nil {
 			t.Errorf("%s section: an output descriptor must reject the payload", sec)
 		}
@@ -153,10 +153,10 @@ func TestPublicSectionRefusesAddressAndDescriptor(t *testing.T) {
 func TestPublicSectionRefusesASecret(t *testing.T) {
 	d := vectorNamed(t, "D")
 	ms1 := d.Secret[0]
-	if got := Classify(ms1); got != ClassCodex32Secret {
-		t.Fatalf("Classify(ms1) = %v, want %v", got, ClassCodex32Secret)
+	if got := Classify([]byte(ms1)); got != ClassCodex32Secret {
+		t.Fatalf("Classify([]byte(ms1)) = %v, want %v", got, ClassCodex32Secret)
 	}
-	got, err := AdmitSection(insertAt(d.Public, 2, ms1), SectionPublic)
+	got, err := AdmitSection(bs(insertAt(d.Public, 2, ms1)), SectionPublic)
 	if !errors.Is(err, ErrRecordNotPermitted) {
 		t.Errorf("an ms1 in the public section must reject the payload, got %v", err)
 	}
@@ -166,18 +166,18 @@ func TestPublicSectionRefusesASecret(t *testing.T) {
 	// ...and the same record IS admitted in the encrypted section (§12 item 6:
 	// ms1 is admitted encrypted and refused in the clear, deliberately
 	// separable).
-	if _, err := AdmitSection([]string{ms1}, SectionEncrypted); err != nil {
+	if _, err := AdmitSection(bs([]string{ms1}), SectionEncrypted); err != nil {
 		t.Errorf("ms1 must be admitted in the encrypted section: %v", err)
 	}
 	// So must a BIP-39 mnemonic, and it must NOT be admitted in public.
 	mn := vectorNamed(t, "A").Secret[0]
-	if got := Classify(mn); got != ClassMnemonic {
-		t.Fatalf("Classify(mnemonic) = %v, want %v", got, ClassMnemonic)
+	if got := Classify([]byte(mn)); got != ClassMnemonic {
+		t.Fatalf("Classify([]byte(mnemonic)) = %v, want %v", got, ClassMnemonic)
 	}
-	if _, err := AdmitSection([]string{mn}, SectionEncrypted); err != nil {
+	if _, err := AdmitSection(bs([]string{mn}), SectionEncrypted); err != nil {
 		t.Errorf("a BIP-39 mnemonic must be admitted in the encrypted section: %v", err)
 	}
-	if _, err := AdmitSection([]string{mn}, SectionPublic); !errors.Is(err, ErrRecordNotPermitted) {
+	if _, err := AdmitSection(bs([]string{mn}), SectionPublic); !errors.Is(err, ErrRecordNotPermitted) {
 		t.Errorf("a BIP-39 mnemonic in the public section must be refused, got %v", err)
 	}
 }
@@ -187,7 +187,7 @@ func TestPublicSectionRefusesASecret(t *testing.T) {
 func TestDecodesACompleteCardSet(t *testing.T) {
 	for _, name := range []string{"D", "E", "G"} {
 		v := vectorNamed(t, name)
-		got, err := AdmitSection(v.Public, SectionPublic)
+		got, err := AdmitSection(bs(v.Public), SectionPublic)
 		if err != nil {
 			t.Errorf("%s: the full card set must decode: %v", name, err)
 		}
@@ -198,7 +198,7 @@ func TestDecodesACompleteCardSet(t *testing.T) {
 			if a.Class != ClassMDMK {
 				t.Errorf("%s record %d classified %v, want %v", name, i, a.Class, ClassMDMK)
 			}
-			if a.Record != v.Public[i] {
+			if string(a.Record) != v.Public[i] {
 				t.Errorf("%s record %d was altered", name, i)
 			}
 		}
@@ -217,7 +217,7 @@ func TestRefusesAnIncompleteCardSet(t *testing.T) {
 		{"two md1 chunks of three", d.Public[2:4]},
 		{"one mk1 chunk of two", d.Public[0:1]},
 	} {
-		got, err := AdmitSection(c.records, SectionPublic)
+		got, err := AdmitSection(bs(c.records), SectionPublic)
 		if !errors.Is(err, ErrUndecodableCardSet) {
 			t.Errorf("%s must be refused, got %v", c.name, err)
 		}
@@ -236,10 +236,10 @@ func TestRefusesBCHValidButUndecodable(t *testing.T) {
 	if !codex32.ValidMD(smuggledMD1) {
 		t.Fatal("premise broken: the BCH layer must ACCEPT this record — that is the point")
 	}
-	if got := Classify(smuggledMD1); got != ClassMDMK {
-		t.Fatalf("Classify(smuggled) = %v, want %v — the allow-list alone lets it through", got, ClassMDMK)
+	if got := Classify([]byte(smuggledMD1)); got != ClassMDMK {
+		t.Fatalf("Classify([]byte(smuggled)) = %v, want %v — the allow-list alone lets it through", got, ClassMDMK)
 	}
-	got, err := AdmitSection([]string{smuggledMD1}, SectionPublic)
+	got, err := AdmitSection(bs([]string{smuggledMD1}), SectionPublic)
 	if !errors.Is(err, ErrUndecodableCardSet) {
 		t.Errorf("the decode step must reject it, got %v", err)
 	}
@@ -287,7 +287,7 @@ func TestGroupsByHRPAndChunkSetID(t *testing.T) {
 		}
 	}
 	// ...and every group reassembles and decodes, with no leftovers.
-	if _, err := AdmitSection(g.Public, SectionPublic); err != nil {
+	if _, err := AdmitSection(bs(g.Public), SectionPublic); err != nil {
 		t.Errorf("vector G's public section must be admitted: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestDecodesTwoDistinctNonChunkedCards(t *testing.T) {
 			t.Errorf("card %+v holds %d records, want 1", k, len(groups[k]))
 		}
 	}
-	got, err := AdmitSection(recs, SectionPublic)
+	got, err := AdmitSection(bs(recs), SectionPublic)
 	if err != nil {
 		t.Errorf("two non-chunked md1 cards must decode: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestDecodesTwoDistinctNonChunkedCards(t *testing.T) {
 	}
 	// A non-chunked card mixed in with a chunked set keeps its own group.
 	d := vectorNamed(t, "D")
-	if _, err := AdmitSection(append([]string{singleMD1a}, d.Public...), SectionPublic); err != nil {
+	if _, err := AdmitSection(bs(append([]string{singleMD1a}, d.Public...)), SectionPublic); err != nil {
 		t.Errorf("a single-string card alongside D's chunked cards must decode: %v", err)
 	}
 }
@@ -356,14 +356,14 @@ func TestDecodesTwoDistinctNonChunkedCards(t *testing.T) {
 func TestRefusesAnOverlongRecord(t *testing.T) {
 	atCap := codex32.AssembleMD1(make([]byte, 80)) // 93 data symbols — legal
 	over := codex32.AssembleMD1(make([]byte, 81))  // 94 data symbols — refused
-	if got := Classify(atCap); got != ClassMDMK {
+	if got := Classify([]byte(atCap)); got != ClassMDMK {
 		t.Errorf("a 93-symbol codeword must still classify as md1/mk1, got %v", got)
 	}
-	if got := Classify(over); got != ClassUnknown {
+	if got := Classify([]byte(over)); got != ClassUnknown {
 		t.Errorf("a 94-symbol codeword must not classify as md1/mk1, got %v", got)
 	}
 	d := vectorNamed(t, "D")
-	got, err := AdmitSection(insertAt(d.Public, 2, over), SectionPublic)
+	got, err := AdmitSection(bs(insertAt(d.Public, 2, over)), SectionPublic)
 	if !errors.Is(err, ErrRecordNotPermitted) {
 		t.Errorf("an over-long md1 must reject the payload, got %v", err)
 	}
@@ -389,7 +389,7 @@ func TestLeftoverRecordRejects(t *testing.T) {
 		t.Fatal("no md1 record found in vector G")
 	}
 	recs := append(append([]string(nil), d.Public...), intruder)
-	got, err := AdmitSection(recs, SectionPublic)
+	got, err := AdmitSection(bs(recs), SectionPublic)
 	if !errors.Is(err, ErrUndecodableCardSet) {
 		t.Errorf("a leftover record must reject the payload, got %v", err)
 	}
@@ -414,7 +414,7 @@ func TestClassifyMirrorsScanBranchOrder(t *testing.T) {
 		{"", ClassUnknown},
 		{"not a record at all", ClassUnknown},
 	} {
-		if got := Classify(c.in); got != c.want {
+		if got := Classify([]byte(c.in)); got != c.want {
 			t.Errorf("Classify(%.24q) = %v, want %v", c.in, got, c.want)
 		}
 	}

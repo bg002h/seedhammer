@@ -115,3 +115,14 @@ func TestVectorsAreLoadable(t *testing.T) {
 	}
 	t.Logf("loaded %d vectors: %s", len(vs), summary)
 }
+
+// bs converts a fixture's []string to the [][]byte the pipeline now takes.
+// AdmittedRecord.Record is []byte so Payload.Wipe can zero it; a Go string
+// cannot be zeroed (§10.2 step 10).
+func bs(ss []string) [][]byte {
+	out := make([][]byte, len(ss))
+	for i, s := range ss {
+		out[i] = []byte(s)
+	}
+	return out
+}

@@ -39,6 +39,27 @@ type Payload struct {
 	// payload would teach the operator it is furniture (§10.2 step 3).
 	Hash    [16]byte
 	HasHash bool
+
+	// nPub carries the public record count from Inspect to Unlock, where the
+	// §6.4 cross-section total is checked. Unexported: it is plumbing, not API.
+	nPub int
+}
+
+// Wipe zeroes every admitted record's bytes. Phase B MUST call it on every exit
+// path from a session (§10.2 step 10, §10.2.2). It is why AdmittedRecord.Record
+// is []byte and not string: a Go string cannot be zeroed, so a secret returned
+// as one is unwipeable by construction and §10.2.2's "each record is wiped as
+// its plate leaves the screen" would have no implementation at all.
+//
+// Same caveat as the rest of the firmware: TinyGo's GC may copy or retain, so
+// this is defence in depth, not a guarantee.
+func (p *Payload) Wipe() {
+	for _, r := range p.Secret {
+		clear(r.Record)
+	}
+	for _, r := range p.Public {
+		clear(r.Record)
+	}
 }
 
 // NeedsPassphrase reports whether the payload carries an encrypted section.
@@ -65,6 +86,34 @@ func NormalisePassphrase(s string) string {
 // passphrase is used only when the header says something is encrypted; when
 // ct_len == 0 it is ignored entirely and no KDF runs.
 func (o Opener) Open(blob []byte, passphrase string) (*Payload, error) {
+	p, err := o.Inspect(blob)
+	if err != nil {
+		return nil, err
+	}
+	if !p.NeedsPassphrase() {
+		return p, nil
+	}
+	if err := o.Unlock(blob, p, passphrase); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Inspect runs §10.2 steps 1-3 ONLY: parse, bound-check, split, allow-list and
+// card-set-decode the public section, and compute the §6.6 hash. It needs NO
+// passphrase and runs NO KDF.
+//
+// This exists because §10.2 step 3 requires the hash displayed BEFORE word
+// entry (step 5), and step 8 requires it kept on screen through the retry loop.
+// A single Open that returns nil on a tag mismatch cannot deliver either: the
+// hash would only ever be reachable AFTER a correct passphrase and a ~31 s KDF.
+// Phase B calls Inspect, shows the hash, takes the words, then calls Unlock —
+// and still holds the Payload, with its hash, when Unlock fails.
+//
+// Do NOT re-implement steps 1-3 in Phase B. Two code paths that must agree on
+// the public record set is exactly the divergence one headless entry point
+// exists to eliminate, and §6.6 is the only control an unsealed payload has.
+func (o Opener) Inspect(blob []byte) (*Payload, error) {
 	// Step 1 — parse and bound-check. EVERY §6.2 bound is checked here, before
 	// any allocation or KDF work.
 	h, err := ParseHeader(blob)
@@ -107,13 +156,35 @@ func (o Opener) Open(blob []byte, passphrase string) (*Payload, error) {
 		// never read from the payload. There is deliberately no hash field on
 		// the wire: an attacker who rewrites the records rewrites the hash
 		// beside them.
-		p.Hash = PublicDataHash(recs, h.Sealed())
+		// Public records only — cleartext by definition, so the copy is harmless.
+		strs := make([]string, len(recs))
+		for i, r := range recs {
+			strs[i] = string(r)
+		}
+		p.Hash = PublicDataHash(strs, h.Sealed())
 		p.HasHash = true
 	}
 
+	p.nPub = nPub
+	return p, nil
+}
+
+// Unlock runs §10.2 steps 5-9 against a Payload that Inspect already produced.
+// On failure p is left intact — its Header, Public records and Hash remain
+// valid, which is what lets Phase B keep the hash on screen through the retry
+// loop (§10.2 step 8).
+func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
+	h := p.Header
+	nPub := p.nPub
+	end := HeaderLen + int(h.PubLen) + int(h.CtLen)
+	if h.Sealed() {
+		end += TagLen
+	}
+	split := HeaderLen + int(h.PubLen)
+
 	// Step 4 — nothing encrypted: stop here. No passphrase, no KDF.
 	if !h.Sealed() {
-		return p, nil
+		return nil
 	}
 
 	// Steps 7-8 — derive, then open over AAD = header ‖ public section (§6.1a).
@@ -126,33 +197,40 @@ func (o Opener) Open(blob []byte, passphrase string) (*Payload, error) {
 		derive = DeriveKey
 	}
 	key := derive(NormalisePassphrase(passphrase), h.Salt[:], int(h.Iterations))
+	// §10.2 step 10: wipe the derived key on EVERY exit path. Same honest caveat
+	// as the rest of the firmware — TinyGo's GC may copy or retain, so this is
+	// defence in depth, not a guarantee.
+	defer clear(key)
 	plaintext, err := Open(key, h.IV[:], blob[:split], blob[split:end])
 	if err != nil {
 		// Fail closed. The error is ErrAuthentication and Phase B must offer
 		// BOTH readings — "wrong passphrase, or this payload has been altered"
 		// — keeping the hash on screen through the retry loop.
-		return nil, err
+		return err
 	}
 
 	// Step 9 — split and allow-list the decrypted section. "Authenticated"
 	// means "sealed by whoever knows the passphrase", which is not the same as
 	// "safe" (§6.5).
+	// The plaintext buffer is ours to own; the records copied out of it are
+	// wiped by Payload.Wipe, which Phase B owns.
+	defer clear(plaintext)
 	recs, nSec, err := SplitSection(plaintext)
 	if err != nil {
-		return nil, describeRecordCount(err, nPub, nSec)
+		return describeRecordCount(err, nPub, nSec)
 	}
 	// §6.4's 1..24 cap is over the TOTAL across BOTH sections, which
 	// SplitSection cannot see — this is the only place the cross-section total
 	// is known, which is also why the count comes back out of band.
 	if total := nPub + nSec; total > MaxRecords {
-		return nil, recordCountError(total, nPub, nSec)
+		return recordCountError(total, nPub, nSec)
 	}
 	admitted, err := AdmitSection(recs, SectionEncrypted)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	p.Secret = admitted
-	return p, nil
+	return nil
 }
 
 // describeRecordCount turns SplitSection's preallocated sentinel into the

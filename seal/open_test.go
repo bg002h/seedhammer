@@ -107,7 +107,7 @@ func TestOpenDrivesEveryVector(t *testing.T) {
 				t.Fatalf("%d public records, vector declares %d", len(p.Public), len(v.Public))
 			}
 			for i, a := range p.Public {
-				if a.Record != v.Public[i] {
+				if string(a.Record) != v.Public[i] {
 					t.Errorf("public record %d:\n got %q\nwant %q", i, a.Record, v.Public[i])
 				}
 			}
@@ -115,7 +115,7 @@ func TestOpenDrivesEveryVector(t *testing.T) {
 				t.Fatalf("%d secret records, vector declares %d", len(p.Secret), len(v.Secret))
 			}
 			for i, a := range p.Secret {
-				if a.Record != v.Secret[i] {
+				if string(a.Record) != v.Secret[i] {
 					t.Errorf("secret record %d:\n got %q\nwant %q", i, a.Record, v.Secret[i])
 				}
 			}
@@ -173,7 +173,7 @@ func TestVectorCClassificationSequence(t *testing.T) {
 	}
 	// The HRPs are also checkable, and pin the sequence to real content.
 	for i, prefix := range []string{"ms1", "mk1", "mk1", "md1", "md1", "md1"} {
-		if !strings.HasPrefix(p.Secret[i].Record, prefix) {
+		if !strings.HasPrefix(string(p.Secret[i].Record), prefix) {
 			t.Errorf("record %d does not start with %s", i, prefix)
 		}
 	}
@@ -261,7 +261,7 @@ func TestTotalRecordCapSpansBothSections(t *testing.T) {
 		t.Fatalf("the public half must be 20 records, got %d", len(public))
 	}
 	// Prove the premise: 20 public records alone are legal and decodable.
-	if _, err := AdmitSection(public, SectionPublic); err != nil {
+	if _, err := AdmitSection(bs(public), SectionPublic); err != nil {
 		t.Fatalf("the 20 public records must decode, or this test passes for the wrong reason: %v", err)
 	}
 
@@ -361,7 +361,7 @@ func TestReorderedPublicSectionFailsAtTheTag(t *testing.T) {
 	// md1 card in front of the mk1 card: intra-card order is untouched, so
 	// every group still reassembles.
 	reordered := append(append([]string(nil), d.Public[2:]...), d.Public[:2]...)
-	if _, err := AdmitSection(reordered, SectionPublic); err != nil {
+	if _, err := AdmitSection(bs(reordered), SectionPublic); err != nil {
 		t.Fatalf("the reordered section must still be admissible, or this test "+
 			"fires at the wrong layer: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestSpaceGroupedRecordsRejectTheBundle(t *testing.T) {
 		"md1fv9w jpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3",
 		"md1fv9w-jpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3",
 	} {
-		if Classify(bad) != ClassUnknown {
+		if Classify([]byte(bad)) != ClassUnknown {
 			t.Errorf("%q must not classify as a card", bad)
 		}
 		blob := sealForTest(t, replaceAt(d.Public, 2, bad), d.Secret, *d.Passphrase,
@@ -528,7 +528,111 @@ func TestZeroOpenerUsesTheRealKDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Opener{}.Open: %v", err)
 	}
-	if len(p.Secret) != 1 || p.Secret[0].Record != a.Secret[0] {
+	if len(p.Secret) != 1 || string(p.Secret[0].Record) != a.Secret[0] {
 		t.Error("the zero Opener must decrypt exactly as the instrumented one does")
+	}
+}
+
+// insertPub returns vector D's public records with extra spliced in at index 2.
+func insertPub(pub []string, extra string) []string {
+	out := append([]string(nil), pub[:2]...)
+	out = append(out, extra)
+	return append(out, pub[2:]...)
+}
+
+// THE WIRING TEST. The three highest-consequence negatives in this package were
+// asserted only against AdmitSection in isolation, so which Section constant
+// Opener.Open passes was untested — and the §6.3 card-set decode is gated on
+// that same constant.
+//
+// Measured: changing the ONE token `SectionPublic` to `SectionEncrypted` in
+// open.go left the entire 100-test suite green while the public section
+// happily admitted an ms1 seed, a raw BIP-39 mnemonic and a BCH-valid-but-
+// undecodable smuggled record. That is the feature's central safety property —
+// "what stops a seed reaching steel in the clear" — with zero coverage at the
+// only layer Phase B calls.
+func TestOpenRefusesSecretsInThePublicSection(t *testing.T) {
+	d := vectorNamed(t, "D")
+	mnemonic := strings.TrimSpace(strings.Repeat("bacon ", 24))
+
+	for _, c := range []struct {
+		name  string
+		extra string
+	}{
+		{"ms1 seed", d.Secret[0]},
+		{"bip39 mnemonic", mnemonic},
+		{"bch-valid but undecodable", smuggledMD1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			blob := sealForTest(t, insertPub(d.Public, c.extra), d.Secret,
+				*d.Passphrase, mustHex(t, d.SaltHex), mustHex(t, d.IVHex), uint32(d.Iterations))
+			p, err := Opener{}.Open(blob, *d.Passphrase)
+			if err == nil {
+				t.Fatalf("Open ADMITTED %s into the public section — a seed would reach steel in the clear", c.name)
+			}
+			if p != nil {
+				t.Errorf("rejection must be whole-payload: got a non-nil Payload with %d public records", len(p.Public))
+			}
+		})
+	}
+}
+
+// Inspect must yield the §6.6 hash with NO passphrase and NO KDF (§10.2 step 3
+// requires it displayed BEFORE word entry), and the Payload must survive a
+// failed Unlock so Phase B can keep the hash on screen through the retry loop
+// (§10.2 step 8).
+func TestInspectYieldsTheHashWithoutAPassphrase(t *testing.T) {
+	d := vectorNamed(t, "D")
+	blob := sealForTest(t, d.Public, d.Secret, *d.Passphrase,
+		mustHex(t, d.SaltHex), mustHex(t, d.IVHex), uint32(d.Iterations))
+
+	calls := 0
+	o := Opener{KDF: func(p string, s []byte, n int) []byte { calls++; return DeriveKey(p, s, n) }}
+
+	p, err := o.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("Inspect ran the KDF %d times; §10.2 step 3 precedes word entry", calls)
+	}
+	if !p.HasHash || hex.EncodeToString(p.Hash[:]) != *d.PubhashSealed {
+		t.Fatalf("Inspect hash = %x, vector D declares %s", p.Hash, *d.PubhashSealed)
+	}
+	want := p.Hash
+
+	// A wrong passphrase must NOT cost the hash.
+	if err := o.Unlock(blob, p, strings.TrimSpace(strings.Repeat("zoo ", 12))); err == nil {
+		t.Fatal("Unlock accepted a wrong passphrase")
+	}
+	if p.Hash != want || !p.HasHash {
+		t.Error("the hash must survive a failed Unlock — §10.2 step 8 keeps it on screen through the retry loop")
+	}
+	if len(p.Secret) != 0 {
+		t.Error("a failed Unlock must leave no secret records behind")
+	}
+}
+
+// Payload.Wipe must actually zero the secret bytes. AdmittedRecord.Record is
+// []byte precisely so this is possible; a Go string could not be zeroed and
+// §10.2 step 10 would be unimplementable for the one thing that most needs it.
+func TestWipeZeroesSecretRecords(t *testing.T) {
+	d := vectorNamed(t, "D")
+	blob := sealForTest(t, d.Public, d.Secret, *d.Passphrase,
+		mustHex(t, d.SaltHex), mustHex(t, d.IVHex), uint32(d.Iterations))
+	p, err := Opener{}.Open(blob, *d.Passphrase)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if len(p.Secret) == 0 || len(p.Secret[0].Record) == 0 {
+		t.Fatal("no secret record to wipe")
+	}
+	p.Wipe()
+	for i, r := range p.Secret {
+		for j, b := range r.Record {
+			if b != 0 {
+				t.Fatalf("secret record %d byte %d = %#x after Wipe, want 0", i, j, b)
+			}
+		}
 	}
 }

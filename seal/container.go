@@ -46,7 +46,7 @@ var (
 // materialises ~8192 slice headers — ~98 KB on a 32-bit target, a fifth of the
 // free heap, transiently. With ct_len == 0 that is reachable with no passphrase
 // and no KDF at all.
-func SplitSection(b []byte) ([]string, int, error) {
+func SplitSection(b []byte) ([][]byte, int, error) {
 	// Pass 1: count separators only, and reject on the count. Allocation-free
 	// by construction — no bytes.Count, no split, no formatted error.
 	n := 1
@@ -62,7 +62,7 @@ func SplitSection(b []byte) ([]string, int, error) {
 	// Pass 2: bound each record and reject CR. Every byte of b lies in exactly
 	// one record, because LF is the only separator — so scanning the records
 	// for 0x0D is "a 0x0D anywhere".
-	recs := make([]string, 0, n)
+	recs := make([][]byte, 0, n)
 	start := 0
 	for i := 0; i <= len(b); i++ {
 		if i < len(b) && b[i] != '\n' {
@@ -85,7 +85,7 @@ func SplitSection(b []byte) ([]string, int, error) {
 					ErrCarriageReturn, idx)
 			}
 		}
-		recs = append(recs, string(rec))
+		recs = append(recs, rec)
 		start = i + 1
 	}
 	return recs, n, nil

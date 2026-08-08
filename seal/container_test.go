@@ -27,7 +27,7 @@ func TestSplitSectionRoundTripsAVectorSection(t *testing.T) {
 			t.Fatalf("%s: split into %d records, want %d", name, len(recs), len(v.Public))
 		}
 		for i := range recs {
-			if recs[i] != v.Public[i] {
+			if string(recs[i]) != v.Public[i] {
 				t.Errorf("%s record %d:\n got %q\nwant %q", name, i, recs[i], v.Public[i])
 			}
 		}
@@ -123,7 +123,7 @@ func TestRejectsEmptyRecords(t *testing.T) {
 // A single record with no separator at all is a legal section.
 func TestSplitsASingleRecord(t *testing.T) {
 	recs, n, err := SplitSection([]byte("md1abc"))
-	if err != nil || n != 1 || len(recs) != 1 || recs[0] != "md1abc" {
+	if err != nil || n != 1 || len(recs) != 1 || string(recs[0]) != "md1abc" {
 		t.Errorf("single record: recs=%q n=%d err=%v", recs, n, err)
 	}
 }

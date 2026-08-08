@@ -1,9 +1,9 @@
 package seal
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 
 	btcaddr "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -92,7 +92,10 @@ func (c Classification) String() string {
 // classification that admitted it. Phase B labels each plate by this — never by
 // anything the sealer asserted.
 type AdmittedRecord struct {
-	Record string
+	// Record is []byte, not string, so Payload.Wipe can zero it. A Go string
+	// cannot be zeroed, which would make §10.2 step 10 unimplementable for the
+	// one thing that most needs it.
+	Record []byte
 	Class  Classification
 }
 
@@ -105,14 +108,19 @@ type AdmittedRecord struct {
 const cmdPrefix = "command: "
 
 // Classify reproduces gui/scan.go's Scan branch order for a single record.
-func Classify(s string) Classification {
-	if strings.HasPrefix(s, cmdPrefix) {
+func Classify(b []byte) Classification {
+	// codex32.New / ValidMD / ValidMK / DecodeAddress take a string. Converting
+	// once here is a copy of the record, which is why Classify is only ever
+	// called on records the caller already holds — the copy's lifetime is this
+	// function, and the wipeable original stays in AdmittedRecord.Record.
+	s := string(b)
+	if bytes.HasPrefix(b, []byte(cmdPrefix)) {
 		return ClassDebugCommand
 	}
-	if _, err := bip39.Parse([]byte(s)); err == nil {
+	if _, err := bip39.Parse(b); err == nil {
 		return ClassMnemonic
 	}
-	if _, err := nonstandard.OutputDescriptor([]byte(s)); err == nil {
+	if _, err := nonstandard.OutputDescriptor(b); err == nil {
 		return ClassDescriptor
 	}
 	if _, err := codex32.New(s); err == nil {
@@ -147,7 +155,7 @@ func permitted(section Section, c Classification) bool {
 // AdmitSection runs all three passes over one section's records. On any failure
 // it returns NO records: rejection is whole-payload, and an empty result is
 // Phase A's expression of "nothing was engraved".
-func AdmitSection(records []string, section Section) ([]AdmittedRecord, error) {
+func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 	out := make([]AdmittedRecord, 0, len(records))
 	for i, r := range records {
 		// Pass 1 — §6.4's all-lowercase rule, BEFORE classification, binding
@@ -166,7 +174,11 @@ func AdmitSection(records []string, section Section) ([]AdmittedRecord, error) {
 			return nil, fmt.Errorf("%w: record %d classifies as %s, which the %s section does not permit",
 				ErrRecordNotPermitted, i, c, section)
 		}
-		out = append(out, AdmittedRecord{Record: r, Class: c})
+		// COPY, not a slice into the caller's buffer. Unlock does
+		// `defer clear(plaintext)` and SplitSection slices into that plaintext, so
+		// retaining r would hand Phase B records that zero themselves the moment
+		// Unlock returns. The copy is also what Payload.Wipe owns.
+		out = append(out, AdmittedRecord{Record: append([]byte(nil), r...), Class: c})
 	}
 	// Pass 3 — §6.3's card-set decode, once per GROUP, public section only.
 	// ValidMD/ValidMK never open the payload, so classification is not
@@ -174,7 +186,13 @@ func AdmitSection(records []string, section Section) ([]AdmittedRecord, error) {
 	// entropy in the cleartext section, where `picotool save` reaches it with
 	// no passphrase at all.
 	if section == SectionPublic {
-		if err := decodePublicSet(records); err != nil {
+		// Public records are cleartext by definition, so stringifying them
+		// copies nothing that needs wiping.
+		strs := make([]string, len(records))
+		for i, r := range records {
+			strs[i] = string(r)
+		}
+		if err := decodePublicSet(strs); err != nil {
 			return nil, err
 		}
 	}
@@ -189,9 +207,9 @@ func AdmitSection(records []string, section Section) ([]AdmittedRecord, error) {
 // everything admissible — and the fork already records that the unicode package
 // costs ~55 KB of RAM on this target (gui/scan.go:62), which is real money for
 // a check that cannot observe the difference.
-func firstUpperASCII(s string) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 'A' && s[i] <= 'Z' {
+func firstUpperASCII(b []byte) int {
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
 			return i
 		}
 	}
