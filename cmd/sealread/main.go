@@ -12,14 +12,14 @@
 // WHERE TO RUN IT. A Pico 2 / Pico Plus 2, NEVER the SeedHammer II.
 // `tinygo flash` targets whatever RP2350 is in BOOTSEL, so before flashing:
 //
-//	1. Physically disconnect the SeedHammer II.
-//	2. Confirm exactly ONE RP2350 is present and it is the Pico:
-//	     lsusb | grep 2e8a          # 2e8a:000f == bootrom in BOOTSEL
-//	     picotool info -a           # chipid must be 0x66d3d60ff20abf2f
-//	   SH2 chipid is 0x77c483b745abf55c. If you see that, STOP.
-//	3. Replug holding BOOTSEL — a running TinyGo app has NO reset interface,
-//	   so picotool reboot -f cannot get you here ("Unable to locate reset
-//	   interface on the device", measured 2026-08-07).
+//  1. Physically disconnect the SeedHammer II.
+//  2. Confirm exactly ONE RP2350 is present and it is the Pico:
+//     lsusb | grep 2e8a          # 2e8a:000f == bootrom in BOOTSEL
+//     picotool info -a           # chipid must be 0x66d3d60ff20abf2f
+//     SH2 chipid is 0x77c483b745abf55c. If you see that, STOP.
+//  3. Replug holding BOOTSEL — a running TinyGo app has NO reset interface,
+//     so picotool reboot -f cannot get you here ("Unable to locate reset
+//     interface on the device", measured 2026-08-07).
 //
 // Build, sign and flash:
 //
