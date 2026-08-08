@@ -290,10 +290,11 @@ func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
 }
 
 // TestUnauthenticatedWarningConfirmProceeds. Hold-to-confirm is the "explicit
-// confirmation" of §10.2 step 4; a tap must not be enough.
+// confirmation" of §10.2 step 4; a tap must not be enough, and only a
+// confirmation reaches the plate list.
 func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		frame, done, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
+		frame, _, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
 		defer quit()
 		if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
 			t.Fatalf("never reached the hash screen; got %q", content)
@@ -314,11 +315,10 @@ func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 		press(&ctx.Router, Button3)
 		frame()
 		time.Sleep(confirmDelay)
-		for i := 0; i < 32 && !*done; i++ {
-			frame()
-		}
-		if !*done {
-			t.Fatal("holding to confirm did not leave the warning")
+		// §10.2 step 4: "require an explicit confirmation, then go to the plate
+		// list". Vector E's first entry is the single mk1 card's first plate.
+		if content, ok := pumpUntil(frame, "mk1 1/2", 32); !ok {
+			t.Fatalf("holding to confirm did not reach the plate list; got %q", content)
 		}
 	})
 }

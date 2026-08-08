@@ -70,6 +70,7 @@ func unlockPayloadFlow(ctx *Context, th *Colors, blob []byte) {
 	if !unlockWarnUnauthenticated(ctx, th, p) {
 		return
 	}
+	unlockPlateListFlow(ctx, th, p.Public)
 }
 
 // unlockHashBody renders §10.2 step 3: the §6.6 digest, the PUBLIC record count
