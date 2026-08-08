@@ -1,0 +1,324 @@
+package gui
+
+import (
+	"strings"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"seedhammer.com/seal"
+)
+
+// §10.2 steps 1-4 at the UI: Inspect, the §6.6 hash screen, the §10.2.3
+// unauthenticated warning, and B1's honest stop on a sealed payload.
+
+// runUnlock drives unlockPayloadFlow over a blob and returns a frame pump plus
+// a "has the flow returned" flag.
+func runUnlock(t *testing.T, blob []byte) (frame func() (string, bool), done *bool, ctx *Context, quit func()) {
+	t.Helper()
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx = NewContext(p)
+	returned := false
+	frame, quit = runUI(ctx, func() {
+		unlockPayloadFlow(ctx, &descriptorTheme, blob)
+		returned = true
+	})
+	return frame, &returned, ctx, quit
+}
+
+// hashScreen pumps to the §10.2 step 3 hash screen and returns what it drew.
+func hashScreen(t *testing.T, blob []byte) string {
+	t.Helper()
+	frame, _, _, quit := runUnlock(t, blob)
+	defer quit()
+	content, ok := pumpUntil(frame, "Public data hash", 32)
+	if !ok {
+		t.Fatalf("never reached the public-data-hash screen; last frame %q", content)
+	}
+	return content
+}
+
+// TestUnlockShowsTheHashItsCountAndItsShape — §10.2 step 3. The expected digest
+// is the vector file's own pubhash, not a value retyped here.
+func TestUnlockShowsTheHashItsCountAndItsShape(t *testing.T) {
+	for _, tc := range []struct {
+		vector string
+		shape  string
+	}{
+		{"D", "SEALED"},
+		{"E", "UNSEALED"},
+	} {
+		t.Run(tc.vector, func(t *testing.T) {
+			v := sealVector(t, tc.vector)
+			want := v.PubhashSealed
+			if tc.shape == "UNSEALED" {
+				want = v.PubhashUnsealed
+			}
+			if want == nil {
+				t.Fatalf("vector %s has no %s pubhash", tc.vector, tc.shape)
+			}
+			content := hashScreen(t, v.blob(t))
+			if !uiContains(content, *want) {
+				t.Errorf("the hash screen does not show %s's %s digest %s; got %q",
+					tc.vector, tc.shape, *want, content)
+			}
+			// The count is the PUBLIC record count, which is what §6.6 hashes.
+			if !uiContains(content, "5 records") {
+				t.Errorf("the hash screen does not show the public record count; got %q", content)
+			}
+			if !uiContains(content, tc.shape) {
+				t.Errorf("the hash screen does not show the %s shape; got %q", tc.shape, content)
+			}
+		})
+	}
+}
+
+// TestUnlockHashMakesADowngradeVisible. Vectors D and E carry the SAME five
+// public records and differ only in whether anything is encrypted, so a screen
+// that ignored the sealed flag would show one digest for both -- and stripping
+// the ciphertext and tag off a sealed payload would then be invisible to an
+// operator comparing the number they recorded.
+//
+// This is Phase A's downgrade property re-asserted where the operator actually
+// meets it, which is the screen.
+func TestUnlockHashMakesADowngradeVisible(t *testing.T) {
+	d := sealVector(t, "D")
+	e := sealVector(t, "E")
+	if strings.Join(d.Public, "\n") != strings.Join(e.Public, "\n") {
+		t.Fatal("premise broken: D and E must carry identical public records")
+	}
+	dScreen := hashScreen(t, d.blob(t))
+	eScreen := hashScreen(t, e.blob(t))
+	if dScreen == eScreen {
+		t.Fatal("the sealed and unsealed screens render identically; the downgrade is invisible")
+	}
+	if uiContains(dScreen, *e.PubhashUnsealed) {
+		t.Errorf("the SEALED screen shows the unsealed digest %s: %q", *e.PubhashUnsealed, dScreen)
+	}
+	if uiContains(eScreen, *d.PubhashSealed) {
+		t.Errorf("the UNSEALED screen shows the sealed digest %s: %q", *d.PubhashSealed, eScreen)
+	}
+}
+
+// TestUnlockShowsNoHashWhenThePublicSectionIsEmpty — §10.2 step 3's other half.
+// pub_len == 0 means the digest of an EMPTY record set, which is a constant:
+// displaying it on every fully encrypted payload would teach the operator the
+// number is furniture.
+func TestUnlockShowsNoHashWhenThePublicSectionIsEmpty(t *testing.T) {
+	v := sealVector(t, "F")
+	if v.PubLen != 0 {
+		t.Fatalf("premise broken: vector F must have pub_len 0, got %d", v.PubLen)
+	}
+	frame, _, _, quit := runUnlock(t, v.blob(t))
+	defer quit()
+	// The constant an empty public section would hash to, computed here rather
+	// than retyped, so the assertion tracks §6.6 rather than a snapshot.
+	constant := seal.FormatHash(seal.PublicDataHash(nil, true))
+	for i := 0; i < 32; i++ {
+		content, ok := frame()
+		if !ok {
+			break
+		}
+		if uiContains(content, "Public data hash") {
+			t.Fatalf("a payload with no public section drew a hash region: %q", content)
+		}
+		if uiContains(content, constant) {
+			t.Fatalf("a payload with no public section drew the empty-set constant %s: %q", constant, content)
+		}
+	}
+}
+
+// TestUnlockRefusesAnUnreadablePayload. Every §6.2/§6.3 violation but one reads
+// as "payload unreadable", which is what §2.2 item 4 has taught the operator to
+// read as "someone replaced my payload".
+func TestUnlockRefusesAnUnreadablePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mangle func(b []byte) []byte
+	}{
+		{"bad magic", func(b []byte) []byte { b[0] = 'X'; return b }},
+		{"unknown version", func(b []byte) []byte { b[8] = 0x02; return b }},
+		{"truncated", func(b []byte) []byte { return b[:len(b)-8] }},
+		{"corrupt public record", func(b []byte) []byte {
+			// A byte inside the public section: BCH-valid no longer, so the
+			// card set does not decode.
+			b[seal.HeaderLen+4] = 'q'
+			return b
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blob := tc.mangle(sealVectorBlob(t, "E"))
+			frame, _, _, quit := runUnlock(t, blob)
+			defer quit()
+			content, ok := pumpUntil(frame, "Payload unreadable", 32)
+			if !ok {
+				t.Fatalf("a %s payload did not report \"Payload unreadable\"; got %q", tc.name, content)
+			}
+		})
+	}
+}
+
+// TestUnlockDistinguishesTooManyRecords — §6.4 requires it. Conflating a wallet
+// larger than the machine accepts with a tampered blob would send the operator
+// chasing a compromise that did not happen.
+func TestUnlockDistinguishesTooManyRecords(t *testing.T) {
+	recs := make([]string, seal.MaxRecords+1)
+	for i := range recs {
+		recs[i] = "md1qqq"
+	}
+	section := strings.Join(recs, "\n")
+	h := seal.Header{PubLen: uint32(len(section))}
+	enc := h.Encode()
+	blob := append(enc[:], section...)
+
+	frame, _, _, quit := runUnlock(t, blob)
+	defer quit()
+	content, ok := pumpUntil(frame, "more records than the machine accepts", 32)
+	if !ok {
+		t.Fatalf("a %d-record payload did not get its own message; got %q", len(recs), content)
+	}
+	if uiContains(content, "Payload unreadable") {
+		t.Errorf("too-many-records was reported as an unreadable payload: %q", content)
+	}
+}
+
+// TestSealedPayloadStopsAtATerminalScreen — Task 6. B1 has no passphrase flow,
+// so a sealed payload must say so and stop. It must NOT prompt for words it
+// cannot check, and it must NOT fall through to the plate list: p.Public on a
+// sealed payload is a legitimate record set, and engraving it while silently
+// dropping the encrypted half is §6.4's incomplete-backup-believed-complete.
+func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
+	for _, name := range []string{"D", "G"} {
+		t.Run(name, func(t *testing.T) {
+			v := sealVector(t, name)
+			if v.CtLen == 0 {
+				t.Fatalf("premise broken: vector %s must be sealed", name)
+			}
+			frame, done, ctx, quit := runUnlock(t, v.blob(t))
+			defer quit()
+			// Past the hash screen.
+			if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
+				t.Fatalf("never reached the hash screen; got %q", content)
+			}
+			click(&ctx.Router, Button3)
+			content, ok := pumpUntil(frame, "Unlocking is not available", 32)
+			if !ok {
+				t.Fatalf("a sealed payload did not reach the terminal screen; got %q", content)
+			}
+			// No word entry anywhere in the flow.
+			if uiContains(content, "Word 1 of") {
+				t.Fatalf("a sealed payload reached word entry: %q", content)
+			}
+			// And it is TERMINAL: dismissing returns to the menu.
+			click(&ctx.Router, Button3)
+			for i := 0; i < 32 && !*done; i++ {
+				frame()
+			}
+			if !*done {
+				t.Fatal("the sealed terminal screen did not return to the menu")
+			}
+		})
+	}
+}
+
+// TestUnauthenticatedWarningShownOnlyWhenNothingIsEncrypted. The negative half
+// is the one that matters: a warning shown on a SEALED payload is a false claim
+// that the payload is unauthenticated.
+func TestUnauthenticatedWarningShownOnlyWhenNothingIsEncrypted(t *testing.T) {
+	// ct_len == 0 -> shown, with the same digest the hash screen produced.
+	e := sealVector(t, "E")
+	frame, _, ctx, quit := runUnlock(t, e.blob(t))
+	defer quit()
+	if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
+		t.Fatalf("never reached the hash screen; got %q", content)
+	}
+	click(&ctx.Router, Button3)
+	content, ok := pumpUntil(frame, "NOT AUTHENTICATED", 32)
+	if !ok {
+		t.Fatalf("an unsealed payload did not reach the §10.2.3 warning; got %q", content)
+	}
+	if !uiContains(content, *e.PubhashUnsealed) {
+		t.Errorf("the warning body does not carry the hash %s; got %q", *e.PubhashUnsealed, content)
+	}
+	// It must not claim the device checked anything.
+	for _, forbidden := range []string{"verified", "signature valid", "authenticated OK"} {
+		if uiContains(content, forbidden) {
+			t.Errorf("the warning implies the device verified the payload (%q): %q", forbidden, content)
+		}
+	}
+	quit()
+
+	// ct_len > 0 -> NEVER shown.
+	d := sealVector(t, "D")
+	frame2, _, ctx2, quit2 := runUnlock(t, d.blob(t))
+	defer quit2()
+	if content, ok := pumpUntil(frame2, "Public data hash", 32); !ok {
+		t.Fatalf("never reached the hash screen; got %q", content)
+	}
+	click(&ctx2.Router, Button3)
+	for i := 0; i < 32; i++ {
+		c, ok := frame2()
+		if !ok {
+			break
+		}
+		if uiContains(c, "NOT AUTHENTICATED") {
+			t.Fatalf("a SEALED payload was declared unauthenticated: %q", c)
+		}
+	}
+}
+
+// TestUnauthenticatedWarningCancelReturnsToTheMenu — §10.2 step 4 requires an
+// explicit confirmation, so declining must leave the flow entirely.
+func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
+	frame, done, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
+	defer quit()
+	if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
+		t.Fatalf("never reached the hash screen; got %q", content)
+	}
+	click(&ctx.Router, Button3)
+	if content, ok := pumpUntil(frame, "NOT AUTHENTICATED", 32); !ok {
+		t.Fatalf("never reached the warning; got %q", content)
+	}
+	click(&ctx.Router, Button1) // Cancel
+	for i := 0; i < 32 && !*done; i++ {
+		frame()
+	}
+	if !*done {
+		t.Fatal("cancelling the §10.2.3 warning did not return to the menu")
+	}
+}
+
+// TestUnauthenticatedWarningConfirmProceeds. Hold-to-confirm is the "explicit
+// confirmation" of §10.2 step 4; a tap must not be enough.
+func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		frame, done, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
+		defer quit()
+		if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
+			t.Fatalf("never reached the hash screen; got %q", content)
+		}
+		click(&ctx.Router, Button3)
+		if content, ok := pumpUntil(frame, "NOT AUTHENTICATED", 32); !ok {
+			t.Fatalf("never reached the warning; got %q", content)
+		}
+		// A tap is NOT a confirmation: the warning must still be on screen.
+		click(&ctx.Router, Button3)
+		content, ok := frame()
+		if !ok {
+			t.Fatal("no frame after the tap")
+		}
+		if !uiContains(content, "NOT AUTHENTICATED") {
+			t.Fatalf("a bare tap dismissed the warning: %q", content)
+		}
+		press(&ctx.Router, Button3)
+		frame()
+		time.Sleep(confirmDelay)
+		for i := 0; i < 32 && !*done; i++ {
+			frame()
+		}
+		if !*done {
+			t.Fatal("holding to confirm did not leave the warning")
+		}
+	})
+}
