@@ -223,7 +223,7 @@ func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
 					break
 				}
 				for j := range labels {
-					if uiContains(c, drawnLabel(plateLabel(labels[j], j))) {
+					if uiContains(c, plateLabel(labels[j], j)) {
 						t.Fatalf("a sealed payload reached the plate list: %q", c)
 					}
 				}
@@ -302,7 +302,7 @@ func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
 			break
 		}
 		for j := range labels {
-			if uiContains(c, drawnLabel(plateLabel(labels[j], j))) {
+			if uiContains(c, plateLabel(labels[j], j)) {
 				t.Fatalf("declining the §10.2.3 warning still reached the plate list: %q", c)
 			}
 		}

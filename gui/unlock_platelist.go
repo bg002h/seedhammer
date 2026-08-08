@@ -33,7 +33,7 @@ var unlockEngraveHook func(label string, record []byte)
 // never by re-deriving either in the UI.
 //
 //	one card of this HRP      mk1 1/2            plate within the card
-//	several cards of this HRP mk1 2/3 · 1/2      card, then plate within it
+//	several cards of this HRP mk1 2/3 | 1/2      card, then plate within it
 //
 // §10.2.2's own examples are single-sig, where there is exactly one card of
 // each HRP, so the first form reproduces them exactly. The second exists
@@ -55,7 +55,7 @@ func plateLabel(r seal.AdmittedRecord, i int) string {
 		return fmt.Sprintf("record %d", i+1)
 	}
 	if r.CardTotal > 1 {
-		return fmt.Sprintf("%s %d/%d · %d/%d", hrp, r.CardIndex, r.CardTotal, r.PlateIndex, r.PlateTotal)
+		return fmt.Sprintf("%s %d/%d | %d/%d", hrp, r.CardIndex, r.CardTotal, r.PlateIndex, r.PlateTotal)
 	}
 	return fmt.Sprintf("%s %d/%d", hrp, r.PlateIndex, r.PlateTotal)
 }

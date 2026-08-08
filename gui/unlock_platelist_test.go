@@ -5,7 +5,6 @@ import (
 	"image"
 	"io"
 	"slices"
-	"strings"
 	"testing"
 
 	"seedhammer.com/gui/assets"
@@ -14,38 +13,61 @@ import (
 	"seedhammer.com/seal"
 )
 
-// drawnLabel is a label as it actually reaches the panel. The "·" separator has
-// NO GLYPH in this font and contributes zero width -- measured, and pinned by
-// TestPlateLabelSeparatorDoesNotRender below -- so it never appears in
-// extracted text. Asserting against the raw label would silently pass on a
-// screen that never drew the entry at all.
-func drawnLabel(s string) string { return strings.ReplaceAll(s, "·", "") }
-
-// TestPlateLabelSeparatorDoesNotRender records a surprising, load-bearing
-// measurement rather than leaving it to be rediscovered on hardware.
+// TestPlateLabelSeparatorRenders pins the reason this list uses "|" and not the
+// "·" that §10.2.2's examples and the rest of this fork are written with.
 //
-// §10.2.2's multi-card label form is `mk1 2/3 · 1/2`, and the fork already uses
-// "·" in shipped UI (bundle_flow.go's "Card X of Y · Plate P of Q",
-// codex32_polish.go, slip39_polish.go). It is INVISIBLE in this font: "a·b" and
-// "ab" measure identically, while "a-b" does not. So the operator sees
-// `mk1 2/3 1/2`, with the two index pairs separated by whitespace alone.
+// "·" HAS NO GLYPH in this font. Measured: width("a·b") == width("ab") == 22,
+// while width("a-b") == 31 -- the middot contributes ZERO pixels. Shipped UI
+// carries it today in bundle_flow.go ("Card %d of %d · Plate %d of %d"),
+// codex32_polish.go, slip39_polish.go and bundle.go, where words carry the
+// meaning and an invisible dot merely leaves a double space.
 //
-// If this test fails, the font gained the glyph -- which is good news; update
-// drawnLabel and delete this test.
-func TestPlateLabelSeparatorDoesNotRender(t *testing.T) {
+// Here it would be load-bearing: `mk1 2/3 · 1/2` degrades to `mk1 2/3  1/2`,
+// two unrelated-looking fractions with nothing saying which is the card. So this
+// list uses "|" (operator decision, 2026-08-07), measured at 5px.
+//
+// Both halves are asserted. A separator that renders is the requirement; the
+// middot measurement is the premise that justifies departing from the spec's
+// example, and if the font ever gains the glyph this test says so.
+func TestPlateLabelSeparatorRenders(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	measure := func(s string) int {
 		_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, 400, descriptorTheme.Text, s)
 		return sz.X
 	}
-	withDot, without := measure("a·b"), measure("ab")
-	t.Logf("width(\"a·b\")=%d width(\"ab\")=%d width(\"a-b\")=%d", withDot, without, measure("a-b"))
-	if withDot != without {
-		t.Errorf("the \"·\" separator now measures %dpx (was 0); it renders, so drawnLabel is stale",
-			withDot-without)
+	plain := measure("ab")
+	bar, dot := measure("a|b"), measure("a·b")
+	t.Logf("width(\"ab\")=%d width(\"a|b\")=%d width(\"a·b\")=%d", plain, bar, dot)
+
+	if bar <= plain {
+		t.Errorf("the \"|\" separator measures %dpx -- it must RENDER, or the card and "+
+			"plate indices run together as `mk1 2/3  1/2`", bar-plain)
 	}
-	if measure("a-b") == without {
-		t.Fatal("premise broken: \"-\" must render, or this measurement proves nothing about \"·\"")
+	if dot != plain {
+		t.Errorf("\"·\" now measures %dpx: the font gained the glyph, so this list may "+
+			"return to \"·\" and match bundle_flow.go and the §10.2.2 examples", dot-plain)
+	}
+}
+
+// TestPlateLabelFitsThePanel bounds the WIDEST label the §6.4 record cap can
+// produce against the width the list actually lays out at.
+//
+// The list measures at dims.X - 2*8 (unlock_platelist.go:80). MaxRecords is 24
+// across both sections, so the widest realistic multi-card label has two-digit
+// indices on both pairs. A label that overflows would wrap or clip mid-fraction,
+// which is the one place in this screen where losing characters changes meaning.
+func TestPlateLabelFitsThePanel(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	lineWidth := sh2DisplaySize.X - 2*8
+
+	for _, s := range []string{"mk1 2/3 | 1/2", "md1 12/12 | 12/12", "mk1 24/24 | 24/24"} {
+		_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, descriptorTheme.Text, s)
+		t.Logf("%-20q %3dpx of %dpx", s, sz.X, lineWidth)
+		if sz.X > lineWidth {
+			t.Errorf("label %q is %dpx, past the %dpx line", s, sz.X, lineWidth)
+		}
 	}
 }
 
@@ -59,9 +81,9 @@ func TestPlateLabelForm(t *testing.T) {
 	}{
 		{"E", []string{"mk1 1/2", "mk1 2/2", "md1 1/3", "md1 2/3", "md1 3/3"}},
 		{"G", []string{
-			"mk1 1/3 · 1/2", "mk1 1/3 · 2/2",
-			"mk1 2/3 · 1/2", "mk1 2/3 · 2/2",
-			"mk1 3/3 · 1/2", "mk1 3/3 · 2/2",
+			"mk1 1/3 | 1/2", "mk1 1/3 | 2/2",
+			"mk1 2/3 | 1/2", "mk1 2/3 | 2/2",
+			"mk1 3/3 | 1/2", "mk1 3/3 | 2/2",
 			"md1 1/6", "md1 2/6", "md1 3/6", "md1 4/6", "md1 5/6", "md1 6/6",
 		}},
 	} {
@@ -186,8 +208,10 @@ func TestPlateListLabelsASingleCardPerHRP(t *testing.T) {
 		}
 	}
 	// And it must NOT print the multi-card form when there is one card. The
-	// needle carries no "·" on purpose: that glyph never reaches the panel, so
-	// an assertion containing it could never fire.
+	// needle is the card-index prefix alone, not the full `mk1 1/1 | 1/2` form:
+	// a needle carrying the separator would only catch a card index that
+	// appeared in exactly that shape, and the defect is the index existing at
+	// all.
 	if uiContains(content, "mk1 1/1") {
 		t.Errorf("a single card of an HRP was labelled with a card index: %q", content)
 	}
@@ -206,16 +230,16 @@ func TestPlateListLabelsSeveralCardsOfOneHRP(t *testing.T) {
 	defer quit()
 	// Vector G's cards: mk1 x3 of two plates each, then md1 x1 of six.
 	want := []string{
-		"mk1 1/3 · 1/2", "mk1 1/3 · 2/2",
-		"mk1 2/3 · 1/2", "mk1 2/3 · 2/2",
-		"mk1 3/3 · 1/2", "mk1 3/3 · 2/2",
+		"mk1 1/3 | 1/2", "mk1 1/3 | 2/2",
+		"mk1 2/3 | 1/2", "mk1 2/3 | 2/2",
+		"mk1 3/3 | 1/2", "mk1 3/3 | 2/2",
 		"md1 1/6", "md1 2/6", "md1 3/6", "md1 4/6", "md1 5/6", "md1 6/6",
 	}
 	pages := collectPages(t, frame, drawer, ctx, 4)
 	for _, w := range want {
 		found := false
 		for _, p := range pages {
-			if uiContains(p, drawnLabel(w)) {
+			if uiContains(p, w) {
 				found = true
 				break
 			}
@@ -244,7 +268,7 @@ func TestPlateListPagesThroughEveryRecord(t *testing.T) {
 	}
 	onFirst := 0
 	for i := range recs {
-		if uiContains(first, drawnLabel(plateLabel(recs[i], i))) {
+		if uiContains(first, plateLabel(recs[i], i)) {
 			onFirst++
 		}
 	}
@@ -266,7 +290,7 @@ func TestPlateListPagesThroughEveryRecord(t *testing.T) {
 			t.Fatalf("no frame on page %d", page)
 		}
 		for i := range recs {
-			if uiContains(content, drawnLabel(plateLabel(recs[i], i))) {
+			if uiContains(content, plateLabel(recs[i], i)) {
 				seen[i] = true
 			}
 		}
