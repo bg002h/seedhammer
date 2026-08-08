@@ -39,6 +39,7 @@ import (
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/md"
 	"seedhammer.com/nonstandard"
+	"seedhammer.com/seal"
 	"seedhammer.com/seedqr"
 	slip39words "seedhammer.com/slip39"
 )
@@ -159,17 +160,31 @@ const (
 	engraveSingleSig
 	engraveMultisig
 	bip85Derive
+	// unlockPayload is APPENDED, not inserted, and it is the one program whose
+	// visibility is CONDITIONAL (§10.1: absent payload -> the feature is
+	// invisible). For an unconditional program the house rule is the opposite —
+	// insert mid-enum so bip85Derive stays the boundary — but for a conditional
+	// one the calculus inverts: inserted mid-enum, conditional visibility means
+	// the carousel must SKIP an interior index in both wrap directions, and
+	// layoutMainPager fills dot int(page), which would then point at the wrong
+	// dot. Appended, the whole conditionality collapses to one runtime bound:
+	// StartScreen.lastNav.
+	unlockPayload
 	qaProgram
 )
 
-// Compile-time guard (t5-M1): bip85Derive MUST remain the LAST navigable program,
-// immediately before the non-navigable qaProgram. Several sites hardcode it as
-// the wrap/pager boundary (the StartScreen prog wrap at m.prog>bip85Derive, the
-// npage/npages = int(bip85Derive)+1 consts, layoutMainPlates' case list). If a
-// future program is inserted between bip85Derive and qaProgram (or qaProgram is
-// reordered) without updating those lockstep sites, this array length is no
-// longer 1 (or underflows negative) and the build fails. Keep these in lockstep.
-var _ [1]struct{} = [qaProgram - bip85Derive]struct{}{}
+// Compile-time guard (t5-M1): unlockPayload MUST remain the LAST navigable
+// program, immediately before the non-navigable qaProgram. It is CONDITIONALLY
+// shown (§10.1) -- StartScreen.lastNav() is bip85Derive when no payload is
+// present and unlockPayload when one is -- which is exactly why it must be
+// last: the wrap and pager sites take lastNav as a BOUND, and a bound only
+// works if the conditional entry is at the END of the range. Several sites are
+// keyed to it (the StartScreen prog wrap at m.prog>m.lastNav(), the
+// npage/npages bounds, layoutMainPlates' case list). If a future program is
+// inserted between unlockPayload and qaProgram (or qaProgram is reordered)
+// without updating those lockstep sites, this array length is no longer 1 (or
+// underflows negative) and the build fails. Keep these in lockstep.
+var _ [1]struct{} = [qaProgram - unlockPayload]struct{}{}
 
 type richText struct {
 	Content op.Op
@@ -1519,8 +1534,32 @@ func (s *ChoiceScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 
 func uiFlow(ctx *Context, version string) {
 	th := &descriptorTheme
+	// §10.1 detection. Probed ONCE, here, not per frame: the region cannot
+	// change while the GUI runs (writing it requires picotool and a reboot),
+	// and "absent -> the feature is invisible" is a startup property. Probing
+	// per frame would also put a 64 KB read in the frame path.
+	var payload []byte
+	if r := ctx.Platform.PayloadReader(); r != nil {
+		if b, err := r.Read(); err == nil {
+			payload = b
+		}
+		// errors.Is(err, seal.ErrNoPayload) is the ORDINARY case: erased
+		// flash. It is not logged as a failure. Any other error is equally
+		// "no feature" for §10.1 purposes -- a region that will not read is
+		// indistinguishable from one that is empty, from the menu's point of
+		// view.
+		//
+		// Note the asymmetry and PRESERVE it: §10.1's absent/present decision
+		// is deliberately coarse, asking only "are the first 8 bytes
+		// MNEMBLOB". A blob that is present but violates §6.2 still shows the
+		// menu entry, and unlockPayloadFlow then reports "payload unreadable".
+		// Collapsing the two would hide a tampered payload behind an invisible
+		// menu entry, which is precisely the signal §2.2 item 4 exists to
+		// raise.
+	}
 	s := &StartScreen{
-		Version: version,
+		Version:    version,
+		hasPayload: payload != nil,
 	}
 	// !ctx.Done, not a bare loop. ctx.Done is set exactly when the frame
 	// consumer stops ranging, and StartScreen.Flow then returns immediately
@@ -1553,6 +1592,9 @@ func uiFlow(ctx *Context, version string) {
 			case bip85Derive:
 				bip85DeriveFlow(ctx, th)
 				continue
+			case unlockPayload:
+				unlockPayloadFlow(ctx, th, payload)
+				continue
 			case engravePassphrase:
 				engravePassphraseFlow(ctx, th)
 				continue
@@ -1574,10 +1616,31 @@ func uiFlow(ctx *Context, version string) {
 }
 
 type StartScreen struct {
-	Version     string
-	Status      scanStatus
+	Version string
+	Status  scanStatus
+	// hasPayload is §10.1's detection result, set once by uiFlow from the
+	// Platform.PayloadReader probe.
+	//
+	// A BOOL rather than a `lastNav program` field, deliberately: StartScreen
+	// is constructed as new(StartScreen) at sixteen sites across the suite, and
+	// a zero-valued program field would mean backupWallet -- collapsing the
+	// carousel to a single entry everywhere the screen is built that way. The
+	// zero value has to mean "no payload", and this is the only shape in which
+	// it does.
+	hasPayload  bool
 	prog        program
 	scanTimeout time.Time
+}
+
+// lastNav is the LAST NAVIGABLE program, and the bound every wrap and pager
+// site takes (§10.1). unlockPayload is appended after bip85Derive and shown
+// only when a payload is present, so the entire conditionality of the menu
+// entry is this one value.
+func (m *StartScreen) lastNav() program {
+	if m.hasPayload {
+		return unlockPayload
+	}
+	return bip85Derive
 }
 
 type startScreenAction struct {
@@ -1687,12 +1750,12 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 		for prevBtn.Clicked(ctx) {
 			m.prog--
 			if m.prog < 0 {
-				m.prog = bip85Derive
+				m.prog = m.lastNav()
 			}
 		}
 		for nextBtn.Clicked(ctx) {
 			m.prog++
-			if m.prog > bip85Derive {
+			if m.prog > m.lastNav() {
 				m.prog = 0
 			}
 		}
@@ -1725,6 +1788,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Engrave Multisig"
 	case bip85Derive:
 		titleTxt = "BIP-85 Child Seed"
+	case unlockPayload:
+		titleTxt = "Sealed Payload"
 	}
 
 	title, _ := layoutTitle(ctx, dims.X, th.Text, titleTxt)
@@ -1733,7 +1798,7 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 	content, sz := m.layout(&ctx.B, th, dims.X, prevBtn, nextBtn)
 	content = content.Offset(r.Center(sz))
 
-	inner, sz := layoutMainPager(&ctx.B, th, m.prog)
+	inner, sz := layoutMainPager(&ctx.B, th, m.prog, m.lastNav())
 	_, middle := r.CutBottom(leadingSize)
 	inner = inner.Offset(middle.Center(sz))
 	sttxt := ""
@@ -1901,7 +1966,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 	contentsz := h.Add(sz)
 
 	content := plates.Offset(image.Pt((width-contentsz.X)/2, 8+h.Y(contentsz)))
-	const npage = int(bip85Derive) + 1
+	npage := int(m.lastNav()) + 1
 	if npage > 1 {
 		// The arrow glyphs are only a few pixels wide -- far too small to hit
 		// with a fingertip, and on SeedHammer II touch is the ONLY input. Give
@@ -1926,7 +1991,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive, unlockPayload:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
@@ -1934,8 +1999,13 @@ func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	panic("invalid page")
 }
 
-func layoutMainPager(buf *op.Buffer, th *Colors, page program) (op.Op, image.Point) {
-	const npages = int(bip85Derive) + 1
+// layoutMainPager draws one dot per navigable program, filling dot int(page).
+//
+// lastNav is a PARAMETER rather than a package constant because the last
+// navigable program is now a runtime value (§10.1): layoutMainPager is a free
+// function and cannot see StartScreen.lastNav().
+func layoutMainPager(buf *op.Buffer, th *Colors, page, lastNav program) (op.Op, image.Point) {
+	npages := int(lastNav) + 1
 	const space = 4
 	if npages <= 1 {
 		return op.Op{}, image.Point{}
@@ -2769,6 +2839,14 @@ type Platform interface {
 	Wakeup()
 	Engraver(stall bool) (Engraver, error)
 	NFCReader() io.ReadCloser
+	// PayloadReader returns a reader for the §5 payload region, or nil if this
+	// platform has none. nil is not an error: the emulator and the test
+	// platform have no XIP flash, and §10.1 makes the feature invisible when no
+	// payload is readable, which is the same operator-visible outcome.
+	//
+	// It exists so gui never names a build-tagged type: seal.XIPReader is
+	// tinygo-only and seal.FileReader is the host stand-in.
+	PayloadReader() seal.Reader
 	EngraverParams() engrave.Params
 	DisplaySize() image.Point
 	// Dirty begins a refresh of the content

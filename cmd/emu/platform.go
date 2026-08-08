@@ -13,6 +13,7 @@ import (
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui"
 	"seedhammer.com/internal/sh2"
+	"seedhammer.com/seal"
 )
 
 // platform runs the real firmware GUI against a browser canvas.
@@ -187,6 +188,19 @@ func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 // mk1_inspect.go, md1_gather.go) and offers Back-only where a scan would go.
 // Returning a reader that never yields would hang those screens instead.
 func (p *platform) NFCReader() io.ReadCloser { return nil }
+
+// PayloadReader returns nil: a browser build has no XIP flash, so §10.1's
+// detection finds nothing and the Sealed Payload entry stays invisible.
+//
+// It is deliberately NOT a seal.FileReader fed from a flag. This file is
+// //go:build js, built GOOS=js GOARCH=wasm and run from a static page through
+// wasm_exec.js: there is no flag.Parse() in the package and os.Args carries no
+// real argv under the browser glue, so a flag.String would compile, run, and
+// SILENTLY NEVER RECEIVE A VALUE -- a non-failing no-op, the worst shape a test
+// affordance can have. The automated coverage runs through gui's test platform
+// instead. If a browser-side payload is ever wanted, the mechanism is a
+// syscall/js read of location.search or a JS global set from the host page.
+func (p *platform) PayloadReader() seal.Reader { return nil }
 
 // Features reports no secure boot, so the version line reads "(UNLOCKED)".
 // That is true here and worth saying: nothing about a browser build is signed.

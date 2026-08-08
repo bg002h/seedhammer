@@ -27,6 +27,7 @@ import (
 	"seedhammer.com/image/rgb565"
 	"seedhammer.com/nfc/poller"
 	"seedhammer.com/nfc/type5"
+	"seedhammer.com/seal"
 )
 
 const (
@@ -563,6 +564,14 @@ func (p *Platform) Features() gui.Features {
 
 func (p *Platform) NFCReader() io.ReadCloser {
 	return poller.New(p.nfc)
+}
+
+// PayloadReader returns the real XIP read over the §5 payload region (§10.1).
+// This is the ONLY platform that has one: seal.XIPReader exists only under the
+// TinyGo build, which is exactly why the seam is an interface method rather
+// than a direct reference from gui.
+func (p *Platform) PayloadReader() seal.Reader {
+	return seal.XIPReader{}
 }
 
 func (p *Platform) Engraver(stall bool) (gui.Engraver, error) {
