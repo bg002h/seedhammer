@@ -636,3 +636,66 @@ func TestWipeZeroesSecretRecords(t *testing.T) {
 		}
 	}
 }
+
+// Unlock re-derives its offsets from p.Header, which came from a DIFFERENT
+// call. Nothing forces the caller to hand back the same blob, so a mismatched
+// one must be REFUSED, not panicked on. crypto.go's rule: a panic on a device
+// is a brick.
+//
+// The short blob must be an independent allocation — a plain re-slice of the
+// full blob keeps its capacity, so the out-of-range read silently succeeds and
+// the test would pass for the wrong reason.
+func TestUnlockRefusesAMismatchedBlob(t *testing.T) {
+	d := vectorNamed(t, "D")
+	blob := sealForTest(t, d.Public, d.Secret, *d.Passphrase,
+		mustHex(t, d.SaltHex), mustHex(t, d.IVHex), uint32(d.Iterations))
+
+	p, err := Opener{}.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	short := make([]byte, len(blob)/2)
+	copy(short, blob)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Unlock PANICKED on a truncated blob (%v) — it must fail closed", r)
+		}
+	}()
+	err = Opener{}.Unlock(short, p, *d.Passphrase)
+	if !errors.Is(err, ErrTooShort) {
+		t.Errorf("Unlock(short) = %v, want ErrTooShort", err)
+	}
+}
+
+// A second successful Unlock must not orphan the first call's secret bytes.
+// Overwriting p.Secret makes them unreachable, so Phase B calling p.Wipe()
+// faithfully at session end would still miss them.
+func TestUnlockTwiceWipesTheFirstResult(t *testing.T) {
+	d := vectorNamed(t, "D")
+	blob := sealForTest(t, d.Public, d.Secret, *d.Passphrase,
+		mustHex(t, d.SaltHex), mustHex(t, d.IVHex), uint32(d.Iterations))
+
+	p, err := Opener{}.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if err = (Opener{}).Unlock(blob, p, *d.Passphrase); err != nil {
+		t.Fatalf("first Unlock: %v", err)
+	}
+	// Hold the FIRST call's backing array; p.Secret is about to be replaced.
+	first := p.Secret[0].Record
+	if len(first) == 0 {
+		t.Fatal("no secret record from the first Unlock")
+	}
+
+	if err = (Opener{}).Unlock(blob, p, *d.Passphrase); err != nil {
+		t.Fatalf("second Unlock: %v", err)
+	}
+	for i, b := range first {
+		if b != 0 {
+			t.Fatalf("the first Unlock's secret byte %d = %#x after a second Unlock — "+
+				"those bytes are now unreachable via p.Secret and would never be wiped", i, b)
+		}
+	}
+}

@@ -166,11 +166,13 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 		// so the operator sees a mismatch on an UNTAMPERED payload and learns
 		// that mismatches are normal.
 		if pos := firstUpperASCII(r); pos >= 0 {
+			wipe(out)
 			return nil, fmt.Errorf("%w: record %d, byte %d", ErrNotLowercase, i, pos)
 		}
 		// Pass 2 — §10.2.1's allow-list.
 		c := Classify(r)
 		if !permitted(section, c) {
+			wipe(out)
 			return nil, fmt.Errorf("%w: record %d classifies as %s, which the %s section does not permit",
 				ErrRecordNotPermitted, i, c, section)
 		}
@@ -331,4 +333,13 @@ func decodePublicSet(records []string) error {
 		}
 	}
 	return nil
+}
+
+// wipe zeroes records already copied into a partial result that is about to be
+// discarded. Whole-payload rejection means the caller never sees them, but they
+// are copies of possibly-secret bytes and clearing them costs nothing.
+func wipe(recs []AdmittedRecord) {
+	for _, r := range recs {
+		clear(r.Record)
+	}
 }

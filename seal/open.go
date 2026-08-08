@@ -182,6 +182,16 @@ func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
 	}
 	split := HeaderLen + int(h.PubLen)
 
+	// Unlock re-derives its offsets from p.Header, which came from a DIFFERENT
+	// call (Inspect). Nothing forces the caller to pass the same blob back, so
+	// bound-check the one actually handed to us before slicing it. crypto.go's
+	// rule applies here too: a panic on a device is a brick, and DeriveKey and
+	// Open both fail closed rather than panicking.
+	if len(blob) < end {
+		return fmt.Errorf("%w: region holds %d bytes, the header declares %d",
+			ErrTooShort, len(blob), end)
+	}
+
 	// Step 4 — nothing encrypted: stop here. No passphrase, no KDF.
 	if !h.Sealed() {
 		return nil
@@ -228,6 +238,13 @@ func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
 	admitted, err := AdmitSection(recs, SectionEncrypted)
 	if err != nil {
 		return err
+	}
+	// Wipe any secrets a PREVIOUS Unlock left here before dropping the reference.
+	// Overwriting p.Secret makes those bytes unreachable, so Phase B calling
+	// p.Wipe() faithfully at session end would still miss them — the exact class
+	// of gap AdmittedRecord.Record is []byte to prevent.
+	for _, r := range p.Secret {
+		clear(r.Record)
 	}
 	p.Secret = admitted
 	return nil
