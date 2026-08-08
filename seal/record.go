@@ -97,6 +97,30 @@ type AdmittedRecord struct {
 	// one thing that most needs it.
 	Record []byte
 	Class  Classification
+
+	// HRP is 'd' (md1) or 'k' (mk1) for a ClassMDMK record IN THE PUBLIC
+	// SECTION, and 0 for every record in the encrypted section -- INCLUDING
+	// ClassMDMK ones, which §6.3 explicitly permits there and which vectors C
+	// and F actually carry (vector F's secret set is ms1 x3 / mk1 x6 / md1 x6,
+	// so twelve of its fifteen secret records ARE cards). That is not a
+	// statement about what those records are; it is that pass 3, the only place
+	// grouping is computed, runs for SectionPublic alone. See F-77.
+	//
+	// It comes from the §6.3 card grouping seal already performs -- the UI must
+	// never re-derive it, or the plate list and the decode can disagree about
+	// what a record is. Classification cannot stand in: ClassMDMK is one value
+	// covering both formats, so it cannot even tell md1 from mk1.
+	HRP byte
+	// CardIndex/CardTotal identify which (HRP, chunk_set_id) card this record
+	// belongs to, 1-based, among cards of the SAME HRP. PlateIndex/PlateTotal
+	// identify this record within that card.
+	//
+	// Indexing cards WITHIN an HRP rather than across the section is what keeps
+	// a 2-of-3's three mk1 cosigner cards distinguishable; a flat mk1 1/6..6/6
+	// conflates them, which is §6.4's incomplete-backup-believed-complete
+	// hazard wearing a label.
+	CardIndex, CardTotal   int
+	PlateIndex, PlateTotal int
 }
 
 // cmdPrefix mirrors gui/scan.go:56. A decrypted plaintext of
@@ -194,11 +218,51 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 		for i, r := range records {
 			strs[i] = string(r)
 		}
-		if err := decodePublicSet(strs); err != nil {
+		// The grouping is computed ONCE and both consumers read the same
+		// object. Two groupings is two chances to disagree about what a card
+		// is, and the decode and the plate list disagreeing is precisely the
+		// divergence one headless entry point exists to eliminate.
+		//
+		// It is computed HERE, after the pass-1/pass-2 loop above, and never
+		// before it. cardKey fails closed for anything that is not an md1/mk1
+		// card, so grouping first would send a record the allow-list is about
+		// to refuse into cardKey and change the rejection sentinel --
+		// TestPublicSectionRefusesASecret asserts ErrRecordNotPermitted, and
+		// the wrong order turns that into ErrUndecodableCardSet.
+		g, err := groupRecords(strs)
+		if err != nil {
 			return nil, err
 		}
+		if err := decodePublicSet(g); err != nil {
+			return nil, err
+		}
+		// Backfill §10.2.2's plate identity onto records already admitted.
+		labelCards(out, g)
 	}
 	return out, nil
+}
+
+// labelCards publishes the §6.3 grouping on the admitted records, in record
+// order. It ADDS NO §6.3 LOGIC: every value here comes out of the partition
+// groupRecords already built for the decode.
+func labelCards(out []AdmittedRecord, g grouping) {
+	// Cards of each HRP, in first-seen order. cardTotal is complete only after
+	// this loop, which is why the assignment below is a second pass.
+	cardIdx := make(map[groupKey]int, len(g.keys))
+	cardTotal := make(map[byte]int, 2)
+	for _, k := range g.keys {
+		cardTotal[k.hrp]++
+		cardIdx[k] = cardTotal[k.hrp]
+	}
+	plate := make(map[groupKey]int, len(g.keys))
+	for i, k := range g.perRecord {
+		plate[k]++
+		out[i].HRP = k.hrp
+		out[i].CardIndex = cardIdx[k]
+		out[i].CardTotal = cardTotal[k.hrp]
+		out[i].PlateIndex = plate[k]
+		out[i].PlateTotal = len(g.groups[k])
+	}
 }
 
 // firstUpperASCII returns the byte offset of the first uppercase ASCII letter,
@@ -236,22 +300,50 @@ type groupKey struct {
 	uniq    int
 }
 
-// groupCards partitions records into card sets, preserving first-seen order so
-// the decode below is deterministic.
-func groupCards(records []string) ([]groupKey, map[groupKey][]string, error) {
-	keys := make([]groupKey, 0, len(records))
-	groups := make(map[groupKey][]string, len(records))
+// grouping is the §6.3 card partition of one section's records, computed ONCE
+// and read by both the decode and §10.2.2's plate labels.
+//
+// perRecord is each record's card identity IN RECORD ORDER. keys and groups
+// alone cannot give it back: two records of one card are indistinguishable
+// inside groups[k], so without this the labels would need a second cardKey
+// pass over the same input.
+type grouping struct {
+	keys      []groupKey
+	groups    map[groupKey][]string
+	perRecord []groupKey
+}
+
+// groupRecords partitions records into card sets, preserving first-seen order
+// so the decode below is deterministic.
+func groupRecords(records []string) (grouping, error) {
+	g := grouping{
+		keys:      make([]groupKey, 0, len(records)),
+		groups:    make(map[groupKey][]string, len(records)),
+		perRecord: make([]groupKey, len(records)),
+	}
 	for i, r := range records {
 		k, err := cardKey(r, i)
 		if err != nil {
-			return nil, nil, err
+			return grouping{}, err
 		}
-		if _, seen := groups[k]; !seen {
-			keys = append(keys, k)
+		if _, seen := g.groups[k]; !seen {
+			g.keys = append(g.keys, k)
 		}
-		groups[k] = append(groups[k], r)
+		g.groups[k] = append(g.groups[k], r)
+		g.perRecord[i] = k
 	}
-	return keys, groups, nil
+	return g, nil
+}
+
+// groupCards is groupRecords' cards-only view: the partition without the
+// per-record index. It is what §6.3 is ABOUT -- which records form a card --
+// and the two grouping tests assert against it directly.
+func groupCards(records []string) ([]groupKey, map[groupKey][]string, error) {
+	g, err := groupRecords(records)
+	if err != nil {
+		return nil, nil, err
+	}
+	return g.keys, g.groups, nil
 }
 
 // cardKey reads the card identity off a raw, not-yet-grouped record. Both
@@ -306,13 +398,11 @@ func cardKey(s string, i int) (groupKey, error) {
 // interior spaces and hyphens; the codex32 engine's inputChar has no mapping
 // for 0x20 or '-', so ValidMD/ValidMK already return false and the allow-list
 // refuses them.
-func decodePublicSet(records []string) error {
-	keys, groups, err := groupCards(records)
-	if err != nil {
-		return err
-	}
-	for _, k := range keys {
-		set := groups[k]
+// It takes the grouping rather than computing one: AdmitSection already built
+// it, and the plate labels read the same object.
+func decodePublicSet(g grouping) error {
+	for _, k := range g.keys {
+		set := g.groups[k]
 		var derr error
 		switch {
 		case k.hrp == 'd' && k.chunked:
