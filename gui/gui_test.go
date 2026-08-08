@@ -25,6 +25,7 @@ import (
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/image/rgb565"
+	"seedhammer.com/seal"
 )
 
 func BenchmarkRedraw(b *testing.B) {
@@ -346,6 +347,14 @@ type testPlatform struct {
 	// 240px is drawn partly off-canvas and its keys become untappable in a way
 	// the real machine never sees. Touch tests set this to sh2DisplaySize.
 	display image.Point
+	// payload backs PayloadReader. nil -- the default -- is §10.1's "no payload
+	// present", under which the Sealed Payload menu entry is invisible. A test
+	// that wants the entry sets a seal.FileReader over a vector blob.
+	payload seal.Reader
+	// nfc backs NFCReader. nil -- the default -- is "no tag source", which is
+	// what every platform but the SH2 returns. A test sets it to prove a flow
+	// NEVER opens the reader.
+	nfc func() io.ReadCloser
 }
 
 const (
@@ -426,7 +435,14 @@ func (p *testPlatform) EngraverParams() engrave.Params {
 }
 
 func (p *testPlatform) NFCReader() io.ReadCloser {
+	if p.nfc != nil {
+		return p.nfc()
+	}
 	return nil
+}
+
+func (p *testPlatform) PayloadReader() seal.Reader {
+	return p.payload
 }
 
 func (p *testPlatform) Engraver(stall bool) (Engraver, error) {

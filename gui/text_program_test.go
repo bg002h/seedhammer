@@ -5,12 +5,17 @@ import (
 	"testing"
 )
 
-// ftProgramTitles is the pager in order. Eight programs, with Engrave Text
-// third -- inserted after BIP-39 Password (spec 7.2), never appended, because
-// bip85Derive must stay the last navigable program: the wrap bound, the
-// npage/npages consts and layoutMainPlates' case list are all keyed to it, and
-// gui.go:168's compile-time guard turns a violation into a build failure rather
-// than pager drift.
+// ftProgramTitles is the pager in order with NO payload present: eight
+// programs, with Engrave Text third -- inserted after BIP-39 Password (spec
+// 7.2), never appended, because the last navigable program is the wrap and
+// pager bound, and inserting earlier leaves those sites untouched.
+//
+// Since Phase B1 the last navigable program is unlockPayload, NOT bip85Derive,
+// and it is CONDITIONAL (§10.1): with a payload present the lap is nine. The
+// bound is StartScreen.lastNav(), and gui.go's compile-time guard -- keyed to
+// unlockPayload -- turns a program inserted between it and qaProgram into a
+// build failure rather than pager drift. The nine-program case is
+// TestStartScreenFitsAtNinePagerDots below and gui/unlock_program_test.go.
 var ftProgramTitles = []string{
 	"Backup Wallet",
 	"BIP-39 Password",
@@ -76,12 +81,48 @@ func TestStartScreenFitsAtEightPagerDots(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
-	_, sz := layoutMainPager(&ctx.B, &descriptorTheme, backupWallet)
+	// bip85Derive is the no-payload bound, which is the state this test
+	// exercises: a StartScreen built with new(StartScreen) has no payload.
+	_, sz := layoutMainPager(&ctx.B, &descriptorTheme, backupWallet, bip85Derive)
 	if sz.X > sh2DisplaySize.X {
 		t.Errorf("the %d-dot pager is %dpx wide, past the %dpx panel", int(bip85Derive)+1, sz.X, sh2DisplaySize.X)
 	}
 	// And both arrows are still hit-testable on the real panel.
 	m := new(StartScreen)
+	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
+	defer quit()
+	if _, ok := frame(); !ok {
+		t.Fatal("StartScreen produced no frame")
+	}
+	left, right := arrowPoints(ctx)
+	for _, tc := range []struct {
+		name string
+		at   image.Point
+	}{{"left arrow", left}, {"right arrow", right}} {
+		if _, _, hit := drawer().Hit(tc.at); !hit {
+			t.Errorf("%s has no touch target at %v on a %v panel", tc.name, tc.at, sh2DisplaySize)
+		}
+	}
+}
+
+// TestStartScreenFitsAtNinePagerDots is the same check one dot further out.
+//
+// §10.1's unlockPayload entry adds a NINTH dot when a payload is present, and
+// the row is (dot+space)*npages-space wide, so nothing that passed at eight
+// proves anything at nine. If nine does not fit, the dot pager needs a
+// different treatment at nine -- and this is where that is discovered, not on
+// hardware.
+func TestStartScreenFitsAtNinePagerDots(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	_, sz := layoutMainPager(&ctx.B, &descriptorTheme, backupWallet, unlockPayload)
+	t.Logf("the 9-dot pager measures %dpx on a %dpx panel", sz.X, sh2DisplaySize.X)
+	if sz.X > sh2DisplaySize.X {
+		t.Errorf("the 9-dot pager is %dpx wide, past the %dpx panel", sz.X, sh2DisplaySize.X)
+	}
+	// And with the payload present the arrows are still hit-testable.
+	m := &StartScreen{hasPayload: true}
 	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
 	defer quit()
 	if _, ok := frame(); !ok {
