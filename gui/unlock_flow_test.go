@@ -210,10 +210,23 @@ func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
 			if uiContains(content, "Word 1 of") {
 				t.Fatalf("a sealed payload reached word entry: %q", content)
 			}
-			// And it is TERMINAL: dismissing returns to the menu.
+			// And it is TERMINAL: dismissing returns to the menu, and the plate
+			// list is NEVER constructed. Engraving a sealed payload's public
+			// half while silently dropping the encrypted half is the worst
+			// available outcome, so this is asserted against the labels the
+			// list would have drawn.
+			labels := plateRecords(t, name)
 			click(&ctx.Router, Button3)
 			for i := 0; i < 32 && !*done; i++ {
-				frame()
+				c, ok := frame()
+				if !ok {
+					break
+				}
+				for j := range labels {
+					if uiContains(c, drawnLabel(plateLabel(labels[j], j))) {
+						t.Fatalf("a sealed payload reached the plate list: %q", c)
+					}
+				}
 			}
 			if !*done {
 				t.Fatal("the sealed terminal screen did not return to the menu")
@@ -281,8 +294,18 @@ func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
 		t.Fatalf("never reached the warning; got %q", content)
 	}
 	click(&ctx.Router, Button1) // Cancel
+	// The plate list must never be constructed on the declined path.
+	labels := plateRecords(t, "E")
 	for i := 0; i < 32 && !*done; i++ {
-		frame()
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		for j := range labels {
+			if uiContains(c, drawnLabel(plateLabel(labels[j], j))) {
+				t.Fatalf("declining the §10.2.3 warning still reached the plate list: %q", c)
+			}
+		}
 	}
 	if !*done {
 		t.Fatal("cancelling the §10.2.3 warning did not return to the menu")

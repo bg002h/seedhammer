@@ -204,6 +204,42 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 	}
 }
 
+// TestUnlockPayloadEntrySelectable presses OK on the new entry and drives it
+// into the flow. Navigability only proves the entry is in the carousel; without
+// this the feature ships with a dead menu item and a fully green suite, which
+// is the exact failure gui/text_program_test.go's own selectable test exists to
+// prevent.
+//
+// It is also the ONLY test that proves the bytes uiFlow PROBED are the bytes
+// the flow receives: the digest on screen is computed from them.
+func TestUnlockPayloadEntrySelectable(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.payload = payloadReaderFor(t, "E")
+	ctx := NewContext(p)
+	frame, drawer, quit := runUITouch(ctx, func() { uiFlow(ctx, "test") })
+	defer quit()
+	if _, ok := frame(); !ok {
+		t.Fatal("uiFlow produced no frame")
+	}
+	_, right := arrowPoints(ctx)
+	for i := 0; i < 8; i++ {
+		tap(&ctx.Router, drawer(), right)
+		if _, ok := frame(); !ok {
+			t.Fatalf("no frame after tap #%d", i+1)
+		}
+	}
+	tapNavSlot(t, ctx, drawer(), Button3)
+	content, ok := pumpUntil(frame, "Public data hash", 32)
+	if !ok {
+		t.Fatalf("selecting the Sealed Payload entry did not open the flow; got %q", content)
+	}
+	want := sealVector(t, "E").PubhashUnsealed
+	if !uiContains(content, *want) {
+		t.Errorf("the flow did not receive the probed payload: no digest %s in %q", *want, content)
+	}
+}
+
 // TestUnlockPayloadWrapsBothDirections. The prev wrap and the next wrap are
 // SEPARATE sites and a fix to one does not fix the other, so both are driven in
 // both states. The next wrap is covered by the lap tests above; this pins prev.
