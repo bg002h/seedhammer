@@ -16,7 +16,19 @@
 //  2. Confirm exactly ONE RP2350 is present and it is the Pico:
 //     lsusb | grep 2e8a          # 2e8a:000f == bootrom in BOOTSEL
 //     picotool info -a           # chipid must be 0x66d3d60ff20abf2f
-//     SH2 chipid is 0x77c483b745abf55c. If you see that, STOP.
+//
+//     THREE boards on this bench answer to 2e8a:000f. Full table in
+//     mnemonic-engrave/design/HARDWARE_INVENTORY.md:
+//       0x66d3d60ff20abf2f  Pico 2, rehearsal keys  <- the one you want
+//       0x77c483b745abf55c  SeedHammer II           <- STOP
+//       0xb3d19289d3ec3f0e  Pico 2 W                <- WRONG BOARD
+//
+//     The Pico 2 W is the easy mistake: same form factor, same 4 MB, sat next
+//     to the rehearsal Pico. It has secure boot: 0, so it runs UNSIGNED images
+//     — a sealread that boots there proves nothing about the signing path. Its
+//     LED is also not where a Pico 2's is, so a dark LED is not evidence of a
+//     failed boot. On 2026-08-07 it and the SH2 were in BOOTSEL *at the same
+//     time*, which is exactly what step 2 exists to catch.
 //  3. Replug holding BOOTSEL — a running TinyGo app has NO reset interface,
 //     so picotool reboot -f cannot get you here ("Unable to locate reset
 //     interface on the device", measured 2026-08-07).
