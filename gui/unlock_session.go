@@ -8,6 +8,7 @@ import (
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
 	"seedhammer.com/font/constant"
+	"seedhammer.com/gui/assets"
 	"seedhammer.com/seal"
 )
 
@@ -121,6 +122,13 @@ func unlockSecretPlate(ctx *Context, th *Colors, p *seal.Payload, i int, label s
 		Title:   label,
 		Lead:    "SECRET seed material",
 		Choices: []string{"Cut this plate", "Skip"},
+		// IconDiscard, not the default IconBack. Back here is NOT "step back one
+		// screen": it takes the Skip path and the deferred WipeSecretAt then
+		// destroys a decrypted SEED record, recoverable only with twelve words
+		// and a ~31 s KDF. unlockPlateListFlow made this same call for a
+		// strictly smaller loss -- a payload rather than a seed -- and these two
+		// screens are one tap apart.
+		BackIcon: assets.IconDiscard,
 	}
 	// Back and Skip are the same outcome, and both wipe. There is deliberately
 	// no third option: §10.2.2 gives the operator Cut or Skip, and a "later"

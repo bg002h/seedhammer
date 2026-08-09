@@ -37,6 +37,7 @@ import (
 	"seedhammer.com/gui/saver"
 	"seedhammer.com/gui/text"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/image/alpha4"
 	"seedhammer.com/md"
 	"seedhammer.com/nonstandard"
 	"seedhammer.com/seal"
@@ -1414,9 +1415,21 @@ func mulAlpha(col color.RGBA, a uint8) color.RGBA {
 }
 
 type ChoiceScreen struct {
-	Title    string
-	Lead     string
-	Choices  []string
+	Title   string
+	Lead    string
+	Choices []string
+	// BackIcon overrides the Button1 glyph. The ZERO VALUE keeps assets.IconBack,
+	// so all 52 existing call sites are unaffected by construction.
+	//
+	// It exists because on ONE screen Back is not "step back" but "irreversibly
+	// destroy a decrypted seed record": unlockSecretPlate treats Back and Skip
+	// alike and its deferred WipeSecretAt then zeroes the record, at a recovery
+	// cost of twelve words and a ~31 s KDF. Drawing that under the same glyph
+	// every other screen uses for a harmless step back is the one place this
+	// firmware would teach an operator that Back is safe. The plate list one file
+	// over already made the opposite call for a strictly SMALLER loss -- a
+	// payload, not a seed -- and named the reason in its own code.
+	BackIcon *alpha4.Image
 	children []Choice
 	choice   int
 }
@@ -1469,8 +1482,12 @@ frames:
 		}
 
 		dims := ctx.Platform.DisplaySize()
+		backIcon := s.BackIcon
+		if backIcon == nil {
+			backIcon = assets.IconBack
+		}
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: cancelBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: cancelBtn, Style: StyleSecondary, Icon: backIcon},
 			{Clickable: chooseBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
 		}...)
 		content := s.Draw(ctx, th, dims)

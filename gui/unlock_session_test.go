@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"seedhammer.com/bip39"
+	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/seal"
 )
@@ -1068,5 +1069,44 @@ func TestSecretSessionMixesTheTwoSecretClasses(t *testing.T) {
 	if cards != 5 {
 		t.Errorf("the plate list holds %d cards after the mixed session, want vector C's 5",
 			cards)
+	}
+}
+
+// Back on a secret plate is DESTRUCTIVE — it takes the Skip path and the
+// deferred WipeSecretAt zeroes a decrypted seed record, recoverable only with
+// twelve words and a ~31 s KDF. It must not be drawn with the glyph every other
+// screen uses for a harmless step back.
+//
+// The plate list one file over already made this call for a strictly smaller
+// loss (a payload, not a seed), and the two screens are one tap apart — which is
+// exactly the inconsistency that would teach an operator Back is safe.
+// (B2a-ii whole-diff review, lens 4 Important 2.)
+func TestSecretPlateBackIsDrawnAsDestructive(t *testing.T) {
+	dims := sh2DisplaySize
+	p := unlockedPayload(t, "F")
+
+	pf := newPlatform()
+	pf.display = dims
+	ctx := NewContext(pf)
+	slot := backSlotRect(dims)
+	got := firstFrameRegion(t, ctx, slot, func() {
+		unlockSecretSession(ctx, &descriptorTheme, p)
+	})
+	if len(got) == 0 {
+		t.Fatal("the secret session drew no frame")
+	}
+	discard := referenceRegion(t, dims, slot, assets.IconDiscard)
+	back := referenceRegion(t, dims, slot, assets.IconBack)
+
+	// Premise: the two glyphs must actually differ, or nothing below discriminates.
+	if sameRegion(discard, back) {
+		t.Fatal("IconDiscard and IconBack render identically; this test cannot discriminate")
+	}
+	if sameRegion(got, back) {
+		t.Error("the secret plate's Back slot renders assets.IconBack -- the glyph every " +
+			"harmless step-back uses, on the one screen where Back destroys a SEED record")
+	}
+	if !sameRegion(got, discard) {
+		t.Error("the secret plate's Back slot does not render assets.IconDiscard")
 	}
 }
