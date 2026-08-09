@@ -192,17 +192,41 @@ func unlockShape(p *seal.Payload) string {
 //
 // ConfirmWarningScreen is existing machinery -- scrollable body, cancel, and a
 // hold-to-confirm that is the "explicit confirmation" §10.2 step 4 requires.
+// unlockUnauthenticatedBody is §10.2.3's copy, split out from the screen so a
+// test can MEASURE it (lens 4 MINOR 4).
+//
+// It has to be measured because the last paragraph is the §2.2 item 10
+// downgrade instruction -- the single sentence telling the operator to stop --
+// and it currently sits inside Warning.Layout's overflow window. Measured at
+// 480x320 with the real styles: bodyClip is (6,44)-(423,314), the body is 257 px
+// tall drawn from y=60, so it ends at y=317 in a 320-px panel and
+// maxScroll = 19 > 0. The widget therefore believes the last line is scrolled
+// out of view, and nothing is actually cut off ONLY because fadeClip is a no-op
+// stub (gui/gui.go, with the real mask commented out beside it).
+//
+// Warning's only scroll input is ButtonFilter(Up)/ButtonFilter(Down) and the
+// SH2 has no directional buttons -- processTouch emits PointerEvent
+// exclusively -- so the body is UNSCROLLABLE on the real machine. One more
+// wrapped line of copy, or restoring fadeClip, removes the "Do not continue."
+// paragraph silently with no way to reach it. That half is pre-existing from
+// B1, is not this diff's, and is filed (F-95, plus the standing
+// `seedhammer-warning-scroll-untouchable` entry). What is closed here is that
+// nothing pinned the FIT.
+func unlockUnauthenticatedBody(p *seal.Payload) string {
+	return "THIS PAYLOAD IS NOT AUTHENTICATED\n\n" +
+		"It carries no encrypted data, so there is no key and nothing proves it is " +
+		"the payload you sent. Anyone with physical access could have replaced it.\n\n" +
+		fmt.Sprintf("Public data hash (%d records, UNSEALED):\n\n%s\n\n", len(p.Public), seal.FormatHash(p.Hash)) +
+		"Compare this with the value you recorded.\n\n" +
+		"If you sealed this payload with a passphrase, the encrypted part has been " +
+		"REMOVED. Do not continue."
+}
+
 func unlockWarnUnauthenticated(ctx *Context, th *Colors, p *seal.Payload) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "Not Authenticated",
-		Body: "THIS PAYLOAD IS NOT AUTHENTICATED\n\n" +
-			"It carries no encrypted data, so there is no key and nothing proves it is " +
-			"the payload you sent. Anyone with physical access could have replaced it.\n\n" +
-			fmt.Sprintf("Public data hash (%d records, UNSEALED):\n\n%s\n\n", len(p.Public), seal.FormatHash(p.Hash)) +
-			"Compare this with the value you recorded.\n\n" +
-			"If you sealed this payload with a passphrase, the encrypted part has been " +
-			"REMOVED. Do not continue.",
-		Icon: assets.IconCheckmark,
+		Body:  unlockUnauthenticatedBody(p),
+		Icon:  assets.IconCheckmark,
 	}
 	for !ctx.Done {
 		dims := ctx.Platform.DisplaySize()

@@ -1,11 +1,15 @@
 package gui
 
 import (
+	"fmt"
+	"image"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"seedhammer.com/gui/assets"
+	"seedhammer.com/gui/widget"
 	"seedhammer.com/seal"
 )
 
@@ -368,4 +372,70 @@ func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 			t.Fatalf("holding to confirm did not reach the plate list; got %q", content)
 		}
 	})
+}
+
+// TestUnauthenticatedWarningFitsThePanel — §10.2.3's copy against the screen it
+// is drawn on (lens 4 MINOR 4).
+//
+// The paragraph at the bottom of this body is §2.2 item 10's downgrade
+// instruction: "the encrypted part has been REMOVED. Do not continue." It is
+// the one sentence that tells the operator to stop, and it is the one that
+// falls off first.
+//
+// Three facts stack, and this test pins the third:
+//
+//  1. Warning.Layout computes maxScroll = bodysz.Y - (bodyClip.Dy() -
+//     2*scrollFadeDist), and for this copy that is POSITIVE -- the widget
+//     believes the last line is scrolled out of view.
+//  2. Its only scroll input is ButtonFilter(Up)/ButtonFilter(Down). The SH2 has
+//     no directional buttons, so the body cannot be scrolled on the machine.
+//  3. Nothing is cut off today only because fadeClip is a no-op stub, so the
+//     body renders past bodyClip.Max.Y into the last few pixels of the panel.
+//
+// So the guarantee that the operator can READ the instruction rests entirely on
+// the body still fitting the PANEL. That is what is asserted, with the margin
+// reported, so a copy edit that eats it fails here rather than on hardware.
+func TestUnauthenticatedWarningFitsThePanel(t *testing.T) {
+	pf := newPlatform()
+	pf.display = sh2DisplaySize
+	ctx := NewContext(pf)
+	dims := ctx.Platform.DisplaySize()
+
+	// Warning.Layout's own geometry, reproduced from gui.go's constants rather
+	// than hardcoded, so a change to either is caught.
+	const btnMargin = 4
+	const boxMargin = 6
+	btnOff := assets.NavBtnPrimary.Bounds().Dx() + btnMargin
+	bodyClip := image.Rectangle{
+		Min: image.Pt(boxMargin, leadingSize),
+		Max: image.Pt(dims.X-btnOff, dims.Y-boxMargin),
+	}
+
+	// Every legal public record count, since the count and the digest are both
+	// interpolated into the copy and a wider count wraps a line.
+	for _, n := range []int{1, 5, 9, 12, 24} {
+		t.Run(fmt.Sprintf("%d records", n), func(t *testing.T) {
+			p := &seal.Payload{Public: make([]seal.AdmittedRecord, n), HasHash: true}
+			body := unlockUnauthenticatedBody(p)
+			if !strings.Contains(body, "Do not continue.") {
+				t.Fatal("premise broken: §10.2.3's copy must carry the downgrade instruction")
+			}
+			_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, bodyClip.Dx(), descriptorTheme.Text, body)
+
+			top := bodyClip.Min.Y + scrollFadeDist
+			bottom := top + sz.Y
+			maxScroll := sz.Y - (bodyClip.Dy() - 2*scrollFadeDist)
+			t.Logf("bodyClip=%v body=%dx%d top=%d bottom=%d panel=%d maxScroll=%d",
+				bodyClip, sz.X, sz.Y, top, bottom, dims.Y, maxScroll)
+
+			if bottom > dims.Y {
+				t.Errorf("§10.2.3's body ends at y=%d on a %d-pixel panel (%d px over)\n"+
+					"the paragraph that falls off is §2.2 item 10's \"the encrypted part "+
+					"has been REMOVED. Do not continue.\" -- and Warning scrolls only on "+
+					"Up/Down buttons, which the SeedHammer II does not have, so it is "+
+					"unreachable rather than merely below the fold",
+					bottom, dims.Y, bottom-dims.Y)
+			}
+		})
+	}
 }
