@@ -48,10 +48,14 @@ func plateLabel(r seal.AdmittedRecord, i int) string {
 	case 'k':
 		hrp = "mk1"
 	default:
-		// Unreachable: §10.2.1's allow-list admits only ClassMDMK into the
-		// public section and pass 3 sets HRP for every one of them. Named
-		// rather than mislabelled — an entry that is somehow neither must look
-		// odd, not look like an md1.
+		// Unreachable FOR THE PUBLIC SECTION: §10.2.1's allow-list admits only
+		// ClassMDMK there and pass 3 sets HRP for every one of them. REACHABLE
+		// for the encrypted section once B2a-ii wires it (F-77), where ms1
+		// records, bare mnemonics and every card of a failed grouping all keep
+		// HRP 0 — label_encrypted.go discards a grouping failure precisely
+		// because this branch renders it honestly. Named rather than
+		// mislabelled — an entry that is somehow neither must look odd, not look
+		// like an md1.
 		return fmt.Sprintf("record %d", i+1)
 	}
 	if r.CardTotal > 1 {

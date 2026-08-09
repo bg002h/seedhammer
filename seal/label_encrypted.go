@@ -4,7 +4,7 @@ package seal
 //
 // AdmittedRecord's label fields were populated for SectionPublic only, because
 // pass 3 (decodePublicSet) is the sole place a grouping is computed and it runs
-// only there (record.go:214). But §6.3 admits md1/mk1 into the encrypted
+// only there (record.go:213). But §6.3 admits md1/mk1 into the encrypted
 // section explicitly, and the vectors carry them: vector C's secret set is
 // ms1 x1 / mk1 x2 / md1 x3, vector F's is ms1 x3 / mk1 x6 / md1 x6. Without
 // this, §10.2.2's secret-session plate labels are unimplementable for every
@@ -28,7 +28,7 @@ package seal
 func labelEncryptedCards(out []AdmittedRecord) {
 	// Stringifying an md1/mk1 copies PUBLIC data by §6.3 — an xpub or a wallet
 	// policy, not key material — which is why the same conversion is already
-	// done unremarked for the public section (record.go:217-220). ms1 and
+	// done unremarked for the public section (record.go:216-219). ms1 and
 	// mnemonic records are never converted here.
 	at := make([]int, 0, len(out))
 	strs := make([]string, 0, len(out))

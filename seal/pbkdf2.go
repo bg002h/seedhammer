@@ -105,7 +105,8 @@ func (d *Deriver) Key() []byte {
 	// `d.total == 0` is the ZERO VALUE, and it must be caught explicitly: with
 	// both fields 0 the `done < total` test is FALSE, so without this clause a
 	// `var d Deriver` reports complete and hands out 32 zero bytes -- a VALID
-	// AES key, which is exactly what crypto.go:47-52 forbids. Measured before
+	// AES key, which is exactly what this file's own Wipe/Key contract forbids
+	// (see Key below) and what Phase A's DeriveKey doc argued. Measured before
 	// this clause existed: `Step(1000)=true, Key() len=32, allzero=true`.
 	// NewDeriver clamps total >= 1, so this is unreachable through it; Deriver,
 	// Step and Key are all EXPORTED, and B2b holds one across a timer.
@@ -119,8 +120,9 @@ func (d *Deriver) Key() []byte {
 // reach.
 //
 // done is reset so a post-Wipe Key() returns nil rather than 32 zero bytes.
-// crypto.go:47-52 states the rule this obeys: "An all-zero key would be worse --
-// it is a VALID AES key and hides the fault." Not reachable from unlockDerive,
+// The rule this obeys, stated here because this is now the only place in the
+// package that enforces it: an all-zero key would be worse than none -- it is a
+// VALID AES key and hides the fault. Not reachable from unlockDerive,
 // where Key()'s result is evaluated before the deferred Wipe runs, but this is a
 // public seam and B2b will hold one of these across a timer.
 func (d *Deriver) Wipe() {
@@ -128,7 +130,7 @@ func (d *Deriver) Wipe() {
 	clear(d.acc[:])
 	// nil on a zero-value Deriver, where an unguarded Reset panics -- and on a
 	// device a panic is a brick. Same reason DeriveKey returns nil rather than
-	// panicking (crypto.go:47-52).
+	// panicking: on a device a panic is a brick, and this costs one comparison.
 	if d.mac != nil {
 		d.mac.Reset()
 	}

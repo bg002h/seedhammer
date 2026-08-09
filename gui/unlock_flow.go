@@ -24,6 +24,17 @@ const unlockTitle = "Sealed Payload"
 // region's reader, PROBED once at GUI start (§10.1) and READ here — F-79:
 // startup retains the reader, never the 65,536 bytes.
 func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
+	// Structurally unreachable: lastNav() returns bip85Derive when no payload
+	// was probed, and both carousel wrap sites bound m.prog by it, so the
+	// unlockPayload case cannot be dispatched with a nil reader. Guarded anyway,
+	// for the reason crypto.go guards a wrong-length IV and pbkdf2.go a nil mac
+	// -- a panic on a watchdog-less device is a brick, and this costs one
+	// comparison. Before F-79 the same mistake was harmless: the parameter was a
+	// nil []byte and Inspect reported it as unreadable.
+	if r == nil {
+		showError(ctx, th, unlockTitle, "Payload unreadable.")
+		return
+	}
 	blob, err := r.Read()
 	if err != nil {
 		// ErrNoPayload here means the region was erased between the startup

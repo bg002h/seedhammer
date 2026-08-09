@@ -144,7 +144,7 @@ func TestDeriverWipeLeavesTheReturnedKeyIntact(t *testing.T) {
 		t.Fatal("Wipe left the U buffer non-zero")
 	}
 	// A wiped Deriver must not hand out 32 zero bytes: that is a VALID AES key
-	// and it hides the fault (the rule crypto.go:47-52 states for DeriveKey).
+	// and it hides the fault (the rule Key's own doc comment states).
 	if k := d.Key(); k != nil {
 		t.Fatalf("Key() after Wipe returned %d bytes, want nil", len(k))
 	}
