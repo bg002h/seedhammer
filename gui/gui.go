@@ -69,6 +69,10 @@ type Context struct {
 	B             op.Buffer
 
 	Router EventRouter
+
+	// wipe is §10.2.4's residency seam, installed and uninstalled by
+	// unlockSecretSession. See wipe_guard.go.
+	wipe *wipeGuard
 }
 
 func (c *Context) Frame(op op.Op) {

@@ -79,6 +79,9 @@ func unlockSecretLabel(c seal.Classification, i, n int) string {
 // unlockSecretSession offers every secret record, in order, before the plate
 // list is built.
 func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
+	g := &wipeGuard{}
+	ctx.wipe = g
+	defer func() { ctx.wipe = nil }()
 	at := make([]int, 0, len(p.Secret))
 	for i, r := range p.Secret {
 		if seal.IsSecret(r.Class) {
@@ -194,7 +197,12 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 	// a fresh unlock.
 	clear(rec)
 	// ONE engrave, then return regardless of the outcome.
-	NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
+	scr := NewEngraveScreen(ctx, plate)
+	if g := ctx.wipe; g != nil {
+		g.job = scr.job
+		defer func() { g.job = nil }()
+	}
+	scr.Engrave(ctx, &engraveTheme)
 }
 
 // unlockEngraveMnemonic cuts one bare-mnemonic record.
@@ -291,5 +299,10 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	if unlockMnemonicHook != nil {
 		unlockMnemonicHook(m)
 	}
-	NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
+	scr := NewEngraveScreen(ctx, plate)
+	if g := ctx.wipe; g != nil {
+		g.job = scr.job
+		defer func() { g.job = nil }()
+	}
+	scr.Engrave(ctx, &engraveTheme)
 }
