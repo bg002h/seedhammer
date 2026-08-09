@@ -41,6 +41,30 @@ func (o Opener) UnlockWithKey(blob []byte, p *Payload, key []byte) error {
 	if !h.Sealed() {
 		return ErrNotSealed
 	}
+	// Bound the HEADER before deriving offsets from it, not just the blob
+	// afterwards. p.Header is an exported struct with exported uint32 lengths
+	// and this is an exported entry point, so the only thing standing between a
+	// caller-supplied Header and the slice expressions below is a check made in
+	// a DIFFERENT function (ParseHeader). §6.2 requires the length arithmetic be
+	// done in unsigned arithmetic wider than 32 bits or be otherwise
+	// overflow-checked, and `int(uint32)` on this target REINTERPRETS rather
+	// than widens: TinyGo's int is 32-bit on RP2350, so pub_len = 0x80000000
+	// makes `end` NEGATIVE, `len(blob) < end` false, and `blob[:split]` a panic
+	// -- a brick on a watchdog-less device.
+	//
+	// Measured under GOARCH=386, without this clause:
+	//	int is 32 bits; split=-2147483596 end=-2147483480
+	//	len(blob) < end ? false
+	//	PANIC: runtime error: slice bounds out of range [:-2147483596]
+	//
+	// NOT reachable from a hostile payload: Inspect is the only in-tree producer
+	// of a Payload, ParseHeader caps both lengths at MaxSectionLen in uint64
+	// arithmetic before the struct is built, and nothing assigns p.Header.
+	// This closes the gap between that fact and this function's own contract.
+	if h.PubLen > MaxSectionLen || h.CtLen > MaxSectionLen {
+		return fmt.Errorf("%w: the header declares pub_len=%d ct_len=%d, the cap is %d",
+			ErrTooLarge, h.PubLen, h.CtLen, MaxSectionLen)
+	}
 	end := HeaderLen + int(h.PubLen) + int(h.CtLen) + TagLen
 	split := HeaderLen + int(h.PubLen)
 	// The offsets come from p.Header, which came from a DIFFERENT call

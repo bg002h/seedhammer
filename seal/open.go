@@ -180,6 +180,17 @@ func (o Opener) Inspect(blob []byte) (*Payload, error) {
 // ~31 s derivation, and a single call that derives and opens has none.
 func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
 	h := p.Header
+	// Bound the HEADER first, in uint32 comparisons that cannot wrap, for the
+	// reason UnlockWithKey states at length: `int(uint32)` reinterprets on a
+	// 32-bit target, so the `len(blob) < end` test below is made against a
+	// NEGATIVE end and passes. UnlockWithKey re-checks this and is the function
+	// that actually slices, but it is reached only after the derivation --
+	// placing the clause here too means a caller with a broken Header is told so
+	// instead of burning up to 2,000,000 iterations to be told the same thing.
+	if h.PubLen > MaxSectionLen || h.CtLen > MaxSectionLen {
+		return fmt.Errorf("%w: the header declares pub_len=%d ct_len=%d, the cap is %d",
+			ErrTooLarge, h.PubLen, h.CtLen, MaxSectionLen)
+	}
 	end := HeaderLen + int(h.PubLen) + int(h.CtLen)
 	if h.Sealed() {
 		end += TagLen

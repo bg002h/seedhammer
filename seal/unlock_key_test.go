@@ -301,3 +301,99 @@ func TestUnlockWithKeyZeroesThePlaintextOnAnErrorExit(t *testing.T) {
 		t.Errorf("a REFUSED unlock left the decrypted section resident: %q", held)
 	}
 }
+
+// TestUnlockRefusesAnOutOfRangeHeaderInsteadOfSlicingOnIt — §6.2's overflow
+// clause, at the two exported entry points that re-derive their offsets from a
+// CALLER-SUPPLIED Header (B2a-ii whole-diff review, lens 6 M1; lens 3 recorded
+// the same shape as a theoretical note).
+//
+// Payload.Header is exported and so are its uint32 lengths, so the only thing
+// between a hand-built literal and `blob[:split]` is a bound check made in a
+// different function. §6.2: "the length arithmetic MUST be performed in unsigned
+// arithmetic wider than 32 bits, or be otherwise overflow-checked". `int(uint32)`
+// REINTERPRETS on a 32-bit target rather than widening -- TinyGo's int is 32-bit
+// on RP2350 -- so pub_len = 1<<31 makes end negative, the `len(blob) < end`
+// guard pass, and the slice panic. Measured under GOARCH=386 before this guard:
+//
+//	int is 32 bits; split=-2147483596 end=-2147483480
+//	len(blob) < end ? false
+//	PANIC: runtime error: slice bounds out of range [:-2147483596]
+//
+// The assertion is on ErrTooLarge SPECIFICALLY and not merely "some error":
+// on a 64-bit host the un-guarded code returns ErrTooShort instead of panicking,
+// so a test that accepted any error would pass over the missing guard.
+func TestUnlockRefusesAnOutOfRangeHeaderInsteadOfSlicingOnIt(t *testing.T) {
+	// Wider than MaxSectionLen, up to the value that wraps a 32-bit int.
+	for _, tc := range []struct {
+		name    string
+		pub, ct uint32
+	}{
+		{"pub just over the cap", MaxSectionLen + 1, 100},
+		{"ct just over the cap", 100, MaxSectionLen + 1},
+		{"pub wraps a 32-bit int", 1 << 31, 100},
+		{"ct wraps a 32-bit int", 100, 1 << 31},
+		{"both maximal", 0xFFFFFFFF, 0xFFFFFFFF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Payload{Header: Header{Iterations: MinIterations, PubLen: tc.pub, CtLen: tc.ct}}
+			blob := make([]byte, 4096)
+			key := make([]byte, KeyLen)
+			var o Opener
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("UnlockWithKey PANICKED on a hostile header: %v\n"+
+						"a panic on a watchdog-less device is a brick until the operator "+
+						"re-enters BOOTSEL", r)
+				}
+			}()
+			if err := o.UnlockWithKey(blob, p, key); !errors.Is(err, ErrTooLarge) {
+				t.Errorf("UnlockWithKey with pub_len=%d ct_len=%d = %v, want ErrTooLarge\n"+
+					"the header must be bounded BEFORE offsets are derived from it; "+
+					"ErrTooShort here means the blob guard caught it by luck on a "+
+					"64-bit host and would slice on the 32-bit target", tc.pub, tc.ct, err)
+			}
+			// Unlock re-derives the same offsets and must refuse before the KDF
+			// rather than after it.
+			o2 := Opener{KDF: func(passphrase string, salt []byte, iterations int) []byte {
+				t.Errorf("Unlock ran the KDF on a header it cannot use")
+				return make([]byte, KeyLen)
+			}}
+			if err := o2.Unlock(blob, p, "beef beef beef beef beef beef beef beef beef beef beef beef"); !errors.Is(err, ErrTooLarge) {
+				t.Errorf("Unlock with pub_len=%d ct_len=%d = %v, want ErrTooLarge", tc.pub, tc.ct, err)
+			}
+		})
+	}
+}
+
+// TestInspectCannotProduceAnOutOfRangeHeader is the premise the guard above
+// rests on, asserted rather than assumed: no HOSTILE FLASH REGION can hand the
+// rest of the firmware a Payload whose lengths are out of range. §2.2 item 4
+// concedes the region is attacker-writable, so this is the reachability
+// argument, and it is the reason lens 6's finding is a latent brick in an
+// exported API rather than a live one.
+func TestInspectCannotProduceAnOutOfRangeHeader(t *testing.T) {
+	for _, tc := range []struct{ pub, ct uint32 }{
+		{MaxSectionLen + 1, 100},
+		{100, MaxSectionLen + 1},
+		{1 << 31, 100},
+		{100, 1 << 31},
+		{0xFFFFFFFF, 0},
+		{0xFFFF0000, 0xFFFF0000},
+	} {
+		h := Header{Iterations: MinIterations, PubLen: tc.pub, CtLen: tc.ct}
+		for i := range h.Salt {
+			h.Salt[i] = byte(i + 1)
+		}
+		for i := range h.IV {
+			h.IV[i] = byte(i + 0x40)
+		}
+		enc := h.Encode()
+		blob := make([]byte, RegionLen)
+		copy(blob, enc[:])
+		got, err := ParseHeader(blob)
+		if err == nil {
+			t.Errorf("ParseHeader ACCEPTED pub_len=%d ct_len=%d, producing %+v", tc.pub, tc.ct, got)
+		}
+	}
+}
