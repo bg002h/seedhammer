@@ -34,7 +34,6 @@ import (
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
-	"seedhammer.com/gui/saver"
 	"seedhammer.com/gui/text"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/image/alpha4"
@@ -2932,91 +2931,7 @@ type EngraverStats struct {
 const idleTimeout = 3 * time.Minute
 
 func Run(pl Platform, version string) func(yield func() bool) {
-	return func(yield func() bool) {
-		ctx := NewContext(pl)
-		a := struct {
-			mask *image.Alpha
-			idle struct {
-				start  time.Time
-				active bool
-				state  saver.State
-			}
-		}{}
-		a.idle.start = time.Now()
-
-		it := func(yield func(op.Op) bool) {
-			ctx.FrameCallback = func(op op.Op) {
-				ctx.Done = ctx.Done || !yield(op)
-			}
-			version := "Firmware: " + version + "\nHardware: " + pl.HardwareVersion()
-			if !pl.Features().Has(FeatureSecureBoot) {
-				version += " (UNLOCKED)"
-			}
-			uiFlow(ctx, version)
-		}
-		startTime := time.Now()
-		var evts []Event
-		stats := new(runtimeStats)
-		d := new(op.Drawer)
-		for content := range it {
-			d.Reset()
-			dirty := image.Rectangle{Max: pl.DisplaySize()}
-			layoutTime := time.Since(startTime)
-			if err := pl.Dirty(dirty); err != nil {
-				panic(err)
-			}
-			for {
-				fb, ok := pl.NextChunk()
-				if !ok {
-					break
-				}
-				fbdims := fb.Bounds().Size()
-				npix := fbdims.X * fbdims.Y
-				if a.mask == nil || len(a.mask.Pix) < npix {
-					a.mask = image.NewAlpha(image.Rectangle{Max: fbdims})
-				}
-				a.mask.Rect = image.Rectangle{Max: fbdims}
-				d.Draw(fb, a.mask, content)
-			}
-			drawTime := time.Since(startTime)
-			if debug {
-				stats.Dump(drawTime, layoutTime)
-			}
-			for {
-				if ctx.Done || !yield() {
-					return
-				}
-				wakeup := ctx.Wakeup
-				evts = pl.AppendEvents(wakeup, evts[:0])
-				now := time.Now()
-				if len(evts) > 0 {
-					a.idle.start = now
-				}
-				ctx.Reset()
-				if !a.idle.active {
-					ctx.Router.Events(d, evts...)
-				}
-				idleWakeup := a.idle.start.Add(idleTimeout)
-				idle := now.Sub(idleWakeup) >= 0
-				if a.idle.active != idle {
-					a.idle.active = idle
-					if idle {
-						a.idle.state = saver.State{}
-					}
-				}
-				if a.idle.active {
-					a.idle.state.Draw(pl)
-					// Throttle screen saver speed.
-					const minFrameTime = 40 * time.Millisecond
-					ctx.WakeupAt(now.Add(minFrameTime))
-					continue
-				}
-				ctx.WakeupAt(idleWakeup)
-				break
-			}
-			startTime = time.Now()
-		}
-	}
+	return runWithFlow(pl, version, uiFlow, nil)
 }
 
 type runtimeStats struct {
