@@ -2286,6 +2286,14 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 }
 
 type SeedScreen struct {
+	// NoEdit suppresses the edit affordance. Zero value is EDITABLE, so every
+	// existing caller keeps today's behaviour; only a payload-sourced seed sets
+	// it. For a TYPED seed, editing a word is a typo fix. For an authoritative
+	// one it is corruption, and because Confirm's caller then derives a
+	// fingerprint from whatever is on screen, the resulting plate is internally
+	// self-consistent and does not restore the payload's wallet.
+	NoEdit bool
+
 	selected int
 	words    []Clickable
 }
@@ -2325,7 +2333,13 @@ events:
 				ctx.Frame(op.Layer(d, main))
 			}
 		}
-		if editBtn.Clicked(ctx) {
+		// The guard is on the CLICK HANDLER, not only on the layout below
+		// (R0 round 1, I1). Skipping the nav slot alone does NOT close the
+		// route: Filter.matches (gui/event.go:155-159) gates a buttonEvent on
+		// button identity alone, with no bounds check, so editBtn.Clicked keeps
+		// consuming ButtonFilter(Button2) and ButtonFilter(Center) whether or
+		// not anything was drawn for it.
+		if !s.NoEdit && editBtn.Clicked(ctx) {
 			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
 			continue
 		}
@@ -2389,10 +2403,16 @@ events:
 		}
 
 		dims := ctx.Platform.DisplaySize()
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		navBtns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: editBtn, Style: StyleSecondary, Icon: assets.IconEdit},
-		}...)
+		}
+		// ...and the slot is skipped too, so the icon disappears rather than
+		// sitting there doing nothing.
+		if !s.NoEdit {
+			navBtns = append(navBtns,
+				NavButton{Clickable: editBtn, Style: StyleSecondary, Icon: assets.IconEdit})
+		}
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		if isMnemonicComplete(mnemonic) {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 				{Clickable: confirmBtn, Style: StylePrimary, Icon: assets.IconCheckmark},

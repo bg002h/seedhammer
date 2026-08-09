@@ -109,10 +109,12 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		// p.Secret do not alias this buffer.
 		clear(blob)
 		blob = nil
-		// §10.2.2's secret session (Task 6) and the post-session plate list
-		// (Task 7) attach here. Until they do, this returns rather than falling
-		// through to a list that would carry the secret records straight into
-		// the engrave path.
+		// §10.2.2 -- every secret record offered FIRST, consecutively, each
+		// wiped as its plate leaves the screen by any route.
+		unlockSecretSession(ctx, th, p)
+		// The post-session plate list is Task 7. Until it attaches, this
+		// returns rather than falling through to a list built from p.Public
+		// alone, which would drop the encrypted section's md1/mk1 cards.
 		return
 	}
 
