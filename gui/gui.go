@@ -1536,30 +1536,27 @@ func uiFlow(ctx *Context, version string) {
 	th := &descriptorTheme
 	// §10.1 detection. Probed ONCE, here, not per frame: the region cannot
 	// change while the GUI runs (writing it requires picotool and a reboot),
-	// and "absent -> the feature is invisible" is a startup property. Probing
-	// per frame would also put a 64 KB read in the frame path.
-	var payload []byte
-	if r := ctx.Platform.PayloadReader(); r != nil {
-		if b, err := r.Read(); err == nil {
-			payload = b
-		}
-		// errors.Is(err, seal.ErrNoPayload) is the ORDINARY case: erased
-		// flash. It is not logged as a failure. Any other error is equally
-		// "no feature" for §10.1 purposes -- a region that will not read is
-		// indistinguishable from one that is empty, from the menu's point of
-		// view.
-		//
-		// Note the asymmetry and PRESERVE it: §10.1's absent/present decision
-		// is deliberately coarse, asking only "are the first 8 bytes
-		// MNEMBLOB". A blob that is present but violates §6.2 still shows the
-		// menu entry, and unlockPayloadFlow then reports "payload unreadable".
-		// Collapsing the two would hide a tampered payload behind an invisible
-		// menu entry, which is precisely the signal §2.2 item 4 exists to
-		// raise.
+	// and "absent -> the feature is invisible" is a startup property.
+	//
+	// F-79: the READER is retained, the BYTES are not. XIPReader.Read allocates
+	// the whole 65,536-byte region and at most 16,450 of it can ever be
+	// meaningful (§6.2's caps); holding that for the GUI's lifetime is ~14% of
+	// free heap, and payload-present PLUS a running engrave is the one
+	// configuration hardware has never driven to completion.
+	//
+	// Note the asymmetry and PRESERVE it: §10.1's absent/present decision is
+	// deliberately coarse, asking only "are the first 8 bytes MNEMBLOB". A blob
+	// that is present but violates §6.2 still shows the menu entry, and
+	// unlockPayloadFlow then reports "payload unreadable". Collapsing the two
+	// would hide a tampered payload behind an invisible menu entry, which is
+	// precisely the signal §2.2 item 4 exists to raise.
+	var payloadReader seal.Reader
+	if r := ctx.Platform.PayloadReader(); r != nil && r.Probe() {
+		payloadReader = r
 	}
 	s := &StartScreen{
 		Version:    version,
-		hasPayload: payload != nil,
+		hasPayload: payloadReader != nil,
 	}
 	// !ctx.Done, not a bare loop. ctx.Done is set exactly when the frame
 	// consumer stops ranging, and StartScreen.Flow then returns immediately
@@ -1593,7 +1590,7 @@ func uiFlow(ctx *Context, version string) {
 				bip85DeriveFlow(ctx, th)
 				continue
 			case unlockPayload:
-				unlockPayloadFlow(ctx, th, payload)
+				unlockPayloadFlow(ctx, th, payloadReader)
 				continue
 			case engravePassphrase:
 				engravePassphraseFlow(ctx, th)

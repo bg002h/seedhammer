@@ -32,6 +32,13 @@ type XIPReader struct{}
 
 var _ Reader = XIPReader{}
 
+// Probe reads only the magic. unsafe.Slice over XIP is a MAPPING, not a copy,
+// so this allocates nothing at all — which is the whole point of F-79.
+func (XIPReader) Probe() bool {
+	region := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(PayloadAddr))), clampRegion(len(Magic)))
+	return hasMagic(region)
+}
+
 // Read returns the region's bytes, bounded by clampRegion — the SAME untagged
 // helper the host reader uses, which is what makes the bound testable at all.
 //

@@ -20,9 +20,31 @@ import (
 // string the menu entry carries.
 const unlockTitle = "Sealed Payload"
 
-// unlockPayloadFlow is the unlockPayload program (§10.2). blob is the payload
-// region as read ONCE at GUI start (§10.1).
-func unlockPayloadFlow(ctx *Context, th *Colors, blob []byte) {
+// unlockPayloadFlow is the unlockPayload program (§10.2). r is the payload
+// region's reader, PROBED once at GUI start (§10.1) and READ here — F-79:
+// startup retains the reader, never the 65,536 bytes.
+func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
+	blob, err := r.Read()
+	if err != nil {
+		// ErrNoPayload here means the region was erased between the startup
+		// probe and now, which takes a picotool run and a reboot. Report it the
+		// same as any unreadable region rather than inventing a third message.
+		showError(ctx, th, unlockTitle, "Payload unreadable.")
+		return
+	}
+	// F-79. The region is this flow's for the duration of the session and
+	// nobody else's. clear() zeroes it rather than merely dropping it: the AAD
+	// and the ciphertext both live in here, and TinyGo will not necessarily
+	// collect it before the engrave that follows needs the heap.
+	//
+	// A CLOSURE, not `defer clear(blob)` (R0 round 0, I1). Deferred call
+	// arguments are evaluated when the defer STATEMENT runs, so `defer
+	// clear(blob)` would capture the slice header here and pin all 65,536 bytes
+	// for the whole flow -- B2a-ii's `blob = nil` would rebind the local and
+	// release nothing, and F-79 would be reported closed while unfixed in
+	// exactly the payload-present-plus-running-engrave configuration B2a-ii's
+	// Task 9.5 exists to test. The closure reads `blob` at EXIT instead.
+	defer func() { clear(blob) }()
 	// Steps 1-3, headless. Do NOT re-implement them here: two code paths that
 	// must agree on the public record set is the divergence one entry point
 	// exists to eliminate, and §6.6 is the only control an unsealed payload
