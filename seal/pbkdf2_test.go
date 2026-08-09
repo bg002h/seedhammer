@@ -201,3 +201,55 @@ func TestDeriverMatchesTheStdlibAcrossInputSpace(t *testing.T) {
 		}
 	}
 }
+
+// TestWipedDeriverStaysDead — a wiped Deriver must not be resurrectable
+// (B2a-ii whole-diff review, lens 3 N1).
+//
+// Wipe zeroes u and acc and resets done, but total survives, so without the
+// dead flag a later Step re-runs a FULL derivation from a zeroed u and Key()
+// then sees done >= total and hands back 32 bytes that are not the right key.
+// That surfaces ~31 s later as a tag mismatch indistinguishable from a wrong
+// passphrase -- the exact failure Key()'s contract exists to prevent, and the
+// one an operator reads as "my payload has been altered".
+//
+// Unreachable in B2a (unlockDerive builds a fresh Deriver per attempt and
+// defers Wipe), but Deriver/Step/Wipe/Key are exported and B2b holds one across
+// a timer, which is when it becomes reachable.
+func TestWipedDeriverStaysDead(t *testing.T) {
+	pass := []byte("beef beef beef beef beef beef beef beef beef beef beef beef")
+	salt := bytes.Repeat([]byte{0xa5}, SaltLen)
+
+	d := NewDeriver(pass, salt, 5000)
+	for !d.Step(4096) {
+	}
+	live := d.Key()
+	if len(live) != KeyLen {
+		t.Fatalf("premise broken: a completed derivation returned %d bytes, want %d", len(live), KeyLen)
+	}
+	if allZero(live) {
+		t.Fatal("premise broken: the derived key is all zero")
+	}
+
+	d.Wipe()
+	if k := d.Key(); k != nil {
+		t.Errorf("Key() after Wipe returned %s, want nil", hex.EncodeToString(k))
+	}
+	// The resurrection: Step must TERMINATE (a false return would spin a
+	// watchdog-less device forever) and must not rebuild a key.
+	for i := 0; i < 4; i++ {
+		if !d.Step(4096) {
+			t.Fatalf("Step #%d after Wipe reported INCOMPLETE; a `for !d.Step(n)` loop "+
+				"would never terminate, which on a device with no watchdog is a hang", i)
+		}
+	}
+	if k := d.Key(); k != nil {
+		t.Errorf("Key() after Wipe+Step returned %s, want nil\n"+
+			"a resurrected Deriver hands back a complete-looking WRONG key, which the "+
+			"operator sees ~31 s later as \"this payload has been altered\"",
+			hex.EncodeToString(k))
+	}
+	// And the key that was already handed out is untouched: Key returns a copy.
+	if allZero(live) {
+		t.Error("Wipe zeroed the key it had already handed to the caller")
+	}
+}

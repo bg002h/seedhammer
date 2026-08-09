@@ -40,16 +40,48 @@ type Deriver struct {
 	acc   [sha256.Size]byte
 	done  int
 	total int
+	// dead is set by Wipe and is one-way. Without it a wiped Deriver is
+	// RESURRECTABLE: Wipe zeroes u and acc and resets done, but leaves total,
+	// so a later Step(n) re-runs a full derivation from a ZEROED u and Key()
+	// then hands back 32 bytes that are not the right key -- surfacing ~31 s
+	// later as a tag mismatch indistinguishable from a wrong passphrase, which
+	// is the exact failure Key()'s contract exists to prevent. Unreachable in
+	// B2a (unlockDerive builds a fresh Deriver per attempt and defers Wipe),
+	// but Deriver, Step, Wipe and Key are all exported and B2b holds one of
+	// these across a timer.
+	dead bool
 }
 
 // NewDeriver starts a derivation over the §8.1-normalised passphrase.
 //
 // passphrase is []byte and not string DELIBERATELY: it is the caller's buffer
 // and the caller can zero it, which Unlock's string parameter makes impossible.
-// The honest caveat: hmac.New folds the passphrase into an ipad/opad pair
-// inside the hash state, and those are key-equivalent and not reachable to be
-// zeroed. Wipe clears everything this type owns; it cannot clear that. Same
-// defence-in-depth-not-a-guarantee framing as the rest of the firmware.
+//
+// HONEST CAVEAT, stated precisely because "key-equivalent" understates it.
+// hmac.New folds the passphrase into an ipad/opad pair held in unexported
+// fields; Wipe clears everything this type owns and cannot clear those. What
+// they hold changes once, and it matters which side of the change you are on
+// (read from crypto/internal/fips140/hmac/hmac.go, go1.26.3, not from memory):
+//
+//   - Between NewDeriver and the FIRST Step, ipad is literally K0^0x36 and opad
+//     K0^0x5c. §8.1's passphrase is 47..107 bytes (12 BIP-39 words of 3..8
+//     letters plus 11 separators) against SHA-256's 64-byte block, so when it
+//     is 64 bytes or shorter -- every canonical vector's is 59 -- the
+//     PASSPHRASE ITSELF is recoverable from that array by XOR, not merely
+//     something equivalent to the derived key. Over 64 bytes, hmac.New hashes
+//     it first and what is recoverable is SHA-256(passphrase).
+//   - The first Step calls Reset, which (SHA-256 being marshalable) REPLACES
+//     both arrays with the marshaled compression state over K0^ipad / K0^opad.
+//     The passphrase is no longer recoverable by XOR from those, but they stay
+//     fully key-equivalent -- FIPS 198-1 §6 says in terms that these
+//     precomputed intermediates "shall be treated and protected in the same
+//     manner as secret keys". Reset never clears them again.
+//
+// So the passphrase-recoverable window is brief and the key-equivalent one is
+// the whole life of the Deriver. Avoiding either means hand-rolling HMAC, which
+// this design correctly refuses. Same defence-in-depth-not-a-guarantee framing
+// as the rest of the firmware; recorded so no later reader mistakes Wipe for a
+// guarantee about the passphrase.
 func NewDeriver(passphrase, salt []byte, iterations int) *Deriver {
 	if iterations < 1 {
 		// Unreachable behind ParseHeader, which bounds iterations to
@@ -73,7 +105,15 @@ func NewDeriver(passphrase, salt []byte, iterations int) *Deriver {
 
 // Step runs at most n further iterations and reports whether the derivation is
 // complete. It never runs past total, so a caller that oversteps is harmless.
+//
+// After Wipe it is a TERMINATING no-op: it reports complete so a caller's
+// `for !d.Step(n)` loop cannot spin forever on a device with no watchdog, and
+// Key() then returns nil, so the caller fails closed rather than proceeding
+// with a plausible-looking wrong key.
 func (d *Deriver) Step(n int) bool {
+	if d.dead {
+		return true
+	}
 	for i := 0; i < n && d.done < d.total; i++ {
 		d.mac.Reset()
 		d.mac.Write(d.u[:])
@@ -110,14 +150,22 @@ func (d *Deriver) Key() []byte {
 	// this clause existed: `Step(1000)=true, Key() len=32, allzero=true`.
 	// NewDeriver clamps total >= 1, so this is unreachable through it; Deriver,
 	// Step and Key are all EXPORTED, and B2b holds one across a timer.
-	if d.total == 0 || d.done < d.total {
+	// `d.dead` here is REDUNDANT behind Step's own guard and is deliberately
+	// excluded from the mutation table: Wipe sets done = 0, and a dead Step
+	// returns without advancing done, so `d.done < d.total` already covers
+	// every reachable post-Wipe shape. Measured -- deleting this clause leaves
+	// TestWipedDeriverStaysDead green. It stays because it is the direct
+	// expression of the contract at the function the contract is about, and a
+	// future Step that advances done before checking dead would otherwise hand
+	// out a wrong key. Do not go looking for the test that kills it.
+	if d.dead || d.total == 0 || d.done < d.total {
 		return nil
 	}
 	return append([]byte(nil), d.acc[:]...)
 }
 
-// Wipe zeroes everything this Deriver owns. See NewDeriver for what it cannot
-// reach.
+// Wipe zeroes everything this Deriver owns and marks it permanently dead. See
+// NewDeriver for what it cannot reach.
 //
 // done is reset so a post-Wipe Key() returns nil rather than 32 zero bytes.
 // The rule this obeys, stated here because this is now the only place in the
@@ -125,7 +173,14 @@ func (d *Deriver) Key() []byte {
 // VALID AES key and hides the fault. Not reachable from unlockDerive,
 // where Key()'s result is evaluated before the deferred Wipe runs, but this is a
 // public seam and B2b will hold one of these across a timer.
+//
+// The dead flag exists because zeroing alone is not enough: total survives, so
+// Step would happily re-derive from a zeroed u and Key() would then report
+// complete. Clearing total instead would make Step return true immediately --
+// the same terminating behaviour -- but leaves Key()'s `total == 0` zero-value
+// branch doing double duty for two different faults, so the flag is explicit.
 func (d *Deriver) Wipe() {
+	d.dead = true
 	clear(d.u[:])
 	clear(d.acc[:])
 	// nil on a zero-value Deriver, where an unguarded Reset panics -- and on a

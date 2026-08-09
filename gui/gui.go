@@ -37,6 +37,7 @@ import (
 	"seedhammer.com/gui/saver"
 	"seedhammer.com/gui/text"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/image/alpha4"
 	"seedhammer.com/md"
 	"seedhammer.com/nonstandard"
 	"seedhammer.com/seal"
@@ -226,6 +227,11 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 
 func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
 	seed := bip39.MnemonicSeed(m, password)
+	// The 64-byte BIP-39 seed is seed-equivalent material and this is its only
+	// use. Scrubbed on every exit, matching deriveAccountXpub (derive.go:21).
+	// The returned key is the CALLER's to Zero -- this function cannot, it is
+	// the return value.
+	defer wipeBytes(seed)
 	mk, err := hdkeychain.NewMaster(seed, net)
 	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
 	// According to [0] the odds of encountering a seed that generates
@@ -542,6 +548,13 @@ func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password s
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
 	}
+	// The master PRIVATE key is scrubbed on every exit. The fingerprint is a
+	// uint32 computed from the PUBLIC key before any defer runs, so this cannot
+	// race the return value -- the same "capture BEFORE zeroing master" ordering
+	// derive.go:31 spells out. Note derive.go's R0-C1 warning does NOT bite here:
+	// that one is about Neuter ALIASING chainCode/parentFP, and nothing aliased
+	// is serialised after this point.
+	defer mk.Zero()
 	pkey, err := mk.ECPubKey()
 	if err != nil {
 		return 0, err
@@ -1402,9 +1415,21 @@ func mulAlpha(col color.RGBA, a uint8) color.RGBA {
 }
 
 type ChoiceScreen struct {
-	Title    string
-	Lead     string
-	Choices  []string
+	Title   string
+	Lead    string
+	Choices []string
+	// BackIcon overrides the Button1 glyph. The ZERO VALUE keeps assets.IconBack,
+	// so all 52 existing call sites are unaffected by construction.
+	//
+	// It exists because on ONE screen Back is not "step back" but "irreversibly
+	// destroy a decrypted seed record": unlockSecretPlate treats Back and Skip
+	// alike and its deferred WipeSecretAt then zeroes the record, at a recovery
+	// cost of twelve words and a ~31 s KDF. Drawing that under the same glyph
+	// every other screen uses for a harmless step back is the one place this
+	// firmware would teach an operator that Back is safe. The plate list one file
+	// over already made the opposite call for a strictly SMALLER loss -- a
+	// payload, not a seed -- and named the reason in its own code.
+	BackIcon *alpha4.Image
 	children []Choice
 	choice   int
 }
@@ -1457,8 +1482,12 @@ frames:
 		}
 
 		dims := ctx.Platform.DisplaySize()
+		backIcon := s.BackIcon
+		if backIcon == nil {
+			backIcon = assets.IconBack
+		}
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: cancelBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: cancelBtn, Style: StyleSecondary, Icon: backIcon},
 			{Clickable: chooseBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
 		}...)
 		content := s.Draw(ctx, th, dims)
@@ -2286,6 +2315,14 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 }
 
 type SeedScreen struct {
+	// NoEdit suppresses the edit affordance. Zero value is EDITABLE, so every
+	// existing caller keeps today's behaviour; only a payload-sourced seed sets
+	// it. For a TYPED seed, editing a word is a typo fix. For an authoritative
+	// one it is corruption, and because Confirm's caller then derives a
+	// fingerprint from whatever is on screen, the resulting plate is internally
+	// self-consistent and does not restore the payload's wallet.
+	NoEdit bool
+
 	selected int
 	words    []Clickable
 }
@@ -2325,7 +2362,13 @@ events:
 				ctx.Frame(op.Layer(d, main))
 			}
 		}
-		if editBtn.Clicked(ctx) {
+		// The guard is on the CLICK HANDLER, not only on the layout below
+		// (R0 round 1, I1). Skipping the nav slot alone does NOT close the
+		// route: Filter.matches (gui/event.go:155-159) gates a buttonEvent on
+		// button identity alone, with no bounds check, so editBtn.Clicked keeps
+		// consuming ButtonFilter(Button2) and ButtonFilter(Center) whether or
+		// not anything was drawn for it.
+		if !s.NoEdit && editBtn.Clicked(ctx) {
 			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
 			continue
 		}
@@ -2360,7 +2403,14 @@ events:
 				showErr(scr)
 				continue
 			}
-			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, ""); !ok {
+			// A VALIDITY PROBE: only `ok` is wanted, but deriveMasterKey returns a
+			// live master private key regardless. Discarding it into _ left
+			// seed-equivalent material unscrubbed on the seed-entry path.
+			mk, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, "")
+			if ok {
+				mk.Zero()
+			}
+			if !ok {
 				showErr(&ErrorScreen{
 					Title: "Invalid Seed",
 					Body:  "The seed is invalid.",
@@ -2389,10 +2439,16 @@ events:
 		}
 
 		dims := ctx.Platform.DisplaySize()
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		navBtns := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: editBtn, Style: StyleSecondary, Icon: assets.IconEdit},
-		}...)
+		}
+		// ...and the slot is skipped too, so the icon disappears rather than
+		// sitting there doing nothing.
+		if !s.NoEdit {
+			navBtns = append(navBtns,
+				NavButton{Clickable: editBtn, Style: StyleSecondary, Icon: assets.IconEdit})
+		}
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		if isMnemonicComplete(mnemonic) {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 				{Clickable: confirmBtn, Style: StylePrimary, Icon: assets.IconCheckmark},

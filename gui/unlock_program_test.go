@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -35,17 +36,33 @@ var unlockProgramTitles = []string{
 // normative Rust implementation and never hand-edited, and retyped constants
 // are how a port silently forks.
 type sealTestVector struct {
-	Name            string   `json:"name"`
+	Name string `json:"name"`
+	// Passphrase and Iterations are what let a gui test unlock a vector rather
+	// than retype "beef beef ..." into a Go source file, which
+	// seal/testdata/README.md:19-24 forbids.
+	Passphrase      *string  `json:"passphrase"`
+	Iterations      uint32   `json:"iterations"`
 	Public          []string `json:"public"`
 	Secret          []string `json:"secret"`
 	PubLen          uint32   `json:"pub_len"`
 	CtLen           uint32   `json:"ct_len"`
 	BlobHex         string   `json:"blob_hex"`
+	BlobSHA256      string   `json:"blob_sha256"`
+	SaltHex         string   `json:"salt_hex"`
+	IVHex           string   `json:"iv_hex"`
 	PubhashSealed   *string  `json:"pubhash_sealed"`
 	PubhashUnsealed *string  `json:"pubhash_unsealed"`
 }
 
-func sealVector(t *testing.T, name string) sealTestVector {
+// sealVectorNames pins the file's shape, exactly as seal.loadVectors does. gui
+// is a SECOND decoder of the same normative file, and it pinned none of what
+// seal pins -- so a truncated or reordered vectors.json silently shrank the gui
+// suite while seal failed loudly. (B2a-ii completeness critic, C2.)
+var sealVectorNames = []string{"A", "B", "C", "D", "E", "F", "G"}
+
+// sealVectors loads every vector and re-asserts seal's three integrity pins:
+// the count, the names in order, and blob_sha256 against blob_hex.
+func sealVectors(t *testing.T) []sealTestVector {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "seal", "testdata", "vectors.json"))
 	if err != nil {
@@ -57,7 +74,36 @@ func sealVector(t *testing.T, name string) sealTestVector {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		t.Fatalf("parse seal vectors: %v", err)
 	}
+	if len(f.Vectors) != len(sealVectorNames) {
+		t.Fatalf("vectors.json has %d vectors, want %d", len(f.Vectors), len(sealVectorNames))
+	}
+	for i, want := range sealVectorNames {
+		if f.Vectors[i].Name != want {
+			t.Fatalf("vector %d is %q, want %q", i, f.Vectors[i].Name, want)
+		}
+	}
 	for _, v := range f.Vectors {
+		sum := sha256.Sum256(mustHexBytes(t, v.BlobHex))
+		if got := hex.EncodeToString(sum[:]); got != v.BlobSHA256 {
+			t.Fatalf("vector %s: blob_hex hashes to %s, blob_sha256 says %s",
+				v.Name, got, v.BlobSHA256)
+		}
+	}
+	return f.Vectors
+}
+
+func mustHexBytes(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("bad hex %q: %v", s, err)
+	}
+	return b
+}
+
+func sealVector(t *testing.T, name string) sealTestVector {
+	t.Helper()
+	for _, v := range sealVectors(t) {
 		if v.Name == name {
 			return v
 		}

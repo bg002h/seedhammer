@@ -131,21 +131,44 @@ type AdmittedRecord struct {
 const cmdPrefix = "command: "
 
 // Classify reproduces gui/scan.go's Scan branch order for a single record.
+//
+// HONEST CAVEAT about the string copy, CORRECTED (lens 3 M1). An earlier version
+// of this comment said "the copy's lifetime is this function". That is false: a
+// Go string is a heap allocation that outlives the frame until the GC collects
+// it, is never zeroed, and — the fork's own standing caveat — TinyGo's GC may
+// copy or retain. Classify runs from AdmitSection(recs, SectionEncrypted), i.e.
+// from inside UnlockWithKey, once per decrypted record, so these copies live
+// from unlock to power-off rather than for the duration of one plate.
+//
+// What is done about it: the conversion is made as LATE as possible, below the
+// three branches that take []byte. A command record, a bare mnemonic and a
+// descriptor are therefore never stringified at all — which removes the
+// ClassMnemonic case entirely, and that is the one that is seed material. An
+// ms1 still gets a string copy because codex32.New needs one; that residue is
+// F-88's, and it is the caveat gui/ms1_decode.go:19-20 already carries. Stated
+// rather than claimed away: §2.2 item 9's "after that RAM holds public records
+// only" does not hold for it.
+//
+// The branch ORDER is normative and unchanged — moving the conversion moves no
+// test, because nothing above the new site consults s.
 func Classify(b []byte) Classification {
-	// codex32.New / ValidMD / ValidMK / DecodeAddress take a string. Converting
-	// once here is a copy of the record, which is why Classify is only ever
-	// called on records the caller already holds — the copy's lifetime is this
-	// function, and the wipeable original stays in AdmittedRecord.Record.
-	s := string(b)
 	if bytes.HasPrefix(b, []byte(cmdPrefix)) {
 		return ClassDebugCommand
 	}
-	if _, err := bip39.Parse(b); err == nil {
+	if m, err := bip39.Parse(b); err == nil {
+		// Parse returns a full, WIPEABLE []Word copy of the record. Every other
+		// copy this function makes is an immutable string it cannot zero; this
+		// one it can, so it does. (Parse now also zeroes its own accumulator on
+		// each ERROR exit, so the reject path leaves nothing behind either.)
+		clear(m)
 		return ClassMnemonic
 	}
 	if _, err := nonstandard.OutputDescriptor(b); err == nil {
 		return ClassDescriptor
 	}
+	// From here down the engines need a string. Nothing above this line touches
+	// s, so the two classes that carry seed material never allocate one.
+	s := string(b)
 	if _, err := codex32.New(s); err == nil {
 		return ClassCodex32Secret
 	}

@@ -254,21 +254,54 @@ func New(entropy []byte) Mnemonic {
 	return m
 }
 
+// parseWordsHook hands over Parse's accumulator at the moment it is ALLOCATED,
+// so a test holds the same backing array through every exit and can read it
+// afterwards. nil in production.
+//
+// It exists because the array is otherwise unreachable on exactly the paths
+// that matter: Parse returns nil on all three ERROR exits, so there is no
+// return value to assert on, and the accumulator is a local. Same in-file seam
+// style as gui's unlockPassphraseWordsHook / unlockKeyHook and seal's
+// unlockPlaintextHook, all added for the same §11.2 clause.
+var parseWordsHook func(Mnemonic)
+
 func Parse(buf []byte) (Mnemonic, error) {
-	var m Mnemonic
+	// Preallocated to the maximum the loop below enforces, so append NEVER grows
+	// and never orphans a partial copy. A growing Mnemonic leaves the caller's
+	// clear() reaching only the LAST array: measured, a 12-word parse orphaned
+	// copies holding 1, 2, 4 and 8 words — two thirds of the seed, unreachable
+	// to any wipe. Found by the B2a-ii whole-diff review, lens 1 pass 3.
+	m := make(Mnemonic, 0, 24)
+	if parseWordsHook != nil {
+		parseWordsHook(m[:cap(m)])
+	}
+	// Every ERROR exit zeroes the accumulator before returning nil (lens 7 M2).
+	// The reallocation fix above stopped Parse orphaning PARTIAL copies; this
+	// stops it orphaning the whole one. The materially interesting exit is
+	// ErrInvalidChecksum, where m holds the COMPLETE word list — and
+	// seal.Classify calls Parse on every record of BOTH sections, so a
+	// mnemonic-shaped record with a bad checksum otherwise leaves a full
+	// 12/24-word near-seed on the heap that neither Payload.Wipe nor
+	// SecretsResident can reach. Only a non-conforming or attacker-supplied
+	// blob gets there, and that payload is then rejected, so the exposure is a
+	// REJECTED record and not the operator's own seed — but §10.2.1 explicitly
+	// refuses to assume a conforming sealer.
 	for w := range bytes.SplitSeq(buf, []byte(" ")) {
 		if len(m) == 24 {
+			clear(m)
 			return nil, fmt.Errorf("bip39: parse: mnemonic too long")
 		}
 		wu := bytes.ToUpper(w)
 		closest, valid := ClosestWord(string(wu))
 		if !valid || len(wu) < 3 ||
 			!bytes.HasPrefix([]byte(LabelFor(closest)), wu) {
+			clear(m)
 			return nil, fmt.Errorf("bip39: parse: unknown word: %q", w)
 		}
 		m = append(m, closest)
 	}
 	if !m.Valid() {
+		clear(m)
 		return nil, ErrInvalidChecksum
 	}
 	return m, nil

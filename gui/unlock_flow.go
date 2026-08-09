@@ -77,6 +77,12 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		showError(ctx, th, unlockTitle, "Payload unreadable.")
 		return
 	}
+	// §10.2 step 10 / §10.2.2: "Lock, Back, an error, ctx.Done" are ONE exit,
+	// not four. Registered the moment there is anything to wipe, so every route
+	// out of this flow -- including a panic unwind -- zeroes every record in
+	// BOTH sections. §10.2.2's per-record wipe is finer-grained and runs first;
+	// this is the backstop that catches whatever it did not reach.
+	defer p.Wipe()
 
 	// Step 3 — the hash, shown ONLY when the payload has a public section.
 	// HasHash is false exactly when pub_len == 0, and the digest of an empty
@@ -86,15 +92,27 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		showNotice(ctx, th, "Public Data Hash", unlockHashBody(p))
 	}
 
-	// B1 stops here for a sealed payload (§10.2 steps 5-9 are B2). It must not
-	// fall through to the plate list: p.Public on a sealed payload is a
-	// legitimate record set, and engraving it while silently dropping the
-	// encrypted half is §6.4's incomplete-backup-believed-complete, the worst
-	// available outcome.
+	// §10.2 steps 5-9. On failure or cancellation this returns WITHOUT reaching
+	// the plate list -- see unlockSealedFlow's contract.
 	if p.Header.Sealed() {
-		showError(ctx, th, unlockTitle,
-			"This payload is sealed with a passphrase.\n\n"+
-				"Unlocking is not available in this build, so none of it can be engraved yet.")
+		if !unlockSealedFlow(ctx, th, blob, p) {
+			return
+		}
+		// F-79: the blob's last use was UnlockWithKey's AAD and ciphertext. Zero
+		// and drop it BEFORE the session, so the engrave that follows does not
+		// run with the region still on the heap. This releases it only because
+		// the deferred clear above is a CLOSURE reading `blob` at exit; a
+		// `defer clear(blob)` would still hold the array (I1).
+		//
+		// Safe because AdmitSection COPIES every record
+		// (seal/record.go:207, `append([]byte(nil), r...)`), so p.Public and
+		// p.Secret do not alias this buffer.
+		clear(blob)
+		blob = nil
+		// §10.2.2 -- every secret record offered FIRST, consecutively, each
+		// wiped as its plate leaves the screen by any route.
+		unlockSecretSession(ctx, th, p)
+		unlockPlatesOrNotice(ctx, th, p)
 		return
 	}
 
@@ -103,7 +121,41 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 	if !unlockWarnUnauthenticated(ctx, th, p) {
 		return
 	}
-	unlockPlateListFlow(ctx, th, p.Public)
+	// Both paths build the list the same way, which is also what stops the
+	// unsealed path from silently keeping the old labels.
+	unlockPlatesOrNotice(ctx, th, p)
+}
+
+// unlockPlatesOrNotice enters the plate list, or -- when there is nothing left
+// to list -- says so and returns.
+//
+// An encrypted-seed-only payload has an EMPTY list: vectors A and B are
+// pub_len 0 with a single secret, which is the shape "seal just the seed"
+// takes and plausibly the most common real use of this feature. Measured by
+// driving the whole flow over vector A, the final frame was literally
+//
+//	"SealedPayload"
+//
+// -- the title and three nav icons, no body at all. OK and Page were both
+// no-ops (`sel < len(plates)` and `start+shown < len(labels)` are each `0 < 0`),
+// so the operator was left on a blank screen with two dead-looking buttons at
+// the end of a funds-critical operation, with nothing saying the session had
+// finished. Only Back did anything, drawn with IconDiscard.
+//
+// No safety consequence -- the record was cut and wiped before this point
+// either way -- but "did the machine work?" is precisely the ambiguity the rest
+// of §10.2 spends whole screens preventing, and the answer differs depending on
+// whether the operator cut or skipped.
+func unlockPlatesOrNotice(ctx *Context, th *Colors, p *seal.Payload) {
+	plates := unlockPlates(p)
+	if len(plates) == 0 {
+		showNotice(ctx, th, unlockTitle,
+			"Nothing further to engrave.\n\n"+
+				"This payload carried no card records. Any seed material it held has "+
+				"been offered and cleared from memory.")
+		return
+	}
+	unlockPlateListFlow(ctx, th, plates)
 }
 
 // unlockHashBody renders §10.2 step 3: the §6.6 digest, the PUBLIC record count
@@ -140,17 +192,41 @@ func unlockShape(p *seal.Payload) string {
 //
 // ConfirmWarningScreen is existing machinery -- scrollable body, cancel, and a
 // hold-to-confirm that is the "explicit confirmation" §10.2 step 4 requires.
+// unlockUnauthenticatedBody is §10.2.3's copy, split out from the screen so a
+// test can MEASURE it (lens 4 MINOR 4).
+//
+// It has to be measured because the last paragraph is the §2.2 item 10
+// downgrade instruction -- the single sentence telling the operator to stop --
+// and it currently sits inside Warning.Layout's overflow window. Measured at
+// 480x320 with the real styles: bodyClip is (6,44)-(423,314), the body is 257 px
+// tall drawn from y=60, so it ends at y=317 in a 320-px panel and
+// maxScroll = 19 > 0. The widget therefore believes the last line is scrolled
+// out of view, and nothing is actually cut off ONLY because fadeClip is a no-op
+// stub (gui/gui.go, with the real mask commented out beside it).
+//
+// Warning's only scroll input is ButtonFilter(Up)/ButtonFilter(Down) and the
+// SH2 has no directional buttons -- processTouch emits PointerEvent
+// exclusively -- so the body is UNSCROLLABLE on the real machine. One more
+// wrapped line of copy, or restoring fadeClip, removes the "Do not continue."
+// paragraph silently with no way to reach it. That half is pre-existing from
+// B1, is not this diff's, and is filed (F-95, plus the standing
+// `seedhammer-warning-scroll-untouchable` entry). What is closed here is that
+// nothing pinned the FIT.
+func unlockUnauthenticatedBody(p *seal.Payload) string {
+	return "THIS PAYLOAD IS NOT AUTHENTICATED\n\n" +
+		"It carries no encrypted data, so there is no key and nothing proves it is " +
+		"the payload you sent. Anyone with physical access could have replaced it.\n\n" +
+		fmt.Sprintf("Public data hash (%d records, UNSEALED):\n\n%s\n\n", len(p.Public), seal.FormatHash(p.Hash)) +
+		"Compare this with the value you recorded.\n\n" +
+		"If you sealed this payload with a passphrase, the encrypted part has been " +
+		"REMOVED. Do not continue."
+}
+
 func unlockWarnUnauthenticated(ctx *Context, th *Colors, p *seal.Payload) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "Not Authenticated",
-		Body: "THIS PAYLOAD IS NOT AUTHENTICATED\n\n" +
-			"It carries no encrypted data, so there is no key and nothing proves it is " +
-			"the payload you sent. Anyone with physical access could have replaced it.\n\n" +
-			fmt.Sprintf("Public data hash (%d records, UNSEALED):\n\n%s\n\n", len(p.Public), seal.FormatHash(p.Hash)) +
-			"Compare this with the value you recorded.\n\n" +
-			"If you sealed this payload with a passphrase, the encrypted part has been " +
-			"REMOVED. Do not continue.",
-		Icon: assets.IconCheckmark,
+		Body:  unlockUnauthenticatedBody(p),
+		Icon:  assets.IconCheckmark,
 	}
 	for !ctx.Done {
 		dims := ctx.Platform.DisplaySize()

@@ -18,9 +18,10 @@ import (
 // rather than read-only, entries are labelled from §6.3's grouping rather than
 // from anything the sealer asserted, and Back is the session exit.
 //
-// B1 holds only public records, so there is nothing to wipe on the way out. The
-// SHAPE still has to be right here, or B2 inherits a list it cannot extend
-// without a fourth nav slot.
+// Wiping on the way out is unlockPayloadFlow's `defer p.Wipe()`, which covers
+// both sections. (B1 held only public records and this comment said there was
+// nothing to wipe; B2a-ii's list also carries the encrypted section's cards, so
+// there is.)
 
 // unlockEngraveHook is a test-only seam that observes which record OK selected,
 // so a test can assert the SELECTED record's bytes reach the engrave path
@@ -64,14 +65,28 @@ func plateLabel(r seal.AdmittedRecord, i int) string {
 	return fmt.Sprintf("%s %d/%d", hrp, r.PlateIndex, r.PlateTotal)
 }
 
-// unlockPlateListFlow lists every public record and engraves the selected one.
-// Returning leaves the session (§10.2.2: Lock, Back, an error and ctx.Done are
-// one exit, not four).
-func unlockPlateListFlow(ctx *Context, th *Colors, recs []seal.AdmittedRecord) {
-	labels := make([]string, len(recs))
-	for i, r := range recs {
-		labels[i] = plateLabel(r, i)
+// unlockPlateListFlow lists every record that is safe to leave resident -- the
+// public section, plus the encrypted section's md1/mk1 cards (§6.3) -- and
+// engraves the selected one. Returning leaves the session (§10.2.2: Lock, Back,
+// an error and ctx.Done are one exit, not four).
+//
+// An EMPTY list never reaches here; unlockPayloadFlow shows a terminal notice
+// instead. See the comment at its call site for why.
+func unlockPlateListFlow(ctx *Context, th *Colors, plates []unlockPlate) {
+	// Labels are rebuilt on ENTRY and after every engrave, which is the only
+	// thing that can change one: `cut` is the sole mutable input and it moves
+	// only at the unlockEngraveFlow call below. (An earlier revision of this
+	// comment claimed they were rebuilt EACH FRAME. They are not -- relabel()
+	// is called exactly twice -- and the effect it described is nonetheless
+	// correct. Corrected rather than reworded, because a future reader adding a
+	// second mutable label input would have trusted it.)
+	labels := make([]string, len(plates))
+	relabel := func() {
+		for i, e := range plates {
+			labels[i] = unlockPlateLabel(e.rec, e.idx, e.sealed, e.cut)
+		}
 	}
+	relabel()
 
 	backBtn := &Clickable{Button: Button1}
 	pageBtn := &Clickable{Button: Button2}
@@ -94,8 +109,13 @@ func unlockPlateListFlow(ctx *Context, th *Colors, recs []seal.AdmittedRecord) {
 				sel = i
 			}
 		}
-		if okBtn.Clicked(ctx) && sel < len(recs) {
-			unlockEngraveFlow(ctx, th, recs[sel], labels[sel])
+		if okBtn.Clicked(ctx) && sel < len(plates) {
+			if unlockEngraveFlow(ctx, th, plates[sel].rec, labels[sel]) {
+				// Marked on COMPLETION only. Marking a cancelled plate would
+				// tell the operator a plate is in the tin when it is not.
+				plates[sel].cut = true
+			}
+			relabel()
 			// start is untouched, so the operator lands back on the page they
 			// engraved from. Dropping them to page 1 after every plate is how
 			// a fifteen-record bundle gets one plate cut twice and another not
@@ -150,7 +170,13 @@ func unlockPlateListFlow(ctx *Context, th *Colors, recs []seal.AdmittedRecord) {
 
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, unlockTitle)
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
-			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			// IconDiscard, not IconBack (§10.3, F-80's B2 item). Back here is
+			// the SESSION exit: it discards a decrypted payload, and getting
+			// back costs twelve words and a ~31 s KDF. There is no lock glyph
+			// in gui/assets, and IconDiscard already carries exactly this
+			// meaning -- gui/gui.go uses it for discarding a seed and
+			// gui/freetext_flow.go for clearing entered text.
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconDiscard},
 			{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight},
 			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconHammer},
 		}...)
@@ -173,11 +199,18 @@ func unlockPlateListFlow(ctx *Context, th *Colors, recs []seal.AdmittedRecord) {
 // gatherer has no way to reach them. Inspecting a payload-sourced card is a
 // legitimate thing to want and is filed as F-76; it needs a gatherer primed
 // from the payload, and it is not B1.
-func unlockEngraveFlow(ctx *Context, th *Colors, rec seal.AdmittedRecord, label string) {
-	// AdmittedRecord.Record is []byte deliberately, so that B2 can zero it. The
-	// conversion below is HARMLESS HERE — B1 holds public data only — and
-	// ACTIVELY WRONG in B2, where the same call shape on a secret record makes
-	// an unwipeable copy that Payload.Wipe cannot reach.
+// It reports whether a plate was engraved to COMPLETION, which is what the
+// list's "(cut)" mark is keyed on.
+func unlockEngraveFlow(ctx *Context, th *Colors, rec seal.AdmittedRecord, label string) bool {
+	// AdmittedRecord.Record is []byte deliberately, so that B2 can zero it.
+	//
+	// The conversion below is ADMISSIBLE for an md1/mk1 record from EITHER
+	// section: §6.3 makes them public data wherever they travelled -- an xpub
+	// and a wallet policy leak privacy but do not spend coins -- and B2a
+	// deliberately routes the encrypted section's cards through this same call
+	// (Task 7). It remains ACTIVELY WRONG for anything seal.IsSecret admits,
+	// where it would make an unwipeable copy that Payload.Wipe cannot reach,
+	// which is exactly why §10.2.2's secret session never calls this function.
 	//
 	// It is written at the call site, with this comment, rather than behind a
 	// String() helper on AdmittedRecord: a helper is an invitation to call it
@@ -189,16 +222,16 @@ func unlockEngraveFlow(ctx *Context, th *Colors, rec seal.AdmittedRecord, label 
 	variants, plates, err := validateMdmk(ctx.Platform.EngraverParams(), str)
 	if err != nil || len(plates) == 0 {
 		showError(ctx, th, unlockTitle, "This record does not fit any plate size.")
-		return
+		return false
 	}
 	cs := &ChoiceScreen{Title: label, Lead: "Choose engraving", Choices: variants}
 	for {
 		choice, ok := cs.Choose(ctx, th)
 		if !ok {
-			return
+			return false
 		}
 		if NewEngraveScreen(ctx, plates[choice]).Engrave(ctx, &engraveTheme) {
-			return
+			return true
 		}
 	}
 }
