@@ -98,13 +98,12 @@ type AdmittedRecord struct {
 	Record []byte
 	Class  Classification
 
-	// HRP is 'd' (md1) or 'k' (mk1) for a ClassMDMK record IN THE PUBLIC
-	// SECTION, and 0 for every record in the encrypted section -- INCLUDING
-	// ClassMDMK ones, which §6.3 explicitly permits there and which vectors C
-	// and F actually carry (vector F's secret set is ms1 x3 / mk1 x6 / md1 x6,
-	// so twelve of its fifteen secret records ARE cards). That is not a
-	// statement about what those records are; it is that pass 3, the only place
-	// grouping is computed, runs for SectionPublic alone. See F-77.
+	// HRP is 'd' (md1) or 'k' (mk1) for a ClassMDMK record in EITHER section,
+	// and 0 for every other record. §6.3 admits md1/mk1 into the encrypted
+	// section explicitly, and vector F's secret set is ms1 x3 / mk1 x6 / md1 x6,
+	// so twelve of its fifteen secret records ARE cards. Grouping the encrypted
+	// section is LABEL-ONLY (labelEncryptedCards): no decode runs there and no
+	// grouping failure rejects a payload. F-77, closed in B2a.
 	//
 	// It comes from the §6.3 card grouping seal already performs -- the UI must
 	// never re-derive it, or the plate list and the decode can disagree about
@@ -238,6 +237,11 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 		}
 		// Backfill §10.2.2's plate identity onto records already admitted.
 		labelCards(out, g)
+	}
+	// F-77 — pass 3's grouping, published for the encrypted section too. It is
+	// LABEL-ONLY: see labelEncryptedCards. No decode, and no new rejection.
+	if section == SectionEncrypted {
+		labelEncryptedCards(out)
 	}
 	return out, nil
 }

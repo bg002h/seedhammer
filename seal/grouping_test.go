@@ -90,17 +90,24 @@ func TestSingleCardPerHRPGrouping(t *testing.T) {
 	}
 }
 
-// The encrypted section carries NO grouping -- and the reason is not that
-// secrets aren't cards. SPEC §6.3 is explicit that the encrypted section may
-// carry ms1, mk1, md1 or a bare mnemonic, permitted() admits ClassMDMK
-// unconditionally, and vector F's secret set is ms1 x3 / mk1 x6 / md1 x6:
-// TWELVE OF FIFTEEN SECRET RECORDS ARE CARDS.
+// The encrypted section carries ITS grouping -- and the reason it once did not
+// was never that secrets aren't cards. SPEC §6.3 is explicit that the encrypted
+// section may carry ms1, mk1, md1 or a bare mnemonic, permitted() admits
+// ClassMDMK unconditionally, and vector F's secret set is ms1 x3 / mk1 x6 /
+// md1 x6: TWELVE OF FIFTEEN SECRET RECORDS ARE CARDS.
 //
-// They are zero for one reason only: pass 3, the sole place grouping is
-// computed, runs for SectionPublic alone. That is the trap Phase B2 inherits
-// (F-77), and this test is what makes it a measured fact rather than a
-// recollection.
-func TestEncryptedRecordsCarryNoGrouping(t *testing.T) {
+// Until F-77 they were zero for one reason only: pass 3, the sole place a
+// grouping is computed, ran for SectionPublic alone. This test USED to pin that
+// gap as a measured fact rather than a recollection; labelEncryptedCards
+// (label_encrypted.go) closes it, so the same fixture now pins the closure.
+// The inversion is deliberate: the assertion encoded a documented DEFICIENCY,
+// named with the follow-up number that closes it, not an invariant. The
+// ordering invariant beside it -- grouping must run AFTER the allow-list --
+// is untouched, and TestGroupingRunsAfterTheAllowList still asserts it.
+//
+// The labelling is LABEL-ONLY: no decode runs over the encrypted section and no
+// grouping failure rejects a payload (TestUnreadableEncryptedCardDoesNotReject).
+func TestEncryptedRecordsCarryTheirGrouping(t *testing.T) {
 	f := vectorNamed(t, "F")
 	if len(f.Secret) != 15 {
 		t.Fatalf("vector F's secret section must be 15 records, got %d", len(f.Secret))
@@ -113,10 +120,28 @@ func TestEncryptedRecordsCarryNoGrouping(t *testing.T) {
 	for i, r := range got {
 		if r.Class == ClassMDMK {
 			cards++
+			// A 1-based card/plate identity, not merely a non-zero one: an
+			// off-by-one or a 0-based index would name the wrong plate in
+			// §10.2.2's list.
+			if r.HRP != 'd' && r.HRP != 'k' {
+				t.Errorf("secret record %d is a card with HRP %q, want 'd' or 'k'", i, r.HRP)
+			}
+			if r.CardTotal < 1 || r.CardIndex < 1 || r.CardIndex > r.CardTotal {
+				t.Errorf("secret record %d has card %d/%d, which is not a 1-based index",
+					i, r.CardIndex, r.CardTotal)
+			}
+			if r.PlateTotal < 1 || r.PlateIndex < 1 || r.PlateIndex > r.PlateTotal {
+				t.Errorf("secret record %d has plate %d/%d, which is not a 1-based index",
+					i, r.PlateIndex, r.PlateTotal)
+			}
+			continue
 		}
+		// Everything that is NOT a card keeps its zero label -- vector F's three
+		// ms1 records among them. A label here would mean the ClassMDMK subset
+		// filter leaked, and cardKey fails closed on an ms1.
 		if r.HRP != 0 || r.CardIndex != 0 || r.CardTotal != 0 || r.PlateIndex != 0 || r.PlateTotal != 0 {
-			t.Errorf("secret record %d carries a grouping (%c card %d/%d plate %d/%d); pass 3 does not run for the encrypted section",
-				i, r.HRP, r.CardIndex, r.CardTotal, r.PlateIndex, r.PlateTotal)
+			t.Errorf("secret record %d is a %s yet carries a grouping (%c card %d/%d plate %d/%d)",
+				i, r.Class, r.HRP, r.CardIndex, r.CardTotal, r.PlateIndex, r.PlateTotal)
 		}
 	}
 	// Without this the test would pass just as green on a payload whose secret
