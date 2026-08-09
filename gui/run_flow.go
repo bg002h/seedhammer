@@ -11,14 +11,23 @@ import (
 // runWithFlow is Run's body, with the flow and a draw observer as parameters.
 //
 // The flow parameter exists because Run had no test at a01b666; onDraw exists
-// because Run yields func() bool -- no content reaches the consumer, so
-// without it a test can observe nothing Run draws. Both are nil/uiFlow in
-// production.
+// because Run yields func() bool -- no content reaches the consumer, so without
+// it a test can observe nothing Run draws, including §10.2.4's warning. Both
+// are nil/uiFlow in production.
 func runWithFlow(pl Platform, version string, flow func(ctx *Context, version string), onDraw func(op.Op)) func(yield func() bool) {
 	return func(yield func() bool) {
 		a := struct {
 			mask *image.Alpha
-			idle struct {
+			// warnBuf is the warning's OWN buffer. It must not build into
+			// ctx.B: Context.Frame resets that buffer AFTER the callback
+			// (gui/gui.go:75) and Run's event loop runs INSIDE the callback, so
+			// while the flow is parked ctx.B is never reset. Appending a
+			// warning per second for 30 s grew it to 228 KB live / 245 KB
+			// reserved on the 32-bit target -- measured -- and each of the ~7
+			// doublings memcpy'd the PARKED frame, which on SeedScreen.Confirm
+			// is the twelve words, into an array nothing ever zeroes.
+			warnBuf op.Buffer
+			idle    struct {
 				start  time.Time
 				active bool
 				state  saver.State
@@ -73,8 +82,9 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 			startTime := time.Now()
 			var evts []Event
 
-			// draw is the content path lifted out of the range body so onDraw
-			// has a single place to observe everything Run draws.
+			// draw is the content path lifted out of the range body so the
+			// warning can use it too: the screensaver writes straight to the
+			// platform (saver.State.Draw) and cannot carry an op.
 			draw := func(content op.Op) {
 				d.Reset()
 				dirty := image.Rectangle{Max: pl.DisplaySize()}
@@ -123,8 +133,42 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					wakeup := ctx.Wakeup
 					evts = pl.AppendEvents(wakeup, evts[:0])
 					now := time.Now()
-					if len(evts) > 0 {
+					// §10.2.4: the timer keys on the SESSION BRACKET's
+					// lifetime, never on seal.RecordsResident -- which reads
+					// false while the flow still holds the words and the
+					// plate's spline closure.
+					armed := ctx.wipe.armed()
+					// ONE clock, not two. An earlier draft tracked a separate
+					// wipe origin; every one of its refresh points was also an
+					// idle.start refresh point, so the two were provably equal
+					// -- and the single place they were allowed to diverge is
+					// exactly where the latch bug below came from.
+					//
+					// keepAwake holds off the SCREENSAVER but is ignored while
+					// armed: a screen must never be able to postpone a §10.2.4
+					// wipe. Read before ctx.Reset(), which clears it.
+					if len(evts) > 0 || (ctx.keepAwake && !armed) {
 						a.idle.start = now
+					}
+					if armed != a.armed {
+						a.armed = armed
+						if armed {
+							// §10.2.4 row 2: a finished cut starts a FRESH
+							// window. This ONE line is the whole fix: with the
+							// clock reset, `idle` recomputes false on this very
+							// tick and the block below clears a.idle.active by
+							// itself.
+							//
+							// Deliberately NOT also clearing a.idle.active
+							// here. It would only change the edge TICK, and
+							// changing it is worse: `d` still holds the frame
+							// drawn before the saver activated ~18 min ago, in
+							// a different EngraveScreen state, so routing a
+							// touch against it could hit the wrong widget.
+							// Swallowing the edge-tick touch is exactly today's
+							// screensaver-dismissal behaviour.
+							a.idle.start = now // row 2: fresh window at cut end
+						}
 					}
 					ctx.Reset()
 					if !a.idle.active {
@@ -132,8 +176,8 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					}
 					// The test-only wipe trigger: nil in production. It is the
 					// ONLY trigger that exists in Task 3's commit, since
-					// §10.2.4's timer arrives in Task 4 -- which is what lets
-					// the unwind be tested on the commit introducing it.
+					// §10.2.4's timer below arrives in Task 4 -- which is what
+					// lets the unwind be tested on the commit introducing it.
 					// Package-level test hooks are this package's idiom
 					// (unlock_session.go:40, unlock_kdf.go:60, and 8 others).
 					if wipeNowHook != nil && wipeNowHook() {
@@ -150,6 +194,31 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 						}
 					}
 					if a.idle.active {
+						// Armed and idle IS §10.2.4's window. The warning takes
+						// the screen the saver would otherwise have had, which
+						// is why this is one branch and not a gate on the
+						// saver: they can never both run.
+						if armed { // §10.2.4's window: warn, then wipe
+							wipeAt := idleWakeup.Add(wipeWarningDelay)
+							if now.Sub(wipeAt) >= 0 {
+								wiping = true
+								ctx.Done = true
+								break
+							}
+							a.warnBuf.Reset()
+							draw(wipeWarningOp(&a.warnBuf, ctx.Styles, &descriptorTheme,
+								pl.DisplaySize(), wipeAt.Sub(now)))
+							// The only way a test can see WHICH buffer the
+							// warning went into, or that it is not growing:
+							// op.Buffer's fields are unexported and `a` is a
+							// closure local. Nil in production.
+							if warnBufHook != nil {
+								args, refs := a.warnBuf.Len()
+								warnBufHook(args, refs)
+							}
+							ctx.WakeupAt(now.Add(time.Second))
+							continue
+						}
 						a.idle.state.Draw(pl)
 						// Throttle screen saver speed.
 						const minFrameTime = 40 * time.Millisecond
@@ -164,6 +233,14 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 			if !wiping {
 				return
 			}
+			// NOTHING to scrub here, and that is worth stating because an
+			// earlier draft got it backwards. Context.Frame runs c.B.Reset()
+			// AFTER the callback (gui/gui.go:75), and the wipe path uses
+			// `break`, so the range body completes, yield returns true, the
+			// callback returns, and clear(b.refs) (gui/op/op.go:376) runs on
+			// the last frame drawn -- then again after every discard-guarded
+			// Frame during the unwind. The abandoned Context's buffer is
+			// already zeroed by the time control reaches this line.
 		}
 	}
 }

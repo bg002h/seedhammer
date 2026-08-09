@@ -73,6 +73,12 @@ type Context struct {
 	// wipe is §10.2.4's residency seam, installed and uninstalled by
 	// unlockSecretSession. See wipe_guard.go.
 	wipe *wipeGuard
+
+	// keepAwake holds off the screensaver for the current tick only -- Run
+	// reads and clears it once per tick (run_flow.go), and it is ignored
+	// while §10.2.4's timer is armed, so a screen can never use it to
+	// postpone a wipe. Set by KeepAwake().
+	keepAwake bool
 }
 
 func (c *Context) Frame(op op.Op) {
@@ -96,8 +102,16 @@ func (c *Context) WakeupAt(t time.Time) {
 	}
 }
 
+// KeepAwake holds off the screensaver for the current tick. F-93: a
+// derivation produces no events, so without this the screensaver would park
+// the flow permanently once idleTimeout is crossed mid-derivation.
+func (c *Context) KeepAwake() {
+	c.keepAwake = true
+}
+
 func (c *Context) Reset() {
 	c.Wakeup = time.Time{}
+	c.keepAwake = false
 	// Immediately wake up to process remaining events.
 	if c.Router.Reset() {
 		c.Wakeup = time.Now()
