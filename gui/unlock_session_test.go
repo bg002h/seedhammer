@@ -655,6 +655,15 @@ func TestMnemonicWordsAreZeroWhenThePlateReachesEngrave(t *testing.T) {
 	h.tapNav(Button3)
 	h.mustReach("Insert a blank plate")
 
+	// D2: pin clear(rec) on the MNEMONIC arm too. The sibling test covers it only
+	// on the codex32 arm, because vector F's three secrets are all ms1 — so
+	// deleting clear(rec) here left the suite green.
+	first := firstSecretIdx(t, p)
+	if !allZeroBytes(p.Secret[first].Record) {
+		t.Fatalf("seal's record is STILL RESIDENT while the engrave screen is up: %q",
+			p.Secret[first].Record)
+	}
+
 	if atEngrave == nil {
 		t.Fatal("the plate never reached Engrave; the test asserted nothing")
 	}

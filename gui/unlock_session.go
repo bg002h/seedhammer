@@ -172,23 +172,31 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 // on a cancelled engrave. The plate produced here is the one backupWalletFlow's
 // Skip-passphrase path produces.
 //
-// HONEST CAVEAT — the full inventory of seed-equivalent copies this path makes,
-// because an earlier version of this comment named only `m` and read as though
-// that were the whole list (B2a-ii whole-diff review, lens 1 I1):
+// HONEST CAVEAT — the seed-equivalent copies this path makes. This list has been
+// wrong TWICE: it first named only `m`, then claimed to be the "full inventory"
+// and omitted four more (B2a-ii lens 1, I1 then D1). It is therefore written as
+// what is KNOWN, not as exhaustive — if you add a derivation here, add a row.
 //
 //	ZEROED  rec         seal's []byte, cleared before Engrave (see below)
 //	ZEROED  m           bip39.Parse's []Word, cleared beside it
 //	ZEROED  the 64-byte BIP-39 seed, in deriveMasterKey
 //	ZEROED  the BIP-32 master private key, in masterFingerprintFor and at the
 //	        seed-entry validity probe
-//	DROPPED engraveSeed's words []string and string(seedqr.QR(m)) — immutable
-//	        Go strings, unwipeable by construction
+//	LIVE    sentence []byte inside bip39.MnemonicSeed — the PLAINTEXT MNEMONIC,
+//	        never wiped, plus whatever append() reallocation orphans. Not
+//	        reachable from this package. F-88.
+//	LIVE    the []byte behind string(seedqr.QR(m)), and qr.Code.Bitmap. F-88.
+//	LIVE    engraveSeed's words []string. The STRINGS are not secret — LabelFor
+//	        returns substrings of the public wordlist — but their SELECTION and
+//	        ORDER are the seed, and clear(words) would destroy that for free.
+//	        F-88.
 //	LIVE    plate.Spline, for the duration of the cut. It IS the seed rendered
 //	        as geometry and must exist while the needle moves. F-83, accepted.
 //
-// The four ZEROED rows are defence in depth with the usual TinyGo caveat, and
-// three of them are UNPINNED: no test can observe them without unsafe. Same
-// property seal/record.go's wipe() documents about its own call sites.
+// The ZEROED rows are defence in depth with the usual TinyGo caveat. `m` is
+// pinned by a test; the seed and the master key are not, and cannot be without
+// unsafe — they are internal to functions that return neither. `rec` IS
+// observable and is pinned on both arms.
 func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	m, err := bip39.Parse(rec)
 	if err != nil {
