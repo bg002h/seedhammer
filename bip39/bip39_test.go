@@ -324,5 +324,126 @@ func TestParseNeverGrowsItsResult(t *testing.T) {
 			t.Errorf("%d words: cap is %d, want 24 — append grew and orphaned "+
 				"partial copies of the seed that no clear() can reach", n, c)
 		}
+		// LENGTH too (lens 8 C5). Asserting only capacity is satisfied by a
+		// Parse that returned a 24-long Mnemonic zero-padded to capacity, on
+		// the test named for a seed-orphaning fix.
+		if l := len(got); l != n {
+			t.Errorf("%d words: len is %d, want %d", n, l, n)
+		}
+		for i, w := range got {
+			if want := m[i]; w != want {
+				t.Errorf("%d words: word %d is %v, want %v", n, i, w, want)
+			}
+		}
+	}
+}
+
+// TestParseZeroesItsAccumulatorOnEveryErrorExit — lens 7 M2.
+//
+// The pass-3 fold stopped Parse orphaning PARTIAL copies through append
+// reallocation. This is the other half: on each of the three error returns
+// Parse hands back nil while the accumulator still holds every word it read,
+// and the caller receives nothing it can clear.
+//
+// The materially interesting exit is ErrInvalidChecksum, where the accumulator
+// holds the COMPLETE word list. seal.Classify calls Parse on every record of
+// both sections, so a mnemonic-shaped record with a bad checksum leaves a full
+// 12/24-word near-seed on a heap that neither Payload.Wipe nor SecretsResident
+// can reach.
+//
+// Asserted ON THE BUFFER via the allocation seam, because all three exits
+// return nil and there is no return value to read.
+//
+// EVERY fixture below is built from "zoo" (Word 2047) and NEVER from "abandon"
+// (Word 0), and the premise is asserted per case. That is not fastidiousness:
+// the first draft of this test used "abandon", so the accumulator filled with
+// ZEROES and "reads as zeroed" was VACUOUSLY true -- two of the three mutants
+// survived it. A zero-valued fixture on a zeroing test is a guaranteed false
+// PASS over exactly the defect.
+func TestParseZeroesItsAccumulatorOnEveryErrorExit(t *testing.T) {
+	// Twelve "zoo" is all-valid words with a BAD checksum (measured: Parse
+	// returns ErrInvalidChecksum), so the accumulator holds all twelve.
+	twelveZoo := strings.TrimSpace(strings.Repeat("zoo ", 12))
+	elevenZoo := strings.TrimSpace(strings.Repeat("zoo ", 11))
+	twentyFiveZoo := strings.TrimSpace(strings.Repeat("zoo ", 25))
+
+	for _, tc := range []struct {
+		name     string
+		input    string
+		wantWord Word // the non-zero value the accumulator would hold
+		wantLen  int  // how many slots it would hold it in
+	}{
+		{"invalid checksum (holds ALL twelve words)", twelveZoo, 2047, 12},
+		{"unknown word after eleven good ones", elevenZoo + " notaword", 2047, 11},
+		{"mnemonic too long (holds all 24)", twentyFiveZoo, 2047, 24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantWord == 0 {
+				t.Fatal("premise broken: a zero-valued fixture makes this test vacuous")
+			}
+			var held Mnemonic
+			parseWordsHook = func(m Mnemonic) { held = m }
+			t.Cleanup(func() { parseWordsHook = nil })
+
+			got, err := Parse([]byte(tc.input))
+			if err == nil {
+				t.Fatalf("premise broken: %q parsed cleanly as %v", tc.input, got)
+			}
+			if held == nil {
+				t.Fatal("parseWordsHook never fired; this test asserted nothing")
+			}
+			if len(held) < tc.wantLen {
+				t.Fatalf("the accumulator is %d long; this exit fills %d", len(held), tc.wantLen)
+			}
+			for i, w := range held {
+				if w != 0 {
+					t.Fatalf("Parse returned %v with word %d of its accumulator still set "+
+						"to %v (%q)\nfull accumulator: %v\n"+
+						"the caller gets nil and cannot reach this array, so a full "+
+						"near-seed stays on the heap for the rest of the power cycle",
+						err, i, w, LabelFor(w), held)
+				}
+			}
+		})
+	}
+}
+
+// TestParseAccumulatorIsPopulatedBeforeTheErrorExit is the anti-vacuity control
+// for the test above -- the assertion that would have caught the "abandon"
+// fixture. It proves the accumulator really does carry words by reading the SAME
+// buffer on the SUCCESS path, where nothing clears it.
+func TestParseAccumulatorIsPopulatedBeforeTheErrorExit(t *testing.T) {
+	// A checksum-VALID twelve words made of "zoo": FixChecksum over Word 2047.
+	m := make(Mnemonic, 12)
+	for i := range m {
+		m[i] = 2047
+	}
+	m = m.FixChecksum()
+	words := make([]string, len(m))
+	for i, w := range m {
+		words[i] = strings.ToLower(LabelFor(w))
+	}
+
+	var held Mnemonic
+	parseWordsHook = func(mm Mnemonic) { held = mm }
+	t.Cleanup(func() { parseWordsHook = nil })
+
+	got, err := Parse([]byte(strings.Join(words, " ")))
+	if err != nil {
+		t.Fatalf("the good mnemonic did not parse: %v", err)
+	}
+	if held == nil {
+		t.Fatal("parseWordsHook never fired on the success path")
+	}
+	nonZero := 0
+	for _, w := range held[:len(got)] {
+		if w != 0 {
+			nonZero++
+		}
+	}
+	if nonZero < 11 {
+		t.Fatalf("only %d of %d accumulator slots are non-zero on a SUCCESSFUL parse, so "+
+			"the error-path assertions are reading a buffer that was never populated",
+			nonZero, len(got))
 	}
 }
