@@ -140,7 +140,11 @@ func Classify(b []byte) Classification {
 	if bytes.HasPrefix(b, []byte(cmdPrefix)) {
 		return ClassDebugCommand
 	}
-	if _, err := bip39.Parse(b); err == nil {
+	if m, err := bip39.Parse(b); err == nil {
+		// Parse returns a full, WIPEABLE []Word copy of the record. Every other
+		// copy this function makes is an immutable string it cannot zero; this
+		// one it can, so it does.
+		clear(m)
 		return ClassMnemonic
 	}
 	if _, err := nonstandard.OutputDescriptor(b); err == nil {

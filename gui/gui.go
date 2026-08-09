@@ -226,6 +226,11 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 
 func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
 	seed := bip39.MnemonicSeed(m, password)
+	// The 64-byte BIP-39 seed is seed-equivalent material and this is its only
+	// use. Scrubbed on every exit, matching deriveAccountXpub (derive.go:21).
+	// The returned key is the CALLER's to Zero -- this function cannot, it is
+	// the return value.
+	defer wipeBytes(seed)
 	mk, err := hdkeychain.NewMaster(seed, net)
 	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
 	// According to [0] the odds of encountering a seed that generates
@@ -542,6 +547,13 @@ func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password s
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
 	}
+	// The master PRIVATE key is scrubbed on every exit. The fingerprint is a
+	// uint32 computed from the PUBLIC key before any defer runs, so this cannot
+	// race the return value -- the same "capture BEFORE zeroing master" ordering
+	// derive.go:31 spells out. Note derive.go's R0-C1 warning does NOT bite here:
+	// that one is about Neuter ALIASING chainCode/parentFP, and nothing aliased
+	// is serialised after this point.
+	defer mk.Zero()
 	pkey, err := mk.ECPubKey()
 	if err != nil {
 		return 0, err
@@ -2374,7 +2386,14 @@ events:
 				showErr(scr)
 				continue
 			}
-			if _, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, ""); !ok {
+			// A VALIDITY PROBE: only `ok` is wanted, but deriveMasterKey returns a
+			// live master private key regardless. Discarding it into _ left
+			// seed-equivalent material unscrubbed on the seed-entry path.
+			mk, ok := deriveMasterKey(mnemonic, &chaincfg.MainNetParams, "")
+			if ok {
+				mk.Zero()
+			}
+			if !ok {
 				showErr(&ErrorScreen{
 					Title: "Invalid Seed",
 					Body:  "The seed is invalid.",

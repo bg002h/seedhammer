@@ -171,6 +171,24 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 // BIP-39 passphrase, offers a fingerprint choice, and loops back to re-Confirm
 // on a cancelled engrave. The plate produced here is the one backupWalletFlow's
 // Skip-passphrase path produces.
+//
+// HONEST CAVEAT — the full inventory of seed-equivalent copies this path makes,
+// because an earlier version of this comment named only `m` and read as though
+// that were the whole list (B2a-ii whole-diff review, lens 1 I1):
+//
+//	ZEROED  rec         seal's []byte, cleared before Engrave (see below)
+//	ZEROED  m           bip39.Parse's []Word, cleared beside it
+//	ZEROED  the 64-byte BIP-39 seed, in deriveMasterKey
+//	ZEROED  the BIP-32 master private key, in masterFingerprintFor and at the
+//	        seed-entry validity probe
+//	DROPPED engraveSeed's words []string and string(seedqr.QR(m)) — immutable
+//	        Go strings, unwipeable by construction
+//	LIVE    plate.Spline, for the duration of the cut. It IS the seed rendered
+//	        as geometry and must exist while the needle moves. F-83, accepted.
+//
+// The four ZEROED rows are defence in depth with the usual TinyGo caveat, and
+// three of them are UNPINNED: no test can observe them without unsafe. Same
+// property seal/record.go's wipe() documents about its own call sites.
 func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	m, err := bip39.Parse(rec)
 	if err != nil {
