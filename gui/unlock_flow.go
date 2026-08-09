@@ -112,9 +112,7 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		// §10.2.2 -- every secret record offered FIRST, consecutively, each
 		// wiped as its plate leaves the screen by any route.
 		unlockSecretSession(ctx, th, p)
-		// The post-session plate list is Task 7. Until it attaches, this
-		// returns rather than falling through to a list built from p.Public
-		// alone, which would drop the encrypted section's md1/mk1 cards.
+		unlockPlateListFlow(ctx, th, unlockPlates(p))
 		return
 	}
 
@@ -123,7 +121,9 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 	if !unlockWarnUnauthenticated(ctx, th, p) {
 		return
 	}
-	unlockPlateListFlow(ctx, th, p.Public)
+	// Both paths build the list the same way, which is also what stops the
+	// unsealed path from silently keeping the old labels.
+	unlockPlateListFlow(ctx, th, unlockPlates(p))
 }
 
 // unlockHashBody renders §10.2 step 3: the §6.6 digest, the PUBLIC record count

@@ -117,13 +117,13 @@ func plateRecords(t *testing.T, name string) []seal.AdmittedRecord {
 	return p.Public
 }
 
-func runPlateList(t *testing.T, p *testPlatform, recs []seal.AdmittedRecord) (frame func() (string, bool), drawer func() *op.Drawer, done *bool, ctx *Context, quit func()) {
+func runPlateList(t *testing.T, p *testPlatform, plates []unlockPlate) (frame func() (string, bool), drawer func() *op.Drawer, done *bool, ctx *Context, quit func()) {
 	t.Helper()
 	p.display = sh2DisplaySize
 	ctx = NewContext(p)
 	returned := false
 	frame, drawer, quit = runUITouch(ctx, func() {
-		unlockPlateListFlow(ctx, &descriptorTheme, recs)
+		unlockPlateListFlow(ctx, &descriptorTheme, plates)
 		returned = true
 	})
 	return frame, drawer, &returned, ctx, quit
@@ -196,7 +196,7 @@ func tapNavSlot(t *testing.T, ctx *Context, d *op.Drawer, b Button) {
 // each HRP -- so the label collapses to the plate index within the card.
 func TestPlateListLabelsASingleCardPerHRP(t *testing.T) {
 	recs := plateRecords(t, "E")
-	frame, _, _, _, quit := runPlateList(t, newPlatform(), recs)
+	frame, _, _, _, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 	content, ok := frame()
 	if !ok {
@@ -226,7 +226,7 @@ func TestPlateListLabelsSeveralCardsOfOneHRP(t *testing.T) {
 	if len(recs) != 12 {
 		t.Fatalf("premise broken: vector G's public section must be 12 records, got %d", len(recs))
 	}
-	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), recs)
+	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 	// Vector G's cards: mk1 x3 of two plates each, then md1 x1 of six.
 	want := []string{
@@ -259,7 +259,7 @@ func TestPlateListLabelsSeveralCardsOfOneHRP(t *testing.T) {
 // second.
 func TestPlateListPagesThroughEveryRecord(t *testing.T) {
 	recs := plateRecords(t, "G")
-	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), recs)
+	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 
 	first, ok := frame()
@@ -334,7 +334,7 @@ func TestPlateListPagesThroughEveryRecord(t *testing.T) {
 // Back is the session exit and must work from ANY page, not only the first.
 func TestPlateListBackReturnsFromAnyPage(t *testing.T) {
 	recs := plateRecords(t, "G")
-	frame, drawer, done, ctx, quit := runPlateList(t, newPlatform(), recs)
+	frame, drawer, done, ctx, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 	if _, ok := frame(); !ok {
 		t.Fatal("the plate list produced no frame")
@@ -361,7 +361,7 @@ func TestPlateListOKEngravesTheSelectedRecord(t *testing.T) {
 	unlockEngraveHook = func(label string, rec []byte) { gotLabel, gotRecord = label, rec }
 	t.Cleanup(func() { unlockEngraveHook = nil })
 
-	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), recs)
+	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 	if _, ok := frame(); !ok {
 		t.Fatal("the plate list produced no frame")
@@ -398,7 +398,7 @@ func TestPlateListReturnsToTheSamePageAfterEngrave(t *testing.T) {
 	unlockEngraveHook = func(_ string, rec []byte) { gotRecord = rec }
 	t.Cleanup(func() { unlockEngraveHook = nil })
 
-	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), recs)
+	frame, drawer, _, ctx, quit := runPlateList(t, newPlatform(), asPlates(recs))
 	defer quit()
 	first, ok := frame()
 	if !ok {
@@ -476,7 +476,7 @@ func TestPlateListNeverOpensTheNFCReader(t *testing.T) {
 		return failingNFC{t}
 	}
 	recs := plateRecords(t, "G")
-	frame, drawer, _, ctx, quit := runPlateList(t, p, recs)
+	frame, drawer, _, ctx, quit := runPlateList(t, p, asPlates(recs))
 	defer quit()
 	if _, ok := frame(); !ok {
 		t.Fatal("the plate list produced no frame")
