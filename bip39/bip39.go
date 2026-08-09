@@ -255,7 +255,12 @@ func New(entropy []byte) Mnemonic {
 }
 
 func Parse(buf []byte) (Mnemonic, error) {
-	var m Mnemonic
+	// Preallocated to the maximum the loop below enforces, so append NEVER grows
+	// and never orphans a partial copy. A growing Mnemonic leaves the caller's
+	// clear() reaching only the LAST array: measured, a 12-word parse orphaned
+	// copies holding 1, 2, 4 and 8 words — two thirds of the seed, unreachable
+	// to any wipe. Found by the B2a-ii whole-diff review, lens 1 pass 3.
+	m := make(Mnemonic, 0, 24)
 	for w := range bytes.SplitSeq(buf, []byte(" ")) {
 		if len(m) == 24 {
 			return nil, fmt.Errorf("bip39: parse: mnemonic too long")

@@ -49,6 +49,15 @@ var unlockMnemonicHook func(m bip39.Mnemonic)
 // unlockSecretLabel names a secret plate by its CLASSIFIED type and its index
 // among secrets -- never by anything the sealer asserted, and never by
 // rendering the record's contents.
+// unlockSecretLabel names a secret plate by its CLASSIFIED type and its index
+// WITHIN THAT CLASS -- never across classes, and never by anything the sealer
+// asserted.
+//
+// i and n count secrets of THIS class only. Numbering across all secrets while
+// naming per class renders "ms1 1/2" then "seed words 2/2" on a mixed payload,
+// which tells the operator there are two ms1 cards and they hold the second.
+// No canonical vector mixes the classes (A 0/1, B 0/1, C 0/6, D 5/1, E 5/0,
+// F 0/15, G 12/3 — all-ms1 or all-mnemonic), so nothing caught it.
 func unlockSecretLabel(c seal.Classification, i, n int) string {
 	name := "secret"
 	switch c {
@@ -72,8 +81,17 @@ func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
 			at = append(at, i)
 		}
 	}
-	for n, i := range at {
-		unlockSecretPlate(ctx, th, p, i, unlockSecretLabel(p.Secret[i].Class, n, len(at)))
+	// Count PER CLASS, not across all secrets — see unlockSecretLabel. total is
+	// how many of each class exist; seen is how many have been offered so far.
+	total := make(map[seal.Classification]int, 2)
+	for _, i := range at {
+		total[p.Secret[i].Class]++
+	}
+	seen := make(map[seal.Classification]int, 2)
+	for _, i := range at {
+		c := p.Secret[i].Class
+		unlockSecretPlate(ctx, th, p, i, unlockSecretLabel(c, seen[c], total[c]))
+		seen[c]++
 	}
 }
 
@@ -86,7 +104,10 @@ func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
 func unlockSecretPlate(ctx *Context, th *Colors, p *seal.Payload, i int, label string) {
 	defer func() {
 		p.WipeSecretAt(i)
-		if unlockSecretHook != nil {
+		// Guarded on the same bound WipeSecretAt fails closed on, three lines up:
+		// an out-of-range index is a no-op there and a panic here, and a panic on
+		// a watchdog-less device is a brick.
+		if unlockSecretHook != nil && i >= 0 && i < len(p.Secret) {
 			unlockSecretHook("wiped", i, p.Secret[i].Record)
 		}
 	}()

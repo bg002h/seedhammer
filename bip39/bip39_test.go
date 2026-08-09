@@ -297,3 +297,32 @@ loop:
 		}
 	}
 }
+
+// Parse must never GROW its result: append's reallocation orphans partial copies
+// of the mnemonic that no caller's clear() can reach. Measured before the
+// preallocation, a 12-word parse left orphans holding 1, 2, 4 and 8 words — two
+// thirds of the seed, unwipeable. (B2a-ii whole-diff review, lens 1 pass 3.)
+func TestParseNeverGrowsItsResult(t *testing.T) {
+	for _, n := range []int{12, 24} {
+		words := make([]string, n)
+		for i := range words {
+			words[i] = "abandon"
+		}
+		m := make(Mnemonic, n)
+		for i := range m {
+			m[i] = 0
+		}
+		m = m.FixChecksum()
+		for i, w := range m {
+			words[i] = strings.ToLower(LabelFor(w))
+		}
+		got, err := Parse([]byte(strings.Join(words, " ")))
+		if err != nil {
+			t.Fatalf("%d words: %v", n, err)
+		}
+		if c := cap(got); c != 24 {
+			t.Errorf("%d words: cap is %d, want 24 — append grew and orphaned "+
+				"partial copies of the seed that no clear() can reach", n, c)
+		}
+	}
+}
