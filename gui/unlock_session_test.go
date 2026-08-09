@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"image"
+	"iter"
 	"testing"
 
 	"seedhammer.com/bip39"
@@ -111,6 +113,10 @@ type sessionHarness struct {
 	drawer  func() *op.Drawer
 	done    *bool
 	content string
+	// targets reports the drawn touch targets of the CURRENT frame together
+	// with the text drawn inside each. nil unless the harness was built by
+	// runSecretSessionLabelled -- see chooseLabelled.
+	targets func() []labelledTarget
 }
 
 func runSecretSession(t *testing.T, p *seal.Payload) *sessionHarness {
@@ -676,4 +682,298 @@ func TestMnemonicWordsAreZeroWhenThePlateReachesEngrave(t *testing.T) {
 				"whole cut, and neither p.Wipe() nor SecretsResident() can reach it", i, w)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// what the operator is actually pressing
+// ---------------------------------------------------------------------------
+
+// labelledTarget is one drawn touch target and the text drawn INSIDE it.
+type labelledTarget struct {
+	pt   image.Point
+	text string
+}
+
+// runSecretSessionLabelled is runSecretSession with each touch target's own
+// drawn label recorded beside it.
+//
+// It exists because every session test above selects a choice by TOUCH-TARGET
+// INDEX, and nothing anywhere asserted which label sits at which index — so
+// swapping the two shipped green, leaving the button labelled "Skip" cutting the
+// seed plate and the button labelled "Cut this plate" wiping the record
+// (B2a-ii whole-diff review, lens 2 I5).
+//
+// The extraction happens INSIDE the frame callback, where the op tree is still
+// live. op.Drawer.ExtractText collects only the glyphs whose clip meets the
+// rectangle it is handed (gui/op/op.go), so reading against one target's own
+// clip rect yields that target's label and nothing else — which is what turns
+// "the Nth target does X" into "the target LABELLED Skip does X".
+func runSecretSessionLabelled(t *testing.T, p *seal.Payload) *sessionHarness {
+	t.Helper()
+	pf := newPlatform()
+	pf.display = sh2DisplaySize
+	pf.engraver = newEngraver()
+	ctx := NewContext(pf)
+	returned := false
+	h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+	var last *op.Drawer
+	var lastTargets []labelledTarget
+	next, quit := iter.Pull(func(yield func(content string) bool) {
+		ctx.FrameCallback = func(o op.Op) {
+			r := image.Rectangle{Max: ctx.Platform.DisplaySize()}
+			d := new(op.Drawer)
+			content := d.ExtractText(r, o)
+			last, lastTargets = d, nil
+			for _, pt := range plateHitPoints(ctx, d) {
+				_, rect, ok := d.Hit(pt)
+				if !ok {
+					continue
+				}
+				// ChoiceScreen.Draw expands each label's background by
+				// buttonPadY top and bottom (gui/gui.go), so ADJACENT targets
+				// overlap by that much. Trim back to the label's own rows
+				// before reading, or a target can be credited with its
+				// neighbour's text.
+				rect.Min.Y += buttonPadY
+				rect.Max.Y -= buttonPadY
+				lastTargets = append(lastTargets, labelledTarget{
+					pt: pt, text: new(op.Drawer).ExtractText(rect, o),
+				})
+			}
+			ctx.Reset()
+			ctx.Done = ctx.Done || !yield(content)
+		}
+		unlockSecretSession(ctx, &descriptorTheme, p)
+		returned = true
+	})
+	h.frame = next
+	h.drawer = func() *op.Drawer { return last }
+	h.targets = func() []labelledTarget { return lastTargets }
+	t.Cleanup(quit)
+	return h
+}
+
+// chooseLabelled taps the choice whose DRAWN LABEL is want, then confirms.
+//
+// It fails if no target carries that label, or if two do. That refusal is the
+// assertion: choose(n) cannot tell a screen whose buttons were swapped from one
+// that was not.
+func (h *sessionHarness) chooseLabelled(want string) {
+	h.t.Helper()
+	if h.targets == nil {
+		h.t.Fatal("this harness records no labels; build it with runSecretSessionLabelled")
+	}
+	var pt image.Point
+	var drawn []string
+	found := 0
+	for _, tg := range h.targets() {
+		drawn = append(drawn, tg.text)
+		if uiContains(tg.text, want) {
+			pt = tg.pt
+			found++
+		}
+	}
+	if found != 1 {
+		h.t.Fatalf("%d touch targets are labelled %q; the screen drew %q (%q)",
+			found, want, drawn, h.content)
+	}
+	tap(&h.ctx.Router, h.drawer(), pt)
+	h.next("after selecting " + want)
+	h.tapNav(Button3)
+	if c, ok := h.frame(); ok {
+		h.content = c
+	}
+}
+
+// TestSecretPlateChoicesAreBoundToTheirLabels — §10.2.2's two buttons, bound to
+// the outcomes their text promises.
+//
+// Both directions of the swap are harmful on a screen whose whole job is
+// deciding whether seed material becomes steel: one engraves a seed the operator
+// asked NOT to engrave, the other wipes a secret record they asked to cut — and
+// on the last secret the session then simply ends, which is §6.4's
+// incomplete-backup-believed-complete again.
+//
+// So both are driven, in one session: Skip first (it must build no plate, and
+// must still wipe), then Cut on the next record (it must reach the engrave
+// screen).
+func TestSecretPlateChoicesAreBoundToTheirLabels(t *testing.T) {
+	p := unlockedPayload(t, "F")
+	evts := watchSecrets(t, p)
+	h := runSecretSessionLabelled(t, p)
+	h.mustReach("SECRET seed material")
+
+	// Both labels are drawn, on real targets, exactly once each.
+	var drawn []string
+	for _, tg := range h.targets() {
+		drawn = append(drawn, tg.text)
+	}
+	if len(drawn) != 2 {
+		t.Fatalf("the secret plate screen drew %d touch targets (%q), want 2 -- §10.2.2 "+
+			"gives the operator Cut or Skip and deliberately no third option", len(drawn), drawn)
+	}
+
+	first := firstSecretIdx(t, p)
+	if allZeroBytes(p.Secret[first].Record) {
+		t.Fatal("premise broken: the record is zero before the choice")
+	}
+
+	// SKIP builds no plate.
+	h.chooseLabelled("Skip")
+	reached := false
+	for i := 0; i < 64; i++ {
+		if uiContains(h.content, "Insert a blank plate") {
+			t.Fatalf("the button labelled \"Skip\" built a plate: %q\n"+
+				"it engraves a seed the operator asked not to engrave", h.content)
+		}
+		if uiContains(h.content, "SECRET seed material") {
+			reached = true
+			break
+		}
+		c, ok := h.frame()
+		if !ok {
+			break
+		}
+		h.content = c
+	}
+	if !reached {
+		t.Fatalf("Skip did not advance to the next secret; last frame %q", h.content)
+	}
+	// ...and it still wipes, which is the half that is NOT swappable.
+	if !allZeroBytes(p.Secret[first].Record) {
+		t.Errorf("Skip left record %d resident: %q", first, p.Secret[first].Record)
+	}
+	assertSecretWiped(t, *evts, first)
+
+	// CUT builds one.
+	h.chooseLabelled("Cut this plate")
+	h.mustReach("Insert a blank plate")
+}
+
+// TestPayloadSeedScreenRefusesEditing — §6c's NoEdit, at the ONE production call
+// site that sets it.
+//
+// TestSeedScreenNoEditClosesBOTHRoutes is a good test of the WIDGET and kills
+// both the handler-guard and the layout-guard mutants. What nothing covered is
+// that unlockEngraveMnemonic actually SETS the flag: `&SeedScreen{NoEdit: true}`
+// could be written `&SeedScreen{}` with the whole suite green (B2a-ii whole-diff
+// review, lens 2 I4).
+//
+// The harm is the one unlock_session.go's own comment states: with the flag
+// clear the operator can edit a word of an AUTHORITATIVE payload seed;
+// inputWordsFlow mutates m in place, and masterFingerprintFor(m, …) and
+// engraveSeed(params, m, mfp) then both read the edited value — so the steel
+// plate is internally self-consistent, carries a matching fingerprint, and does
+// not restore the payload's wallet. Nothing on the plate or the screen says so.
+func TestPayloadSeedScreenRefusesEditing(t *testing.T) {
+	// Vector A's single secret is a bare 24-word mnemonic, so it takes the arm
+	// that builds the SeedScreen.
+	p := unlockedPayload(t, "A")
+	if len(p.Secret) != 1 || p.Secret[0].Class != seal.ClassMnemonic {
+		t.Fatalf("premise broken: vector A must carry one BIP-39 mnemonic, got %d records",
+			len(p.Secret))
+	}
+	h := runSecretSession(t, p)
+	h.mustReach("SECRET seed material")
+	h.choose(0) // Cut this plate
+	h.mustReach("EngraveSeed")
+
+	// The layout route: with NoEdit the edit slot is not drawn, so there is no
+	// target to hit.
+	if _, _, hit := h.drawer().Hit(navSlotPoint(h.ctx, Button2)); hit {
+		t.Error("the edit nav slot still carries a touch target on a PAYLOAD seed")
+	}
+	// The HANDLER route, which is the one that discriminates: Filter.matches
+	// gates a buttonEvent on button identity alone with no bounds check
+	// (gui/event.go), so editBtn.Clicked keeps consuming ButtonFilter(Button2)
+	// whether or not anything was drawn for it.
+	click(&h.ctx.Router, Button2)
+	for i := 0; i < 16; i++ {
+		c, ok := h.frame()
+		if !ok {
+			break
+		}
+		h.content = c
+		if uiContains(c, "Word 1 of") {
+			t.Fatalf("Button2 reached word entry on a payload seed: %q\n"+
+				"editing an authoritative payload seed produces a self-consistent plate, "+
+				"with a matching fingerprint, that does not restore the payload's wallet", c)
+		}
+	}
+}
+
+// TestSecretSessionNumbersEachClassSeparately — the pass-3 fold (commit
+// d0baf13), which rewrote unlockSecretSession to count seen/total PER
+// Classification and landed with no test that can fail (B2a-ii whole-diff
+// review, lens 2 I6).
+//
+// No canonical vector mixes the two secret classes — A 0/1, B 0/1, C 0/6, D 5/1,
+// E 5/0, F 0/15, G 12/3 are all-ms1 or all-mnemonic — so reverting the fold
+// survived the whole suite, and TestUnlockSecretLabelNamesByClassification
+// exercises the FORMATTER with hand-supplied i and n, never the counter that
+// feeds it. This builds the missing shape from two vectors' own records.
+//
+// Numbering across all secrets while naming per class renders "ms1 1/2" then
+// "seed words 2/2", which tells the operator there are two ms1 cards and they
+// are holding the second.
+func TestSecretSessionNumbersEachClassSeparately(t *testing.T) {
+	d := sealVector(t, "D") // one ms1
+	a := sealVector(t, "A") // one bare 24-word mnemonic
+	if len(d.Secret) != 1 || len(a.Secret) != 1 {
+		t.Fatalf("premise broken: D has %d and A has %d secret records, want one each",
+			len(d.Secret), len(a.Secret))
+	}
+	blob := sealBlobForTest(t, nil, []string{d.Secret[0], a.Secret[0]},
+		fixturePassphrase, fixtureIterations)
+	p := unlockedBlob(t, blob, fixturePassphrase)
+	if len(p.Secret) != 2 {
+		t.Fatalf("the fixture admitted %d records, want 2", len(p.Secret))
+	}
+	if p.Secret[0].Class != seal.ClassCodex32Secret || p.Secret[1].Class != seal.ClassMnemonic {
+		t.Fatalf("the fixture is not the mixed-class shape: %v then %v",
+			p.Secret[0].Class, p.Secret[1].Class)
+	}
+
+	h := runSecretSession(t, p)
+	// ONE of each class, so NEITHER may be numbered: unlockSecretLabel adds
+	// "i+1/n" only when n > 1, and n counts this class alone.
+	one := h.mustReach("SECRET seed material")
+	if !uiContains(one, "ms1") {
+		t.Errorf("the first secret is not labelled \"ms1\": %q", one)
+	}
+	if uiContains(one, "1/2") {
+		t.Errorf("the ms1 card is numbered ACROSS classes: %q\n"+
+			"this tells the operator there are two ms1 cards and they hold the first", one)
+	}
+	h.choose(1) // Skip
+	two := h.mustReach("SECRET seed material")
+	if !uiContains(two, "seed words") {
+		t.Errorf("the second secret is not labelled \"seed words\": %q", two)
+	}
+	if uiContains(two, "2/2") {
+		t.Errorf("the mnemonic card is numbered ACROSS classes: %q\n"+
+			"this tells the operator they are holding the second of two seed-word cards", two)
+	}
+}
+
+// unlockedBlob is unlockedPayload for a blob that no single vector can supply.
+func unlockedBlob(t *testing.T, blob []byte, passphrase string) *seal.Payload {
+	t.Helper()
+	var o seal.Opener
+	p, err := o.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	key := seal.DeriveKey(seal.NormalisePassphrase(passphrase), p.Header.Salt[:],
+		int(p.Header.Iterations))
+	defer clear(key)
+	if err := o.UnlockWithKey(blob, p, key); err != nil {
+		t.Fatalf("UnlockWithKey: %v", err)
+	}
+	for i, r := range p.Secret {
+		if allZeroBytes(r.Record) {
+			t.Fatalf("record %d arrived already zero", i)
+		}
+	}
+	return p
 }

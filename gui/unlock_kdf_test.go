@@ -884,3 +884,52 @@ func TestKDFProgressFramesAreSubmittedWithAnExpiredDeadline(t *testing.T) {
 			future, frames)
 	}
 }
+
+// TestVectorBIterationsComeFromTheHeader — §11.3's mandatory row "iteration
+// count read as a constant | §11.4 vector B — nothing else sees it", and §11.2's
+// "Vector B is not optional — it is the only test that catches a hardcoded
+// iteration count."
+//
+// TestUnlockChecksumGateRunsNoKDF above already asserts the count came from the
+// header. It cannot fail: every vector a gui test reached was at 100,000 —
+// §6.2's FLOOR and by far the most likely hardcoded value — so the assertion
+// compared 100000 against 100000 and passed under
+// `newDeriver(pass, h.Salt[:], 100000)`. Vector B, at 100,001, is the only input
+// that discriminates, and `grep '"B"' gui/*_test.go` returned nothing before
+// this test: B was used in seal/ only, and unlockDerive is a SEPARATE call site
+// from seal.Unlock's.
+//
+// What the mutant costs in the field: §7.1's default is 300,000, so every real
+// payload would fail its tag ~10 s in and the device would report "Wrong
+// passphrase, or this payload has been altered" — teaching the operator to read
+// a false tamper alarm as normal, which is precisely the signal §2.2 item 4
+// exists to raise.
+func TestVectorBIterationsComeFromTheHeader(t *testing.T) {
+	v := sealVector(t, "B")
+	if v.Iterations == fixtureIterations {
+		t.Fatalf("premise broken: vector B must differ from §6.2's floor of %d, which is "+
+			"the value a hardcoded count would most likely be; it reads %d",
+			fixtureIterations, v.Iterations)
+	}
+	blob := v.blob(t)
+	p := inspected(t, blob)
+	if p.Header.Iterations != v.Iterations {
+		t.Fatalf("Inspect read %d iterations, the vector says %d",
+			p.Header.Iterations, v.Iterations)
+	}
+
+	c := installKDFCounter(t)
+	if err := runUnlockAttempt(t, blob, p, mnemonicOf(t, vectorPassphrase(t, v)...)); err != nil {
+		t.Fatalf("vector B failed to unlock: %v -- a KDF run at any count but the "+
+			"header's %d derives the wrong key, and the tag fails ~31 s in on the device",
+			err, v.Iterations)
+	}
+	if len(c.iterations) != 1 || c.iterations[0] != int(v.Iterations) {
+		t.Errorf("the KDF ran at %v iterations; vector B's header says %d -- the count "+
+			"must come from the header and never from a constant", c.iterations, v.Iterations)
+	}
+	if len(p.Secret) != len(v.Secret) {
+		t.Errorf("the unlock admitted %d secret records, vector B has %d",
+			len(p.Secret), len(v.Secret))
+	}
+}
