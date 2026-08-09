@@ -18,9 +18,10 @@ import (
 // rather than read-only, entries are labelled from §6.3's grouping rather than
 // from anything the sealer asserted, and Back is the session exit.
 //
-// B1 holds only public records, so there is nothing to wipe on the way out. The
-// SHAPE still has to be right here, or B2 inherits a list it cannot extend
-// without a fourth nav slot.
+// Wiping on the way out is unlockPayloadFlow's `defer p.Wipe()`, which covers
+// both sections. (B1 held only public records and this comment said there was
+// nothing to wipe; B2a-ii's list also carries the encrypted section's cards, so
+// there is.)
 
 // unlockEngraveHook is a test-only seam that observes which record OK selected,
 // so a test can assert the SELECTED record's bytes reach the engrave path
@@ -64,12 +65,21 @@ func plateLabel(r seal.AdmittedRecord, i int) string {
 	return fmt.Sprintf("%s %d/%d", hrp, r.PlateIndex, r.PlateTotal)
 }
 
-// unlockPlateListFlow lists every public record and engraves the selected one.
-// Returning leaves the session (§10.2.2: Lock, Back, an error and ctx.Done are
-// one exit, not four).
+// unlockPlateListFlow lists every record that is safe to leave resident -- the
+// public section, plus the encrypted section's md1/mk1 cards (§6.3) -- and
+// engraves the selected one. Returning leaves the session (§10.2.2: Lock, Back,
+// an error and ctx.Done are one exit, not four).
+//
+// An EMPTY list never reaches here; unlockPayloadFlow shows a terminal notice
+// instead. See the comment at its call site for why.
 func unlockPlateListFlow(ctx *Context, th *Colors, plates []unlockPlate) {
-	// Labels are rebuilt EACH FRAME rather than once up front, so the "(cut)"
-	// mark appears the moment a plate completes.
+	// Labels are rebuilt on ENTRY and after every engrave, which is the only
+	// thing that can change one: `cut` is the sole mutable input and it moves
+	// only at the unlockEngraveFlow call below. (An earlier revision of this
+	// comment claimed they were rebuilt EACH FRAME. They are not -- relabel()
+	// is called exactly twice -- and the effect it described is nonetheless
+	// correct. Corrected rather than reworded, because a future reader adding a
+	// second mutable label input would have trusted it.)
 	labels := make([]string, len(plates))
 	relabel := func() {
 		for i, e := range plates {

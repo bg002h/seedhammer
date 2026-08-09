@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -480,4 +481,207 @@ func asPlates(recs []seal.AdmittedRecord) []unlockPlate {
 		out[i] = unlockPlate{rec: r, idx: i}
 	}
 	return out
+}
+
+// TestEncryptedSeedOnlyPayloadEndsWithANoticeAndNotABlankList — vectors A and B
+// (B2a-ii whole-diff review, lens 4 MINOR 3).
+//
+// A and B are pub_len 0 with a single secret: the shape "seal just the seed"
+// takes, and plausibly the most common real use of this feature. The plate list
+// for them is EMPTY. Before this fold, the flow entered unlockPlateListFlow
+// anyway and the last frame the operator saw was literally "SealedPayload" --
+// the title and three nav icons, no body -- with OK and Page both no-ops
+// (`sel < len(plates)` and `start+shown < len(labels)` are each `0 < 0`).
+//
+// The assertion is on what the screen SAYS, not merely that the flow ended: a
+// flow that returned silently would also "end", and the operator would be back
+// at the menu with no statement that the session completed.
+func TestEncryptedSeedOnlyPayloadEndsWithANoticeAndNotABlankList(t *testing.T) {
+	for _, name := range []string{"A", "B"} {
+		for _, branch := range []string{"cut", "skip"} {
+			t.Run(name+"/"+branch, func(t *testing.T) {
+				p := unlockedPayload(t, name)
+				if len(p.Public) != 0 {
+					t.Fatalf("premise broken: vector %s must have no public section, got %d",
+						name, len(p.Public))
+				}
+				if got := len(unlockPlates(p)); got != 0 {
+					t.Fatalf("premise broken: vector %s must produce an EMPTY plate list, got %d",
+						name, got)
+				}
+
+				pf := newPlatform()
+				pf.display = sh2DisplaySize
+				pf.engraver = newEngraver()
+				ctx := NewContext(pf)
+				returned := false
+				frame, drawer, quit := runUITouch(ctx, func() {
+					unlockSecretSession(ctx, &descriptorTheme, p)
+					unlockPlatesOrNotice(ctx, &descriptorTheme, p)
+					returned = true
+				})
+				t.Cleanup(quit)
+
+				h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+				h.frame, h.drawer = frame, drawer
+				h.mustReach("SECRET seed material")
+				pts := plateHitPoints(ctx, drawer())
+				if len(pts) != 2 {
+					t.Fatalf("the secret plate drew %d choices, want Cut and Skip", len(pts))
+				}
+				if branch == "skip" {
+					tap(&ctx.Router, drawer(), pts[1])
+					h.next("after Skip")
+					h.tapNav(Button3)
+				} else {
+					// Cutting reaches the engrave screen; leaving it returns.
+					// The mnemonic arm passes through SeedScreen on the way and
+					// the ms1 arm does not, so the confirm is class-dependent.
+					tap(&ctx.Router, drawer(), pts[0])
+					h.next("after Cut")
+					h.tapNav(Button3)
+					if p.Secret[0].Class == seal.ClassMnemonic {
+						h.mustReach("1:")
+						h.tapNav(Button3) // confirm the seed
+					}
+					h.mustReach("Insert a blank plate")
+					h.tapNav(Button1)
+				}
+
+				// The terminal notice, and NOT a blank list.
+				var last string
+				sawNotice := false
+				for i := 0; i < 256 && !returned; i++ {
+					c, ok := frame()
+					if !ok {
+						break
+					}
+					last = c
+					h.content = c
+					if uiContains(c, "Nothing further to engrave") {
+						sawNotice = true
+						break
+					}
+				}
+				if !sawNotice {
+					t.Fatalf("an encrypted-seed-only payload never said the session was done; "+
+						"last frame %q\n"+
+						"with an empty list the plate-list screen draws a title and three nav "+
+						"icons and NO BODY, with OK and Page dead -- a blank screen with two "+
+						"dead buttons at the end of a funds-critical operation", last)
+				}
+				// And nothing on it invites an engrave that cannot happen.
+				if uiContains(h.content, "record 1") {
+					t.Errorf("the terminal notice offered a plate entry: %q", h.content)
+				}
+			})
+		}
+	}
+}
+
+// TestPlateListFallbackNumbersWithinTheLISTEDSet — lens 2 N1 = lens 4 NIT 6.
+//
+// plateLabel's default branch renders "record %d" from unlockPlate.idx, and it
+// is REACHABLE for the encrypted section: labelEncryptedCards discards a
+// grouping failure by design, so every card of a failed group keeps HRP 0.
+// Numbering by SECTION position then renders "record 2".."record 6" for a
+// five-entry list with no "record 1", because the ms1 that occupied section
+// index 0 is never listed -- and on a mixed payload a public "record 1" and an
+// encrypted "record 1" are two different plates under one label.
+//
+// The mutant `idx: len(out)` -> `idx: i` is what this exists to kill.
+func TestPlateListFallbackNumbersWithinTheLISTEDSet(t *testing.T) {
+	p := unlockedPayload(t, "C")
+	// Force the fallback: strip the card labels the grouping produced, which is
+	// the state a discarded grouping leaves behind.
+	for i := range p.Secret {
+		p.Secret[i].HRP = 0
+	}
+	plates := unlockPlates(p)
+	if len(plates) == 0 {
+		t.Fatal("premise broken: vector C must produce a non-empty plate list")
+	}
+	// Vector C's ms1 sits at section index 0 and is NOT listed, so section
+	// numbering would start at 2. This is the discriminating premise.
+	if p.Secret[0].Class != seal.ClassCodex32Secret {
+		t.Fatalf("premise broken: vector C's record 0 must be the ms1, got %v", p.Secret[0].Class)
+	}
+
+	seen := make(map[string]int, len(plates))
+	for i, e := range plates {
+		label := unlockPlateLabel(e.rec, e.idx, e.sealed, e.cut)
+		want := fmt.Sprintf("record %d", i+1)
+		if label != want {
+			t.Errorf("entry %d is labelled %q, want %q -- the fallback numbers the LISTED "+
+				"set, not the section", i, label, want)
+		}
+		seen[label]++
+	}
+	for label, n := range seen {
+		if n > 1 {
+			t.Errorf("%d entries share the label %q; the operator cannot tell them apart",
+				n, label)
+		}
+	}
+}
+
+// TestPlateListPagesAProductionBuiltMixedList — lens 8 C3.
+//
+// Every existing paging test drives asPlates(), a test-local constructor that
+// fabricates unlockPlate{rec, idx} with sealed:false, cut:false. The list
+// production actually builds -- unlockPlates(p), which appends the encrypted
+// section's cards and sets `sealed` when BOTH sections carry them -- reached
+// the flow in only two tests, and NEITHER paged. Paging is where start/sel/shown
+// and the post-engrave relabel() interact, and the "(sealed)" suffix is what
+// makes entries long enough for the interaction to matter.
+func TestPlateListPagesAProductionBuiltMixedList(t *testing.T) {
+	p := unlockedFixture(t)
+	plates := unlockPlates(p)
+	var sealedN int
+	for _, e := range plates {
+		if e.sealed {
+			sealedN++
+		}
+	}
+	if sealedN == 0 {
+		t.Fatal("premise broken: the both-sections fixture must mark some entries (sealed)")
+	}
+	pf := newPlatform()
+	frame, drawer, done, ctx, quit := runPlateList(t, pf, plates)
+	defer quit()
+
+	labels := make([]string, len(plates))
+	for i, e := range plates {
+		labels[i] = unlockPlateLabel(e.rec, e.idx, e.sealed, e.cut)
+	}
+
+	// Page all the way round and collect every label the list ever draws.
+	shown := make(map[string]bool)
+	content := ""
+	for turn := 0; turn < len(labels)+4; turn++ {
+		c, ok := frame()
+		if !ok {
+			t.Fatalf("the list stopped drawing on page turn %d", turn)
+		}
+		content = c
+		for _, l := range labels {
+			if uiContains(c, l) {
+				shown[l] = true
+			}
+		}
+		if len(shown) == len(labels) {
+			break
+		}
+		tapNavSlot(t, ctx, drawer(), Button2)
+	}
+	for _, l := range labels {
+		if !shown[l] {
+			t.Errorf("paging a production-built list never showed %q; last frame %q\n"+
+				"every entry must be reachable, or the operator stores an incomplete "+
+				"backup believing it complete (§6.4)", l, content)
+		}
+	}
+	if *done {
+		t.Fatal("paging left the list")
+	}
 }

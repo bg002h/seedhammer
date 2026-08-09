@@ -112,7 +112,7 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		// §10.2.2 -- every secret record offered FIRST, consecutively, each
 		// wiped as its plate leaves the screen by any route.
 		unlockSecretSession(ctx, th, p)
-		unlockPlateListFlow(ctx, th, unlockPlates(p))
+		unlockPlatesOrNotice(ctx, th, p)
 		return
 	}
 
@@ -123,7 +123,39 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 	}
 	// Both paths build the list the same way, which is also what stops the
 	// unsealed path from silently keeping the old labels.
-	unlockPlateListFlow(ctx, th, unlockPlates(p))
+	unlockPlatesOrNotice(ctx, th, p)
+}
+
+// unlockPlatesOrNotice enters the plate list, or -- when there is nothing left
+// to list -- says so and returns.
+//
+// An encrypted-seed-only payload has an EMPTY list: vectors A and B are
+// pub_len 0 with a single secret, which is the shape "seal just the seed"
+// takes and plausibly the most common real use of this feature. Measured by
+// driving the whole flow over vector A, the final frame was literally
+//
+//	"SealedPayload"
+//
+// -- the title and three nav icons, no body at all. OK and Page were both
+// no-ops (`sel < len(plates)` and `start+shown < len(labels)` are each `0 < 0`),
+// so the operator was left on a blank screen with two dead-looking buttons at
+// the end of a funds-critical operation, with nothing saying the session had
+// finished. Only Back did anything, drawn with IconDiscard.
+//
+// No safety consequence -- the record was cut and wiped before this point
+// either way -- but "did the machine work?" is precisely the ambiguity the rest
+// of §10.2 spends whole screens preventing, and the answer differs depending on
+// whether the operator cut or skipped.
+func unlockPlatesOrNotice(ctx *Context, th *Colors, p *seal.Payload) {
+	plates := unlockPlates(p)
+	if len(plates) == 0 {
+		showNotice(ctx, th, unlockTitle,
+			"Nothing further to engrave.\n\n"+
+				"This payload carried no card records. Any seed material it held has "+
+				"been offered and cleared from memory.")
+		return
+	}
+	unlockPlateListFlow(ctx, th, plates)
 }
 
 // unlockHashBody renders §10.2 step 3: the §6.6 digest, the PUBLIC record count

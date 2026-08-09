@@ -15,9 +15,17 @@ import "seedhammer.com/seal"
 // operator needs to see about it.
 type unlockPlate struct {
 	rec seal.AdmittedRecord
-	// idx is the record's position within its OWN section, which is what
-	// plateLabel's fallback branch numbers when a record somehow carries no
-	// card labels.
+	// idx is the entry's position in THIS LIST, which is what plateLabel's
+	// fallback branch numbers when a record somehow carries no card labels.
+	//
+	// The list, not the section (lens 2 N1 = lens 4 NIT 6). Numbering by
+	// section position renders "record 2".."record 6" for a five-entry list
+	// with no "record 1" -- reachable on vector C, where labelEncryptedCards
+	// discards a grouping failure by design (seal/label_encrypted.go:45-48) and
+	// the ms1 that occupied section index 0 is never listed. It is also
+	// AMBIGUOUS on a mixed payload, where a public record 1 and an encrypted
+	// record 1 are two different plates. The operator is choosing among the
+	// entries in front of them, so the number has to count those.
 	idx int
 	// sealed marks a record that came from the encrypted section, and is set
 	// only when BOTH sections carry cards -- see unlockPlateLabel.
@@ -70,14 +78,14 @@ func unlockPlates(p *seal.Payload) []unlockPlate {
 	}
 	mixed := pub && enc
 	out := make([]unlockPlate, 0, len(p.Public)+len(p.Secret))
-	for i, r := range p.Public {
-		out = append(out, unlockPlate{rec: r, idx: i})
+	for _, r := range p.Public {
+		out = append(out, unlockPlate{rec: r, idx: len(out)})
 	}
-	for i, r := range p.Secret {
+	for _, r := range p.Secret {
 		if r.Class != seal.ClassMDMK {
 			continue
 		}
-		out = append(out, unlockPlate{rec: r, idx: i, sealed: mixed})
+		out = append(out, unlockPlate{rec: r, idx: len(out), sealed: mixed})
 	}
 	return out
 }
