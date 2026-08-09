@@ -835,3 +835,52 @@ func navSlotPoint(ctx *Context, b Button) image.Point {
 	ys := [3]int{leadingSize, (dims.Y - sz.Y) / 2, dims.Y - leadingSize - sz.Y}
 	return image.Pt(dims.X-sz.X/2, ys[int(b-Button1)]+sz.Y/2)
 }
+
+// The KDF progress loop must ask for its next frame BEFORE submitting one.
+//
+// ctx.Frame is the yield, and Run reads the deadline for the frame it has just
+// been handed (`wakeup := ctx.Wakeup`) BEFORE its own ctx.Reset(). A WakeupAt
+// placed after Frame therefore governs the NEXT frame, and frame 1 inherits the
+// preceding screen's deadline — Run's ctx.WakeupAt(idleWakeup), i.e. three
+// minutes. The derivation parks at 500/300,000 iterations and the screensaver
+// takes the screen.
+//
+// A frame-COUNT assertion is a guaranteed false PASS here: the count is 199
+// either way. The property is the DEADLINE, so this test reproduces Run's own
+// read-then-Reset ordering and asserts every progress frame is submitted with an
+// already-expired one. (B2a-ii whole-diff review, concurrency lens.)
+func TestKDFProgressFramesAreSubmittedWithAnExpiredDeadline(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+
+	var future int
+	var frames int
+	ctx.FrameCallback = func(op.Op) {
+		// Read the deadline for THIS frame exactly as Run does, before Reset.
+		if !ctx.Wakeup.IsZero() && ctx.Wakeup.After(time.Now()) {
+			future++
+		}
+		frames++
+	}
+	// Seed the deadline the way Run leaves it for a newly-entered screen: the
+	// idle timeout, three minutes out. Without this the test cannot see the bug.
+	ctx.WakeupAt(time.Now().Add(idleTimeout))
+
+	h := seal.Header{Iterations: 2000}
+	for i := range h.Salt {
+		h.Salt[i] = byte(i)
+	}
+	pass := []byte("beef beef beef beef beef beef beef beef beef beef beef beef")
+	if key, ok := unlockDerive(ctx, &descriptorTheme, h, pass); !ok || key == nil {
+		t.Fatal("the derivation did not complete")
+	}
+	if frames == 0 {
+		t.Fatal("no progress frames were drawn; the test asserted nothing")
+	}
+	if future != 0 {
+		t.Errorf("%d of %d progress frames were submitted with a FUTURE deadline; "+
+			"the derivation parks instead of running. WakeupAt must precede ctx.Frame",
+			future, frames)
+	}
+}

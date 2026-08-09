@@ -188,6 +188,21 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconDiscard},
 		}...)
+		// BEFORE ctx.Frame, and the order is load-bearing. ctx.Frame IS the
+		// yield, and Run reads the deadline for the frame it has just been
+		// handed (`wakeup := ctx.Wakeup`, gui/gui.go:2972) BEFORE its own
+		// ctx.Reset(). So a WakeupAt placed AFTER Frame governs the NEXT frame,
+		// never this one -- and frame 1 then inherits whatever the preceding
+		// screen left, which is Run's own ctx.WakeupAt(idleWakeup): the twelfth
+		// word's OK release plus THREE MINUTES. The derivation parks at
+		// 500/300,000 iterations, the screensaver takes the screen, and
+		// ctx.Frame never returns.
+		//
+		// That is worse than the blocking pbkdf2.Key this design replaced, which
+		// at least finished in ~31 s, and it defeats the operator decision this
+		// whole screen exists to satisfy. EngraveScreen.Engrave has the correct
+		// order (gui/gui.go:2733 before :2741); this now matches it.
+		ctx.WakeupAt(time.Now())
 		ctx.Frame(op.Layer(
 			nav,
 			titleOp,
@@ -195,9 +210,6 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 			leadOp.Offset(image.Pt((dims.X-leadSz.X)/2, (dims.Y+pctSz.Y)/2)),
 			op.Color(&ctx.B, th.Background),
 		))
-		// Ask for the next frame immediately: this loop IS the work, and a
-		// deadline in the future would idle the KDF instead of running it.
-		ctx.WakeupAt(time.Now())
 	}
 	return nil, false
 }
