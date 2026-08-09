@@ -79,6 +79,22 @@ var unlockPassphraseWordsHook func(m bip39.Mnemonic)
 // the buffer the flow zeroes are different allocations. nil in production.
 var unlockKeyHook func(key []byte)
 
+// unlockPassphraseNotice is §10.2 step 5's "these words are not a seed", split
+// out from unlockPassphraseFlow so unlockSealedFlow can show it ONCE per
+// session rather than once per attempt.
+//
+// unlockSealedFlow calls unlockPassphraseFlow afresh for every retry, so with
+// the notice inside it a wrong passphrase cost the operator two dismissals --
+// the §10.2 step 8 error carrying the §6.6 hash, and then this -- before the
+// keyboard came back. It also put a screen BETWEEN the hash and the retry, on
+// the one path where the hash is the signal the operator is meant to act on.
+func unlockPassphraseNotice(ctx *Context, th *Colors) {
+	showNotice(ctx, th, unlockTitle,
+		"Enter the 12-word passphrase for this payload.\n\n"+
+			"These words are the payload's passphrase. They are NOT a seed and no "+
+			"wallet is derived from them.")
+}
+
 // unlockPassphraseFlow takes §8's twelve words. It returns ok == false only
 // when the operator backs out; a checksum-invalid entry is reported and
 // re-prompted here, because that is a typo and not a decision.
@@ -87,23 +103,23 @@ var unlockKeyHook func(key []byte)
 // §8 says the passphrase is twelve words; there is no choice to offer. What it
 // does reuse unmodified is inputWordsFlow, whose length is len(mnemonic) and
 // whose title parameter is a documented additive seam.
+//
+// The notice is the CALLER's (unlockSealedFlow), once per session -- see
+// unlockPassphraseNotice.
 func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	if unlockPassphraseHook != nil {
 		unlockPassphraseHook()
 	}
-	// The screen's identity is established HERE, before entry, and the title
-	// passed to inputWordsFlow stays "" (R0 round 0, M4). The title parameter is
-	// an either/or: gui/gui.go:765-770 renders `layoutTitlef("Word %d of %d")`
-	// when it is empty and `layoutTitle(title)` when it is not. Passing
-	// "Passphrase" would REPLACE the only per-word progress on the screen, so
-	// the operator would type twelve words with no idea how many remain, on the
-	// screen that gates a ~31 s KDF. Empty is also what makes §8's "reuses the
-	// existing 12-word seed-entry flow unmodified" literally true, and it keeps
-	// the existing `uiContains(content, "Word 1 of")` negative assertion working.
-	showNotice(ctx, th, unlockTitle,
-		"Enter the 12-word passphrase for this payload.\n\n"+
-			"These words are the payload's passphrase. They are NOT a seed and no "+
-			"wallet is derived from them.")
+	// The screen's identity is established by unlockPassphraseNotice, before
+	// entry, and the title passed to inputWordsFlow stays "" (R0 round 0, M4).
+	// The title parameter is an either/or: gui/gui.go:765-770 renders
+	// `layoutTitlef("Word %d of %d")` when it is empty and `layoutTitle(title)`
+	// when it is not. Passing "Passphrase" would REPLACE the only per-word
+	// progress on the screen, so the operator would type twelve words with no
+	// idea how many remain, on the screen that gates a ~31 s KDF. Empty is also
+	// what makes §8's "reuses the existing 12-word seed-entry flow unmodified"
+	// literally true, and it keeps the existing
+	// `uiContains(content, "Word 1 of")` negative assertion working.
 	for !ctx.Done {
 		m := emptyBIP39Mnemonic(12)
 		if unlockPassphraseWordsHook != nil {
@@ -174,7 +190,16 @@ func unlockKDFLead(done, total int, elapsed time.Duration) string {
 	}
 	// Multiply BEFORE dividing: `elapsed/done` truncates to whole nanoseconds
 	// first, and on a fast host that rounds to 0 and the screen reads "About 0
-	// seconds left." int64 overflows only past ~10^10 ns of elapsed time.
+	// seconds left."
+	//
+	// The product cannot overflow int64. `total-done` is bounded by §6.2's
+	// ceiling at 1,999,999, so overflow needs
+	// elapsed > (2^63-1)/1_999_999 = 4,611,688,324,271 ns -- 4611.7 s, about
+	// 76.9 minutes of wall time on a screen the operator is watching. (An
+	// earlier revision of this comment said "~10^10 ns", which is 10 seconds
+	// and understates the headroom by ~461x; the figure above is computed, per
+	// this project's rule that numbers in comments are measured and not
+	// estimated.)
 	left := time.Duration(int64(elapsed) * int64(total-done) / int64(done))
 	return fmt.Sprintf("Unlocking. About %d seconds left.", int(left.Seconds()+0.5))
 }
@@ -189,21 +214,51 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 	defer d.Wipe()
 	backBtn := &Clickable{Button: Button1}
 	start := time.Now()
+	// derived accumulates the time spent INSIDE d.Step and nothing else.
+	//
+	// §7.1 is closed by Task 9.3 reading the log line below off the real
+	// machine and re-deriving the iteration count from it, so the line must
+	// report the DERIVATION, not the wall clock. Wall time here also covers
+	// ~600 full-panel repaints, and -- the part that actually bites -- any
+	// interval in which Run's screensaver has parked this loop, which is
+	// unbounded (see the frame-deadline note below and F-93). §7.1's own
+	// history is a rate estimate wrong by 1.54x that set the default to
+	// 450,000; a parked wall-clock reading would repeat that error larger, and
+	// this time with the number "measured on the real part".
+	//
+	// Both are logged: the rate comes from `derived`, and `wall` is what §7.1
+	// separately asks for -- "the number the operator actually experiences".
+	var derived time.Duration
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			return nil, false
 		}
-		if d.Step(kdfStepIterations) {
+		stepStart := time.Now()
+		done := d.Step(kdfStepIterations)
+		derived += time.Since(stepStart)
+		if done {
 			// §7.1 still owes an in-situ rate on RP2350B silicon. Logging it
 			// here makes the operator's real unlock that measurement, in the
 			// real call path, rather than a benchmark's idealised loop. The
 			// iteration count travels in the header and is public, so this
 			// leaks nothing.
-			log.Printf("seal: kdf %d iterations in %s", d.Total(), time.Since(start))
+			log.Printf("seal: kdf %d iterations in %s derived (%s wall)",
+				d.Total(), derived, time.Since(start))
 			return d.Key(), true
 		}
 		dims := ctx.Platform.DisplaySize()
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, unlockTitle)
+		// d.Done()*100 is computed in int, which is 32 bits on this target, and
+		// it is safe only because of seal.MaxIterations. Done() <= Total() <=
+		// 2,000,000, so the product peaks at 200,000,000 against int32's
+		// 2,147,483,647 -- 10.7x of headroom, but headroom that is a silent
+		// consequence of a constant in ANOTHER package. The largest
+		// seal.MaxIterations this expression tolerates is 21,474,836
+		// (x100 = 2,147,483,600); at 21,474,837 it wraps and the screen renders
+		// a NEGATIVE percentage during the one operation §10.2 step 7 exists to
+		// keep legible. Pinned at the bound by
+		// TestUnlockDerivesAtTheMaximumIterationCount. If MaxIterations is ever
+		// raised, widen this to int64 rather than re-deriving the margin.
 		pctOp, pctSz := widget.Label(&ctx.B, ctx.Styles.progress, th.Text,
 			fmt.Sprintf("%d%%", d.Done()*100/d.Total()))
 		leadOp, leadSz := widget.Labelw(&ctx.B, ctx.Styles.lead, dims.X-2*8, th.Text,
@@ -225,6 +280,18 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 		// at least finished in ~31 s, and it defeats the operator decision this
 		// whole screen exists to satisfy. EngraveScreen.Engrave has the correct
 		// order (gui/gui.go:2733 before :2741); this now matches it.
+		//
+		// WHAT THIS ORDER DOES NOT FIX, so nobody reads it as fixed: Run refreshes
+		// a.idle.start only on `len(evts) > 0`, and a derivation produces no
+		// events, so a derivation longer than idleTimeout still trips the saver --
+		// whose branch `continue`s without breaking, so ctx.Frame does not return
+		// and the KDF stops until a touch. At §7.1's measured 9,715 it/s that is
+		// iterations >= 180 * 9,715 = 1,748,700, against §6.2's ceiling of
+		// 2,000,000 (205.9 s): the top 13.2% of the LEGAL range, reachable with a
+		// conforming blob. The default is 300,000 (30.9 s), nowhere near it.
+		// Closing it needs a Run-side change and must be reconciled with §10.2.4's
+		// residency timer, which is F-89's territory -- so it is B2b's, filed as
+		// F-93. The log line above is the half that could be fixed here.
 		ctx.WakeupAt(time.Now())
 		ctx.Frame(op.Layer(
 			nav,
@@ -294,6 +361,10 @@ func unlockRetryBody(p *seal.Payload) string {
 // available outcome. That is the same rule B1's Task 6 enforced with a terminal
 // screen, and it does not relax now that unlocking exists.
 func unlockSealedFlow(ctx *Context, th *Colors, blob []byte, p *seal.Payload) bool {
+	// ONCE per session, above the retry loop. Inside it the operator dismissed
+	// this notice again after every wrong passphrase, with the §6.6 hash they
+	// are meant to be comparing pushed one screen further back each time.
+	unlockPassphraseNotice(ctx, th)
 	for !ctx.Done {
 		m, ok := unlockPassphraseFlow(ctx, th)
 		if !ok {

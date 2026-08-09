@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -636,10 +637,36 @@ func TestUnlockRetryKeepsTheHashOnScreen(t *testing.T) {
 	if !uiContains(content, "5 records") {
 		t.Errorf("the retry message does not carry the PUBLIC record count: %q", content)
 	}
-	// And it RETRIES rather than leaving: dismissing returns to the prompt and
-	// then to word entry, with the flow still running.
+	// And it RETRIES rather than leaving: dismissing returns STRAIGHT to word
+	// entry, with the flow still running.
+	//
+	// "Straight" is itself the assertion (lens 4 NIT 7). The "These words are
+	// NOT a seed" notice belongs to the SESSION, not to the attempt:
+	// unlockSealedFlow calls unlockPassphraseFlow afresh per retry, so with the
+	// notice inside it a wrong passphrase cost the operator TWO dismissals and
+	// put a screen between the §6.6 hash and the keyboard -- on the one path
+	// where that hash is the signal they are meant to act on.
 	h.tapNav(Button3)
-	h.toPassphrase(false)
+	reachedEntry := false
+	for i := 0; i < 64; i++ {
+		c, ok := h.frame()
+		if !ok {
+			break
+		}
+		h.content = c
+		if uiContains(c, "Enter the 12-word passphrase") {
+			t.Fatalf("the passphrase notice was re-shown on the retry: %q\n"+
+				"it is shown ONCE per session, above unlockSealedFlow's retry loop", c)
+		}
+		if uiContains(c, "Word 1 of 12") {
+			reachedEntry = true
+			break
+		}
+	}
+	if !reachedEntry {
+		t.Fatalf("dismissing the retry message did not return to word entry; last frame %q",
+			h.content)
+	}
 	if *h.done {
 		t.Fatal("a wrong passphrase ended the flow instead of re-prompting")
 	}
@@ -931,5 +958,171 @@ func TestVectorBIterationsComeFromTheHeader(t *testing.T) {
 	if len(p.Secret) != len(v.Secret) {
 		t.Errorf("the unlock admitted %d secret records, vector B has %d",
 			len(p.Secret), len(v.Secret))
+	}
+}
+
+// TestUnlockDerivesAtTheMaximumIterationCount — §6.2's CEILING, which nothing
+// had ever run (B2a-ii whole-diff review, lens 8 M4; it also pins lens 6 N2's
+// coupling at the bound).
+//
+// Every vector is at 100,000 or 100,001 and fixtureIterations is 100,000, so
+// the top 95% of the legal range had never been through the progress screen.
+// That matters for one specific reason: the iteration count is
+// ATTACKER-CONTROLLED (§2.2 item 4 concedes the region is writable) and it is
+// the only header field this screen consumes arithmetically.
+//
+// Two properties, both invisible at the floor:
+//
+//  1. d.Done()*100/d.Total() is computed in a 32-bit int on target. At the
+//     ceiling the product is 200,000,000 against int32's 2,147,483,647. The
+//     percentage must stay in 0..99 and never run backwards -- a wrapped
+//     product renders NEGATIVE, on the one screen §10.2 step 7 exists to keep
+//     legible.
+//  2. The frame count follows the count from the HEADER, so the screen is
+//     driven by the payload rather than by a constant.
+func TestUnlockDerivesAtTheMaximumIterationCount(t *testing.T) {
+	if seal.MaxIterations != 2_000_000 {
+		t.Fatalf("premise: this test's arithmetic assumes MaxIterations == 2,000,000, got %d",
+			seal.MaxIterations)
+	}
+	// The largest MaxIterations d.Done()*100 tolerates in a 32-bit int.
+	const safeCeiling = 21_474_836
+	if seal.MaxIterations > safeCeiling {
+		t.Fatalf("seal.MaxIterations = %d exceeds %d: d.Done()*100 wraps a 32-bit int and "+
+			"the progress screen renders a negative percentage",
+			seal.MaxIterations, safeCeiling)
+	}
+
+	d := sealVector(t, "D")
+	words := vectorPassphrase(t, d)
+	blob := sealBlobForTest(t, d.Public, d.Secret, strings.Join(words, " "), seal.MaxIterations)
+
+	h := newUnlockHarness(t, payloadReaderFrom(t, blob))
+	h.toPassphrase(true)
+	h.typePassphrase(words)
+
+	// (MaxIterations-1)/kdfStepIterations steps, one frame between each.
+	wantFrames := (seal.MaxIterations-1)/kdfStepIterations - 1
+	frames, last := 0, -1
+	minPct, maxPct := 100, -1
+	for i := 0; i < wantFrames+512; i++ {
+		c, ok := h.frame()
+		if !ok {
+			break
+		}
+		h.content = c
+		m := progressPct.FindStringSubmatch(c)
+		if m == nil {
+			if frames > 0 {
+				break // the derivation finished and the screen moved on
+			}
+			continue
+		}
+		pct, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("unreadable progress reading %q", m[1])
+		}
+		if pct < 0 || pct > 99 {
+			t.Fatalf("frame %d read %d%%: at %d iterations d.Done()*100 is %d, and a "+
+				"32-bit int holds %d -- a reading outside 0..99 is the wrap",
+				frames, pct, seal.MaxIterations, seal.MaxIterations*100, math.MaxInt32)
+		}
+		if pct < last {
+			t.Fatalf("frame %d read %d%% after %d%%: the progress ran BACKWARDS", frames, pct, last)
+		}
+		last = pct
+		if pct < minPct {
+			minPct = pct
+		}
+		if pct > maxPct {
+			maxPct = pct
+		}
+		frames++
+	}
+	if frames != wantFrames {
+		t.Errorf("the derivation drew %d progress frames at %d iterations, want %d\n"+
+			"the frame count follows the count from the HEADER; a mismatch means the "+
+			"screen is driven by a constant", frames, seal.MaxIterations, wantFrames)
+	}
+	if minPct != 0 || maxPct != 99 {
+		t.Errorf("the percentage spanned %d..%d, want 0..99", minPct, maxPct)
+	}
+	// It must actually SUCCEED at the ceiling, not merely draw.
+	h.mustReach("SECRET seed material")
+}
+
+// TestUnlockRetryOnAPayloadWithNoPublicSectionShowsNoDigest — §10.2 step 3's
+// "furniture" rule on the RETRY screen (B2a-ii whole-diff review, lens 2 M3).
+//
+// A, B, C and F all carry pub_len == 0, and the retry test uses D. So no test
+// drove a wrong passphrase against a payload with no public section, and the
+// mutant `if !p.HasHash` -> `if false` survived. Under it a wrong passphrase on
+// vector C displays
+//
+//	Public data hash (0 records, SEALED): 0000 0000 ... 0000
+//
+// -- the digest of the EMPTY record set, a constant shown on every fully
+// encrypted payload, which §10.2 step 3 and §6.6 say "would teach the operator
+// it is furniture", on the one screen that exists to raise a tamper signal.
+func TestUnlockRetryOnAPayloadWithNoPublicSectionShowsNoDigest(t *testing.T) {
+	v := sealVector(t, "C")
+	p := unlockedPayload(t, "C")
+	if len(p.Public) != 0 {
+		t.Fatalf("premise broken: vector C must have no public section, got %d records",
+			len(p.Public))
+	}
+	// The TWO furniture constants a broken branch can print, both COMPUTED and
+	// never retyped. They differ, and knowing which is which is the point:
+	// p.Hash is never POPULATED when pub_len == 0, so the branch this test's
+	// mutant removes prints the ZERO-VALUE array; a different mistake --
+	// hashing the empty record set rather than declining to -- prints the
+	// digest of no records. Measured:
+	//	unpopulated  "0000 0000 0000 0000 0000 0000 0000 0000"
+	//	empty set    "9c37 4420 ca19 4e28 8469 bc81 e9e1 b64b"
+	// Both are constants on every fully encrypted payload, which is exactly
+	// what §10.2 step 3 forbids, so both are excluded.
+	var zeroHash [16]byte
+	unpopulatedDigest := seal.FormatHash(zeroHash)
+	emptySetDigest := seal.FormatHash(seal.PublicDataHash(nil, true))
+	if unpopulatedDigest == emptySetDigest {
+		t.Fatal("premise broken: the two furniture constants must differ, or this test " +
+			"excludes only one of them")
+	}
+
+	h := newUnlockHarness(t, payloadReaderFrom(t, v.blob(t)))
+	// pub_len == 0, so §10.2 step 3 shows no hash notice at all on the way in.
+	h.toPassphrase(false)
+	wrong := []string{"abandon", "abandon", "abandon", "abandon", "abandon", "abandon",
+		"abandon", "abandon", "abandon", "abandon", "abandon", "about"}
+	if !mnemonicOf(t, wrong...).Valid() {
+		t.Fatal("premise broken: the wrong passphrase must still be checksum-valid")
+	}
+	h.typePassphrase(wrong)
+	content := h.mustReach("has been altered")
+
+	if !uiContains(content, "Wrong passphrase") {
+		t.Errorf("the retry message does not offer the wrong-passphrase reading: %q", content)
+	}
+	for _, c := range []struct{ what, digest string }{
+		{"UNPOPULATED (zero-value p.Hash)", unpopulatedDigest},
+		{"EMPTY-RECORD-SET", emptySetDigest},
+	} {
+		if uiContains(content, c.digest) {
+			t.Errorf("the retry message printed the %s digest %s: %q\n"+
+				"it is a constant on every pub_len == 0 payload; §10.2 step 3 says showing "+
+				"it teaches the operator the digest is furniture, on the one screen that "+
+				"exists to raise a tamper signal", c.what, c.digest, content)
+		}
+	}
+	if uiContains(content, "Public data hash") {
+		t.Errorf("the retry message offered a public data hash on a payload with no "+
+			"public section: %q", content)
+	}
+	if uiContains(content, "0 records") {
+		t.Errorf("the retry message advertised a 0-record hash: %q", content)
+	}
+	// It must still say what to DO, rather than trailing off.
+	if !uiContains(content, "Check the words and try again") {
+		t.Errorf("the pub_len == 0 retry message gives the operator no next step: %q", content)
 	}
 }
