@@ -38,6 +38,14 @@ import (
 // Mirrors unlockEngraveHook, the sanctioned in-file seam.
 var unlockSecretHook func(stage string, idx int, record []byte)
 
+// unlockMnemonicHook observes bip39.Parse's []Word copy at the moment the plate
+// is handed to Engrave. It exists because that copy is a local: no test could
+// reach it, which is why a seed sat live through the whole cut with the suite
+// green. Asserting on the BUFFER at the instant the screen comes up is the only
+// assertion that distinguishes an early wipe from a deferred one. nil in
+// production.
+var unlockMnemonicHook func(m bip39.Mnemonic)
+
 // unlockSecretLabel names a secret plate by its CLASSIFIED type and its index
 // among secrets -- never by anything the sealer asserted, and never by
 // rendering the record's contents.
@@ -197,7 +205,23 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 		return
 	}
 	// §10.2.2 — see unlockEngraveCodex32 for why this is before Engrave and not
-	// after. m is zeroed by this function's own defer; rec is seal's buffer.
+	// after. BOTH copies go here, and that is the whole point: rec is seal's
+	// buffer, and m is bip39.Parse's INDEPENDENT []Word copy of the same seed.
+	//
+	// An earlier version zeroed m only on the defer below, which fires when this
+	// function RETURNS -- i.e. after Engrave. That left a full copy of the seed
+	// live for the entire ~21-minute cut and indefinitely on the paused or failed
+	// engrave screen, which is precisely the residency the lines above exist to
+	// remove. Worse, nothing else could reach it: p.Wipe() and §10.2.4's
+	// SecretsResident() both scan p.Secret only, so the timer condition reads
+	// FALSE while the seed is live. Found by the B2a-ii whole-diff review, lens 1.
+	//
+	// The defer stays: it covers the three early returns above, where no plate was
+	// ever built. clear is idempotent, so the double-zero is free.
 	clear(rec)
+	clear(m)
+	if unlockMnemonicHook != nil {
+		unlockMnemonicHook(m)
+	}
 	NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
 }

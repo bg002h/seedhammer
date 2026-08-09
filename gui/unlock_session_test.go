@@ -627,3 +627,44 @@ func TestUnlockSecretLabelNamesByClassification(t *testing.T) {
 
 // unused guard so bip39 stays imported if the mnemonic test is edited.
 var _ = bip39.Mnemonic(nil)
+
+// §10.2.2 for the SECOND copy. bip39.Parse returns an independent []Word of the
+// same seed, and it is a local — no test could see it, which is how a full seed
+// stayed live through an entire ~21-minute cut with the suite green (B2a-ii
+// whole-diff review, lens 1 C1).
+//
+// The assertion is at the instant the plate reaches Engrave, NOT after the flow
+// returns. That distinction is the whole test: a deferred clear(m) satisfies
+// every after-the-fact check and leaves the seed resident for the cut.
+func TestMnemonicWordsAreZeroWhenThePlateReachesEngrave(t *testing.T) {
+	var atEngrave []bip39.Word
+	unlockMnemonicHook = func(m bip39.Mnemonic) {
+		atEngrave = append([]bip39.Word(nil), m...)
+	}
+	t.Cleanup(func() { unlockMnemonicHook = nil })
+
+	// Vector A's single secret record is a bare 24-word mnemonic.
+	p := unlockedPayload(t, "A")
+	h := runSecretSession(t, p)
+	h.mustReach("SECRET seed material")
+	h.choose(0) // Cut this plate
+	// The mnemonic arm shows SeedScreen.Confirm first — the 24 words and an
+	// "Engrave Seed" confirm. The codex32 arm has no such screen, which is why
+	// its sibling test reaches the engrave in one step.
+	h.mustReach("EngraveSeed")
+	h.tapNav(Button3)
+	h.mustReach("Insert a blank plate")
+
+	if atEngrave == nil {
+		t.Fatal("the plate never reached Engrave; the test asserted nothing")
+	}
+	if len(atEngrave) != 24 {
+		t.Fatalf("observed %d words, want 24 — wrong vector or wrong hook", len(atEngrave))
+	}
+	for i, w := range atEngrave {
+		if w != 0 {
+			t.Fatalf("word %d is still %d at Engrave entry: the seed is live for the "+
+				"whole cut, and neither p.Wipe() nor SecretsResident() can reach it", i, w)
+		}
+	}
+}
