@@ -242,7 +242,7 @@ func TestUnlockWithKeyTwiceWipesTheFirstResult(t *testing.T) {
 // every ms1 and every bare mnemonic in the payload, in one gcm.Open allocation
 // -- from the heap once AdmitSection has copied out of it. Nothing else can
 // reach that array: Payload.Wipe and WipeSecretAt walk p.Public/p.Secret, and
-// SecretsResident reports on those too, so deleting the line leaves a full
+// RecordsResident reports on those too, so deleting the line leaves a full
 // plaintext copy of the seed live for the rest of the power cycle and reports
 // "no secret resident" while it sits there. That is why this needs a seam
 // (unlockPlaintextHook) rather than a public-API assertion: no handle escapes.
@@ -279,7 +279,7 @@ func TestUnlockWithKeyZeroesTheDecryptedPlaintext(t *testing.T) {
 	if !allZero(held) {
 		t.Errorf("the decrypted record container survived UnlockWithKey: %q\n"+
 			"§11.2 requires the plaintext record buffer read as zeroed; neither "+
-			"Payload.Wipe nor SecretsResident can reach this one", held)
+			"Payload.Wipe nor RecordsResident can reach this one", held)
 	}
 	// And the wipe is not collateral damage: AdmitSection COPIES
 	// (seal/record.go), so the admitted records must survive it.

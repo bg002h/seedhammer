@@ -19,7 +19,7 @@ var ErrNotSealed = errors.New("seal: payload carries no encrypted section")
 // allocation, AdmitSection copies out of it (seal/record.go), and no handle
 // escapes this function. It is also the widest such buffer in the firmware --
 // every ms1 and every bare mnemonic in the payload in ONE array that neither
-// Payload.Wipe, WipeSecretAt nor SecretsResident can reach -- so a deleted
+// Payload.Wipe, WipeSecretAt nor RecordsResident can reach -- so a deleted
 // `defer clear(plaintext)` leaves a full plaintext copy of the seed live for the
 // rest of the power cycle with nothing able to notice.
 var unlockPlaintextHook func(plaintext []byte)

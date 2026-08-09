@@ -282,7 +282,7 @@ func Parse(buf []byte) (Mnemonic, error) {
 	// seal.Classify calls Parse on every record of BOTH sections, so a
 	// mnemonic-shaped record with a bad checksum otherwise leaves a full
 	// 12/24-word near-seed on the heap that neither Payload.Wipe nor
-	// SecretsResident can reach. Only a non-conforming or attacker-supplied
+	// RecordsResident can reach. Only a non-conforming or attacker-supplied
 	// blob gets there, and that payload is then rejected, so the exposure is a
 	// REJECTED record and not the operator's own seed — but §10.2.1 explicitly
 	// refuses to assume a conforming sealer.

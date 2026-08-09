@@ -256,6 +256,13 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	// zeroed by the caller's defer; this one is this function's to zero, and
 	// clear() reaches []Word where wipeBytes ([]byte) does not compile.
 	defer clear(m)
+	// F-87: fires immediately after the defer above is registered, so a test
+	// holds the SAME backing array the defer will zero and can assert it on
+	// every early return below -- not just the success path unlockMnemonicHook
+	// already covers. See unlock_mnemonic_seam.go.
+	if unlockMnemonicParsedHook != nil {
+		unlockMnemonicParsedHook(m)
+	}
 	// NoEdit: the edit nav button (Button2, or a tap on its slot) opens the word
 	// editor, and editing an authoritative payload seed produces a
 	// self-consistent plate that does not restore the payload's wallet. For a
@@ -287,7 +294,7 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	// function RETURNS -- i.e. after Engrave. That left a full copy of the seed
 	// live for the entire ~21-minute cut and indefinitely on the paused or failed
 	// engrave screen, which is precisely the residency the lines above exist to
-	// remove. Worse, nothing else could reach it: §10.2.4's SecretsResident()
+	// remove. Worse, nothing else could reach it: §10.2.4's RecordsResident()
 	// scans p.Secret only, and p.Wipe() loops p.Secret and p.Public -- neither
 	// reaches a local -- so the timer condition reads FALSE while the seed is
 	// live. Found by the B2a-ii whole-diff review, lens 1.

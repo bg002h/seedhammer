@@ -348,7 +348,7 @@ func TestParseNeverGrowsItsResult(t *testing.T) {
 // The materially interesting exit is ErrInvalidChecksum, where the accumulator
 // holds the COMPLETE word list. seal.Classify calls Parse on every record of
 // both sections, so a mnemonic-shaped record with a bad checksum leaves a full
-// 12/24-word near-seed on a heap that neither Payload.Wipe nor SecretsResident
+// 12/24-word near-seed on a heap that neither Payload.Wipe nor RecordsResident
 // can reach.
 //
 // Asserted ON THE BUFFER via the allocation seam, because all three exits
