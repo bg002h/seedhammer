@@ -212,9 +212,10 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	// function RETURNS -- i.e. after Engrave. That left a full copy of the seed
 	// live for the entire ~21-minute cut and indefinitely on the paused or failed
 	// engrave screen, which is precisely the residency the lines above exist to
-	// remove. Worse, nothing else could reach it: p.Wipe() and §10.2.4's
-	// SecretsResident() both scan p.Secret only, so the timer condition reads
-	// FALSE while the seed is live. Found by the B2a-ii whole-diff review, lens 1.
+	// remove. Worse, nothing else could reach it: §10.2.4's SecretsResident()
+	// scans p.Secret only, and p.Wipe() loops p.Secret and p.Public -- neither
+	// reaches a local -- so the timer condition reads FALSE while the seed is
+	// live. Found by the B2a-ii whole-diff review, lens 1.
 	//
 	// The defer stays: it covers the three early returns above, where no plate was
 	// ever built. clear is idempotent, so the double-zero is free.
