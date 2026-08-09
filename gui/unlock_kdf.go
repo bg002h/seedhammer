@@ -59,6 +59,26 @@ var newDeriver = seal.NewDeriver
 // production.
 var unlockPassphraseHook func()
 
+// unlockPassphraseWordsHook hands over the []Word buffer the operator types
+// into, at the moment it is ALLOCATED, so a test holds the same backing array
+// through every exit and can read it afterwards.
+//
+// §11.2 requires the passphrase buffer to be asserted zeroed ON THE BUFFER
+// ITSELF, and this buffer is otherwise unreachable: the flow returns nil on the
+// partial-entry exit, so there is no return value to read. One seam covers both
+// wipes, because unlockPassphraseFlow returns this exact slice on success -- so
+// it is also the `m` unlockSealedFlow zeroes after each attempt. nil in
+// production; same in-file style as unlockSecretHook and unlockMnemonicHook.
+var unlockPassphraseWordsHook func(m bip39.Mnemonic)
+
+// unlockKeyHook hands over the DERIVED KEY at the moment unlockAttemptOnce takes
+// ownership of it, for the same reason and under the same §11.2 clause.
+//
+// The newDeriver seam cannot reach this array: unlockDerive returns d.Key(),
+// which is a FRESH copy (seal/pbkdf2.go's Key), so the Deriver a test holds and
+// the buffer the flow zeroes are different allocations. nil in production.
+var unlockKeyHook func(key []byte)
+
 // unlockPassphraseFlow takes §8's twelve words. It returns ok == false only
 // when the operator backs out; a checksum-invalid entry is reported and
 // re-prompted here, because that is a typo and not a decision.
@@ -86,6 +106,9 @@ func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 			"wallet is derived from them.")
 	for !ctx.Done {
 		m := emptyBIP39Mnemonic(12)
+		if unlockPassphraseWordsHook != nil {
+			unlockPassphraseWordsHook(m)
+		}
 		inputWordsFlow(ctx, th, m, 0, "")
 		// inputWordsFlow returns on Back with whatever has been typed, so an
 		// incomplete mnemonic is the ordinary shape of "the operator left".
@@ -237,6 +260,9 @@ func unlockAttemptOnce(ctx *Context, th *Colors, blob []byte, p *seal.Payload, m
 	}
 	// §10.2 step 10: the derived key is zeroed on every exit path.
 	defer clear(key)
+	if unlockKeyHook != nil {
+		unlockKeyHook(key)
+	}
 	var o seal.Opener
 	return o.UnlockWithKey(blob, p, key)
 }

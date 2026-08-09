@@ -11,6 +11,19 @@ import (
 // caller skipped that check.
 var ErrNotSealed = errors.New("seal: payload carries no encrypted section")
 
+// unlockPlaintextHook hands over the DECRYPTED RECORD CONTAINER at the moment
+// UnlockWithKey takes ownership of it. nil in production.
+//
+// §11.2 requires the plaintext record buffer be asserted zeroed ON THE BUFFER
+// ITSELF, and this one is unreachable without a seam: it is gcm.Open's own
+// allocation, AdmitSection copies out of it (seal/record.go), and no handle
+// escapes this function. It is also the widest such buffer in the firmware --
+// every ms1 and every bare mnemonic in the payload in ONE array that neither
+// Payload.Wipe, WipeSecretAt nor SecretsResident can reach -- so a deleted
+// `defer clear(plaintext)` leaves a full plaintext copy of the seed live for the
+// rest of the power cycle with nothing able to notice.
+var unlockPlaintextHook func(plaintext []byte)
+
 // UnlockWithKey is §10.2 steps 8-9 against a key the caller already derived.
 //
 // It exists because §10.2 step 7 requires a progress indicator over a ~31 s
@@ -49,6 +62,9 @@ func (o Opener) UnlockWithKey(blob []byte, p *Payload, key []byte) error {
 	// The plaintext buffer is ours; the records copied out of it are wiped by
 	// Payload.Wipe, which Phase B owns.
 	defer clear(plaintext)
+	if unlockPlaintextHook != nil {
+		unlockPlaintextHook(plaintext)
+	}
 	recs, nSec, err := SplitSection(plaintext)
 	if err != nil {
 		return describeRecordCount(err, p.nPub, nSec)

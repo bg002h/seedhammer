@@ -3,6 +3,7 @@ package seal
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -201,5 +202,102 @@ func TestUnlockWithKeyTwiceWipesTheFirstResult(t *testing.T) {
 	}
 	if allZero(p.Secret[0].Record) {
 		t.Error("the second unlock's own record was zeroed")
+	}
+}
+
+// TestUnlockWithKeyZeroesTheDecryptedPlaintext — §11.2's plaintext record
+// buffer, asserted on the buffer itself.
+//
+// `defer clear(plaintext)` is what removes the DECRYPTED RECORD CONTAINER --
+// every ms1 and every bare mnemonic in the payload, in one gcm.Open allocation
+// -- from the heap once AdmitSection has copied out of it. Nothing else can
+// reach that array: Payload.Wipe and WipeSecretAt walk p.Public/p.Secret, and
+// SecretsResident reports on those too, so deleting the line leaves a full
+// plaintext copy of the seed live for the rest of the power cycle and reports
+// "no secret resident" while it sits there. That is why this needs a seam
+// (unlockPlaintextHook) rather than a public-API assertion: no handle escapes.
+//
+// Vector F is the widest shape there is -- fifteen records, three of them ms1.
+func TestUnlockWithKeyZeroesTheDecryptedPlaintext(t *testing.T) {
+	var held []byte
+	var handedOver string
+	unlockPlaintextHook = func(pt []byte) {
+		held = pt
+		// A copy taken at handover, so the assertion has a positive control:
+		// this proves the watched array really was the record container.
+		handedOver = string(pt)
+	}
+	t.Cleanup(func() { unlockPlaintextHook = nil })
+
+	v := vectorNamed(t, "F")
+	blob := v.Blob(t)
+	var o Opener
+	p, err := o.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if err := o.UnlockWithKey(blob, p, mustHex(t, *v.DerivedKeyHex)); err != nil {
+		t.Fatalf("UnlockWithKey: %v", err)
+	}
+	if held == nil {
+		t.Fatal("unlockPlaintextHook never fired; this test asserted nothing")
+	}
+	if want := strings.Join(v.Secret, "\n"); handedOver != want {
+		t.Fatalf("the watched buffer held %q, the vector's encrypted section is %q -- "+
+			"this test is watching the wrong array", handedOver, want)
+	}
+	if !allZero(held) {
+		t.Errorf("the decrypted record container survived UnlockWithKey: %q\n"+
+			"§11.2 requires the plaintext record buffer read as zeroed; neither "+
+			"Payload.Wipe nor SecretsResident can reach this one", held)
+	}
+	// And the wipe is not collateral damage: AdmitSection COPIES
+	// (seal/record.go), so the admitted records must survive it.
+	if len(p.Secret) != len(v.Secret) {
+		t.Fatalf("UnlockWithKey admitted %d records, the vector has %d",
+			len(p.Secret), len(v.Secret))
+	}
+	for i, r := range p.Secret {
+		if allZero(r.Record) {
+			t.Errorf("record %d was zeroed along with the container; the admitted records "+
+				"must not alias it", i)
+		}
+	}
+}
+
+// TestUnlockWithKeyZeroesThePlaintextOnAnErrorExit — the same buffer, on the
+// exit §11.2 names separately.
+//
+// §6.4's 1..24 cap is checked AFTER the decryption, so this route returns with a
+// full plaintext section already in hand. It is the one non-success exit past
+// the defer that a test can construct, and it is the one that matters: a payload
+// built to be refused is exactly what an attacker hands the machine.
+func TestUnlockWithKeyZeroesThePlaintextOnAnErrorExit(t *testing.T) {
+	var held []byte
+	unlockPlaintextHook = func(pt []byte) { held = pt }
+	t.Cleanup(func() { unlockPlaintextHook = nil })
+
+	v := vectorNamed(t, "A")
+	secret := make([]string, MaxRecords+1)
+	for i := range secret {
+		secret[i] = "md1qqq"
+	}
+	salt, iv := mustHex(t, v.SaltHex), mustHex(t, v.IVHex)
+	blob := sealForTest(t, nil, secret, *v.Passphrase, salt, iv, v.Iterations)
+	var o Opener
+	p, err := o.Inspect(blob)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	key := DeriveKey(NormalisePassphrase(*v.Passphrase), salt, int(v.Iterations))
+	defer clear(key)
+	if err := o.UnlockWithKey(blob, p, key); !errors.Is(err, ErrTooManyRecords) {
+		t.Fatalf("UnlockWithKey on %d records = %v, want ErrTooManyRecords", len(secret), err)
+	}
+	if held == nil {
+		t.Fatal("unlockPlaintextHook never fired; this test asserted nothing")
+	}
+	if !allZero(held) {
+		t.Errorf("a REFUSED unlock left the decrypted section resident: %q", held)
 	}
 }
