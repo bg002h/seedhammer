@@ -281,17 +281,25 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 		// whole screen exists to satisfy. EngraveScreen.Engrave has the correct
 		// order (gui/gui.go:2733 before :2741); this now matches it.
 		//
-		// WHAT THIS ORDER DOES NOT FIX, so nobody reads it as fixed: Run refreshes
-		// a.idle.start only on `len(evts) > 0`, and a derivation produces no
-		// events, so a derivation longer than idleTimeout still trips the saver --
-		// whose branch `continue`s without breaking, so ctx.Frame does not return
-		// and the KDF stops until a touch. At §7.1's measured 9,715 it/s that is
-		// iterations >= 180 * 9,715 = 1,748,700, against §6.2's ceiling of
-		// 2,000,000 (205.9 s): the top 13.2% of the LEGAL range, reachable with a
-		// conforming blob. The default is 300,000 (30.9 s), nowhere near it.
-		// Closing it needs a Run-side change and must be reconciled with §10.2.4's
-		// residency timer, which is F-89's territory -- so it is B2b's, filed as
-		// F-93. The log line above is the half that could be fixed here.
+		// F-93, closed by Task 5. Run refreshes a.idle.start only on
+		// `len(evts) > 0`, and a derivation produces no events, so without
+		// the KeepAwake call below a derivation longer than idleTimeout still
+		// trips the saver -- whose branch `continue`s without breaking, so
+		// ctx.Frame does not return and the KDF stops until a touch. At
+		// §7.1's measured 9,715 it/s that is iterations >= 180 * 9,715 =
+		// 1,748,700, against §6.2's ceiling of 2,000,000 (205.9 s): the top
+		// 13.2% of the LEGAL range, reachable with a conforming blob. The
+		// default is 300,000 (30.9 s), nowhere near it.
+		//
+		// ctx.KeepAwake() is the caller half of the fix; the Run-side term
+		// (`ctx.keepAwake && !armed`, run_flow.go) is the other, and the
+		// `&& !armed` there is what reconciles this with §10.2.4's residency
+		// timer: KeepAwake is ignored whenever the timer is armed, so a
+		// derivation can never use it to postpone a wipe (F-93's own scope is
+		// the screensaver, not the wipe). It must be called BEFORE
+		// ctx.Frame, for the same reason WakeupAt must: Run reads and clears
+		// the flag from inside this very call.
+		ctx.KeepAwake()
 		ctx.WakeupAt(time.Now())
 		ctx.Frame(op.Layer(
 			nav,

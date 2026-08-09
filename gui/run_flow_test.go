@@ -9,6 +9,7 @@ import (
 
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/seal"
 )
 
 // Step 1.2's smoke tests: the harness itself, exercised against the two
@@ -633,4 +634,95 @@ func TestWipeWarningOpClampsNegativeRemaining(t *testing.T) {
 		t.Errorf("wipeWarningOp with a negative remaining drew %q, want it to contain %q",
 			text, "erased in 0 seconds")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 5 -- F-93: the screensaver must not park a derivation.
+// ---------------------------------------------------------------------------
+
+// TestRunKeepAwakeDuringDerivationDoesNotParkUnderTheScreensaver -- step 5.1.
+// Drives a REAL derivation (newDeriver is `var newDeriver = seal.NewDeriver`,
+// a concrete *seal.Deriver -- there is no fake to swap in) past idleTimeout
+// and asserts it still completes.
+//
+// p.tickFloor = 1 * time.Second, per the plan's own arithmetic: at the
+// default 10ms floor, crossing idleTimeout (3 min) takes ~18,000 ticks =
+// 9,000,000 iterations -- 4.5x seal.MaxIterations. At a 1s floor it is 180
+// ticks = 90,000 iterations. 100,000 iterations here (200 ticks, 200s of
+// bubble time) clears that crossing with margin while staying legal and
+// fast.
+//
+// Without the floor this test would be a false PASS: unlockDerive calls
+// ctx.WakeupAt(time.Now()) before every ctx.Frame, so every deadline is
+// already expired, time.Until is <= 0, nothing durably blocks, and a
+// synctest bubble's clock never advances -- the saver could never fire even
+// under the `ctx.keepAwake` -> `false` mutant, and the mutant would pass too.
+//
+// mustFinish's own maxRunFrames cap (via runSession) is what converts the
+// `ctx.keepAwake` -> `false` mutant (4.3's row, attributed to this step) from
+// a hang into a kill: under that mutant the screensaver activates and its
+// `continue` branch never returns control to unlockDerive's blocked
+// ctx.Frame call, so mustFinish reports "Run exceeded 100000 ticks" instead
+// of the derivation ever completing. No boundedFlow wrapper is needed here --
+// unlike Task 3's discard-guard mutant, the screensaver's `continue` still
+// calls the session's own top-of-loop yield() every tick (that is how the
+// saver's Dirty calls are throttled at all), so runSession's tick counter
+// keeps advancing and the cap trips on its own.
+func TestRunKeepAwakeDuringDerivationDoesNotParkUnderTheScreensaver(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newDeadlinePlatform()
+		p.tickFloor = 1 * time.Second
+		var derivedKey []byte
+		var derivedOK bool
+		flow := func(ctx *Context, version string) {
+			h := seal.Header{Iterations: 100_000}
+			pass := []byte("does not matter, this test never checks the key value")
+			derivedKey, derivedOK = unlockDerive(ctx, &descriptorTheme, h, pass)
+			ctx.Done = true
+		}
+		mustFinish(t, p, flow, nil)
+		if !derivedOK {
+			t.Fatal("unlockDerive returned ok=false -- cancelled or failed to complete")
+		}
+		if len(derivedKey) != seal.KeyLen {
+			t.Errorf("derived key length = %d, want %d", len(derivedKey), seal.KeyLen)
+		}
+	})
+}
+
+// TestRunKeepAwakeCannotPostponeAnArmedWipe -- step 5.3: `&& !armed` is
+// normative, not caution. An armed session that calls KeepAwake every tick
+// (exactly what a derivation does) must still wipe on schedule -- KeepAwake
+// holds off the screensaver and nothing else.
+//
+// Kills 4.3's `(ctx.keepAwake && !armed)` -> `(ctx.keepAwake)` row: under
+// that mutant every tick's KeepAwake call refreshes a.idle.start even while
+// armed, so idleWakeup keeps sliding into the future and the session never
+// restarts -- trk.session stays 1 until boundedFlow's cap panics.
+func TestRunKeepAwakeCannotPostponeAnArmedWipe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newDeadlinePlatform()
+		var trk sessionTracker
+		flow := boundedFlow(t, func(ctx *Context) bool {
+			session, _ := trk.next(ctx)
+			if ctx.wipe == nil {
+				ctx.wipe = &wipeGuard{}
+			}
+			if session == 2 {
+				return false
+			}
+			// Called every tick, exactly as unlockDerive calls it on every
+			// slice -- BEFORE ctx.Frame, since Run reads and clears the flag
+			// from inside that call.
+			ctx.KeepAwake()
+			o, _ := widget.Label(&ctx.B, ctx.Styles.body, descriptorTheme.Text, "CONTENT")
+			ctx.Frame(o)
+			return true
+		})
+		drawn := mustFinish(t, p, flow, nil)
+		if trk.session != 2 {
+			t.Fatalf("expected an armed session calling KeepAwake to still wipe on schedule "+
+				"(session 2), got %d sessions; drawn=%q", trk.session, drawn)
+		}
+	})
 }
