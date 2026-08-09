@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 
 	"seedhammer.com/bip39"
@@ -220,4 +221,112 @@ func TestUnlockZeroesAPartialPassphraseOnTheWayOut(t *testing.T) {
 			"§11.2's wipe covers EVERY exit, and Back with a word typed is the most "+
 			"ordinary one there is", typed[0])
 	}
+}
+
+// TestUnlockFlowWipesOnTheCtxDoneAndErrorExits — §11.2's "each exit", for the
+// two nobody drove (lens 5 M1 = lens 2 M4).
+//
+// §11.2 names four: Lock, Back, an error path and ctx.Done.
+// TestUnlockFlowWipesEveryRecordOnExit drives Back on the plate list, which is
+// also Lock per §10.3, so two of the four collapse legitimately -- and the
+// other two were structurally covered by `defer p.Wipe()` and asserted by
+// nothing. That structure is exactly what B2b's timer-unwind edits (F-89), so
+// the shape the spec asks for is the shape that has to be pinned.
+func TestUnlockFlowWipesOnTheCtxDoneAndErrorExits(t *testing.T) {
+	// ctx.Done: stop the coroutine mid-flow. runUITouch's yield then returns
+	// false, the flow sees ctx.Done, unwinds, and its defers run.
+	t.Run("ctx.Done while the plate list is up", func(t *testing.T) {
+		var held [][]byte
+		unlockEngraveHook = func(_ string, rec []byte) { held = append(held, rec) }
+		t.Cleanup(func() { unlockEngraveHook = nil })
+
+		v := sealVector(t, "D")
+		h := newUnlockHarness(t, payloadReaderFrom(t, v.blob(t)))
+		h.toPassphrase(true)
+		h.typePassphrase(vectorPassphrase(t, v))
+		h.mustReach("SECRET seed material")
+		pts := plateHitPoints(h.ctx, h.drawer())
+		if len(pts) < 2 {
+			t.Fatalf("the choice screen drew %d targets", len(pts))
+		}
+		tap(&h.ctx.Router, h.drawer(), pts[1]) // Skip the secret
+		h.next("after Skip")
+		h.tapNav(Button3)
+		h.mustReach("mk1 1/2")
+		h.tapNav(Button3) // OK, so unlockEngraveHook hands over a PUBLIC record
+		h.mustReach("Choose engraving")
+		if len(held) == 0 {
+			t.Fatal("the engrave path never handed the test a record buffer")
+		}
+		rec := held[0]
+		if allZeroBytes(rec) {
+			t.Fatal("premise broken: the public record was already zero when offered")
+		}
+
+		// Not Back, not Lock: the coroutine simply stops.
+		h.quit()
+		if !allZeroBytes(rec) {
+			t.Errorf("a PUBLIC record survived the ctx.Done exit: %q\n"+
+				"§11.2 requires the record buffer zeroed on EACH exit, and ctx.Done is "+
+				"one of the four it names", rec)
+		}
+	})
+
+	// The error path: a payload whose decrypted section is refused after the
+	// tag verified. unlockSealedFlow returns false, so the flow leaves without
+	// ever reaching the plate list -- and p.Public is populated the whole time.
+	t.Run("error path after a successful tag check", func(t *testing.T) {
+		var heldPass []byte
+		var handedOver string
+		var heldKey []byte
+		prev := newDeriver
+		newDeriver = func(passphrase, salt []byte, iterations int) *seal.Deriver {
+			heldPass = passphrase
+			handedOver = string(passphrase)
+			return seal.NewDeriver(passphrase, salt, iterations)
+		}
+		t.Cleanup(func() { newDeriver = prev })
+		unlockKeyHook = func(k []byte) { heldKey = k }
+		t.Cleanup(func() { unlockKeyHook = nil })
+
+		d := sealVector(t, "D")
+		// 5 public + 20 encrypted = 25, one past §6.4's cross-section cap, so
+		// AdmitSection refuses AFTER the AEAD tag verified: the derivation ran,
+		// the key and passphrase existed, and the flow leaves by the error arm.
+		secret := make([]string, 20)
+		for i := range secret {
+			secret[i] = "md1qqq"
+		}
+		words := vectorPassphrase(t, d)
+		blob := sealBlobForTest(t, d.Public, secret, strings.Join(words, " "), fixtureIterations)
+
+		h := newUnlockHarness(t, payloadReaderFrom(t, blob))
+		h.toPassphrase(true)
+		h.typePassphrase(words)
+		h.mustReach("more records than the machine accepts")
+		h.tapNav(Button3) // dismiss; unlockSealedFlow has already returned false
+		for i := 0; i < 128 && !*h.done; i++ {
+			if _, ok := h.frame(); !ok {
+				break
+			}
+		}
+		if !*h.done {
+			t.Fatalf("the error path did not leave the flow; last frame %q", h.content)
+		}
+		if heldPass == nil || heldKey == nil {
+			t.Fatal("the derivation never handed over its buffers; this subtest asserted nothing")
+		}
+		if handedOver != *d.Passphrase {
+			t.Fatalf("the KDF was handed %q, the vector's passphrase is %q -- watching "+
+				"the wrong buffer", handedOver, *d.Passphrase)
+		}
+		if !allZeroBytes(heldPass) {
+			t.Errorf("the passphrase buffer survived the ERROR exit: %q\n"+
+				"§11.2 requires it zeroed on each exit, and an error path is one of "+
+				"the four", heldPass)
+		}
+		if !allZeroBytes(heldKey) {
+			t.Errorf("the derived key survived the ERROR exit: %x", heldKey)
+		}
+	})
 }

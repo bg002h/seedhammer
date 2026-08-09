@@ -57,6 +57,13 @@ func TestUnlockWithKeyReproducesUnlock(t *testing.T) {
 					name, len(v.Secret), len(viaKey.Secret))
 			}
 			for i := range viaKey.Secret {
+				// TAUTOLOGICAL TODAY, and kept deliberately (lens 2 N3).
+				// seal/open.go's Unlock ends `return o.UnlockWithKey(blob, p,
+				// key)`, so this comparison cannot fail while that delegation
+				// stands -- it is a regression guard on the delegation itself,
+				// not coverage of the pipeline. The assertion that does real
+				// work is the `v.Secret[i]` one below, which compares against
+				// the NORMATIVE vector file.
 				if !bytes.Equal(viaKey.Secret[i].Record, viaUnlock.Secret[i].Record) {
 					t.Errorf("record %d: UnlockWithKey gave %q, Unlock gave %q",
 						i, viaKey.Secret[i].Record, viaUnlock.Secret[i].Record)
@@ -170,6 +177,29 @@ func TestUnlockWithKeyDoesNotRetainOrZeroTheKey(t *testing.T) {
 	}
 	if !bytes.Equal(key, before) {
 		t.Errorf("UnlockWithKey modified the caller's key: %x -> %x", before, key)
+	}
+	// The "does not RETAIN" half, which the name promises and nothing asserted
+	// (lens 2 N4). The caller owns the key and zeroes it the moment
+	// UnlockWithKey returns (gui/unlock_kdf.go's `defer clear(key)`), so if
+	// anything reachable from p still referenced that array, the admitted
+	// records would change under the caller's own wipe.
+	want := make([][]byte, len(p.Secret))
+	for i, r := range p.Secret {
+		want[i] = append([]byte(nil), r.Record...)
+	}
+	if len(want) == 0 {
+		t.Fatal("premise broken: vector D must admit at least one secret record")
+	}
+	for i := range key {
+		key[i] ^= 0xff
+	}
+	clear(key)
+	for i, r := range p.Secret {
+		if !bytes.Equal(r.Record, want[i]) {
+			t.Errorf("record %d changed after the caller scrambled and zeroed its key: "+
+				"%q, want %q -- UnlockWithKey retained a reference to the key array",
+				i, r.Record, want[i])
+		}
 	}
 }
 

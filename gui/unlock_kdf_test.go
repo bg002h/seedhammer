@@ -142,6 +142,10 @@ type unlockHarness struct {
 	done    *bool
 	content string
 	keys    map[rune]image.Point
+	// quit stops the coroutine, which makes yield return false and so sets
+	// ctx.Done -- the §11.2 exit no test drove before. It is also registered
+	// with t.Cleanup, and iter.Pull's stop is idempotent.
+	quit func()
 }
 
 func newUnlockHarness(t *testing.T, r seal.Reader) *unlockHarness {
@@ -155,7 +159,7 @@ func newUnlockHarness(t *testing.T, r seal.Reader) *unlockHarness {
 		unlockPayloadFlow(ctx, &descriptorTheme, r)
 		returned = true
 	})
-	h.frame, h.drawer = frame, drawer
+	h.frame, h.drawer, h.quit = frame, drawer, quit
 	t.Cleanup(quit)
 	return h
 }
@@ -430,9 +434,28 @@ func TestUnlockRejectsAPartialPassphraseWithoutAKDF(t *testing.T) {
 		t.Errorf("a partial passphrase returned %v, want errUnlockChecksum", err)
 	}
 	if c.calls != 0 {
-		t.Errorf("a partial passphrase ran the KDF %d times; the isMnemonicComplete "+
-			"half of the gate is missing", c.calls)
+		t.Errorf("a partial passphrase ran the KDF %d times; §10.2 step 6 rejects it "+
+			"BEFORE any derivation", c.calls)
 	}
+	// WHAT THIS TEST DOES NOT PIN, said plainly so the row is not read as
+	// covered (lens 2 M1). Its message used to claim "the isMnemonicComplete
+	// half of the gate is missing", and that claim was false: the mutant
+	// `!isMnemonicComplete(m) || !m.Valid()` -> `!m.Valid()` SURVIVES, because
+	// emptyBIP39Mnemonic fills with -1 and Mnemonic.Valid() ends
+	// `ChecksumWord(ent) == last`, which can never equal -1. So !m.Valid()
+	// alone already rejects every partial this flow can produce, and no input
+	// reachable here discriminates the two halves.
+	//
+	// The report that found this suggested asserting panic-safety instead --
+	// that isMnemonicComplete keeps Valid()/splitMnemonic off -1 input, where
+	// bytes.Repeat with a negative count would panic. MEASURED, and that is
+	// also false: Valid() on a fully -1 mnemonic (12 and 24) and on a
+	// half-typed one returns false with NO panic. Both claims are recorded as
+	// refuted so the next reader does not re-derive either.
+	//
+	// isMnemonicComplete stays as defence in depth -- it states the intent
+	// independently of Valid()'s implementation -- but nothing in this test
+	// stands behind it, and pretending otherwise is what this comment prevents.
 }
 
 // TestPassphraseBytesIsSection81sNormalisedForm. The buffer exists so the

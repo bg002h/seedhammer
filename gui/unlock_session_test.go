@@ -436,7 +436,10 @@ func TestSecretSessionEngravesAMnemonic(t *testing.T) {
 	}
 	h.choose(0) // Cut
 	// SeedScreen draws the numbered word list.
-	h.mustReach("1:")
+	// A longer landmark than "1:" (lens 2 N5): a two-character needle on a
+	// screen that draws a numbered 24-word list is a coincidence away from
+	// matching something else.
+	h.mustReach("Engrave Seed")
 	if allZeroBytes(p.Secret[0].Record) {
 		t.Error("the record was wiped before SeedScreen confirmed it; the operator would " +
 			"be confirming a plate built from nothing")
@@ -976,4 +979,94 @@ func unlockedBlob(t *testing.T, blob []byte, passphrase string) *seal.Payload {
 		}
 	}
 	return p
+}
+
+// TestSecretSessionMixesTheTwoSecretClasses — the shape that has NEVER been
+// constructed (lens 8 M5), and the one the pass-3 per-class numbering fold
+// exists for.
+//
+// No canonical vector mixes ClassCodex32Secret and ClassMnemonic: A 0/1, B 0/1,
+// C 0/6, D 5/1, E 5/0, F 0/15, G 12/3, all-ms1 or all-mnemonic. That is why the
+// across-classes numbering defect shipped, and why reverting the fold survived
+// the suite. The fixture machinery to build the shape landed in this same diff
+// and building it is ten lines.
+//
+// Three properties at once: both classes are OFFERED, each is named by its own
+// CLASS (never "ms1 1/2" then "seed words 2/2", which tells the operator there
+// are two ms1 cards and they hold the second), and each is wiped before the
+// next is offered.
+func TestSecretSessionMixesTheTwoSecretClasses(t *testing.T) {
+	c := sealVector(t, "C") // one ms1 + five md1/mk1 cards
+	a := sealVector(t, "A") // one bare 24-word mnemonic
+	if len(c.Secret) == 0 || len(a.Secret) == 0 {
+		t.Fatal("premise broken: C and A must both carry secret records")
+	}
+	secret := append(append([]string(nil), c.Secret...), a.Secret...)
+	blob := sealBlobForTest(t, nil, secret, fixturePassphrase, fixtureIterations)
+	p := unlockedBlob(t, blob, fixturePassphrase)
+
+	var ms1, mnemonic int
+	for _, r := range p.Secret {
+		switch r.Class {
+		case seal.ClassCodex32Secret:
+			ms1++
+		case seal.ClassMnemonic:
+			mnemonic++
+		}
+	}
+	if ms1 != 1 || mnemonic != 1 {
+		t.Fatalf("premise broken: the mixed section must hold exactly one ms1 and one "+
+			"bare mnemonic, got %d and %d -- this is the shape no canonical vector has",
+			ms1, mnemonic)
+	}
+
+	evts := watchSecrets(t, p)
+	h := runSecretSession(t, p)
+
+	// Both classes are offered, each named by its OWN class and UNNUMBERED,
+	// because there is exactly one of each. Numbering across all secrets
+	// renders "ms1 1/2" then "seed words 2/2".
+	first := h.mustReach("SECRET seed material")
+	if !uiContains(first, "ms1") {
+		t.Errorf("the first secret is not labelled ms1: %q", first)
+	}
+	for _, bad := range []string{"ms1 1/2", "1/2", "2/2"} {
+		if uiContains(first, bad) {
+			t.Errorf("the first secret carries a cross-class index %q: %q\n"+
+				"i and n count secrets of THIS class only; there is one ms1 and one "+
+				"mnemonic, so neither is numbered", bad, first)
+		}
+	}
+	h.choose(1) // Skip
+
+	second := h.mustReach("seed words")
+	if uiContains(second, "ms1") {
+		t.Errorf("the second secret is a bare mnemonic but is labelled ms1: %q", second)
+	}
+	for _, bad := range []string{"seed words 2/2", "1/2", "2/2"} {
+		if uiContains(second, bad) {
+			t.Errorf("the second secret carries a cross-class index %q: %q", bad, second)
+		}
+	}
+	h.choose(1) // Skip
+
+	// Both wiped, and the five md1/mk1 cards survive to reach the plate list.
+	for i, r := range p.Secret {
+		if seal.IsSecret(r.Class) {
+			assertSecretWiped(t, *evts, i)
+		}
+	}
+	if p.SecretsResident() {
+		t.Error("SecretsResident() is true after the mixed-class session ended")
+	}
+	cards := 0
+	for _, e := range unlockPlates(p) {
+		if e.rec.Class == seal.ClassMDMK {
+			cards++
+		}
+	}
+	if cards != 5 {
+		t.Errorf("the plate list holds %d cards after the mixed session, want vector C's 5",
+			cards)
+	}
 }

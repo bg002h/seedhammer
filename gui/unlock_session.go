@@ -47,11 +47,14 @@ var unlockSecretHook func(stage string, idx int, record []byte)
 var unlockMnemonicHook func(m bip39.Mnemonic)
 
 // unlockSecretLabel names a secret plate by its CLASSIFIED type and its index
-// among secrets -- never by anything the sealer asserted, and never by
-// rendering the record's contents.
-// unlockSecretLabel names a secret plate by its CLASSIFIED type and its index
-// WITHIN THAT CLASS -- never across classes, and never by anything the sealer
-// asserted.
+// WITHIN THAT CLASS -- never across classes, never by anything the sealer
+// asserted, and never by rendering the record's contents.
+//
+// (The pass-3 fold prepended this paragraph without removing the one it
+// replaced, so the godoc carried "its index among secrets" -- the exact
+// behaviour the fold removed as a defect -- as the sentence `go doc` shows
+// FIRST. Deleted; a stale record beside a fixed behaviour is how the defect
+// comes back.)
 //
 // i and n count secrets of THIS class only. Numbering across all secrets while
 // naming per class renders "ms1 1/2" then "seed words 2/2" on a mixed payload,
@@ -214,10 +217,19 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 //	LIVE    plate.Spline, for the duration of the cut. It IS the seed rendered
 //	        as geometry and must exist while the needle moves. F-83, accepted.
 //
-// The ZEROED rows are defence in depth with the usual TinyGo caveat. `m` is
-// pinned by a test; the seed and the master key are not, and cannot be without
-// unsafe — they are internal to functions that return neither. `rec` IS
-// observable and is pinned on both arms.
+// The ZEROED rows are defence in depth with the usual TinyGo caveat. `m` and
+// `rec` are pinned by tests. The 64-byte seed and the BIP-32 master key are
+// NOT, and the reason is scheduling, not impossibility: an earlier version of
+// this comment said they "cannot be without unsafe — they are internal to
+// functions that return neither", and that is false by this file's own
+// precedent. `unlockMnemonicHook` pins `m`, also a local, in a function that
+// does not return it, with an ordinary package var. A `var deriveSeedHook
+// func([]byte)` fired beside `seed := bip39.MnemonicSeed(...)` would do the
+// same for the seed, with no unsafe. It is not done here because
+// deriveMasterKey and masterFingerprintFor are SHARED funds-path code that this
+// phase only scrubbed, so the seam belongs with the phase that owns them —
+// filed as F-94. A comment that licenses a coverage gap on seed-equivalent
+// material must not overstate the obstacle (lens 2 M2).
 func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	m, err := bip39.Parse(rec)
 	if err != nil {
