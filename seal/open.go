@@ -173,26 +173,37 @@ func (o Opener) Inspect(blob []byte) (*Payload, error) {
 // On failure p is left intact — its Header, Public records and Hash remain
 // valid, which is what lets Phase B keep the hash on screen through the retry
 // loop (§10.2 step 8).
+//
+// It is the derivation plus UnlockWithKey, and nothing else: there is ONE
+// implementation of the open-split-allow-list pipeline in this package. The
+// split exists because §10.2 step 7 needs a seam to draw frames in across the
+// ~31 s derivation, and a single call that derives and opens has none.
 func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
 	h := p.Header
-	nPub := p.nPub
 	end := HeaderLen + int(h.PubLen) + int(h.CtLen)
 	if h.Sealed() {
 		end += TagLen
 	}
-	split := HeaderLen + int(h.PubLen)
 
 	// Unlock re-derives its offsets from p.Header, which came from a DIFFERENT
 	// call (Inspect). Nothing forces the caller to pass the same blob back, so
 	// bound-check the one actually handed to us before slicing it. crypto.go's
 	// rule applies here too: a panic on a device is a brick, and DeriveKey and
 	// Open both fail closed rather than panicking.
+	//
+	// Redundant with UnlockWithKey's own guard, deliberately: Unlock remains a
+	// public entry point and bound-checks its own argument.
 	if len(blob) < end {
 		return fmt.Errorf("%w: region holds %d bytes, the header declares %d",
 			ErrTooShort, len(blob), end)
 	}
 
 	// Step 4 — nothing encrypted: stop here. No passphrase, no KDF.
+	//
+	// This stays even though UnlockWithKey rejects the same shape, because the
+	// two contracts DIFFER: Unlock's is "a payload with nothing encrypted is
+	// not an error", UnlockWithKey's is "you gave me a key for a payload with
+	// no ciphertext".
 	if !h.Sealed() {
 		return nil
 	}
@@ -211,43 +222,7 @@ func (o Opener) Unlock(blob []byte, p *Payload, passphrase string) error {
 	// as the rest of the firmware — TinyGo's GC may copy or retain, so this is
 	// defence in depth, not a guarantee.
 	defer clear(key)
-	plaintext, err := Open(key, h.IV[:], blob[:split], blob[split:end])
-	if err != nil {
-		// Fail closed. The error is ErrAuthentication and Phase B must offer
-		// BOTH readings — "wrong passphrase, or this payload has been altered"
-		// — keeping the hash on screen through the retry loop.
-		return err
-	}
-
-	// Step 9 — split and allow-list the decrypted section. "Authenticated"
-	// means "sealed by whoever knows the passphrase", which is not the same as
-	// "safe" (§6.5).
-	// The plaintext buffer is ours to own; the records copied out of it are
-	// wiped by Payload.Wipe, which Phase B owns.
-	defer clear(plaintext)
-	recs, nSec, err := SplitSection(plaintext)
-	if err != nil {
-		return describeRecordCount(err, nPub, nSec)
-	}
-	// §6.4's 1..24 cap is over the TOTAL across BOTH sections, which
-	// SplitSection cannot see — this is the only place the cross-section total
-	// is known, which is also why the count comes back out of band.
-	if total := nPub + nSec; total > MaxRecords {
-		return recordCountError(total, nPub, nSec)
-	}
-	admitted, err := AdmitSection(recs, SectionEncrypted)
-	if err != nil {
-		return err
-	}
-	// Wipe any secrets a PREVIOUS Unlock left here before dropping the reference.
-	// Overwriting p.Secret makes those bytes unreachable, so Phase B calling
-	// p.Wipe() faithfully at session end would still miss them — the exact class
-	// of gap AdmittedRecord.Record is []byte to prevent.
-	for _, r := range p.Secret {
-		clear(r.Record)
-	}
-	p.Secret = admitted
-	return nil
+	return o.UnlockWithKey(blob, p, key)
 }
 
 // describeRecordCount turns SplitSection's preallocated sentinel into the

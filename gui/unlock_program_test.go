@@ -35,7 +35,12 @@ var unlockProgramTitles = []string{
 // normative Rust implementation and never hand-edited, and retyped constants
 // are how a port silently forks.
 type sealTestVector struct {
-	Name            string   `json:"name"`
+	Name string `json:"name"`
+	// Passphrase and Iterations are what let a gui test unlock a vector rather
+	// than retype "beef beef ..." into a Go source file, which
+	// seal/testdata/README.md:19-24 forbids.
+	Passphrase      *string  `json:"passphrase"`
+	Iterations      uint32   `json:"iterations"`
 	Public          []string `json:"public"`
 	Secret          []string `json:"secret"`
 	PubLen          uint32   `json:"pub_len"`

@@ -203,53 +203,57 @@ func TestUnlockDistinguishesTooManyRecords(t *testing.T) {
 	}
 }
 
-// TestSealedPayloadStopsAtATerminalScreen — Task 6. B1 has no passphrase flow,
-// so a sealed payload must say so and stop. It must NOT prompt for words it
-// cannot check, and it must NOT fall through to the plate list: p.Public on a
+// TestSealedPayloadReachesThePassphraseAndCancelsToTheMenu REPLACES
+// TestSealedPayloadStopsAtATerminalScreen, which asserted the exact behaviour
+// B2a removes: B1 had no passphrase flow, so a sealed payload said so and
+// stopped. B2a has one, so the terminal screen is gone.
+//
+// What does NOT relax is the rule underneath it. Cancelling must still return
+// to the menu and must still NOT fall through to the plate list: p.Public on a
 // sealed payload is a legitimate record set, and engraving it while silently
-// dropping the encrypted half is §6.4's incomplete-backup-believed-complete.
-func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
+// dropping the encrypted half is §6.4's incomplete-backup-believed-complete,
+// the worst available outcome.
+//
+// Driven by touch, because the screen it now reaches has a keyboard.
+func TestSealedPayloadReachesThePassphraseAndCancelsToTheMenu(t *testing.T) {
 	for _, name := range []string{"D", "G"} {
 		t.Run(name, func(t *testing.T) {
 			v := sealVector(t, name)
 			if v.CtLen == 0 {
 				t.Fatalf("premise broken: vector %s must be sealed", name)
 			}
-			frame, done, ctx, quit := runUnlock(t, payloadReaderFrom(t, v.blob(t)))
-			defer quit()
-			// Past the hash screen.
-			if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
-				t.Fatalf("never reached the hash screen; got %q", content)
+			h := newUnlockHarness(t, payloadReaderFrom(t, v.blob(t)))
+			// The B1 terminal screen must be GONE, not merely bypassed.
+			content := h.mustReach("Public data hash")
+			if uiContains(content, "Unlocking is not available") {
+				t.Fatalf("the B1 terminal screen is still on the hash frame: %q", content)
 			}
-			click(&ctx.Router, Button3)
-			content, ok := pumpUntil(frame, "Unlocking is not available", 32)
-			if !ok {
-				t.Fatalf("a sealed payload did not reach the terminal screen; got %q", content)
+			h.tapNav(Button3)
+			content = h.mustReach("Enter the 12-word passphrase")
+			if uiContains(content, "Unlocking is not available") {
+				t.Fatalf("a sealed payload still reports unlocking unavailable: %q", content)
 			}
-			// No word entry anywhere in the flow.
-			if uiContains(content, "Word 1 of") {
-				t.Fatalf("a sealed payload reached word entry: %q", content)
-			}
-			// And it is TERMINAL: dismissing returns to the menu, and the plate
-			// list is NEVER constructed. Engraving a sealed payload's public
-			// half while silently dropping the encrypted half is the worst
-			// available outcome, so this is asserted against the labels the
-			// list would have drawn.
+			h.tapNav(Button3)
+			h.mustReach("Word 1 of 12")
+
+			// Back out with nothing typed: the flow leaves, and the plate list
+			// is NEVER constructed. Asserted against the labels the list would
+			// have drawn, not against a return value.
+			h.tapNav(Button1)
 			labels := plateRecords(t, name)
-			click(&ctx.Router, Button3)
-			for i := 0; i < 32 && !*done; i++ {
-				c, ok := frame()
+			for i := 0; i < 64 && !*h.done; i++ {
+				c, ok := h.frame()
 				if !ok {
 					break
 				}
 				for j := range labels {
 					if uiContains(c, plateLabel(labels[j], j)) {
-						t.Fatalf("a sealed payload reached the plate list: %q", c)
+						t.Fatalf("cancelling a sealed payload reached the plate list: %q", c)
 					}
 				}
 			}
-			if !*done {
-				t.Fatal("the sealed terminal screen did not return to the menu")
+			if !*h.done {
+				t.Fatal("cancelling the passphrase did not return to the menu")
 			}
 		})
 	}

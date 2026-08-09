@@ -77,6 +77,12 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		showError(ctx, th, unlockTitle, "Payload unreadable.")
 		return
 	}
+	// §10.2 step 10 / §10.2.2: "Lock, Back, an error, ctx.Done" are ONE exit,
+	// not four. Registered the moment there is anything to wipe, so every route
+	// out of this flow -- including a panic unwind -- zeroes every record in
+	// BOTH sections. §10.2.2's per-record wipe is finer-grained and runs first;
+	// this is the backstop that catches whatever it did not reach.
+	defer p.Wipe()
 
 	// Step 3 — the hash, shown ONLY when the payload has a public section.
 	// HasHash is false exactly when pub_len == 0, and the digest of an empty
@@ -86,15 +92,27 @@ func unlockPayloadFlow(ctx *Context, th *Colors, r seal.Reader) {
 		showNotice(ctx, th, "Public Data Hash", unlockHashBody(p))
 	}
 
-	// B1 stops here for a sealed payload (§10.2 steps 5-9 are B2). It must not
-	// fall through to the plate list: p.Public on a sealed payload is a
-	// legitimate record set, and engraving it while silently dropping the
-	// encrypted half is §6.4's incomplete-backup-believed-complete, the worst
-	// available outcome.
+	// §10.2 steps 5-9. On failure or cancellation this returns WITHOUT reaching
+	// the plate list -- see unlockSealedFlow's contract.
 	if p.Header.Sealed() {
-		showError(ctx, th, unlockTitle,
-			"This payload is sealed with a passphrase.\n\n"+
-				"Unlocking is not available in this build, so none of it can be engraved yet.")
+		if !unlockSealedFlow(ctx, th, blob, p) {
+			return
+		}
+		// F-79: the blob's last use was UnlockWithKey's AAD and ciphertext. Zero
+		// and drop it BEFORE the session, so the engrave that follows does not
+		// run with the region still on the heap. This releases it only because
+		// the deferred clear above is a CLOSURE reading `blob` at exit; a
+		// `defer clear(blob)` would still hold the array (I1).
+		//
+		// Safe because AdmitSection COPIES every record
+		// (seal/record.go:207, `append([]byte(nil), r...)`), so p.Public and
+		// p.Secret do not alias this buffer.
+		clear(blob)
+		blob = nil
+		// §10.2.2's secret session (Task 6) and the post-session plate list
+		// (Task 7) attach here. Until they do, this returns rather than falling
+		// through to a list that would carry the secret records straight into
+		// the engrave path.
 		return
 	}
 
