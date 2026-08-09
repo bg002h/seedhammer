@@ -26,20 +26,42 @@ import (
 // payload (seal/crypto.go:12-16).
 func sealBlobForTest(t *testing.T, public, secret []string, passphrase string, iterations uint32) []byte {
 	t.Helper()
+	// Synthetic salt and IV: a fixture must be deterministic, and §7.2's
+	// one-key-one-message rule is not weakened because nothing here is ever a
+	// real payload -- production cannot reach this code at all.
+	var salt [seal.SaltLen]byte
+	var iv [seal.IVLen]byte
+	for i := range salt {
+		salt[i] = byte(i + 1)
+	}
+	for i := range iv {
+		iv[i] = byte(i + 0x40)
+	}
+	return sealBlobWith(t, public, secret, passphrase, iterations, salt, iv)
+}
+
+// sealBlobWith is sealBlobForTest with the salt and IV supplied, which is what
+// lets the fixture be checked against the NORMATIVE vectors byte-for-byte
+// instead of merely round-tripping through the package that produced it.
+//
+// Why that matters (B2a-ii completeness critic, C1): the old self-check sealed
+// vector D's records with a SYNTHETIC salt and IV and then asserted the §6.6
+// hash plus a round-trip. §6.6's digest covers the public records, the `sealed`
+// byte and the public count -- NOT the salt, the IV, the ciphertext, the tag or
+// any other header field. And a round-trip cannot see a layout error either,
+// because the fixture encodes with seal.Header.Encode and production decodes
+// with the same package, so any byte-order or offset mistake is symmetric and
+// invisible. "Agrees with the normative vectors" was true of about 19 of the
+// header's 60-odd bytes.
+func sealBlobWith(t *testing.T, public, secret []string, passphrase string, iterations uint32, salt [seal.SaltLen]byte, iv [seal.IVLen]byte) []byte {
+	t.Helper()
 	pub := []byte(strings.Join(public, "\n"))
 	h := seal.Header{PubLen: uint32(len(pub))}
 	if len(secret) > 0 {
 		pt := []byte(strings.Join(secret, "\n"))
 		h.Iterations = iterations
-		// Fixed salt and IV: a test fixture must be deterministic. §7.2's
-		// one-key-one-message rule is not weakened, because nothing here is
-		// ever a real payload -- and production cannot reach this code at all.
-		for i := range h.Salt {
-			h.Salt[i] = byte(i + 1)
-		}
-		for i := range h.IV {
-			h.IV[i] = byte(i + 0x40)
-		}
+		h.Salt = salt
+		h.IV = iv
 		h.CtLen = uint32(len(pt))
 		hdr := h.Encode()
 		aad := append(append([]byte(nil), hdr[:]...), pub...)
@@ -225,4 +247,43 @@ func bothSectionRecords(t *testing.T) (public, secret []string) {
 			len(d.Public), len(c.Secret))
 	}
 	return d.Public, c.Secret
+}
+
+// THE STRONG BINDING: the fixture must reproduce every sealed vector's blob
+// BYTE-FOR-BYTE, given that vector's own salt and IV.
+//
+// This is what "agrees with the normative vectors" ought to mean. The sibling
+// check seals with a synthetic salt/IV and asserts the §6.6 hash plus a
+// round-trip, and neither can see a wire-format error: §6.6 covers the public
+// records, the `sealed` byte and the public count and nothing else, and a
+// round-trip through the same package is symmetric under any byte-order or
+// offset mistake. This one compares against blob_hex, which the RUST
+// implementation produced — so the header layout, the AAD, the key schedule, the
+// GCM tag and the record joining are all bound at once.
+//
+// (B2a-ii completeness critic, C1.)
+func TestSealBlobForTestReproducesEveryVectorByteForByte(t *testing.T) {
+	var checked int
+	for _, v := range sealVectors(t) {
+		if v.Passphrase == nil {
+			continue // vector E seals nothing; no key, no salt, no IV.
+		}
+		var salt [seal.SaltLen]byte
+		var iv [seal.IVLen]byte
+		copy(salt[:], mustHexBytes(t, v.SaltHex))
+		copy(iv[:], mustHexBytes(t, v.IVHex))
+		got := sealBlobWith(t, v.Public, v.Secret, *v.Passphrase, v.Iterations, salt, iv)
+		if h := hex.EncodeToString(got); h != v.BlobHex {
+			t.Errorf("vector %s: fixture produced %d bytes that differ from the "+
+				"normative blob_hex (%d bytes) — the fixture and the Rust "+
+				"implementation disagree about the wire format",
+				v.Name, len(got), len(v.BlobHex)/2)
+		}
+		checked++
+	}
+	// Six of the seven vectors are sealed; only E is not. Asserted so a fixture
+	// file that lost its passphrases cannot leave this test green over nothing.
+	if checked != 6 {
+		t.Fatalf("checked %d vectors, want 6", checked)
+	}
 }
