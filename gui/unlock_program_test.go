@@ -87,8 +87,16 @@ func sealVectorBlob(t *testing.T, name string) []byte {
 // to keep out of gui: no build-tagged type is named here.
 func payloadReaderFor(t *testing.T, name string) seal.Reader {
 	t.Helper()
+	return payloadReaderFrom(t, sealVectorBlob(t, name))
+}
+
+// payloadReaderFrom is payloadReaderFor over raw region bytes, for the tests
+// that mangle or hand-build a blob. F-79 moved the flow's parameter from
+// []byte to seal.Reader, so those blobs need a reader too.
+func payloadReaderFrom(t *testing.T, blob []byte) seal.Reader {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "payload.bin")
-	if err := os.WriteFile(path, sealVectorBlob(t, name), 0o600); err != nil {
+	if err := os.WriteFile(path, blob, 0o600); err != nil {
 		t.Fatalf("write payload: %v", err)
 	}
 	return seal.FileReader{Path: path}
@@ -284,5 +292,65 @@ func TestUnlockPayloadWrapsBothDirections(t *testing.T) {
 				t.Fatalf("two Lefts stayed on %q; the wrap bound is off by one: %q", tc.wantLast, content)
 			}
 		})
+	}
+}
+
+// countingReader instruments a seal.Reader so a test can tell a PROBE from a
+// READ. F-79's whole claim is about which of the two startup performs, and
+// nothing else in the harness can observe that.
+type countingReader struct {
+	inner  seal.Reader
+	reads  *int
+	probes *int
+}
+
+func (r *countingReader) Probe() bool {
+	*r.probes++
+	return r.inner.Probe()
+}
+
+func (r *countingReader) Read() ([]byte, error) {
+	*r.reads++
+	return r.inner.Read()
+}
+
+// F-79. The startup probe must not read the region: a 64 KB allocation held for
+// the GUI's lifetime is ~14% of free heap, and the menu only needs to know
+// whether MNEMBLOB is there.
+func TestStartupProbesWithoutReadingTheRegion(t *testing.T) {
+	var reads, probes int
+	r := &countingReader{inner: payloadReaderFor(t, "D"), reads: &reads, probes: &probes}
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.payload = r
+	ctx := NewContext(p)
+	frame, drawer, quit := runUITouch(ctx, func() { uiFlow(ctx, "test") })
+	defer quit()
+	if _, ok := frame(); !ok {
+		t.Fatal("uiFlow produced no frame")
+	}
+	// The carousel opens on "Backup Wallet" and pumping frames sends no input,
+	// so the ninth entry is reached the way every sibling test in this file
+	// reaches it: eight right taps. Measured -- a bare pump never leaves the
+	// first program, so the guard below can only succeed after navigating.
+	_, right := arrowPoints(ctx)
+	var content string
+	for i := 0; i < 8; i++ {
+		tap(&ctx.Router, drawer(), right)
+		c, ok := frame()
+		if !ok {
+			t.Fatalf("no frame after tap #%d", i+1)
+		}
+		content = c
+	}
+	if !uiContains(content, "Sealed Payload") {
+		t.Fatalf("the menu entry never appeared, so the probe did not report present; got %q", content)
+	}
+	if probes == 0 {
+		t.Fatal("startup never probed")
+	}
+	if reads != 0 {
+		t.Fatalf("startup called Read %d times; F-79 requires the region NOT be read "+
+			"until the flow is entered", reads)
 	}
 }

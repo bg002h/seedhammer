@@ -81,6 +81,43 @@ func TestFileReaderReportsNoPayloadOnAbsentBlob(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: a missing payload must be an error value, not a nil slice", c.name)
 		}
+		// Probe MUST agree with Read about what "present" means: §10.1 routes
+		// the menu's visibility through Probe and the "payload unreadable"
+		// message through Read, and the deliberate asymmetry between them only
+		// holds if they agree on ABSENT. Asserted here rather than in its own
+		// test so the two can never drift apart case by case.
+		if r.Probe() {
+			t.Errorf("%s: Probe reports present where Read reports ErrNoPayload", c.name)
+		}
+	}
+}
+
+// The POSITIVE half, and it is what makes the negatives above mean something.
+// Without it `func (FileReader) Probe() bool { return true }` passes the whole
+// suite — measured by the B2a-i whole-diff review, which is how this test came
+// to exist. §10.1's "present → the entry appears" had exactly one one-directional
+// pin, and a one-directional kill is not a kill.
+func TestFileReaderProbeAgreesWithReadOnPresent(t *testing.T) {
+	for _, v := range loadVectors(t) {
+		t.Run(v.Name, func(t *testing.T) {
+			region := append(append([]byte(nil), v.Blob(t)...), bytes.Repeat([]byte{0xFF}, 1024)...)
+			r := FileReader{Path: writeRegion(t, region)}
+			if !r.Probe() {
+				t.Error("Probe reports absent on a vector blob Read accepts")
+			}
+			if _, err := r.Read(); err != nil {
+				t.Errorf("premise broken: Read rejected vector %s: %v", v.Name, err)
+			}
+		})
+	}
+}
+
+// A missing region file must Probe false too — the branch Probe reaches by
+// os.Open failing, which no other test touches.
+func TestFileReaderProbeReportsAbsentWhenTheRegionIsMissing(t *testing.T) {
+	r := FileReader{Path: filepath.Join(t.TempDir(), "does-not-exist.bin")}
+	if r.Probe() {
+		t.Error("Probe reports present for a region file that does not exist")
 	}
 }
 

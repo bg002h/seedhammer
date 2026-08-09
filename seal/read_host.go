@@ -24,6 +24,22 @@ type FileReader struct {
 
 var _ Reader = FileReader{}
 
+// Probe reads only the magic, matching XIPReader.Probe's cost profile as
+// closely as a file can. An absent or unreadable file is "no payload" (§6.1) —
+// never an error, because on the device the two are indistinguishable.
+func (r FileReader) Probe() bool {
+	f, err := os.Open(r.Path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, len(Magic))
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return false
+	}
+	return hasMagic(buf)
+}
+
 // Read returns at most RegionLen bytes, matching what the device sees. A
 // region that is absent, unreadable, or does not begin with MNEMBLOB is
 // ErrNoPayload (§6.1) — never (nil, nil).

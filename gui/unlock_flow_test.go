@@ -14,23 +14,23 @@ import (
 
 // runUnlock drives unlockPayloadFlow over a blob and returns a frame pump plus
 // a "has the flow returned" flag.
-func runUnlock(t *testing.T, blob []byte) (frame func() (string, bool), done *bool, ctx *Context, quit func()) {
+func runUnlock(t *testing.T, r seal.Reader) (frame func() (string, bool), done *bool, ctx *Context, quit func()) {
 	t.Helper()
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx = NewContext(p)
 	returned := false
 	frame, quit = runUI(ctx, func() {
-		unlockPayloadFlow(ctx, &descriptorTheme, blob)
+		unlockPayloadFlow(ctx, &descriptorTheme, r)
 		returned = true
 	})
 	return frame, &returned, ctx, quit
 }
 
 // hashScreen pumps to the §10.2 step 3 hash screen and returns what it drew.
-func hashScreen(t *testing.T, blob []byte) string {
+func hashScreen(t *testing.T, r seal.Reader) string {
 	t.Helper()
-	frame, _, _, quit := runUnlock(t, blob)
+	frame, _, _, quit := runUnlock(t, r)
 	defer quit()
 	content, ok := pumpUntil(frame, "Public data hash", 32)
 	if !ok {
@@ -58,7 +58,7 @@ func TestUnlockShowsTheHashItsCountAndItsShape(t *testing.T) {
 			if want == nil {
 				t.Fatalf("vector %s has no %s pubhash", tc.vector, tc.shape)
 			}
-			content := hashScreen(t, v.blob(t))
+			content := hashScreen(t, payloadReaderFrom(t, v.blob(t)))
 			if !uiContains(content, *want) {
 				t.Errorf("the hash screen does not show %s's %s digest %s; got %q",
 					tc.vector, tc.shape, *want, content)
@@ -108,8 +108,8 @@ func TestUnlockHashMakesADowngradeVisible(t *testing.T) {
 	if strings.Join(d.Public, "\n") != strings.Join(e.Public, "\n") {
 		t.Fatal("premise broken: D and E must carry identical public records")
 	}
-	dScreen := hashScreen(t, d.blob(t))
-	eScreen := hashScreen(t, e.blob(t))
+	dScreen := hashScreen(t, payloadReaderFrom(t, d.blob(t)))
+	eScreen := hashScreen(t, payloadReaderFrom(t, e.blob(t)))
 	if dScreen == eScreen {
 		t.Fatal("the sealed and unsealed screens render identically; the downgrade is invisible")
 	}
@@ -130,7 +130,7 @@ func TestUnlockShowsNoHashWhenThePublicSectionIsEmpty(t *testing.T) {
 	if v.PubLen != 0 {
 		t.Fatalf("premise broken: vector F must have pub_len 0, got %d", v.PubLen)
 	}
-	frame, _, _, quit := runUnlock(t, v.blob(t))
+	frame, _, _, quit := runUnlock(t, payloadReaderFrom(t, v.blob(t)))
 	defer quit()
 	// The constant an empty public section would hash to, computed here rather
 	// than retyped, so the assertion tracks §6.6 rather than a snapshot.
@@ -169,7 +169,7 @@ func TestUnlockRefusesAnUnreadablePayload(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blob := tc.mangle(sealVectorBlob(t, "E"))
-			frame, _, _, quit := runUnlock(t, blob)
+			frame, _, _, quit := runUnlock(t, payloadReaderFrom(t, blob))
 			defer quit()
 			content, ok := pumpUntil(frame, "Payload unreadable", 32)
 			if !ok {
@@ -192,7 +192,7 @@ func TestUnlockDistinguishesTooManyRecords(t *testing.T) {
 	enc := h.Encode()
 	blob := append(enc[:], section...)
 
-	frame, _, _, quit := runUnlock(t, blob)
+	frame, _, _, quit := runUnlock(t, payloadReaderFrom(t, blob))
 	defer quit()
 	content, ok := pumpUntil(frame, "more records than the machine accepts", 32)
 	if !ok {
@@ -215,7 +215,7 @@ func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
 			if v.CtLen == 0 {
 				t.Fatalf("premise broken: vector %s must be sealed", name)
 			}
-			frame, done, ctx, quit := runUnlock(t, v.blob(t))
+			frame, done, ctx, quit := runUnlock(t, payloadReaderFrom(t, v.blob(t)))
 			defer quit()
 			// Past the hash screen.
 			if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
@@ -261,7 +261,7 @@ func TestSealedPayloadStopsAtATerminalScreen(t *testing.T) {
 func TestUnauthenticatedWarningShownOnlyWhenNothingIsEncrypted(t *testing.T) {
 	// ct_len == 0 -> shown, with the same digest the hash screen produced.
 	e := sealVector(t, "E")
-	frame, _, ctx, quit := runUnlock(t, e.blob(t))
+	frame, _, ctx, quit := runUnlock(t, payloadReaderFrom(t, e.blob(t)))
 	defer quit()
 	if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
 		t.Fatalf("never reached the hash screen; got %q", content)
@@ -284,7 +284,7 @@ func TestUnauthenticatedWarningShownOnlyWhenNothingIsEncrypted(t *testing.T) {
 
 	// ct_len > 0 -> NEVER shown.
 	d := sealVector(t, "D")
-	frame2, _, ctx2, quit2 := runUnlock(t, d.blob(t))
+	frame2, _, ctx2, quit2 := runUnlock(t, payloadReaderFrom(t, d.blob(t)))
 	defer quit2()
 	if content, ok := pumpUntil(frame2, "Public data hash", 32); !ok {
 		t.Fatalf("never reached the hash screen; got %q", content)
@@ -304,7 +304,7 @@ func TestUnauthenticatedWarningShownOnlyWhenNothingIsEncrypted(t *testing.T) {
 // TestUnauthenticatedWarningCancelReturnsToTheMenu — §10.2 step 4 requires an
 // explicit confirmation, so declining must leave the flow entirely.
 func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
-	frame, done, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
+	frame, done, ctx, quit := runUnlock(t, payloadReaderFor(t, "E"))
 	defer quit()
 	if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
 		t.Fatalf("never reached the hash screen; got %q", content)
@@ -337,7 +337,7 @@ func TestUnauthenticatedWarningCancelReturnsToTheMenu(t *testing.T) {
 // confirmation reaches the plate list.
 func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		frame, _, ctx, quit := runUnlock(t, sealVectorBlob(t, "E"))
+		frame, _, ctx, quit := runUnlock(t, payloadReaderFor(t, "E"))
 		defer quit()
 		if content, ok := pumpUntil(frame, "Public data hash", 32); !ok {
 			t.Fatalf("never reached the hash screen; got %q", content)

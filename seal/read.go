@@ -25,6 +25,16 @@ var ErrNoPayload = errors.New("seal: no payload present")
 // Reader yields the payload region's bytes. Phase B holds one of these and
 // never learns where the bytes came from.
 type Reader interface {
+	// Probe reports whether the region begins with MNEMBLOB (§6.1). It exists
+	// so §10.1's startup detection costs 8 bytes rather than 64 KB: Read's
+	// result is retained for as long as the caller holds it, and holding the
+	// whole region for the GUI's lifetime is ~14% of free heap (F-79).
+	//
+	// It is deliberately COARSER than Read: present-but-corrupt probes true,
+	// the menu entry appears, and the flow then reports "payload unreadable".
+	// Collapsing the two would hide a tampered payload behind an invisible menu
+	// entry, which is precisely the signal §2.2 item 4 exists to raise.
+	Probe() bool
 	Read() ([]byte, error)
 }
 

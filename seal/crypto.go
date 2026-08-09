@@ -3,8 +3,6 @@ package seal
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/pbkdf2"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 )
@@ -15,11 +13,15 @@ import (
 // that can seal is a device that can be made to emit a payload, and nothing in
 // §10 needs it.
 //
-// crypto/pbkdf2 and crypto/sha256 are already linked and already CALLED —
-// golang.org/x/crypto/pbkdf2, which bip39 and slip39 import, is a thin wrapper
-// over crypto/pbkdf2. crypto/aes and crypto/cipher are ABSENT from today's
-// firmware build; importing them is what makes AES-GCM callable and costs the
-// measured ~1.6 KB.
+// crypto/aes and crypto/cipher were ABSENT from the firmware build before this
+// feature; importing them is what makes AES-GCM callable and costs the measured
+// ~1.6 KB. Nothing else here is new weight: crypto/hmac and crypto/sha256 are
+// already linked and already CALLED by bip85, nonstandard and slip39, and
+// crypto/pbkdf2 stays in the image via bip39 and slip39, which import
+// golang.org/x/crypto/pbkdf2 -- a thin wrapper over it. seal no longer calls it
+// itself: DeriveKey below wraps pbkdf2.go's Deriver, so this package holds ONE
+// PBKDF2. The stdlib remains the differential ORACLE in pbkdf2_test.go, which
+// costs no flash because _test.go is never linked into the firmware.
 
 // KeyLen is 32 bytes — AES-256.
 const KeyLen = 32
@@ -37,21 +39,25 @@ var (
 
 // DeriveKey runs PBKDF2-HMAC-SHA256 over the §8.1-normalised passphrase.
 //
-// iterations ALWAYS comes from the header — never a constant, or vector B
-// fails. Its signature is the injectable seam Open uses (see openSeam in
-// open.go), which is what makes "no KDF ran" observable in a test.
+// It is the one-shot form of Deriver (pbkdf2.go), and it is a WRAPPER rather
+// than a second implementation: two PBKDF2s in one package must agree forever,
+// and a divergence between them is a wrong key that surfaces as a tag mismatch
+// indistinguishable from a wrong passphrase. There is one implementation now,
+// and the vectors pin it.
+//
+// The []byte conversion is an unwipeable copy of the passphrase -- not a
+// regression, the old body handed a string to pbkdf2.Key which copies it the
+// same way, but it is why a caller that wants a ZEROABLE passphrase calls
+// NewDeriver directly with its own buffer, as the device unlock path does.
+//
+// iterations ALWAYS comes from the header — never a constant, or vector B fails.
 func DeriveKey(passphrase string, salt []byte, iterations int) []byte {
-	key, err := pbkdf2.Key(sha256.New, passphrase, salt, iterations, KeyLen)
-	if err != nil {
-		// Only reachable with an out-of-range iteration count or key length,
-		// and ParseHeader has already excluded both (§6.2 bounds iterations
-		// to [100_000, 2_000_000] before any KDF work). Return nil rather
-		// than panic: on a device a panic is a brick, while a nil key makes
-		// aes.NewCipher fail and the payload fails closed. An all-zero key
-		// would be worse — it is a VALID AES key and hides the fault.
-		return nil
-	}
-	return key
+	d := NewDeriver([]byte(passphrase), salt, iterations)
+	defer d.Wipe()
+	// One call: Step never runs past total, so the largest legal iteration
+	// count (§6.2's 2,000,000) completes here in a single pass.
+	d.Step(iterations)
+	return d.Key()
 }
 
 // Open verifies then decrypts.
