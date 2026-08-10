@@ -79,9 +79,15 @@ func unlockSecretLabel(c seal.Classification, i, n int) string {
 // unlockSecretSession offers every secret record, in order, before the plate
 // list is built.
 func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
+	// prev, not nil, on the way out -- see unlockPassphraseFlow's own bracket
+	// (§10.2.4 row 4, task9-r0.md M2): these two guards never nest today (this
+	// function always runs after unlockPassphraseFlow has already returned and
+	// uninstalled its own), and save-and-restore makes that a structural fact
+	// rather than an accident of call order.
+	prev := ctx.wipe
 	g := &wipeGuard{}
 	ctx.wipe = g
-	defer func() { ctx.wipe = nil }()
+	defer func() { ctx.wipe = prev }()
 	at := make([]int, 0, len(p.Secret))
 	for i, r := range p.Secret {
 		if seal.IsSecret(r.Class) {

@@ -627,7 +627,7 @@ func TestRunWarningBufferDoesNotGrow(t *testing.T) {
 // is never negative in practice. A direct unit call is the only way to reach it.
 func TestWipeWarningOpClampsNegativeRemaining(t *testing.T) {
 	var buf op.Buffer
-	o := wipeWarningOp(&buf, NewStyles(), &descriptorTheme, sh2DisplaySize, -5*time.Second)
+	o := wipeWarningOp(&buf, NewStyles(), &descriptorTheme, sh2DisplaySize, -5*time.Second, wipeWarningSubjectSecret)
 	d := new(op.Drawer)
 	text := d.ExtractText(image.Rectangle{Max: sh2DisplaySize}, o)
 	if !uiContains(text, "erased in 0 seconds") {

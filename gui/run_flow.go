@@ -207,7 +207,7 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 							}
 							a.warnBuf.Reset()
 							draw(wipeWarningOp(&a.warnBuf, ctx.Styles, &descriptorTheme,
-								pl.DisplaySize(), wipeAt.Sub(now)))
+								pl.DisplaySize(), wipeAt.Sub(now), ctx.wipe.warningSubject()))
 							// The only way a test can see WHICH buffer the
 							// warning went into, or that it is not growing:
 							// op.Buffer's fields are unexported and `a` is a

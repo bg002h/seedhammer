@@ -110,6 +110,31 @@ func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	if unlockPassphraseHook != nil {
 		unlockPassphraseHook()
 	}
+	// §10.2.4 row 4: an in-flight passphrase is seed-equivalent (operator
+	// ruling 2026-08-09) -- it derives the key that opens everything, and the
+	// machine holds it beside the sealed blob in flash. This bracket is THE
+	// SEAM (F-105 / task9-r0.md §4): it wraps this function's own lifetime --
+	// both unlockSealedFlow's per-attempt retry (a fresh call on every wrong
+	// passphrase) and the checksum-retry loop below -- and nothing else.
+	//
+	// The bracket CLOSES on every return path (defer), which is BEFORE
+	// unlockAttemptOnce and therefore unlockDerive ever run. That closure IS
+	// row 5, not a flag on wipeGuard: arming across the KDF is unsurvivable,
+	// because Run's warning branch draws and `continue`s without returning
+	// control, so a derivation that reaches 3:00 is frozen for the whole 30 s
+	// window and the wipe becomes certain -- measured at ~1,343,284
+	// iterations, 34.6% of §6.2's legal range, permanently un-openable on the
+	// device (task9-r0.md §2). ctx.wipe must therefore read nil for the
+	// derivation's ENTIRE run, not merely disarmed -- armed() itself is
+	// unchanged and untouched.
+	//
+	// prev, not nil, on the way out: unlockSealedFlow never nests a guard
+	// today (this function always returns before unlockSecretSession runs),
+	// but save-and-restore makes that a structural fact rather than an
+	// accident of call order (task9-r0.md M2).
+	prev := ctx.wipe
+	ctx.wipe = &wipeGuard{subject: wipeWarningSubjectPassphrase}
+	defer func() { ctx.wipe = prev }()
 	// The screen's identity is established by unlockPassphraseNotice, before
 	// entry, and the title passed to inputWordsFlow stays "" (R0 round 0, M4).
 	// The title parameter is an either/or: gui/gui.go:765-770 renders

@@ -15,6 +15,20 @@ import (
 // same row requires and which no existing constant carries.
 const wipeWarningDelay = 30 * time.Second
 
+// The two lead sentences §10.2.4 rows 1 and 4 draw -- what is actually at
+// risk differs, but the countdown, the touch-to-keep affordance and the
+// 3:00/3:30 schedule do not (R0 report, task9-r0.md I1).
+//
+// Row 1's text is false at passphrase entry: nothing has been decrypted yet,
+// and telling an operator the machine holds "decrypted seed material" on a
+// screen they know they have not unlocked teaches them the warning is
+// furniture -- the same reasoning §10.2 step 3 uses to refuse a constant
+// hash.
+const (
+	wipeWarningSubjectSecret     = "This machine still holds decrypted seed material and has been idle."
+	wipeWarningSubjectPassphrase = "This machine holds a partly typed passphrase and has been idle."
+)
+
 // warnBufHook reports the warning buffer's size after each warning frame. Nil
 // in production.
 //
@@ -40,7 +54,13 @@ var warnBufHook func(args, refs int)
 // is passed because Colors carries only Background/Text/Primary
 // (gui/theme.go:30) and no text style. That also rules out calling
 // layoutTitle(ctx, ...), whose two lines are inlined below.
-func wipeWarningOp(buf *op.Buffer, st Styles, th *Colors, dims image.Point, remaining time.Duration) op.Op {
+//
+// subject is the sentence the body opens with -- wipeWarningSubjectSecret or
+// wipeWarningSubjectPassphrase, chosen by the caller from ctx.wipe (in scope
+// at Run's call site) via wipeGuard.warningSubject(). Passed as a plain
+// string rather than *wipeGuard so this function stays testable without a
+// guard at all.
+func wipeWarningOp(buf *op.Buffer, st Styles, th *Colors, dims image.Point, remaining time.Duration, subject string) op.Op {
 	const margin = 8
 	secs := int(remaining.Seconds() + 0.5)
 	if secs < 0 {
@@ -49,8 +69,7 @@ func wipeWarningOp(buf *op.Buffer, st Styles, th *Colors, dims image.Point, rema
 	// layoutTitlef (gui/gui.go:1865) inlined -- it needs only ctx.B and Styles.title.
 	title, titleSz := widget.Labelw(buf, st.title, dims.X-2*16, th.Text, "WIPING SECRET DATA")
 	body, bodySz := widget.Labelwf(buf, st.body, dims.X-2*margin, th.Text,
-		"This machine still holds decrypted seed material and has been idle.\n\n"+
-			"It will be erased in %d seconds.\n\nTouch the screen to keep it.", secs)
+		subject+"\n\nIt will be erased in %d seconds.\n\nTouch the screen to keep it.", secs)
 	return op.Layer(
 		body.Offset(image.Pt((dims.X-bodySz.X)/2, margin+titleSz.Y+margin)),
 		title.Offset(image.Pt((dims.X-titleSz.X)/2, margin)),

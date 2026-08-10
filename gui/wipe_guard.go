@@ -16,6 +16,14 @@ type wipeGuard struct {
 	// job is the engrave job currently cutting a secret plate, nil otherwise.
 	// Registered by the two unlock engrave arms around their Engrave call.
 	job *engraveJob
+	// subject overrides §10.2.4's warning text for a bracket whose walk-away
+	// window is protecting something other than row 1's "decrypted seed
+	// material" -- currently only row 4's in-flight passphrase
+	// (unlockPassphraseFlow's own bracket). Empty means row 1's default.
+	// Deliberately NOT read by armed(): the subject is what the warning SAYS,
+	// never whether the timer runs, so it cannot become a second, harder-to-
+	// audit way to gate arming.
+	subject string
 }
 
 // wipeNowHook forces a wipe on Run's next tick. Nil in production.
@@ -49,4 +57,15 @@ func (g *wipeGuard) armed() bool {
 		}
 	}
 	return true
+}
+
+// warningSubject reports the sentence §10.2.4's warning should open with.
+// Run only calls this once armed() has already read true, which itself
+// requires g != nil -- the nil case is handled anyway so this needs no
+// caller-side guard of its own.
+func (g *wipeGuard) warningSubject() string {
+	if g != nil && g.subject != "" {
+		return g.subject
+	}
+	return wipeWarningSubjectSecret
 }
