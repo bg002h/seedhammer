@@ -1714,9 +1714,19 @@ func (s *SafePointer) HistoryLen() int {
 	return len(s.history)
 }
 
-// ClearHistory zeroes ALL of this SafePointer's retained state. F-108: it is the
-// seed rendered as geometry, and SafePointer lives in engrave while the only
-// caller that knows the job is abandoned lives in gui.
+// ClearHistory zeroes this SafePointer's retained state -- every field, and the
+// CURRENT history array to cap. F-108: it is the seed rendered as geometry, and
+// SafePointer lives in engrave while the only caller that knows the job is
+// abandoned lives in gui.
+//
+// NOT "all state that ever existed", and the difference is measurable. Knot
+// grows history with a bare `append`, which is an UNFUNNELLED growth site of
+// exactly the class op.Buffer's appendArgs/appendRefs fix: every reallocation
+// orphans an array still holding the knots written before it, and nothing here
+// can reach those. Measured on a real plate under a lockstep driver: 4 orphaned
+// arrays holding 15 knots, rising to 23 arrays / 119,891 knots if the driver
+// reports no progress so the trim never fires. That residue is F-110, not
+// something this function covers.
 //
 // PRECONDITION: the job owning this SafePointer is abandoned -- no engrave
 // goroutine is running against it and no restart is reachable. Calling it on a
