@@ -75,5 +75,12 @@ func (r FileReader) Read() ([]byte, error) {
 	if !hasMagic(buf) {
 		return nil, ErrNoPayload
 	}
-	return buf, nil
+	// Same trim as XIPReader, through the same untagged helper, so host and
+	// device return the SAME length. Without this every host test would
+	// exercise a 65,536-byte blob while the device saw <= 1,421.
+	total, err := boundBlob(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:total], nil
 }

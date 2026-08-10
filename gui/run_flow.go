@@ -243,6 +243,25 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 			// is the seed. This session's Context is abandoned below, so
 			// nothing will overwrite that array.
 			ctx.B.Scrub()
+			// The Drawer outlives this Context by design -- allocated above the
+			// session loop so a wipe does not reallocate the mask -- so it is
+			// the one thing that can still reach the Buffer abandoned below.
+			// Its stale frameOps hold each drawn frame's mask SOURCE as an
+			// interface-value copy living in the Drawer's own array, which
+			// Scrub cannot reach: Scrub zeroes ctx.B's arrays, not this one.
+			//
+			// Draw clears as it goes, so this is defence in depth rather than
+			// the only barrier -- it releases at the moment of abandonment
+			// instead of on session 2's first frame. Said plainly because it
+			// has a testing consequence: NO host test can distinguish deleting
+			// this line from keeping it, since Draw closes the same path one
+			// frame later. See gui/op/release_test.go for the tests that do
+			// bite.
+			//
+			// Order against Scrub does not matter -- Release frees nothing,
+			// ctx.B holds its own headers to the same arrays, and ctx is live
+			// across both. What matters is that BOTH follow the last draw().
+			d.Release()
 		}
 	}
 }

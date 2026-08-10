@@ -53,7 +53,11 @@ func (XIPReader) Read() ([]byte, error) {
 	// Copy out of XIP before returning. The caller keeps these bytes across a
 	// flash write (Phase B's wipe path erases the region), and a slice aliasing
 	// XIP would silently change underneath it.
-	out := make([]byte, len(region))
-	copy(out, region)
+	n, err := boundBlob(region)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, n)
+	copy(out, region[:n])
 	return out, nil
 }

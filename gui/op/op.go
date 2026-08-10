@@ -246,6 +246,20 @@ func (d *Drawer) Draw(dst, maskfb draw.Image, op Op) {
 	if op.buf == nil {
 		return
 	}
+	// clear to CAP, not just truncate. The backing array outlives the slice,
+	// and a mark-sweep collector scans whole allocated objects -- so a stale
+	// frameOp from the PREVIOUS frame keeps that frame's mask source, and its
+	// Buffer, alive indefinitely. When the previous frame belonged to a
+	// session that has since been wiped, that is the whole leak.
+	//
+	// Here rather than only in Release: this makes the property structural, so
+	// a future caller who abandons a Buffer without calling Release cannot
+	// reintroduce it. Costs one clear of <= cap entries per frame, against a
+	// full-screen redraw.
+	//
+	// The recursion's own restore at the end of draw() must NOT do this: those
+	// entries alias the buffer being drawn right now.
+	clear(d.maskStack[:cap(d.maskStack)])
 	d.maskStack = d.maskStack[:0]
 	d.jumpStack = append(d.jumpStack[:0], op.op.r)
 	d.draw(dst, maskfb, op.op.buf, drawState{clip: image.Rect(-1e9, -1e9, 1e9, 1e9)}, math.MaxInt)
@@ -255,6 +269,35 @@ func (d *Drawer) Draw(dst, maskfb draw.Image, op Op) {
 
 func (d *Drawer) Reset() {
 	d.inputs = d.inputs[:0]
+	d.skipInputOps = false
+}
+
+// Release drops every reference this Drawer still holds into buffers it has
+// drawn, so a Buffer abandoned while its Drawer lives on can be collected.
+//
+// Truncation does not do it. maskStack and inputs are re-sliced to length 0
+// between frames, but the backing arrays keep their stale entries, and a
+// mark-sweep collector scans whole allocated objects rather than up to len.
+// Each stale frameOp holds an imageOp whose `refs` and `args` ALIAS the
+// Buffer's own arrays, and whose `src` is an interface-value COPY living here
+// rather than in the Buffer -- so Buffer.Scrub, which zeroes that Buffer's
+// arrays, cannot reach it.
+//
+// Reslicing to cap before clear() is the whole point: clear(d.maskStack) with
+// len 0 zeroes nothing and leaves exactly the entries that leak.
+//
+// Production calls this from the wipe path (gui/run_flow.go), the only place a
+// Buffer is abandoned while this Drawer survives. Draw clears as it goes
+// besides, so a missed call cannot reintroduce the leak.
+func (d *Drawer) Release() {
+	clear(d.maskStack[:cap(d.maskStack)])
+	clear(d.inputs[:cap(d.inputs)])
+	d.maskStack = d.maskStack[:0]
+	d.inputs = d.inputs[:0]
+	// jumpStack is []ops -- three ints, no pointers -- so truncation suffices.
+	// Listed rather than omitted so the audit is total.
+	d.jumpStack = d.jumpStack[:0]
+	d.text = nil
 	d.skipInputOps = false
 }
 

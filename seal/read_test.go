@@ -165,18 +165,38 @@ func TestFileReaderReadsEveryVector(t *testing.T) {
 }
 
 // THE unbounded-read mutant's killer. An oversized region must come back
-// clamped, and it must still be readable.
+// bounded, and it must still be readable.
+//
+// The bound TIGHTENED. It used to be RegionLen, because Read returned the whole
+// clamped region; it is now what the header itself declares, 52+pub+ct(+16), so
+// that no reader needs a 64 KiB CONTIGUOUS run on a non-moving collector to
+// hold a payload that cannot legally exceed 16,450 bytes and is typically
+// ~1,400. Both readers take the trim through the same untagged helper, so host
+// and device return identical lengths.
+//
+// TWO assertions, because either alone is weak: "<= RegionLen" would pass for
+// any truncation at all, and the exact figure alone would pass even if
+// clampRegion were deleted. Together they pin the tightened bound and keep the
+// original unbounded-read mutant dead -- the 4x-oversize region is what makes
+// the second one bite.
 func TestFileReaderNeverReturnsMoreThanTheRegion(t *testing.T) {
-	blob := vectorNamed(t, "A").Blob(t)
-	oversize := append(append([]byte(nil), blob...), bytes.Repeat([]byte{0xFF}, 4*RegionLen)...)
+	v := vectorNamed(t, "A")
+	oversize := append(append([]byte(nil), v.Blob(t)...), bytes.Repeat([]byte{0xFF}, 4*RegionLen)...)
 	r := FileReader{Path: writeRegion(t, oversize)}
 	got, err := r.Read()
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(got) != RegionLen {
-		t.Errorf("Read returned %d bytes from a %d-byte region, want exactly %d",
-			len(got), len(oversize), RegionLen)
+	want := HeaderLen + int(v.PubLen) + int(v.CtLen)
+	if v.CtLen > 0 {
+		want += TagLen
+	}
+	if len(got) != want {
+		t.Errorf("Read returned %d bytes from a %d-byte region, want %d (52 + pub %d + ct %d)",
+			len(got), len(oversize), want, v.PubLen, v.CtLen)
+	}
+	if len(got) > RegionLen {
+		t.Errorf("Read returned %d bytes, which exceeds the region bound %d", len(got), RegionLen)
 	}
 }
 
