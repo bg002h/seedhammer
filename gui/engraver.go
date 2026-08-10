@@ -112,6 +112,37 @@ func (e *engraveJob) Start() {
 	}()
 }
 
+// releaseResumeState zeroes the job's resume state once the job is provably
+// abandoned. F-108.
+//
+// history is RESUME state, not cut state: its lifetime is the job, not the
+// goroutine, because catchup() re-reads it on the operator's hold-to-resume
+// (gui/gui.go:2747). Zeroing it at the goroutine's exit would drive that
+// resume's catch-up motion to the origin at T:0 and cut a wrong plate -- worse
+// than the residency it fixes.
+//
+// TERMINAL-ONLY. A terminal state is the receive on e.errs, so runEngraving has
+// provably returned, with its defers complete, and there is no live writer.
+//
+// TWO non-terminal returns skip this, not one: Engrave returning on ctx.Done
+// (the wipe) AND the double-Back return in engraveStopping, where the goroutine
+// is still winding down. Neither is covered elsewhere -- the wipe unwind is
+// ctx.B.Scrub() + Drawer.Release() and reaches no engrave state. That hole is
+// F-110, not a covered case. Skipping is still right: zeroing under a live
+// goroutine races it, and a wrecked plate is worse than the residue.
+//
+// Safe to call only where a restart is impossible. Start() has exactly one
+// caller, inside EngraveScreen.Engrave's own loop, and every Engrave call site
+// constructs a fresh EngraveScreen -- so "Engrave has returned" is that point.
+func (e *engraveJob) releaseResumeState() {
+	switch e.status.State {
+	case engraveStopped, engraveDone, engraveFailed:
+	default:
+		return
+	}
+	e.safePoint.ClearHistory()
+}
+
 func (e *engraveJob) Stats() EngraverStats {
 	select {
 	case d := <-e.lock:
@@ -226,6 +257,15 @@ type splineResumer struct {
 func (s *splineResumer) Knot(k bspline.Knot) (completed uint, cerr error) {
 	if c := s.catchup; c != nil {
 		s.catchup = nil
+		// F-108: c is a FRESH copy of the history knots, made per restart by
+		// SafePointer.Resume, and once s.catchup is nil nothing outside this
+		// block can reach it -- so a job-level sweep would zero a nil slice
+		// while every restart left another intact copy behind.
+		//
+		// defer rather than a clear after the loop: the loop returns early on a
+		// driver error and that path must zero too. Registered once per job, not
+		// per knot -- this block runs only on the first resumed knot.
+		defer clear(c)
 		// Fast forward until the most recent knot.
 		for _, k := range c {
 			t, err := s.drv.Knot(k)

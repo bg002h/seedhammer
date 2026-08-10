@@ -23,6 +23,11 @@ func (b *Buffer) Len() (args, refs int) {
 func (b *Buffer) Scrub() {
 	clear(b.args[:cap(b.args)])
 	clear(b.refs[:cap(b.refs)])
+	// Arrays this Buffer OUTGREW were already zeroed by appendArgs/appendRefs at
+	// the instant they were outgrown, so there is nothing left here for Scrub to
+	// reach -- see Buffer.zeroedArrays. Before that existed, every reallocation
+	// left a complete copy of everything written before it, and Scrub zeroed
+	// only the current array.
 	b.args = b.args[:0]
 	b.refs = b.refs[:0]
 }
@@ -45,4 +50,19 @@ func (b *Buffer) Residue() (args, refs int) {
 		}
 	}
 	return args, refs
+}
+
+// Zeroed reports how many outgrown backing arrays this Buffer has zeroed, and
+// how many entries they held. It exists so a test can prove the zeroing RAN:
+// an array that was correctly zeroed and an array that was never created are
+// indistinguishable by inspection, so without this an orphan test passes
+// vacuously on any frame too small to reallocate.
+func (b *Buffer) Zeroed() (arrays, entries int) {
+	return b.zeroedArrays, b.zeroedEntries
+}
+
+// Caps reports the current backing arrays' capacity, so a measurement can state
+// retention against the frame that produced it.
+func (b *Buffer) Caps() (args, refs int) {
+	return cap(b.args), cap(b.refs)
 }
