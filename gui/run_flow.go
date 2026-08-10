@@ -233,14 +233,16 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 			if !wiping {
 				return
 			}
-			// NOTHING to scrub here, and that is worth stating because an
-			// earlier draft got it backwards. Context.Frame runs c.B.Reset()
-			// AFTER the callback (gui/gui.go:75), and the wipe path uses
-			// `break`, so the range body completes, yield returns true, the
-			// callback returns, and clear(b.refs) (gui/op/op.go:376) runs on
-			// the last frame drawn -- then again after every discard-guarded
-			// Frame during the unwind. The abandoned Context's buffer is
-			// already zeroed by the time control reaches this line.
+			// SCRUB the abandoned buffer. Context.Frame ran c.B.Reset() on
+			// the last frame drawn (gui/gui.go:75) -- but Reset TRUNCATES
+			// args and clears only refs (gui/op/op.go:374), and op.Glyph
+			// encodes every rendered rune into args. So on the SeedScreen
+			// path the twelve words come back VERBATIM AND IN ORDER from the
+			// backing array. An earlier comment here claimed the buffer was
+			// "already zeroed"; it was half right, and the half it got wrong
+			// is the seed. This session's Context is abandoned below, so
+			// nothing will overwrite that array.
+			ctx.B.Scrub()
 		}
 	}
 }
