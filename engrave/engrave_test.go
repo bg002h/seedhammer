@@ -68,9 +68,19 @@ func TestConstantQR(t *testing.T) {
 		}
 		refProf := ProfileSpline(PlanEngraving(conf, cmd.Engrave(conf, strokeWidth, 3)))
 		for i := range 100 {
+			// Drawn HERE, not inside the subtest. genEntropy closes over a
+			// single rng, and calling it from t.Parallel subtests raced ~2,500
+			// goroutines on it: `go test -race ./engrave/` failed on every
+			// tree, so -race could not gate this package at all -- including
+			// the residency tests that now live in it.
+			//
+			// It also cost the test its reproducibility. A seeded source is
+			// pointless when the draw order is the scheduler's choice, so a
+			// failure reported here could not be re-run against the entropy
+			// that produced it.
+			entropy := genEntropy(n)
 			t.Run(fmt.Sprintf("n-%d-run-%d", n, i), func(t *testing.T) {
 				t.Parallel()
-				entropy := genEntropy(n)
 				qrc, err := qr.Encode(string(entropy), qr.Q)
 				if err != nil {
 					t.Fatal(err)
