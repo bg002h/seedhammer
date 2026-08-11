@@ -242,6 +242,29 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 	r.Y = offy + m.Descent.Ceil()
 }
 
+// deriveSeedHook hands over the 64-byte BIP-39 seed at the moment it is
+// allocated, immediately AFTER `defer wipeBytes(seed)` is registered, so a test
+// holds the SAME backing array the defer will zero and can read it after
+// deriveMasterKey returns. nil in production.
+//
+// It exists because the seed is a local of a function that returns neither it
+// nor anything aliasing it, so no caller can observe the wipe -- which is
+// exactly why the wipe was deletable with the whole suite green (F-94). This is
+// the seam F-94's own entry specifies ("a var deriveSeedHook func([]byte) fired
+// beside seed := bip39.MnemonicSeed(...) would do the same for the seed, with
+// no unsafe"), and the same in-file style as bip85PkeyHook and
+// unlockMnemonicParsedHook.
+var deriveSeedHook func([]byte)
+
+// deriveMasterKeyHook hands over the derived BIP-32 master key on the success
+// path, so a test can assert the CALLER zeroed it. nil in production.
+//
+// The key is deriveMasterKey's return value, so this function cannot scrub it;
+// both callers do (masterFingerprintFor's `defer mk.Zero()` and SeedScreen's
+// validity probe), and neither was pinned (F-94). One seam covers both because
+// there is exactly one place a master key is derived.
+var deriveMasterKeyHook func(*hdkeychain.ExtendedKey)
+
 func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
 	seed := bip39.MnemonicSeed(m, password)
 	// The 64-byte BIP-39 seed is seed-equivalent material and this is its only
@@ -249,13 +272,24 @@ func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*
 	// The returned key is the CALLER's to Zero -- this function cannot, it is
 	// the return value.
 	defer wipeBytes(seed)
+	if deriveSeedHook != nil {
+		deriveSeedHook(seed)
+	}
 	mk, err := hdkeychain.NewMaster(seed, net)
 	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
 	// According to [0] the odds of encountering a seed that generates
 	// an invalid key by chance is 1 in 2^127.
 	//
 	// [0] https://bitcoin.stackexchange.com/questions/53180/bip-32-seed-resulting-in-an-invalid-private-key
-	return mk, err == nil
+	if err != nil {
+		// NewMaster returns a nil key with its error, so this is the same
+		// (nil, false) the previous `return mk, err == nil` produced.
+		return nil, false
+	}
+	if deriveMasterKeyHook != nil {
+		deriveMasterKeyHook(mk)
+	}
+	return mk, true
 }
 
 type ErrorScreen struct {
