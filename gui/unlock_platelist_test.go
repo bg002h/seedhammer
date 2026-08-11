@@ -18,9 +18,10 @@ import (
 //
 // "·" HAS NO GLYPH in this font. Measured: width("a·b") == width("ab") == 22,
 // while width("a-b") == 31 -- the middot contributes ZERO pixels. Shipped UI
-// carries it today in bundle_flow.go ("Card %d of %d · Plate %d of %d"),
-// codex32_polish.go, slip39_polish.go and bundle.go, where words carry the
-// meaning and an invisible dot merely leaves a double space.
+// carried it in bundle_flow.go ("Card %d of %d · Plate %d of %d"),
+// codex32_polish.go, slip39_polish.go and bundle.go, where words carried the
+// meaning and an invisible dot merely left a double space -- until F-78, which
+// switched all four to "|" for the same reason this list already had.
 //
 // Here it would be load-bearing: `mk1 2/3 · 1/2` degrades to `mk1 2/3  1/2`,
 // two unrelated-looking fractions with nothing saying which is the card. So this

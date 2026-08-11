@@ -59,8 +59,12 @@ func TestBundlePlanSingleMD1OnePlate(t *testing.T) {
 }
 
 // TestBundleEngraveGuidedTitles: confirming a 2-card bundle drives "Card 1 of 2
-// · Plate 1 of N" first (and the card-progress is shown). Mirrors
+// | Plate 1 of N" first (and the card-progress is shown). Mirrors
 // TestMultiPlateEngravePlateTitles: assert the first guided title appears.
+//
+// The separator is "|", not "·" (F-78 — bundle_flow.go:339's
+// "Card %d of %d · Plate %d of %d" renders in ctx.Styles.title, poppins.Bold25,
+// where "·" contributes zero pixels).
 func TestBundleEngraveGuidedTitles(t *testing.T) {
 	g := &bundleGatherer{}
 	offerAll(t, g, mk1CardA(t)) // first card: an mk1 (>=2 plates)
@@ -73,8 +77,15 @@ func TestBundleEngraveGuidedTitles(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, cards) })
 	defer quit()
-	if c, ok := pumpUntil(frame, "Card 1 of 2", 48); !ok {
+	c, ok := pumpUntil(frame, "Card 1 of 2", 48)
+	if !ok {
 		t.Fatalf("guided 'Card 1 of 2' title not shown; got %q", c)
+	}
+	if !uiContains(c, "Card 1 of 2 | Plate 1 of") {
+		t.Errorf("guided title missing the \"|\" separator; got %q", c)
+	}
+	if strings.Contains(c, "·") {
+		t.Errorf("guided title still contains the invisible middot separator: %q", c)
 	}
 }
 

@@ -384,10 +384,27 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 			lay := textLayout(params, fnt, fontSize, offy, qrp)
 			var lines []string
 			if len(p.Text) > 0 {
-				// The descriptor and mdmk callers keep an UNBOUNDED path:
-				// their TEXT+QR -> TEXT-ONLY -> QR-ONLY fallback depends on
-				// toPlate rejecting overflow, so a maxLines refusal here would
-				// silently change which variants they offer.
+				// The descriptor and mdmk callers (validateDescriptor,
+				// validateMdmk) keep an UNBOUNDED path here: they offer
+				// whichever of TEXT+QR / TEXT-ONLY / QR-ONLY fit, which
+				// depends on toPlate rejecting overflow, so a maxLines
+				// refusal here would silently change which variants they
+				// offer.
+				//
+				// These three are NOT a TEXT+QR -> TEXT-ONLY -> QR-ONLY
+				// fallback chain, despite an earlier version of this comment
+				// claiming that order (F-119). Measured by growing the input
+				// string through validateMdmk and watching each variant drop
+				// out: TEXT+QR fails first (works through 268 chars, fails at
+				// 269), then QR-ONLY (641, fails at 642), and TEXT-ONLY fails
+				// LAST (645, fails at 646). QR-ONLY is the LEAST robust of
+				// the two single-mode variants, not the most: a QR code's
+				// capacity is a hard ceiling, while wrapped text keeps
+				// fitting a few characters longer at the same plate size. The
+				// variants themselves are correct -- validateMdmk/
+				// validateDescriptor try all three and offer whichever fit,
+				// not a first-match chain -- only the comment's stated order
+				// was wrong.
 				//
 				// Empty text is special-cased rather than wrapped, because
 				// spec 5.2's empty-block rule returns ONE empty line and that

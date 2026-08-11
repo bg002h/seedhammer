@@ -234,7 +234,7 @@ func recoverSLIP39Flow(ctx *Context, th *Colors, first slip39words.Share) (bip39
 	// Collection loop: prompt until enough groups are satisfied.
 	for countSatisfied(byGroup) < GT {
 		done := countSatisfied(byGroup)
-		title := fmt.Sprintf("Share · %d/%d groups", done, GT)
+		title := fmt.Sprintf("Share | %d/%d groups", done, GT) // F-78: "·" is a zero-pixel glyph in this font
 		m := emptySLIP39Mnemonic(L)
 		if ok := inputSLIP39Flow(ctx, th, m, 0, title); !ok {
 			return nil, false // Back exits recovery (the dead-end / cancel path)

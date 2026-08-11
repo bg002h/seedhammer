@@ -288,6 +288,30 @@ func TestRecoverSLIP39MultiGroup(t *testing.T) {
 	}
 }
 
+// TestRecoverSLIP39TitleSeparator: recoverSLIP39Flow's collection-roster title
+// (slip39_polish.go:237, "Share %d/%d groups") renders in ctx.Styles.title
+// (poppins.Bold25). F-78: "·" contributes zero pixels in this font; the title
+// must use "|" instead.
+func TestRecoverSLIP39TitleSeparator(t *testing.T) {
+	first := parseFixtureShare(t, slip39Vec3[0])
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { recoverSLIP39Flow(ctx, &descriptorTheme, first) })
+	defer quit()
+	c, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if !uiContains(c, "Share") || !uiContains(c, "groups") {
+		t.Fatalf("recover roster title not shown; got %q", c)
+	}
+	if !strings.Contains(c, "|") {
+		t.Errorf("recover roster title missing the \"|\" separator; got %q", c)
+	}
+	if strings.Contains(c, "·") {
+		t.Errorf("recover roster title still contains the invisible middot separator: %q", c)
+	}
+}
+
 func TestRecoverSLIP39Mismatch(t *testing.T) {
 	// Entering a share from a DIFFERENT set (different identifier) must surface
 	// an eager ConsistentShares error and re-prompt (not abort, not combine).

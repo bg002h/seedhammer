@@ -754,7 +754,10 @@ func TestUnlockTooManyRecordsIsNotReportedAsAWrongPassphrase(t *testing.T) {
 
 // progressPct reads the percentage off a drawn progress frame. ExtractText
 // emits no spaces, so the number sits between the title and the lead line.
-var progressPct = regexp.MustCompile(`(?i)sealedpayload(\d+)unlocking`)
+// The "%?" is F-86: Boldprogress45 now carries a "%" glyph, so it is drawn
+// (and therefore extracted) between the digits and "Unlocking" where it
+// used to render zero pixels and vanish from the extracted stream entirely.
+var progressPct = regexp.MustCompile(`(?i)sealedpayload(\d+)%?unlocking`)
 
 // TestUnlockDerivesWithARealProgressScreen — §10.2 step 7. pbkdf2.Key is one
 // blocking call: the frame loop stops for ~31 s and the screen freezes, which
@@ -837,22 +840,17 @@ func TestUnlockDerivesWithARealProgressScreen(t *testing.T) {
 	}
 }
 
-// TestProgressStyleRendersNoPercentSign pins a MEASURED fact about the screen
-// above, in the same spirit as TestPlateLabelSeparatorRenders.
-//
-// unlockDerive formats the reading as "%d%%", but Styles.progress is
-// poppins.Boldprogress45 -- the engrave timer's face, which carries digits and
-// ":" and NOT "%". Measured: width("50") = 57, width("50%") = 56, so the "%"
-// contributes ZERO glyph pixels (the -1 is Styles.progress' LetterSpacing).
-// Styles.body and Styles.lead both render it at +12px.
-//
-// So the operator sees a bare number. That is legible -- the lead line beneath
-// it carries "Unlocking. About N seconds left." -- but it is F-78's class
-// exactly ("a mark the operator cannot see is worse than no mark at all"), and
-// it is recorded here rather than silently redesigned, because the plan is
-// GREEN and this is a font fact, not a code defect. If the face ever gains the
-// glyph this test says so.
-func TestProgressStyleRendersNoPercentSign(t *testing.T) {
+// TestProgressStyleRendersPercentSign is F-86's regression guard, superseding
+// TestProgressStyleRendersNoPercentSign (which pinned the DEFECT: "%" used to
+// contribute zero pixels in Styles.progress because Boldprogress45 was
+// generated with -alphabet "0123456789:", missing "%"). font/poppins/gen.go
+// now generates it with "0123456789:%%" (F-86), and
+// font/poppins/boldprogress45_test.go's TestBoldprogress45HasPercentGlyph
+// pins the glyph directly on the RASTER. This test pins the consequence at
+// the call-site style level: unlockDerive formats the reading as "%d%%" in
+// Styles.progress, and it must now measure wider with "%" than without, the
+// same way Styles.lead always has.
+func TestProgressStyleRendersPercentSign(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	w := func(style, s string) int {
 		st := ctx.Styles.progress
@@ -868,12 +866,12 @@ func TestProgressStyleRendersNoPercentSign(t *testing.T) {
 	t.Logf("lead:     width(\"50\")=%d width(\"50%%\")=%d (delta %d)", lead, leadPct, leadPct-lead)
 
 	if leadPct <= lead {
-		t.Errorf("Styles.lead no longer renders \"%%\" either (delta %d); the premise "+
-			"that this is a face-subset issue is gone", leadPct-lead)
+		t.Errorf("Styles.lead does not render \"%%\" (delta %d); setup invalid -- the positive "+
+			"control face must already carry the glyph", leadPct-lead)
 	}
-	if progPct > prog {
-		t.Errorf("Styles.progress now renders \"%%\" (delta %d px): the face gained the "+
-			"glyph, so unlockDerive's reading is finally complete on screen", progPct-prog)
+	if progPct <= prog {
+		t.Errorf("Styles.progress still does not render \"%%\" (delta %d px): the operator "+
+			"sees a bare number where the code says a percentage (F-86)", progPct-prog)
 	}
 }
 
