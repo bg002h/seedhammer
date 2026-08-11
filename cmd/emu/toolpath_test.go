@@ -188,14 +188,31 @@ func rerun(t *testing.T, w []waypoint) string {
 	return runPlan(t, w).Summarize(0).Digest
 }
 
-// TestReturnsToOriginFlagsTheResumeFailure pins the anomaly detector against
+// TestCutsThroughOriginIgnoresALegitimateResumeApproach pins the anomaly detector against
 // the shape it exists for: a needle-down move back through (0,0) part way
 // into a plate.
 //
 // That is what a zeroed SafePointer.history produces -- Resume feeds appendLine
 // from a cleared safePoint, so the catch-up drives to the origin at T:0. On a
 // plate it is a ruined plate; here it is a boolean.
-func TestReturnsToOriginFlagsTheResumeFailure(t *testing.T) {
+func TestCutsThroughOriginIgnoresALegitimateResumeApproach(t *testing.T) {
+	// The shape SafePointer.Resume actually produces: a needle-UP run back
+	// through the origin, then out to the safe point. Measured on hardware --
+	// every healthy resume does this, and the first version of the flag called
+	// it a wrecked plate.
+	resume := []waypoint{
+		{false, bezier.Pt(0, 0)},
+		{false, bezier.Pt(10*mm, 5*mm)},
+		{true, bezier.Pt(40*mm, 5*mm)},
+		{false, bezier.Pt(0, 0)}, // <- the synthesised approach
+		{false, bezier.Pt(30*mm, 15*mm)},
+		{true, bezier.Pt(40*mm, 25*mm)},
+	}
+	if s := runPlan(t, resume).Summarize(0); s.CutsThroughOrigin {
+		t.Error("a needle-UP return through the origin was flagged -- that is what EVERY " +
+			"legitimate resume does, so the flag would condemn every healthy plate")
+	}
+
 	clean := []waypoint{
 		{false, bezier.Pt(0, 0)},
 		{false, bezier.Pt(10*mm, 5*mm)},
@@ -203,7 +220,7 @@ func TestReturnsToOriginFlagsTheResumeFailure(t *testing.T) {
 		{true, bezier.Pt(40*mm, 25*mm)},
 		{false, bezier.Pt(30*mm, 15*mm)},
 	}
-	if s := runPlan(t, clean).Summarize(0); s.ReturnsToOrigin {
+	if s := runPlan(t, clean).Summarize(0); s.CutsThroughOrigin {
 		t.Errorf("a plan that never returns to the origin was flagged as doing so -- "+
 			"the detector would cry wolf on every plate (digest %s)", s.Digest)
 	}
@@ -216,7 +233,7 @@ func TestReturnsToOriginFlagsTheResumeFailure(t *testing.T) {
 		{true, bezier.Pt(40*mm, 25*mm)},
 	}
 	s := runPlan(t, wrecked).Summarize(0)
-	if !s.ReturnsToOrigin {
+	if !s.CutsThroughOrigin {
 		t.Error("a needle-down move through the origin mid-plate was NOT flagged -- this is " +
 			"the exact signature of resume state zeroed while a restart was reachable")
 	}

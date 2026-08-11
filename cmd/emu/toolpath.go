@@ -345,11 +345,20 @@ type Summary struct {
 	// the abort->resume reading needs.
 	Digest string `json:"digest"`
 
-	// Anomalies are the shapes that mean "the geometry was zeroed while a
-	// restart was still reachable" rather than "a residue survived".
-	ReturnsToOrigin bool `json:"returnsToOrigin"`
-	LongCuts        int  `json:"longCuts"`
-	LongCutLimit    int  `json:"longCutLimit"`
+	// CutsThroughOrigin is a needle-DOWN pass through the machine origin.
+	//
+	// It is deliberately NOT "the path reaches the origin". Measured on
+	// hardware 2026-08-10: EVERY legitimate resume tracks toward the origin,
+	// because SafePointer.Resume synthesises its approach from there --
+	// appendLine(move, conf, false, bezier.Point{}, s.safePoint)
+	// (engrave/engrave.go:1664) interpolates in absolute coordinates from
+	// (0,0). The first version of this flag fired on healthy runs.
+	//
+	// That approach is needle UP. Cutting through the origin is not something
+	// any plate does.
+	CutsThroughOrigin bool `json:"cutsThroughOrigin"`
+	LongCuts          int  `json:"longCuts"`
+	LongCutLimit      int  `json:"longCutLimit"`
 }
 
 // Summarize digests the recording. longCutFrac is the fraction of the bounding
@@ -387,9 +396,9 @@ func (r *toolpathRecorder) Summarize(longCutFrac float64) Summary {
 		}
 	}
 	// A plate STARTS at the origin, so "is any vertex at (0,0)" would flag
-	// every clean run. The signature is a RETURN: the head has to have gone
-	// somewhere first. Measured on the first version of this code -- it
-	// reported a clean box as wrecked.
+	// every clean run. The head has to have gone somewhere first -- and the
+	// pass has to be needle-down, since a resume legitimately travels back
+	// through the origin with the needle up.
 	away := max(span/10, 1)
 	// The path is rasterised, so a vertex lands within a step or so of the
 	// ideal coordinate. Exact equality against (0,0) misses the dive it is
@@ -411,8 +420,8 @@ func (r *toolpathRecorder) Summarize(longCutFrac float64) Summary {
 			continue
 		}
 		p := vs[i-1]
-		if hasLeft && abs(v.X) <= originTol && abs(v.Y) <= originTol {
-			s.ReturnsToOrigin = true
+		if hasLeft && v.Needle && abs(v.X) <= originTol && abs(v.Y) <= originTol {
+			s.CutsThroughOrigin = true
 		}
 		if v.Needle && limit > 0 {
 			d := max(abs(v.X-p.X), abs(v.Y-p.Y))
