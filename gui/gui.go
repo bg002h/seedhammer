@@ -594,7 +594,29 @@ func engraveSeed(params engrave.Params, m bip39.Mnemonic, mfp uint32) (Plate, er
 	return toPlate(seedSide, params)
 }
 
+// masterFingerprintFailHook, when non-nil and returning true, makes
+// masterFingerprintFor report failure without deriving anything. nil in
+// production.
+//
+// It exists to reach unlockEngraveMnemonic's THIRD early return -- the
+// "Couldn't derive the fingerprint for this seed" leg, the one residue F-87
+// still has after two of the three were pinned. That leg is gated on
+// hdkeychain.NewMaster rejecting the derived key, a 1-in-2^127 event no
+// fixture can produce and no Platform, mnemonic or network argument can force,
+// so the leg is unreachable from a test without a seam and its share of
+// `defer clear(m)` stays unpinned.
+//
+// This is the ONE seam in this file that changes behaviour rather than merely
+// observing it, so the direction matters: it fails CLOSED. Non-nil, the machine
+// refuses to derive a fingerprint and shows an error; it cannot make the device
+// engrave a DIFFERENT fingerprint or a different seed, which is what a seam
+// that substituted the seed or the returned value could do.
+var masterFingerprintFailHook func() bool
+
 func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password string) (uint32, error) {
+	if masterFingerprintFailHook != nil && masterFingerprintFailHook() {
+		return 0, errors.New("masterFingerprintFailHook: forced failure")
+	}
 	mk, ok := deriveMasterKey(m, network, password)
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
