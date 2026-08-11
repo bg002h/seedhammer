@@ -31,7 +31,47 @@ var (
 	ErrNotLowercase       = errors.New("seal: record is not lowercase")
 	ErrRecordNotPermitted = errors.New("seal: record classification not permitted in this section")
 	ErrUndecodableCardSet = errors.New("seal: public records do not form a decodable card set")
+	// ErrCodex32TooLong is §10.2.1a's refusal, and it is a SEPARATE sentinel
+	// from ErrRecordNotPermitted on purpose. §6.4 renders every other admission
+	// failure to the operator as "Payload unreadable"; this record is not
+	// unreadable. It is intact and too long to cut, and the operator has been
+	// taught to read "unreadable" as "someone replaced my payload". Conflating
+	// a plate-geometry limit with an attack sends them chasing a compromise
+	// that did not happen -- exactly the argument ErrTooManyRecords already
+	// won. The length and the classification are authenticated plaintext, so
+	// naming them leaks nothing.
+	ErrCodex32TooLong = errors.New("seal: codex32 secret is too long to engrave")
 )
+
+// MaxEngraveableCodex32Len is §10.2.1a's limit: the longest codex32 secret the
+// seed plate's QR can hold.
+//
+// Derived from backup.EngraveSeedString, which builds the QR from the
+// UPPERCASED share at error-correction level M and refuses qrc.Size > 33.
+// Measured against the real encoder the boundary is exact and sits between 90
+// and 91:
+//
+//	 63-90  -> QR size 33 -> cuts
+//	 91-122 -> QR size 37 -> refused
+//	123-127 -> QR size 41 -> refused
+//
+// codex32.New admits two bands -- short 48-93 and long 125-127 -- so BOTH
+// overhang the engraver: 91-93 and every long code. That is why this is stated
+// as one length rather than as "reject long codes".
+//
+// IT IS PINNED, NOT TRUSTED. TestEngraveableLimitIsDerivedFromTheRealQREncoder
+// (backup/engraveable_test.go) re-derives this number from qr.Encode and fails
+// if it is no longer 90/91. Two things can move it independently: the
+// qrc.Size > 33 cap and the error-correction level. Measured: at qr.Q instead
+// of qr.M the limit drops to 67 -- below EncodeMS1's ordinary output -- which
+// would silently reopen this defect AND reject ordinary seeds. (qrScale is NOT
+// among them: the boundary is decided by qr.Encode before qrScale is read.)
+//
+// Characters, and len() is the right measure: a record only reaches this check
+// once Classify has returned ClassCodex32Secret, i.e. once codex32.New has
+// parsed it, so every byte is drawn from the bech32 charset and is one
+// character.
+const MaxEngraveableCodex32Len = 90
 
 // Section is where a record was carried. Secrecy is decided by section
 // placement, checked against CLASSIFIED CONTENT — never against anything the
@@ -221,6 +261,30 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 			wipe(out)
 			return nil, fmt.Errorf("%w: record %d classifies as %s, which the %s section does not permit",
 				ErrRecordNotPermitted, i, c, section)
+		}
+		// Pass 2a — §10.2.1a. An ms1 the seed plate cannot hold is refused HERE,
+		// in the per-record pass, and never in the post-loop section block: there
+		// it would leak every ms1 already copied into `out`, unreachable to both
+		// Payload.Wipe and RecordsResident(). So it wipes what it copied and
+		// returns nothing, exactly as the two allow-list failure paths above do.
+		//
+		// AFTER the allow-list, not before it, and the order is load-bearing. An
+		// over-length codex32 secret in the PUBLIC section is a secret shipped in
+		// the clear -- a far more serious finding than a plate that does not fit
+		// -- and the operator must be told the serious one. Checking first turns
+		// ErrRecordNotPermitted into ErrCodex32TooLong for exactly that case.
+		//
+		// ms1 ONLY. mdmkText and mnemonics are deliberately not covered: a
+		// descriptor too long for one record CHUNKS across records that
+		// reassemble by (HRP, chunk_set_id), and md/mk plates have VARIANTS
+		// (backup.EngraveText via engrave.QR, with "TEXT + QR" and "QR ONLY"
+		// among the shapes gui/gui.go offers). A seed share has neither -- it is
+		// atomic, and backup.EngraveSeedString has exactly one shape.
+		if c == ClassCodex32Secret && len(r) > MaxEngraveableCodex32Len {
+			wipe(out)
+			return nil, fmt.Errorf(
+				"%w: record %d is a codex32 secret of %d characters; this machine can engrave at most %d",
+				ErrCodex32TooLong, i, len(r), MaxEngraveableCodex32Len)
 		}
 		// COPY, not a slice into the caller's buffer. Unlock does
 		// `defer clear(plaintext)` and SplitSection slices into that plaintext, so
@@ -457,10 +521,20 @@ func decodePublicSet(g grouping) error {
 //
 // ITS CALL SITES ARE NOT REGRESSION-TESTED, and cannot cheaply be: `out` is
 // never returned on the paths that call this, so no test can observe those
-// bytes through the public API without `unsafe`. Deleting both calls leaves the
-// whole suite green — measured. TestWipeZeroesAPartialResult below covers this
-// function's own behaviour, so a no-op `wipe` is caught; a REMOVED call is not.
-// Saying so beats a contorted test that pretends otherwise. Whole-payload rejection means the caller never sees them, but they
+// bytes through the public API without `unsafe`. Deleting any of the THREE
+// calls — the two allow-list paths and §10.2.1a's engraveability check — leaves
+// the whole suite green. Re-measured 2026-08-10 when the third was added, by
+// deleting it: `go test ./seal/ ./backup/ ./gui/` stayed green.
+// TestWipeZeroesAPartialResult below covers this function's own behaviour, so a
+// no-op `wipe` is caught; a REMOVED call is not. Saying so beats a contorted
+// test that pretends otherwise.
+//
+// What IS testable about placement is WHICH record a section stops at, and
+// TestTooLongSecretIsCaughtInThePerRecordPass uses it: an over-length secret at
+// index 0 ahead of an allow-list failure at index 1 must report
+// ErrCodex32TooLong, which only a check inside the loop can do.
+//
+// Whole-payload rejection means the caller never sees these records, but they
 // are copies of possibly-secret bytes and clearing them costs nothing.
 func wipe(recs []AdmittedRecord) {
 	for _, r := range recs {
