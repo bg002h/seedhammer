@@ -43,6 +43,12 @@ func main() {
 	fmt.Println()
 	fmt.Println("Test data only (mnemonic-engrave seal_vectors.json Vector F) -- never")
 	fmt.Println("anyone's funds. See cmd/emu/sealed_test_payload.go for provenance.")
+	fmt.Println()
+	fmt.Println("window.shToolpath decodes the step stream this emulator would have")
+	fmt.Println("sent to the machine -- reset()/summary()/path()/svg(). Cut a plate")
+	fmt.Println("twice, once straight through and once with Back mid-cut followed by")
+	fmt.Println("hold-to-resume, and compare summary().digest: equal digests mean the")
+	fmt.Println("resumed plate follows the same motion. See cmd/emu/toolpath_js.go.")
 	fmt.Println("==================================================================")
 	for range gui.Run(newPlatform(), ver) {
 	}
