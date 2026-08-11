@@ -61,6 +61,18 @@ func singleMK1Fixture(tb testing.TB) string {
 	return s
 }
 
+// TestMk1SummarySeparator: mk1Summary (bundle.go:306) joins its three fields
+// with "|", not "·" (F-78 — "·" contributes zero pixels in ctx.Styles.body,
+// the face this review-summary line renders in).
+func TestMk1SummarySeparator(t *testing.T) {
+	c := mk.Card{Network: "mainnet", Path: "m/84'/0'/0'", Fingerprint: "deadbeef"}
+	got := mk1Summary(c)
+	want := "mainnet | m/84'/0'/0' | fp deadbeef"
+	if got != want {
+		t.Errorf("mk1Summary = %q, want %q", got, want)
+	}
+}
+
 func TestClassify(t *testing.T) {
 	mkA := mk1CardA(t)
 	mdA := md1CardA(t)

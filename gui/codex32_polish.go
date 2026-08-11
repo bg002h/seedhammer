@@ -23,18 +23,21 @@ func codex32StatusLine(n int) string {
 	case n < codex32.ShortCodeMinLength:
 		return fmt.Sprintf("%d chars", n)
 	case n <= codex32.ShortCodeMaxLength:
-		return fmt.Sprintf("short · %d chars", n)
+		return fmt.Sprintf("short | %d chars", n)
 	case n < codex32.LongCodeMinLength:
 		return fmt.Sprintf("%d chars — keep typing", n)
 	case n <= codex32.LongCodeMaxLength:
-		return fmt.Sprintf("long · %d chars", n)
+		return fmt.Sprintf("long | %d chars", n)
 	default:
 		return "too long"
 	}
 }
 
-// codex32FieldLine renders the parsed header fields as "id NAME · thr 2 · share C",
+// codex32FieldLine renders the parsed header fields as "id NAME | thr 2 | share C",
 // each segment appearing once its field is known. Returns "" if nothing is known.
+//
+// F-78: the separator is "|", not the spec examples' "·" — "·" has no glyph in
+// this font (ctx.Styles.body) and contributes zero pixels.
 func codex32FieldLine(f codex32.Fields) string {
 	var segs []string
 	if f.IdentifierKnown {
@@ -46,7 +49,7 @@ func codex32FieldLine(f codex32.Fields) string {
 	if f.ShareIndexKnown {
 		segs = append(segs, "share "+strings.ToUpper(string(f.ShareIndex)))
 	}
-	return strings.Join(segs, " · ")
+	return strings.Join(segs, " | ")
 }
 
 // codex32Feedback returns an error label to show under the entry, or "" if the
@@ -179,7 +182,7 @@ func recoverCodex32Flow(ctx *Context, th *Colors, first codex32.String) (codex32
 	id := strings.ToUpper(f.Identifier)
 	shares := []codex32.String{first}
 	for len(shares) < k {
-		title := fmt.Sprintf("Share %d of %d · id %s", len(shares)+1, k, id)
+		title := fmt.Sprintf("Share %d of %d | id %s", len(shares)+1, k, id) // F-78: "·" is a zero-pixel glyph in this font
 		obj, ok := inputCodex32Flow(ctx, th, title)
 		if !ok {
 			return codex32.String{}, false // Back exits recovery
@@ -283,7 +286,7 @@ func mstarStatusLine(frag string, f codex32.Fields) string {
 	switch {
 	case strings.EqualFold(f.HRP, "md"), strings.EqualFold(f.HRP, "mk"):
 		if codex32.MStarInWindow(frag) {
-			return fmt.Sprintf("%s · %d chars", strings.ToLower(f.HRP), len(frag))
+			return fmt.Sprintf("%s | %d chars", strings.ToLower(f.HRP), len(frag)) // F-78: "·" is a zero-pixel glyph in this font
 		}
 		return fmt.Sprintf("%d chars", len(frag))
 	default: // ms or pre-separator
@@ -311,7 +314,7 @@ func mstarFeedback(frag string, f codex32.Fields, perr, msErr error, valid bool)
 // confirmCorrectionFlow shows the proposed correction's per-position diff and
 // asks the user to confirm it against their source card BEFORE the corrected
 // string is accepted. The per-position diff is the UNIVERSAL anchor for all three
-// m*1 (SPEC §2.3); for ms ONLY it also shows the decoded id·thr·share header line
+// m*1 (SPEC §2.3); for ms ONLY it also shows the decoded id|thr|share header line
 // (the codex32 share schema does not exist for md/mk). Button1 rejects, Button3
 // accepts; Button2 is drained every frame so it cannot block the queue head.
 func confirmCorrectionFlow(ctx *Context, th *Colors, res codex32.CorrectionResult, hrp string) bool {

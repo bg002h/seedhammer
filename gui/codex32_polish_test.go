@@ -15,12 +15,12 @@ func TestCodex32StatusLine(t *testing.T) {
 	}{
 		{0, "0 chars"},
 		{47, "47 chars"},
-		{48, "short · 48 chars"},
-		{93, "short · 93 chars"},
+		{48, "short | 48 chars"},
+		{93, "short | 93 chars"},
 		{94, "94 chars — keep typing"},
 		{124, "124 chars — keep typing"},
-		{125, "long · 125 chars"},
-		{127, "long · 127 chars"},
+		{125, "long | 125 chars"},
+		{127, "long | 127 chars"},
 		{128, "too long"},
 	}
 	for _, c := range cases {
@@ -32,16 +32,36 @@ func TestCodex32StatusLine(t *testing.T) {
 
 func TestCodex32FieldLine(t *testing.T) {
 	f, _ := codex32.ParsePrefix("ms12name")
-	if got := codex32FieldLine(f); got != "id NAME · thr 2" {
+	if got := codex32FieldLine(f); got != "id NAME | thr 2" {
 		t.Errorf("codex32FieldLine(ms12name) = %q", got)
 	}
 	f, _ = codex32.ParsePrefix("ms10tests")
-	if got := codex32FieldLine(f); got != "id TEST · thr 0 · share S" {
+	if got := codex32FieldLine(f); got != "id TEST | thr 0 | share S" {
 		t.Errorf("codex32FieldLine(ms10tests) = %q", got)
 	}
 	var empty codex32.Fields
 	if got := codex32FieldLine(empty); got != "" {
 		t.Errorf("codex32FieldLine(empty) = %q, want \"\"", got)
+	}
+}
+
+// TestMstarStatusLineSeparator: the md/mk branch of mstarStatusLine
+// (codex32_polish.go:286) joins the HRP and length readout with "|", not "·"
+// (F-78 — "·" has no glyph in poppins.Regular16/Bold25, the faces that render
+// this line, and contributes zero pixels; "|" is the operator's established
+// substitute, already used by unlockPlateLabel).
+func TestMstarStatusLineSeparator(t *testing.T) {
+	const frag = "md1yqpqqxqq8xtwhw4xwn4qh"
+	f, _ := codex32.ParsePrefix(frag)
+	if !codex32.MStarInWindow(frag) {
+		t.Fatalf("setup: %q must be in the md/mk status window", frag)
+	}
+	got := mstarStatusLine(frag, f)
+	if !strings.Contains(got, "|") {
+		t.Errorf("mstarStatusLine(%q) = %q, want a \"|\" separator", frag, got)
+	}
+	if strings.Contains(got, "·") {
+		t.Errorf("mstarStatusLine(%q) = %q, still uses the invisible middot", frag, got)
 	}
 }
 
@@ -228,6 +248,30 @@ func TestConfirmCodex32UnsharedNoRecover(t *testing.T) {
 	click(&ctx.Router, Button2, Button3) // Button2 must be inert for an unshared secret
 	if got := confirmCodex32Flow(ctx, &descriptorTheme, s); got != codex32Engrave {
 		t.Errorf("unshared + Button2,Button3 → %v, want codex32Engrave (Button2 ignored)", got)
+	}
+}
+
+// TestRecoverCodex32TitleSeparator: recoverCodex32Flow's per-share prompt title
+// (codex32_polish.go:182, "Share %d of %d · id %s") renders in ctx.Styles.title
+// (poppins.Bold25). F-78: "·" contributes zero pixels in this font; the title
+// must use "|" instead, matching the fix applied throughout this file.
+func TestRecoverCodex32TitleSeparator(t *testing.T) {
+	shareA, err := codex32.New("MS12NAMEA320ZYXWVUTSRQPNMLKJHGFEDCAXRPP870HKKQRM")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	frame, quit := runUI(ctx, func() { recoverCodex32Flow(ctx, &descriptorTheme, shareA) })
+	defer quit()
+	c, ok := frame()
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if !uiContains(c, "Share 2 of 2 | id NAME") {
+		t.Errorf("recover title missing the \"|\" separator; got %q", c)
+	}
+	if strings.Contains(c, "·") {
+		t.Errorf("recover title still contains the invisible middot separator: %q", c)
 	}
 }
 

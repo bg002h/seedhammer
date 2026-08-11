@@ -298,12 +298,15 @@ func (g *bundleGatherer) dropPending() {
 }
 
 // mk1Summary is a one-line review summary for an mk1 card.
+//
+// F-78: joined with "|", not "·" — "·" has no glyph in ctx.Styles.body
+// (poppins.Regular16) and contributes zero pixels.
 func mk1Summary(card mk.Card) string {
 	fp := card.Fingerprint
 	if fp == "" {
 		fp = "none"
 	}
-	return card.Network + " · " + card.Path + " · fp " + fp
+	return card.Network + " | " + card.Path + " | fp " + fp
 }
 
 // bundleMD1Summary is a one-line review summary for an md1 descriptor card,
