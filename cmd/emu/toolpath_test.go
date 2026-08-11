@@ -16,6 +16,14 @@ const mm = 6400
 // recorder decoded from the words it emitted.
 func runPlan(t *testing.T, waypoints []waypoint) *toolpathRecorder {
 	t.Helper()
+	return runPlanInto(t, newToolpathRecorder(), waypoints)
+}
+
+// runPlanInto is runPlan against a recorder that may already hold a recording,
+// which is how the homing tests below put two jobs through one recorder -- the
+// arrangement cmd/emu/platform.go deliberately has.
+func runPlanInto(t *testing.T, rec *toolpathRecorder, waypoints []waypoint) *toolpathRecorder {
+	t.Helper()
 	conf := sh2.Params().StepperConfig
 	plan := func(yield func(engrave.Command) bool) {
 		for _, w := range waypoints {
@@ -28,7 +36,9 @@ func runPlan(t *testing.T, waypoints []waypoint) *toolpathRecorder {
 			}
 		}
 	}
-	rec := newToolpathRecorder()
+	// A FRESH driver per job, as runEngraving makes one per pass. Its position
+	// starts at (0,0) -- which is the whole of F-121: on the machine the head
+	// really is there, because homingEngraver drove it there.
 	drv := stepper.NewDriver(rec)
 	for k := range engrave.PlanEngraving(conf, plan) {
 		if _, err := drv.Knot(k); err != nil {
@@ -241,4 +251,184 @@ func TestCutsThroughOriginIgnoresALegitimateResumeApproach(t *testing.T) {
 		t.Error("the origin dive was not counted as a long cut either, so neither anomaly " +
 			"would surface it")
 	}
+}
+
+// TestHomeReturnsTheHeadToTheOriginBetweenJobs is F-121, as a test.
+//
+// cmd/controller wraps its engraver in a homingEngraver that homes on the first
+// write of every job, so the machine's head is at the plate origin whenever a
+// pass begins -- resumes included. stepper.Driver relies on it: Driver.pos is a
+// zero bezier.Point and every step it emits is a delta from there, so the step
+// stream MEANS "from the origin".
+//
+// The emulator had no such wrapper, and one recorder spans every job. So a
+// second pass integrated an origin-relative stream from wherever the previous
+// pass stopped, and recorded a plate the machine would never cut -- measured on
+// the seed plate, an offset of (68.1mm, 34.4mm) on an 85mm plate.
+//
+// Mutations this pins: drop the Home call from emuEngraver.Write; make Home
+// clear the position without recording the travel; home on the first job only.
+func TestHomeReturnsTheHeadToTheOriginBetweenJobs(t *testing.T) {
+	plan := []waypoint{
+		{false, bezier.Pt(0, 0)},
+		{false, bezier.Pt(10*mm, 5*mm)},
+		{true, bezier.Pt(40*mm, 5*mm)},
+		{true, bezier.Pt(40*mm, 25*mm)},
+	}
+
+	rec := newToolpathRecorder()
+	runPlanInto(t, rec, plan)
+	first := rec.Summarize(0)
+	if first.EndX == 0 && first.EndY == 0 {
+		t.Fatal("INCONCLUSIVE: the plan ended at the origin, so a missing home would be " +
+			"invisible and this test could not fail")
+	}
+
+	rec.Home()
+	if s := rec.Summarize(0); s.EndX != 0 || s.EndY != 0 {
+		t.Fatalf("after Home the head is at (%d,%d), want the origin -- the next job's step "+
+			"stream is a delta from (0,0) and would be recorded from here instead",
+			s.EndX, s.EndY)
+	}
+
+	// The same plan again, through a fresh driver, as a second pass is.
+	runPlanInto(t, rec, plan)
+	second := rec.Summarize(0)
+	if second.EndX != first.EndX || second.EndY != first.EndY {
+		t.Errorf("the second pass over the same plan ended at (%d,%d), want (%d,%d) -- "+
+			"it is being recorded offset by the previous pass, which is the plate the "+
+			"machine does not cut", second.EndX, second.EndY, first.EndX, first.EndY)
+	}
+	if second.Bounds != first.Bounds {
+		t.Errorf("the second pass covered %v, want %v -- an overlay would draw it off the "+
+			"plan by the whole offset", second.Bounds, first.Bounds)
+	}
+}
+
+// TestHomeTravelsWithTheNeedleUp pins the one way homing could manufacture the
+// exact anomaly the recorder exists to find.
+//
+// CutsThroughOrigin is the signature of resume state zeroed while a restart was
+// reachable (F-108): a needle-DOWN pass through (0,0) part way into a plate. A
+// homing move that recorded the needle's last state instead of lifting it would
+// stamp that signature onto every healthy interrupted plate -- and the flag
+// would then be worthless in the one place it is read.
+func TestHomeTravelsWithTheNeedleUp(t *testing.T) {
+	// Ends mid-cut, needle DOWN and far from the origin.
+	rec := runPlan(t, []waypoint{
+		{false, bezier.Pt(0, 0)},
+		{false, bezier.Pt(10*mm, 5*mm)},
+		{true, bezier.Pt(40*mm, 25*mm)},
+	})
+	if !rec.Path()[len(rec.Path())-1].Needle {
+		t.Fatal("INCONCLUSIVE: the plan did not end with the needle down, so lifting it " +
+			"cannot be what this test observes")
+	}
+
+	rec.Home()
+
+	last := rec.Path()[len(rec.Path())-1]
+	if last.X != 0 || last.Y != 0 {
+		t.Fatalf("the homing move ended at (%d,%d), want the origin", last.X, last.Y)
+	}
+	if last.Needle {
+		t.Error("the homing move was recorded as a CUT to the origin -- that is the F-108 " +
+			"wrecked-plate signature, and homing would forge it on every healthy plate")
+	}
+	if s := rec.Summarize(0); s.CutsThroughOrigin {
+		t.Error("homing set CutsThroughOrigin, so the anomaly that detects a zeroed " +
+			"SafePointer.history now fires on every interrupted plate")
+	}
+}
+
+// TestHomeAtTheOriginRecordsNothing keeps the common case free of debris: the
+// device homes at the start of every job whether or not it needs to, but a
+// zero-length travel is not motion, and a vertex per job would accumulate in a
+// recording that deliberately spans all of them.
+func TestHomeAtTheOriginRecordsNothing(t *testing.T) {
+	rec := newToolpathRecorder()
+	before := len(rec.Path())
+	rec.Home()
+	rec.Home()
+	if got := len(rec.Path()); got != before {
+		t.Errorf("two homes at the origin added %d vertices, want 0", got-before)
+	}
+
+	// And after a plan that happens to end where it started.
+	rec = runPlan(t, []waypoint{
+		{false, bezier.Pt(0, 0)},
+		{true, bezier.Pt(20*mm, 0)},
+		{true, bezier.Pt(0, 0)},
+	})
+	s := rec.Summarize(0)
+	if s.EndX != 0 || s.EndY != 0 {
+		t.Fatalf("INCONCLUSIVE: the closing plan ended at (%d,%d), not the origin", s.EndX, s.EndY)
+	}
+	n := len(rec.Path())
+	rec.Home()
+	if got := len(rec.Path()); got != n {
+		t.Errorf("homing from the origin added %d vertices, want 0", got-n)
+	}
+}
+
+// TestJobRecorderHomesOncePerJob pins the wiring, not the motion.
+//
+// It exists because the wiring used to live in engraver.go, which is
+// //go:build js and therefore cannot be tested at all. "Homes on the first
+// write and on Close, and not in between" is a three-state machine, and the
+// two ways to get it wrong -- homing on every write, homing on none -- are
+// both invisible until a plate is walked in a browser.
+//
+// Mutations this pins: home on every Write; never home on Write; drop the home
+// from Close; share homed across jobs.
+func TestJobRecorderHomesOncePerJob(t *testing.T) {
+	plan := []waypoint{
+		{false, bezier.Pt(0, 0)},
+		{false, bezier.Pt(10*mm, 5*mm)},
+		{true, bezier.Pt(40*mm, 25*mm)},
+	}
+	atOrigin := func(t *testing.T, rec *toolpathRecorder, what string) {
+		t.Helper()
+		if s := rec.Summarize(0); s.EndX != 0 || s.EndY != 0 {
+			t.Fatalf("%s left the head at (%d,%d), want the origin", what, s.EndX, s.EndY)
+		}
+	}
+
+	rec := runPlan(t, plan)
+	if s := rec.Summarize(0); s.EndX == 0 && s.EndY == 0 {
+		t.Fatal("INCONCLUSIVE: the plan ended at the origin, so homing cannot be observed")
+	}
+
+	// An EMPTY write, deliberately: homingEngraver homes before it forwards
+	// anything, so what triggers it is the write happening, not its content.
+	j := &jobRecorder{rec: rec}
+	if _, err := j.Write(nil); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	atOrigin(t, rec, "the first Write of a job")
+
+	// Now drive the head away again and write a second time. That must NOT
+	// home: the machine homes once per job, and a home mid-plate would drag
+	// the recording back to the origin between two halves of one cut.
+	runPlanInto(t, rec, plan)
+	before := rec.Summarize(0)
+	if _, err := j.Write(nil); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if after := rec.Summarize(0); after.EndX != before.EndX || after.EndY != before.EndY {
+		t.Errorf("a later Write moved the head to (%d,%d) from (%d,%d) -- it homed again, "+
+			"mid-job", after.EndX, after.EndY, before.EndX, before.EndY)
+	}
+
+	j.Close()
+	atOrigin(t, rec, "Close")
+
+	// And a NEW job homes again, because Platform.Engraver hands out a new
+	// engraver per pass.
+	runPlanInto(t, rec, plan)
+	j2 := &jobRecorder{rec: rec}
+	if _, err := j2.Write(nil); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	atOrigin(t, rec, "the first Write of the NEXT job")
 }

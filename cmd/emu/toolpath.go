@@ -310,6 +310,62 @@ func (r *toolpathRecorder) Reset() {
 	r.reset()
 }
 
+// Home records the origin-seeking move the machine performs at the start and
+// the end of every job, and it is not cosmetic: it is what makes a second pass
+// mean the same thing here as it does on the machine. F-121.
+//
+// cmd/controller wraps its engraver in a homingEngraver
+// (cmd/controller/platform_sh2.go:589) that homes on the first write and again
+// on Close, so the head is physically at the plate origin whenever a pass
+// begins. stepper.Driver depends on that: Driver.pos starts as the zero
+// bezier.Point and every step it emits is a delta from there, so a step stream
+// MEANS "starting from the origin".
+//
+// This recorder deliberately spans every job (platform.go:185), so without
+// this the second pass integrated an origin-relative stream from wherever the
+// first one stopped. On the seed plate that is an offset of (68.1mm, 34.4mm)
+// on an 85mm plate -- not a fidelity nit but a recording of a plate no machine
+// cuts, which is the reverse of what the recorder is for.
+//
+// The travel is needle UP. It has to be: a needle-DOWN pass through the origin
+// is the F-108 signature Summary.CutsThroughOrigin exists to catch, and homing
+// that forged it would make the flag useless exactly on interrupted plates.
+func (r *toolpathRecorder) Home() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.x == 0 && r.y == 0 {
+		// The device homes here too -- it cannot know it is already home -- but
+		// a zero-length travel is not motion, and this runs twice per job on a
+		// recording that spans all of them.
+		//
+		// The open run still has to be closed. path() appends the live position
+		// as a trailing vertex while started is set, so clearing started without
+		// emitting first DELETES the arrival: measured on a plan that closes at
+		// the origin, homing removed the vertex where the cut got there.
+		if r.started {
+			r.emit(r.x, r.y, r.needle)
+		}
+		r.startRun(0, 0, false)
+		r.started = false
+		return
+	}
+	// Close the open run where the head stands, then the travel home. BOTH
+	// vertices are needed: without the first, the polyline would leave from
+	// wherever the last corner was rather than from the head; without the
+	// second, the next pass's first segment would cut the corner and never
+	// pass through the origin at all.
+	r.emit(r.x, r.y, r.needle)
+	r.x, r.y = 0, 0
+	r.needle = false
+	r.emit(0, 0, false)
+	r.startRun(0, 0, false)
+	// started=false leaves exactly the shape reset() leaves: the origin is in
+	// the vertex list already, so path() must not append it a second time. The
+	// next real step sets it again.
+	r.started = false
+}
+
 // Path returns the vertices recorded so far, closed with the current position.
 func (r *toolpathRecorder) Path() []Vertex {
 	r.mu.Lock()
@@ -324,6 +380,45 @@ func (r *toolpathRecorder) path() []Vertex {
 		out = append(out, Vertex{X: r.x, Y: r.y, Needle: r.needle})
 	}
 	return out
+}
+
+// jobRecorder is one engraving pass over a recorder: it performs the homing
+// the machine performs, once per job.
+//
+// It lives HERE rather than in engraver.go because engraver.go is
+// //go:build js and cannot be tested on this host at all. "Homes on the first
+// write and on Close, and nowhere in between" is a small state machine whose
+// two failure modes -- homing on every write, homing on none -- both look like
+// a plausible plate until someone walks one in a browser.
+type jobRecorder struct {
+	rec *toolpathRecorder
+	// homed is per-JOB. Platform.Engraver hands out a fresh engraver per pass,
+	// exactly as cmd/controller does, so this arms once per pass the way
+	// homingEngraver.homed does.
+	homed bool
+}
+
+// Write homes before forwarding the first buffer of the job, as
+// homingEngraver.Write does. What triggers it is the write happening, not what
+// the write carries.
+func (j *jobRecorder) Write(steps []uint32) (int, error) {
+	if !j.homed {
+		j.homed = true
+		j.home()
+	}
+	if j.rec == nil {
+		return len(steps), nil
+	}
+	return j.rec.Write(steps)
+}
+
+// Close homes, as homingEngraver.Close does.
+func (j *jobRecorder) Close() { j.home() }
+
+func (j *jobRecorder) home() {
+	if j.rec != nil {
+		j.rec.Home()
+	}
 }
 
 // Summary is the machine-checkable digest of a run. It is what a comparison
