@@ -34,6 +34,10 @@ type platform struct {
 	events  chan gui.Event
 	wakeups chan struct{}
 
+	// toolpath decodes every step the GUI writes to an engraver. See
+	// toolpath.go; exposed to the page as window.shToolpath.
+	toolpath *toolpathRecorder
+
 	// The JS side. buf is a Uint8ClampedArray the same length as fb.Pix; Go
 	// cannot hand a []byte to putImageData directly, so each frame is copied
 	// through it.
@@ -49,9 +53,11 @@ func newPlatform() *platform {
 		// Buffered so a tap that lands while the GUI is laying out a frame is
 		// queued rather than dropped -- the browser delivers events on the JS
 		// side, which cannot block waiting for Go to be ready for them.
-		events:  make(chan gui.Event, 16),
-		wakeups: make(chan struct{}, 1),
+		events:   make(chan gui.Event, 16),
+		wakeups:  make(chan struct{}, 1),
+		toolpath: newToolpathRecorder(),
 	}
+	installToolpathAPI(p.toolpath)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -177,7 +183,9 @@ func (p *platform) Wakeup() {
 }
 
 func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
-	return &emuEngraver{}, nil
+	// One recorder across every job, so a plate that is aborted and resumed
+	// records as ONE motion -- which is the thing being compared.
+	return &emuEngraver{rec: p.toolpath}, nil
 }
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
