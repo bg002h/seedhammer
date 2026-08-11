@@ -18,8 +18,10 @@
 // the image by CONSTRUCTION rather than by argument. gui/preview.go keeps the
 // plate previews out of the image the same way, for a related reason.
 //
-// The cost of the split is one empty function in the TinyGo build. The cost of
-// getting it wrong is a hole in an inventory nobody re-derives.
+// The cost of the split is one call to an empty function per engraving job in
+// the TinyGo build -- measured, not assumed; see plate_hook_tinygo.go, where
+// the first version of that claim was wrong. The cost of getting the split
+// itself wrong is a hole in an inventory nobody re-derives.
 package gui
 
 import (
