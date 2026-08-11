@@ -187,6 +187,13 @@ func (e *engraveJob) runEngraving(quit <-chan struct{}, progress chan uint64) (c
 	if err != nil {
 		return err
 	}
+	// Offer the plan to the engraver before the first Write, so a consumer can
+	// show the whole plate at the moment the cut begins rather than watching it
+	// appear. nknots is the resume marker: it is the count of knots already
+	// emitted, so past zero this pass is a hold-to-resume over the same spline.
+	// notifyPlate is a no-op on the machine and PlateAware is not in the image
+	// at all -- see plate_hook.go.
+	notifyPlate(d, e.spline, e.conf, e.nknots > 0)
 	e.lock <- d
 	defer func() {
 		d := <-e.lock
