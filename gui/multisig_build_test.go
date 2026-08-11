@@ -485,7 +485,7 @@ func FuzzAssembleBuildPolicy(f *testing.F) {
 			cards = append(cards, c)
 		}
 		p := buildPolicyParams{
-			Script:    multisigScriptFor(((scriptIdx%3)+3)%3),
+			Script:    multisigScriptFor(((scriptIdx % 3) + 3) % 3),
 			N:         n,
 			K:         k,
 			SelfSlot:  selfSlot,

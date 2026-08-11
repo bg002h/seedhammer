@@ -303,12 +303,12 @@ func FuzzDeriveBip85Child(f *testing.F) {
 	f.Add(12, 0)
 	f.Add(18, 5)
 	f.Add(24, 9)
-	f.Add(15, 0)             // out-of-spec word count
-	f.Add(12, -1)            // negative index
+	f.Add(15, 0)  // out-of-spec word count
+	f.Add(12, -1) // negative index
 	f.Add(0, 0)
-	f.Add(12, 1<<31)         // = 2147483648: would wrap uint32 -> unhardened element 0 (R0-M1)
-	f.Add(12, 1<<31+1)       // = 2147483649: would wrap to unhardened element 1 (R0-M1)
-	f.Add(12, 2147483647)    // = 2^31-1: the accepted boundary
+	f.Add(12, 1<<31)      // = 2147483648: would wrap uint32 -> unhardened element 0 (R0-M1)
+	f.Add(12, 1<<31+1)    // = 2147483649: would wrap to unhardened element 1 (R0-M1)
+	f.Add(12, 2147483647) // = 2^31-1: the accepted boundary
 	f.Fuzz(func(t *testing.T, words, index int) {
 		// Must not panic. Errors are fine for out-of-spec inputs.
 		child, err := deriveBip85Child(abandonAboutMnemonic(), "", words, index)
@@ -339,7 +339,7 @@ func TestParseBip85Index(t *testing.T) {
 	}{
 		{"0", 0},
 		{"7", 7},
-		{"007", 7},          // leading zeros ACCEPTED (R0 adjudication #1)
+		{"007", 7}, // leading zeros ACCEPTED (R0 adjudication #1)
 		{"1000000", 1000000},
 		{"2147483647", 2147483647}, // = 2^31-1, the boundary, ACCEPTED
 	}
@@ -353,17 +353,17 @@ func TestParseBip85Index(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"",            // empty
-		"12a",         // trailing letter
-		"a12",         // leading letter
-		"-1",          // sign
-		"+1",          // sign
-		" 1",          // leading whitespace
-		"1 ",          // trailing whitespace
-		"0x10",        // hex prefix
-		"1.0",         // decimal point
-		"2147483648",  // = 2^31, first out-of-range value
-		"9999999999",  // 10 digits but > 2^31-1 (range, not length, is the authority)
+		"",                    // empty
+		"12a",                 // trailing letter
+		"a12",                 // leading letter
+		"-1",                  // sign
+		"+1",                  // sign
+		" 1",                  // leading whitespace
+		"1 ",                  // trailing whitespace
+		"0x10",                // hex prefix
+		"1.0",                 // decimal point
+		"2147483648",          // = 2^31, first out-of-range value
+		"9999999999",          // 10 digits but > 2^31-1 (range, not length, is the authority)
 		"9223372036854775808", // > 2^63, ParseUint(…,64) itself overflows
 	}
 	for _, in := range bad {

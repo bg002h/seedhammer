@@ -93,10 +93,10 @@ func TestTemplateEngraveShapeGuard(t *testing.T) {
 	}
 
 	admitted := map[string]*descriptor{
-		"tr(NUMS, multi_a)":          trNumsMultiAGuard(),
-		"wsh(sortedmulti) canonical": canonicalWshSortedMultiGuard(),
+		"tr(NUMS, multi_a)":           trNumsMultiAGuard(),
+		"wsh(sortedmulti) canonical":  canonicalWshSortedMultiGuard(),
 		"wsh(or_i(multi,...)) legacy": wshOrILegacyMultiGuard(),
-		"single-sig wpkh":            keylessWpkhGuard(),
+		"single-sig wpkh":             keylessWpkhGuard(),
 	}
 	for name, d := range admitted {
 		t.Run("admit/"+name, func(t *testing.T) {

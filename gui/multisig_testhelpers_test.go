@@ -15,8 +15,10 @@ import (
 //
 // Fixture reproducibility (R0 m-1) — the two foreign slots' decoded 65-byte
 // ExpandedKey.Xpub (chainCode[0:32] ‖ compressedPubkey[32:65]), hex:
-//   keys[0].Xpub = 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f03a9394a2f1a4f99613a716956c8540f6dba6f18931c2639107221b267d740af23
-//   keys[2].Xpub = 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5
+//
+//	keys[0].Xpub = 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f03a9394a2f1a4f99613a716956c8540f6dba6f18931c2639107221b267d740af23
+//	keys[2].Xpub = 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5
+//
 // (Both share the synthetic chain code 1011..2e2f; only the pubkey differs.
 // Slot @1 is the abandon-about seed's real key derived at m/48'/0'/0'/2'.)
 func suppliedMultisigMd1(t *testing.T) []string {

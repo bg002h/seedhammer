@@ -33,9 +33,9 @@ func isBip380ExpressibleShape(root md.ScriptKind, policy md.PolicyKind, renderab
 // return expandOK for a non-bip380 shape, and on expandOK must return a non-nil
 // descriptor (and a nil descriptor otherwise).
 func FuzzExpandedToDescriptor(f *testing.F) {
-	f.Add([]byte{0, 0, 2, 3, 1, 1}) // wpkh single, 1 key, xpub present
-	f.Add([]byte{3, 2, 2, 3, 1, 1}) // sh sortedmulti, innerWsh, 2 keys
-	f.Add([]byte{4, 1, 3, 2, 0, 0}) // tr multi (unsorted) — must be unsupported
+	f.Add([]byte{0, 0, 2, 3, 1, 1})  // wpkh single, 1 key, xpub present
+	f.Add([]byte{3, 2, 2, 3, 1, 1})  // sh sortedmulti, innerWsh, 2 keys
+	f.Add([]byte{4, 1, 3, 2, 0, 0})  // tr multi (unsorted) — must be unsupported
 	f.Add([]byte{2, 0, 1, 1, 1, 10}) // sh single, InnerWpkh(bit8)+xpubPresent(bit2)=10, 1 key
 	f.Add([]byte{})
 

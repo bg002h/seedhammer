@@ -21,12 +21,12 @@ import (
 // Outcomes:
 //   - exactly one match  -> (index, origin, nil, true)
 //   - zero matches       -> (_, _, _, false): REFUSE (the seed is not a cosigner;
-//                           never engrave a backup for a wallet you are not in)
+//     never engrave a backup for a wallet you are not in)
 //   - >=2 matches        -> the SAME seed legitimately appears at >=2 cosigner
-//                           slots under DISTINCT origins. Return the FIRST-by-index
-//                           slot (deterministic; policy+stub identical across
-//                           slots, only the mk1 Path differs) + every matched
-//                           index in `reused` so the caller can show a notice.
+//     slots under DISTINCT origins. Return the FIRST-by-index
+//     slot (deterministic; policy+stub identical across
+//     slots, only the mk1 Path differs) + every matched
+//     index in `reused` so the caller can show a notice.
 //
 // SECURITY: deriveAccountXpub scrubs its own seed/master/intermediates on every
 // call; the caller scrubs the mnemonic []Word after the LAST derive here (the
