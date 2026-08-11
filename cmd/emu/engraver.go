@@ -5,6 +5,8 @@ package main
 import (
 	"time"
 
+	"seedhammer.com/bspline"
+	"seedhammer.com/engrave"
 	"seedhammer.com/gui"
 )
 
@@ -23,8 +25,31 @@ import (
 // it away left one defect class reachable only by cutting metal: zeroing
 // seed-derived geometry too early does not leave a residue, it sends the head
 // somewhere wrong, and nothing above this line would notice.
+// It DOES home, though, which is the one part of the machine it models on
+// purpose. See toolpathRecorder.Home and F-121: the recorder spans every job
+// while each job's step stream is a delta from the origin, so an emulator that
+// skips the homing the device always performs records a resumed plate offset
+// from the plan by wherever the last one stopped.
 type emuEngraver struct {
-	rec *toolpathRecorder
+	// job carries the homing and the decoding. Both live in toolpath.go,
+	// which has no build tag, so both are reachable by `go test` -- this file
+	// is js-only and nothing in it ever is.
+	job jobRecorder
+	// plan is shared with the platform: the page draws one plate at a time,
+	// and an engraver's life is one pass over it.
+	plan   *platePlan
+	params engrave.Params
+}
+
+// Plate implements gui.PlateAware: it is handed the plan before the first
+// Write, which is what lets the page show the whole plate at the moment the
+// cut starts rather than watching it appear stroke by stroke.
+//
+// The interface exists only in non-TinyGo builds, so the firmware neither calls
+// this nor contains the type -- see gui/plate_hook.go for why a spline is not
+// something to hand out casually.
+func (e *emuEngraver) Plate(spline bspline.Curve, conf engrave.StepperConfig, resumed bool) {
+	beginPlate(e.plan, e.job.rec, spline, e.params, resumed)
 }
 
 // stepPace is how long each Write pretends to take. Small enough that a plate
@@ -33,16 +58,21 @@ type emuEngraver struct {
 const stepPace = time.Millisecond
 
 func (e *emuEngraver) Write(steps []uint32) (int, error) {
-	if e.rec != nil {
-		if _, err := e.rec.Write(steps); err != nil {
-			return 0, err
-		}
+	if _, err := e.job.Write(steps); err != nil {
+		return 0, err
 	}
 	time.Sleep(stepPace)
 	return len(steps), nil
 }
 
-func (e *emuEngraver) Close() error { return nil }
+// Close homes, as homingEngraver.Close does. Unconditionally, where the device
+// skips it after a write error: nothing in this engraver can fail a write, so
+// there is no error state to respect and inventing one would be modelling a
+// machine this file says plainly it does not model.
+func (e *emuEngraver) Close() error {
+	e.job.Close()
+	return nil
+}
 
 // Stats reports a healthy machine: zero stalls, zero load. A stall the
 // operator never provoked would be an invented failure.

@@ -5,22 +5,45 @@
 <style>
   :root { color-scheme: light dark; }
   body {
-    margin: 0; min-height: 100vh;
+    margin: 0; min-height: 100vh; padding: 1rem;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
     background: #1a1a1c; color: #ddd;
     font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+  /* The panel and the plate sit side by side, and wrap to a column when there
+     is not room for both. The plate is not part of the device -- see #plate. */
+  #stage {
+    display: flex; flex-wrap: wrap; gap: 1.25rem;
+    align-items: flex-start; justify-content: center;
+  }
   /* The panel is 480x320. Scale it up whole so pixels stay square and crisp;
      the Go side maps clicks back through getBoundingClientRect. */
   #screen {
-    width: min(96vw, 960px); height: auto; aspect-ratio: 480 / 320;
+    width: min(92vw, 720px); height: auto; aspect-ratio: 480 / 320;
     image-rendering: pixelated;
     background: #000; border-radius: 6px;
     box-shadow: 0 0 0 10px #2a2a2e, 0 12px 40px rgba(0,0,0,.6);
     touch-action: none; /* or the browser scrolls instead of tapping */
     cursor: pointer;
   }
-  #status { min-height: 1.5em; opacity: .75; }
+  /* The plate view is NOT a screen the machine has. It is deliberately outside
+     the canvas: cmd/emu adds no screens and reimplements no flow, so anything
+     the device does not display belongs here, where nobody can mistake it for
+     firmware. */
+  #plate {
+    width: min(92vw, 480px);
+    display: none; /* until a plate is planned */
+    flex-direction: column; gap: .4rem;
+  }
+  #plate.live { display: flex; }
+  #plate-svg {
+    width: 100%; aspect-ratio: 1;
+    border-radius: 6px; overflow: hidden;
+    box-shadow: 0 0 0 10px #2a2a2e, 0 12px 40px rgba(0,0,0,.6);
+  }
+  #plate-svg svg { display: block; width: 100%; height: 100%; }
+  #plate-caption { opacity: .7; font-size: 12px; }
+  #status { min-height: 1.5em; opacity: .75; text-align: center; }
   #payload-hint {
     max-width: min(96vw, 960px); text-align: center; opacity: .85;
     border: 1px dashed #444; border-radius: 6px; padding: .5rem .75rem;
@@ -29,7 +52,13 @@
   a { color: #8ab4f8; }
 </style>
 
-<canvas id="screen" width="480" height="320"></canvas>
+<div id="stage">
+  <canvas id="screen" width="480" height="320"></canvas>
+  <div id="plate">
+    <div id="plate-svg"></div>
+    <div id="plate-caption"></div>
+  </div>
+</div>
 <div id="status">loading emu.wasm…</div>
 <!-- Emulator-only: a built-in TEST sealed payload (cmd/emu/sealed_test_payload.go)
      makes the Sealed Payload menu entry appear. This passphrase is a fixed
@@ -45,9 +74,95 @@
   const status = document.getElementById("status");
   const go = new Go();
 
+  // ---------------------------------------------------------------- plate --
+  //
+  // Two sources, one coordinate space. The PLAN comes from the same
+  // FitBlocks/EngraveFitted/PlanEngraving calls the firmware makes and is
+  // complete before the first step is emitted, so the whole layout is drawn at
+  // the moment the engrave begins. PROGRESS comes from the toolpath recorder,
+  // which decodes the driver's real step stream -- not the plan -- so what is
+  // marked as cut is what the machine would actually have cut.
+  //
+  // They register exactly because both are in microsteps from the machine
+  // origin (see cmd/emu/plate_test.go). That is only true because the emulator
+  // now homes as the device does; before F-121 was fixed, a resumed cut drew
+  // 68mm away from its own plan.
+  const plate = document.getElementById("plate");
+  const plateSVG = document.getElementById("plate-svg");
+  const plateCaption = document.getElementById("plate-caption");
+
+  let shownSeq = 0;   // which plate is on screen
+  let cutEl = null, headEl = null;
+
+  // POLLED, not pushed. The Go side runs the firmware's own event loop and
+  // hands control back to the browser only when every goroutine parks; a
+  // callback out of the engrave path would either block that loop or need a
+  // queue. Polling costs one call per tick and cannot perturb the thing it is
+  // watching.
+  const TICK_MS = 250;
+
+  function drawPlate() {
+    const api = window.shToolpath;
+    if (!api) return;
+
+    const seq = api.planSeq();
+    if (seq === 0) {                    // no plate planned yet, or none since
+      if (shownSeq !== 0) {
+        plate.classList.remove("live");
+        shownSeq = 0;
+      }
+      return;
+    }
+    if (seq !== shownSeq) {
+      // A new plate. Replacing innerHTML is what clears the previous plate's
+      // progress -- the elements the cut is drawn into go with it.
+      plateSVG.innerHTML = api.plan();
+      cutEl = plateSVG.querySelector("#sh-cut");
+      headEl = plateSVG.querySelector("#sh-head");
+      plate.classList.add("live");
+      shownSeq = seq;
+    }
+    if (!cutEl) return;
+
+    const path = JSON.parse(api.path());
+    // Vertex is [x, y, needle], and needle is the state of the segment ENDING
+    // at that vertex -- so a cut run starts at the vertex BEFORE the first
+    // needle-down one. Getting that off by one drops the first stroke of every
+    // letter.
+    let d = "", down = false;
+    for (let i = 1; i < path.length; i++) {
+      const [x, y, n] = path[i];
+      if (!n) { down = false; continue; }
+      if (!down) {
+        const [px, py] = path[i - 1];
+        d += `M${px} ${py}`;
+        down = true;
+      }
+      d += `L${x} ${y}`;
+    }
+    cutEl.setAttribute("d", d);
+
+    if (headEl && path.length > 1) {
+      const [hx, hy] = path[path.length - 1];
+      headEl.setAttribute("cx", hx);
+      headEl.setAttribute("cy", hy);
+      headEl.setAttribute("visibility", "visible");
+    }
+
+    const s = JSON.parse(api.summary());
+    const mm = v => (v / 6400).toFixed(1);
+    const partialPlan = plateSVG.firstElementChild?.dataset.truncated === "true";
+    plateCaption.textContent =
+      `plate ${seq} — plan in grey, cut in black, at the 0.3mm production width` +
+      ` · head ${mm(s.endX)},${mm(s.endY)}mm` +
+      (partialPlan ? " · PLAN TRUNCATED" : "") +
+      (s.truncated ? " · RECORDING TRUNCATED" : "");
+  }
+
   WebAssembly.instantiateStreaming(fetch("emu.wasm"), go.importObject)
     .then(res => {
       status.textContent = "tap the screen to drive it — this is the firmware GUI, not a mock";
+      setInterval(drawPlate, TICK_MS);
       return go.run(res.instance);
     })
     .then(() => { status.textContent = "emulator exited"; })

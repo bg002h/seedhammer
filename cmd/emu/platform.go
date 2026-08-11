@@ -37,6 +37,10 @@ type platform struct {
 	// toolpath decodes every step the GUI writes to an engraver. See
 	// toolpath.go; exposed to the page as window.shToolpath.
 	toolpath *toolpathRecorder
+	// plan is the plate currently being cut, rendered whole at the moment the
+	// engrave begins. See plate.go. It arrives through gui.PlateAware, which
+	// exists in this build and NOT in the firmware's.
+	plan *platePlan
 
 	// The JS side. buf is a Uint8ClampedArray the same length as fb.Pix; Go
 	// cannot hand a []byte to putImageData directly, so each frame is copied
@@ -56,8 +60,9 @@ func newPlatform() *platform {
 		events:   make(chan gui.Event, 16),
 		wakeups:  make(chan struct{}, 1),
 		toolpath: newToolpathRecorder(),
+		plan:     new(platePlan),
 	}
-	installToolpathAPI(p.toolpath)
+	installToolpathAPI(p.toolpath, p.plan)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -184,8 +189,13 @@ func (p *platform) Wakeup() {
 
 func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
 	// One recorder across every job, so a plate that is aborted and resumed
-	// records as ONE motion -- which is the thing being compared.
-	return &emuEngraver{rec: p.toolpath}, nil
+	// records as ONE motion -- which is the thing being compared. The RECORDING
+	// still restarts for a new plate; see beginPlate.
+	return &emuEngraver{
+		job:    jobRecorder{rec: p.toolpath},
+		plan:   p.plan,
+		params: p.EngraverParams(),
+	}, nil
 }
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
