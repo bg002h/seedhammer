@@ -375,26 +375,32 @@ func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 }
 
 // TestUnauthenticatedWarningFitsThePanel — §10.2.3's copy against the screen it
-// is drawn on (lens 4 MINOR 4).
+// is drawn on (lens 4 MINOR 4; strengthened by F-95).
 //
 // The paragraph at the bottom of this body is §2.2 item 10's downgrade
 // instruction: "the encrypted part has been REMOVED. Do not continue." It is
 // the one sentence that tells the operator to stop, and it is the one that
 // falls off first.
 //
-// Three facts stack, and this test pins the third:
+// Three facts stacked (F-95's diagnosis):
 //
 //  1. Warning.Layout computes maxScroll = bodysz.Y - (bodyClip.Dy() -
-//     2*scrollFadeDist), and for this copy that is POSITIVE -- the widget
-//     believes the last line is scrolled out of view.
+//     2*scrollFadeDist). For the PRE-F-95 copy that was POSITIVE (19px) -- the
+//     widget believed part of the body was scrolled out of view.
 //  2. Its only scroll input is ButtonFilter(Up)/ButtonFilter(Down). The SH2 has
 //     no directional buttons, so the body cannot be scrolled on the machine.
-//  3. Nothing is cut off today only because fadeClip is a no-op stub, so the
-//     body renders past bodyClip.Max.Y into the last few pixels of the panel.
+//  3. Nothing was cut off in practice only because fadeClip is a no-op stub,
+//     so the body rendered past bodyClip.Max.Y into the last few pixels of the
+//     panel rather than being hard-clipped there.
 //
-// So the guarantee that the operator can READ the instruction rests entirely on
-// the body still fitting the PANEL. That is what is asserted, with the margin
-// reported, so a copy edit that eats it fails here rather than on hardware.
+// Fitting the PHYSICAL panel (fact 3's accident) was therefore not the real
+// guarantee: restoring fadeClip's real clip mask without ALSO closing fact 1
+// would silently cut the instruction with no way to scroll to it. F-95 closed
+// fact 1 by shortening the copy so maxScroll <= 0 -- the body fits within the
+// fade-visible window, not merely within the panel, so the scroll affordance
+// this hardware does not have is no longer needed at all. Both checks are kept:
+// the panel check as the physical backstop, the maxScroll check as the real
+// requirement.
 func TestUnauthenticatedWarningFitsThePanel(t *testing.T) {
 	pf := newPlatform()
 	pf.display = sh2DisplaySize
@@ -435,6 +441,20 @@ func TestUnauthenticatedWarningFitsThePanel(t *testing.T) {
 					"Up/Down buttons, which the SeedHammer II does not have, so it is "+
 					"unreachable rather than merely below the fold",
 					bottom, dims.Y, bottom-dims.Y)
+			}
+
+			// F-95: fitting the PHYSICAL panel is not enough. Warning.Layout's own
+			// maxScroll must be <= 0 too, or the widget still believes part of the
+			// body is scrolled out of view -- reachable only via ButtonFilter(Up)/
+			// Down, which the SH2 does not have. Today that is invisible only
+			// because fadeClip (gui.go) is a no-op stub; restoring the real clip
+			// mask without this holding first would silently cut the tail of "Do
+			// not continue." with no way to scroll to it (F-95's own warning about
+			// fix ordering).
+			if maxScroll > 0 {
+				t.Errorf("§10.2.3's body needs %d px of scroll the operator cannot perform "+
+					"(maxScroll=%d): Warning has no touch scroll, only ButtonFilter(Up)/Down, "+
+					"which the SeedHammer II does not have", maxScroll, maxScroll)
 			}
 		})
 	}

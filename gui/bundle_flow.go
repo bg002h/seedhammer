@@ -287,7 +287,7 @@ func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 // ─── Phase 3: guided verbatim engrave ────────────────────────────────────────
 
 // bundlePlate is one plate in the cross-card engrave plan: the verbatim card
-// string to engrave, plus the "Card X of Y · Plate P of Q" guidance context.
+// string to engrave, plus the "Card X of Y | Plate P of Q" guidance context.
 type bundlePlate struct {
 	cardIdx    int    // 1-based card position
 	cardTotal  int    // total cards in the bundle
@@ -321,7 +321,7 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 // multiPlateEngrave (R0-M2: Go has no default params; deriveXpubFlow's call site
 // at derive_xpub.go:162 stays BYTE-UNCHANGED), reusing the same per-plate
 // validateMdmk + ChoiceScreen + NewEngraveScreen machinery. It loops the plan,
-// titling each plate "Card X of Y · Plate P of Q"; a set-level Back records no
+// titling each plate "Card X of Y | Plate P of Q"; a set-level Back records no
 // completed state and warns the partial bundle is unusable (I-5). At the end it
 // shows the ms1 reminder (mirror host bundle.rs:296-306).
 func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
@@ -336,7 +336,7 @@ func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
 			return
 		}
 		cs := &ChoiceScreen{
-			Title:   fmt.Sprintf("Card %d of %d · Plate %d of %d", p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal),
+			Title:   fmt.Sprintf("Card %d of %d | Plate %d of %d", p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal), // F-78: "·" is a zero-pixel glyph in this font
 			Lead:    "Choose engraving",
 			Choices: labels,
 		}

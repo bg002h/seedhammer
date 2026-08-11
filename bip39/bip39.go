@@ -103,6 +103,16 @@ func ClosestWord(word string) (Word, bool) {
 	return Word(i), strings.HasPrefix(match, word)
 }
 
+// entropyResidueHook hands over each entropy-bearing []byte that splitMnemonic
+// and its callers DISCARD, at the moment it is discarded and while it is still
+// populated, so a test holds the same backing array and can read it after the
+// call returns. nil in production.
+//
+// Same in-file seam style, and the same reason, as parseWordsHook: every one of
+// these buffers is a local that no caller can reach, so without a seam the
+// clear() beside it is deletable with the whole suite green.
+var entropyResidueHook func(where string, ent []byte)
+
 // Valid reports whether the mnemonic checksum is correct.
 func (m Mnemonic) Valid() bool {
 	// Panics in splitMnemonic.
@@ -110,8 +120,21 @@ func (m Mnemonic) Valid() bool {
 		return false
 	}
 	ent, _ := splitMnemonic(m)
+	if entropyResidueHook != nil {
+		entropyResidueHook("Valid.ent", ent)
+	}
 	last := m[len(m)-1]
-	return ChecksumWord(ent) == last
+	ok := ChecksumWord(ent) == last
+	// F-104 item 2. Valid returns a bool and DISCARDS ent -- which is the full
+	// seed entropy with the checksum bits removed. This is the highest-count
+	// residue on the typed-seed path: LastWordCandidates calls Valid once per
+	// candidate word, i.e. 2,048 times over the operator's 11-word prefix on
+	// every last-word screen, and seal.Classify calls it on every record of
+	// every unlock. Zeroed explicitly rather than by defer because this is the
+	// hot loop and the clear is the entire cost; the only paths that skip it
+	// are panics, which are fatal on the device anyway.
+	clear(ent)
+	return ok
 }
 
 // FixChecksum returns a copy of the mnemonic with a correct checksum.
@@ -121,7 +144,14 @@ func (m Mnemonic) FixChecksum() Mnemonic {
 	m2 := make(Mnemonic, len(m))
 	copy(m2, m)
 	ent, _ := splitMnemonic(m2)
+	if entropyResidueHook != nil {
+		entropyResidueHook("FixChecksum.ent", ent)
+	}
 	m2[len(m2)-1] = ChecksumWord(ent)
+	// F-104 item 2, the third site of the same discarded buffer: only the
+	// checksum WORD survives this call, the entropy it was computed from does
+	// not.
+	clear(ent)
 	return m2
 }
 
@@ -190,9 +220,23 @@ func splitMnemonic(m Mnemonic) (entropy []byte, checksum byte) {
 	// Pad entropy bytes because BIP39 checksum is sensitive to
 	// leading zeros.
 	entBits := len(m)*wordBits - checkBits
-	entBytes := ent.Bytes()
-	padding := bytes.Repeat([]byte{0}, entBits/8-len(entBytes))
-	entBytes = append(padding, entBytes...)
+	raw := ent.Bytes()
+	padding := bytes.Repeat([]byte{0}, entBits/8-len(raw))
+	entBytes := append(padding, raw...)
+	if entropyResidueHook != nil {
+		entropyResidueHook("splitMnemonic.raw", raw)
+	}
+	// F-104 item 2. `raw` is big.Int.Bytes()'s own freshly-allocated copy of
+	// the entropy, and the append above always leaves it behind: append copies
+	// OUT of raw into padding's array (or a grown one), so the returned slice
+	// can never alias it. Unzeroed it is unreachable heap garbage holding the
+	// seed entropy, minted once per splitMnemonic -- i.e. ~2,048 times per
+	// last-word screen, via Valid.
+	//
+	// NOT fixed, and not fixable here: `ent`'s own math/big nat holds the same
+	// value and math/big exposes no way to zero it. That is the other half of
+	// F-104 item 2 and it stays filed as unwipeable.
+	clear(raw)
 	return entBytes, byte(check)
 }
 
