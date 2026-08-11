@@ -21,11 +21,24 @@
     cursor: pointer;
   }
   #status { min-height: 1.5em; opacity: .75; }
+  #payload-hint {
+    max-width: min(96vw, 960px); text-align: center; opacity: .85;
+    border: 1px dashed #444; border-radius: 6px; padding: .5rem .75rem;
+  }
+  #payload-hint code { color: #8ab4f8; }
   a { color: #8ab4f8; }
 </style>
 
 <canvas id="screen" width="480" height="320"></canvas>
 <div id="status">loading emu.wasm…</div>
+<!-- Emulator-only: a built-in TEST sealed payload (cmd/emu/sealed_test_payload.go)
+     makes the Sealed Payload menu entry appear. This passphrase is a fixed
+     literal, kept in lockstep with sealedTestPassphrase in that file -- it is
+     NOT derived from it, so if one changes, change the other. -->
+<div id="payload-hint">
+  Sealed Payload demo passphrase (test data only, never real funds):<br>
+  <code>mosquito neither reopen morning canoe find tiny brand resist satisfy gun ball</code>
+</div>
 
 <script src="wasm_exec.js"></script>
 <script>

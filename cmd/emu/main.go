@@ -18,6 +18,8 @@
 package main
 
 import (
+	"fmt"
+
 	"seedhammer.com/gui"
 )
 
@@ -30,6 +32,18 @@ func main() {
 	if ver == "" {
 		ver = "emu"
 	}
+	// Printed once, to the browser console, before the GUI takes over the
+	// canvas: sealed_test_payload.go's blob is what makes the Sealed Payload
+	// menu entry appear, and this is the one fixed passphrase that opens it.
+	fmt.Println("==================================================================")
+	fmt.Println("SeedHammer II emulator: built-in TEST sealed payload present.")
+	fmt.Println("Open \"Sealed Payload\" from the start screen and type this passphrase:")
+	fmt.Println()
+	fmt.Println("    " + sealedTestPassphrase)
+	fmt.Println()
+	fmt.Println("Test data only (mnemonic-engrave seal_vectors.json Vector F) -- never")
+	fmt.Println("anyone's funds. See cmd/emu/sealed_test_payload.go for provenance.")
+	fmt.Println("==================================================================")
 	for range gui.Run(newPlatform(), ver) {
 	}
 	// gui.Run returning means the GUI asked to stop. In a browser there is
