@@ -1,3 +1,5 @@
+//go:build tinygo && rp
+
 // Command kdfbench measures PBKDF2-HMAC-SHA256 throughput on real RP2350
 // silicon, so the encrypted-payload iteration count (SPEC §7.1 / §12 item 1)
 // rests on a measurement rather than an estimate.

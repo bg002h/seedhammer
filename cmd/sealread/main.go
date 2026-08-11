@@ -1,3 +1,5 @@
+//go:build tinygo && rp
+
 // Command sealread verifies Plan B Phase A Task 7 Step 4 on real RP2350
 // silicon: that the XIP read at 0x10E00000 works at all, and that it is bounded
 // by RegionLen.
