@@ -81,9 +81,18 @@ func (p *deadlinePlatform) AppendEvents(deadline time.Time, evts []Event) []Even
 	// before the sleep, the post-block call runs after it returns -- so the
 	// promptness of row 2's fresh window rests entirely here (R0 round 0, I2).
 	//
-	// It cannot livelock the bubble: Wakeup drains before it sends on a
-	// buffered-1 channel, so a pending wakeup is consumed once and the next
-	// block takes the floor again.
+	// It cannot livelock the bubble ON THE WAKEUPS THIS FILE DRIVES: Wakeup
+	// drains before it sends on a buffered-1 channel, so a STALE pending
+	// wakeup is consumed once and the next block takes the floor again.
+	//
+	// That argument defeats a stale wakeup, NOT a caller that resignals every
+	// iteration -- ConfirmDelay.Progress (gui/gui.go:321) does exactly that
+	// for the duration of any press-and-hold confirm, and against such a
+	// caller this select would return immediately every time and the bubble
+	// clock would stop advancing. No test that constructs a deadlinePlatform
+	// drives that UI path today (checked across all seven). If one ever does,
+	// this is the line that breaks, and the floor has to be applied to the
+	// wakeup branch too rather than only to the timer.
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
