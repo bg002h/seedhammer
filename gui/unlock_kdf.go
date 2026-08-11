@@ -134,7 +134,14 @@ func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	// accident of call order (task9-r0.md M2).
 	prev := ctx.wipe
 	ctx.wipe = &wipeGuard{subject: wipeWarningSubjectPassphrase}
-	defer func() { ctx.wipe = prev }()
+	defer func() {
+		ctx.wipe = prev
+		// F-107 (R0 round 0, I1): §8's twelve-word passphrase is rendered HERE,
+		// outside unlockSecretSession's bracket, and on the give-up routes
+		// nothing scrubbed at all. The passphrase opens the payload, so its
+		// glyphs are as sensitive as the seed's.
+		ctx.B.Scrub()
+	}()
 	// The screen's identity is established by unlockPassphraseNotice, before
 	// entry, and the title passed to inputWordsFlow stays "" (R0 round 0, M4).
 	// The title parameter is an either/or: gui/gui.go:765-770 renders

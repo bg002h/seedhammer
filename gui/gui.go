@@ -2712,7 +2712,13 @@ type EngraveScreen struct {
 }
 
 func (s *EngraveScreen) Engrave(ctx *Context, th *Colors) bool {
-	defer s.job.Stop()
+	defer func() {
+		s.job.Stop()
+		// F-108: the job is abandoned once this returns -- Start() has no caller
+		// outside this function's loop, and every Engrave call site builds a
+		// fresh EngraveScreen. Terminal-only; see releaseResumeState.
+		s.job.releaseResumeState()
+	}()
 	inp := new(InputTracker)
 	backBtn := &Clickable{Button: Button1}
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}

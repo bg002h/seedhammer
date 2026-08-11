@@ -87,7 +87,22 @@ func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
 	prev := ctx.wipe
 	g := &wipeGuard{}
 	ctx.wipe = g
-	defer func() { ctx.wipe = prev }()
+	defer func() {
+		ctx.wipe = prev
+		// F-107: the seed is RENDERED here, and op.Glyph encodes every drawn rune
+		// into ctx.B.args as a uint32. Buffer.Reset (per frame) only TRUNCATES
+		// args, so without this the twelve words come back verbatim and in order
+		// from the backing array on a NORMAL exit -- read your words, press back.
+		//
+		// Only the §10.2.4 wipe scrubbed before this (gui/run_flow.go:245), and
+		// the wipe is the RARE path: on hardware runWithFlow never returns, so a
+		// "normal exit" is the flow walking back to the start screen with the
+		// SAME Context and the same Buffer.
+		//
+		// Safe here: the defer runs strictly between frames, so no op still to be
+		// drawn is zeroed (R0 round 0 §(a)).
+		ctx.B.Scrub()
+	}()
 	at := make([]int, 0, len(p.Secret))
 	for i, r := range p.Secret {
 		if seal.IsSecret(r.Class) {
