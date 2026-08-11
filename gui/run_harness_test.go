@@ -17,11 +17,12 @@ import (
 // deadlinePlatform is a testPlatform whose AppendEvents actually BLOCKS until
 // the deadline it is handed, so time.Sleep inside a synctest bubble advances
 // Run's idle arithmetic. The embedded testPlatform supplies everything else.
-// It deliberately does NOT model Platform.AppendEvents' wakeup channel
-// (cmd/controller/platform_sh2.go:384 returns early on pl.Wakeup()), so a test
-// driving a real engraveJob will not see the job-completion wakeup and falls
-// back on EngraveScreen's 500 ms poll. Workable; named so it is not mistaken
-// for fidelity.
+// It models Platform.AppendEvents' wakeup channel, because NOT modelling it
+// silently diverged from the device on the one path §10.2.4 row 2 depends on:
+// a cut that ends while the loop is parked is un-parked ONLY by pl.Wakeup(),
+// and with the wakeup unmodelled this harness reproduced F-106's own doubled
+// window -- warning at 6m0s against a 3m0s spec -- with the fix applied
+// (R0 round 0, I2/C1).
 type deadlinePlatform struct {
 	*testPlatform
 	// queued events are delivered on the next AppendEvents and refresh Run's
@@ -71,7 +72,24 @@ func (p *deadlinePlatform) AppendEvents(deadline time.Time, evts []Event) []Even
 	if d < p.tickFloor {
 		d = p.tickFloor
 	}
-	time.Sleep(d)
+	// A Wakeup() CUTS the block short, exactly as
+	// cmd/controller/platform_sh2.go:384 returns early on <-p.wakeups.
+	// This is not decoration: engraveJob.Start's goroutine ends with
+	// `defer e.pl.Wakeup()` (gui/engraver.go:110), and for a cut that finishes
+	// while the loop is parked that wakeup is the ONLY thing that un-parks it.
+	// Neither syncArmed call can see such an edge -- the pre-block call runs
+	// before the sleep, the post-block call runs after it returns -- so the
+	// promptness of row 2's fresh window rests entirely here (R0 round 0, I2).
+	//
+	// It cannot livelock the bubble: Wakeup drains before it sends on a
+	// buffered-1 channel, so a pending wakeup is consumed once and the next
+	// block takes the floor again.
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-p.wakeups:
+	}
 	return evts
 }
 
