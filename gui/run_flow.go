@@ -52,6 +52,76 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 			a.idle.active = false
 			a.armed = false
 			wiping := false
+			// syncArmed processes a change in ctx.wipe.armed(), and is called
+			// TWICE per iteration -- once before the loop blocks and once
+			// after. What each call actually buys, measured (R0 round 0):
+			//
+			//   before  catches an edge created by the FLOW -- guard
+			//           installation, and any bracket handover -- on the frame
+			//           it happens, while ctx.Wakeup still holds a deadline
+			//           computed from the PRE-edge clock. Worth a WAKEUP: the
+			//           edge would otherwise wait for the next one, and when
+			//           that wakeup IS the idle deadline the window doubles.
+			//           That is F-106, and this call is the fix.
+			//   after   catches an edge created by the ENGRAVE GOROUTINE at
+			//           the end of the block instead of at the start of the
+			//           next iteration. Worth one TURNAROUND, not one wakeup:
+			//           there is no blocking call between this sample point
+			//           and the next iteration's pre-block one, so the
+			//           pre-block call subsumes it. Deleting it leaves the
+			//           whole ./gui/ suite green -- measured -- and costs at
+			//           most one screensaver frame drawn where a warning frame
+			//           belonged, on the single tick an async edge lands. It
+			//           is kept for that tick's branch consistency, and
+			//           carries no §10.2.4 guarantee of its own.
+			//
+			// Engrave-side edges are covered by NEITHER call -- the pre-block
+			// call runs before the sleep, the post-block call after it
+			// returns. What un-parks the loop for those is pl.Wakeup(), which
+			// engraveJob.Start's goroutine calls on the way out
+			// (gui/engraver.go:110) and which platform_sh2.go:384 returns
+			// early on. TestCutEndingDuringTheParkStartsAFreshWindow pins it.
+			//
+			// Idempotent by the `armed != a.armed` guard, so calling it twice
+			// with no change between cannot move the clock. That guard is
+			// load-bearing: without it the two-call structure would reset
+			// a.idle.start every iteration and the window would NEVER fire,
+			// which is strictly worse than the 2x it fixes. Measured: dropping
+			// it fails 12 tests across ./gui/.
+			//
+			// The structure cannot EXTEND a window. It does not change the set
+			// of clock stamps, only their timing, and only ever earlier -- so
+			// it can make the wipe fire sooner, never later.
+			syncArmed := func(now time.Time) bool {
+				armed := ctx.wipe.armed()
+				if armed != a.armed {
+					a.armed = armed
+					if armed {
+						// Both §10.2.4 rows land here, and which one it is
+						// depends on WHY arming changed:
+						//   row 1  the guard is INSTALLED -- the residency
+						//          begins, and its window opens with it.
+						//          "Resident" is a lifetime and wipe_guard.go
+						//          is that seam, so this is row 1 working, not
+						//          a spurious edge that happens to be harmless.
+						//   row 2  a job finished -- a finished cut starts a
+						//          FRESH window.
+						// With the clock reset, `idle` recomputes false on this
+						// very tick and the block below clears a.idle.active by
+						// itself.
+						//
+						// Deliberately NOT also clearing a.idle.active here. It
+						// would only change the edge TICK, and changing it is
+						// worse: `d` still holds the frame drawn before the
+						// saver activated, in a different EngraveScreen state,
+						// so routing a touch against it could hit the wrong
+						// widget. Swallowing the edge-tick touch is exactly
+						// today's screensaver-dismissal behaviour.
+						a.idle.start = now
+					}
+				}
+				return armed
+			}
 
 			it := func(yield func(op.Op) bool) {
 				ctx.FrameCallback = func(o op.Op) {
@@ -130,6 +200,23 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					if ctx.Done || !yield() {
 						return
 					}
+					// BEFORE the block. The wipe guard is installed INSIDE yield()
+					// above -- ctx.wipe = g in the unlock arms -- so an arm edge is
+					// already pending here, while ctx.Wakeup below still holds the
+					// deadline computed from the PRE-edge clock.
+					//
+					// Leaving it until after AppendEvents means the edge is processed
+					// at whatever the next wakeup happens to be -- and when that
+					// wakeup IS the idle deadline, row 2 restarts the window at the
+					// exact instant the wipe should have fired. Measured on hardware
+					// before this call existed: warning at 6:00 and wipe at 6:30
+					// against a 3:00 spec, deterministically (F-106).
+					//
+					// This can reset a.idle.start after ctx.Wakeup was computed, so
+					// the loop may sleep to a now-stale EARLIER deadline, wake, find
+					// itself not idle and reschedule. That is one extra wakeup on the
+					// frame that installs a guard, never a missed window.
+					syncArmed(time.Now())
 					wakeup := ctx.Wakeup
 					evts = pl.AppendEvents(wakeup, evts[:0])
 					now := time.Now()
@@ -137,7 +224,21 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					// lifetime, never on seal.RecordsResident -- which reads
 					// false while the flow still holds the words and the
 					// plate's spline closure.
-					armed := ctx.wipe.armed()
+					// AFTER the block. This is the SECONDARY of the two calls:
+					// it advances an engrave-goroutine edge by one loop
+					// turnaround, not by a wakeup, and nothing in the suite
+					// pins it -- see the declaration comment above for what it
+					// does and does not buy.
+					//
+					// It must stay `syncArmed(now)`. Substituting the bare
+					// `ctx.wipe.armed()` this replaced is one character away
+					// and NOT equivalent: a fresh sample with no stamp enters
+					// the warning branch below on a tick whose a.idle.start is
+					// still the pre-edge clock, so the warning draws at the
+					// edge and the wipe follows wipeWarningDelay later instead
+					// of a fresh idleTimeout.
+					// TestCutEndingAfterTheDeadlineStartsAFreshWindow pins that.
+					armed := syncArmed(now)
 					// ONE clock, not two. An earlier draft tracked a separate
 					// wipe origin; every one of its refresh points was also an
 					// idle.start refresh point, so the two were provably equal
@@ -149,26 +250,6 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					// wipe. Read before ctx.Reset(), which clears it.
 					if len(evts) > 0 || (ctx.keepAwake && !armed) {
 						a.idle.start = now
-					}
-					if armed != a.armed {
-						a.armed = armed
-						if armed {
-							// §10.2.4 row 2: a finished cut starts a FRESH
-							// window. This ONE line is the whole fix: with the
-							// clock reset, `idle` recomputes false on this very
-							// tick and the block below clears a.idle.active by
-							// itself.
-							//
-							// Deliberately NOT also clearing a.idle.active
-							// here. It would only change the edge TICK, and
-							// changing it is worse: `d` still holds the frame
-							// drawn before the saver activated ~18 min ago, in
-							// a different EngraveScreen state, so routing a
-							// touch against it could hit the wrong widget.
-							// Swallowing the edge-tick touch is exactly today's
-							// screensaver-dismissal behaviour.
-							a.idle.start = now // row 2: fresh window at cut end
-						}
 					}
 					ctx.Reset()
 					if !a.idle.active {
