@@ -35,6 +35,24 @@ type deadlinePlatform struct {
 	// screensaver's only visibility, and the only un-park seam.
 	dirties int
 	onDirty func(n int)
+	// poll, when non-nil, REPLACES the deadline block below: it is called once
+	// per AppendEvents and returns the readings the panel produced on that
+	// poll. polls counts the calls, and is the positive control for any test
+	// that asserts on the ABSENCE of an effect (a generator that silently
+	// stopped producing would otherwise pass for the wrong reason).
+	//
+	// It exists for F-103, whose subject is a panel that never stops
+	// reporting -- and that is the device's own shape, not a convenience:
+	// cmd/controller/platform_sh2.go:371's "don't starve touch input" fast
+	// path returns the instant the touch IRQ has fired, BEFORE the deadline
+	// timer is ever armed, so under a continuously-asserting panel
+	// AppendEvents never blocks at all. tickFloor is still charged, for the
+	// same reason it is charged below: without it a synctest bubble's clock
+	// would never advance and no timer in Run could ever fire.
+	//
+	// nil in every other test, where the deadline block is the whole point.
+	poll  func() []Event
+	polls int
 }
 
 func newDeadlinePlatform() *deadlinePlatform {
@@ -67,6 +85,11 @@ func (p *deadlinePlatform) AppendEvents(deadline time.Time, evts []Event) []Even
 		evts = append(evts, p.queued...)
 		p.queued = p.queued[:0]
 		return evts
+	}
+	if p.poll != nil {
+		p.polls++
+		time.Sleep(p.tickFloor)
+		return append(evts, p.poll()...)
 	}
 	d := time.Until(deadline)
 	if d < p.tickFloor {

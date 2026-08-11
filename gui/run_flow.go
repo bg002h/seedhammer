@@ -8,6 +8,77 @@ import (
 	"seedhammer.com/gui/saver"
 )
 
+// effectiveInput reports whether evts holds operator input that RESOLVES TO A
+// STATE CHANGE, and advances *pressed to the panel's new contact state.
+//
+// This is F-103. §10.2.4's clock used to be refreshed on `len(evts) > 0`, and
+// arrival is not presence: the factory protective film resting on the panel
+// makes ft6x36 assert contact continuously, and processTouch's dedupe is exact
+// equality on (touching, pos) (cmd/controller/platform_sh2.go:401), so a
+// reading that drifts by ONE pixel is delivered as a fresh event. The machine
+// then never goes idle -- and because the warning is nested inside
+// `if a.idle.active`, it never warns either. No countdown, no wipe, nothing on
+// screen, indefinitely, on a machine holding a decrypted seed. Observed on real
+// hardware 2026-08-09; reproduced on a host in
+// gui/idle_effective_input_test.go.
+//
+// The classification, per event kind the router handles:
+//
+//   - POINTER: effective only when the CONTACT state changes -- released ->
+//     pressed, or pressed -> released. A reading that only moves the contact
+//     point is NOT effective. There is no cursor and no hover on this
+//     hardware: processTouch emits a position only while contact is asserted
+//     (it zeroes Pos on release), so a position-only event means "the contact
+//     point moved while still held". That is exactly and only what an object
+//     resting on the panel produces, and what a human produces only in the
+//     middle of a drag -- which is always bracketed by the down and up edges
+//     that DO count. The cost to a genuine operator is therefore one
+//     uninterrupted drag longer than 3:30 with no press or release in it; the
+//     longest hold this UI has is confirmDelay, one second (gui/gui.go:323).
+//   - RUNE and BUTTON: always effective. Each is a discrete, self-terminating
+//     operator action, and the SH2 has neither a keypad nor a keyboard -- the
+//     only producer in the tree is cmd/controller/debug_sh2.go, which
+//     synthesises them from the debug serial line in press/release pairs.
+//     Nothing can emit them as a continuous stream.
+//   - FRAME: never effective. A frame event carries a camera image; it is
+//     machine output, not operator input, and a source delivering frames at
+//     30 Hz is precisely the shape of the defect above. No platform in this
+//     tree produces one today, which is why this line costs nothing and is
+//     written down anyway -- a future scan path must not silently re-open
+//     F-103.
+//
+// What this does NOT cover, said plainly rather than left for a reviewer: a
+// panel whose contact FLICKERS -- repeatedly crossing the detection threshold
+// -- produces genuine press and release edges and would still hold the clock.
+// That is strictly narrower than the behaviour it replaces, which was tripped
+// by any non-identical reading at all including pure position jitter, but it
+// is not closed. Closing it needs a plausibility bound on how fast a human can
+// tap, which is a tunable in the middle of a funds-safety control and is not
+// worth adding blind.
+//
+// The whole batch is scanned; there is no early return. Returning at the first
+// effective event would leave *pressed stale, and press/release arrive in one
+// batch on more than one platform (gui/run_harness_test.go's tap does exactly
+// that) -- so the next genuine press edge would be missed.
+func effectiveInput(evts []Event, pressed *bool) bool {
+	effective := false
+	for _, e := range evts {
+		pe, ok := e.AsPointer()
+		if !ok {
+			if _, isFrame := e.AsFrame(); isFrame {
+				continue
+			}
+			effective = true
+			continue
+		}
+		if pe.Pressed != *pressed {
+			*pressed = pe.Pressed
+			effective = true
+		}
+	}
+	return effective
+}
+
 // runWithFlow is Run's body, with the flow and a draw observer as parameters.
 //
 // The flow parameter exists because Run had no test at a01b666; onDraw exists
@@ -33,6 +104,16 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 				state  saver.State
 			}
 			armed bool
+			// pressed is the panel's CONTACT state, tracked across ticks so a
+			// pointer reading can be classified as a state CHANGE rather than
+			// as an arrival. See effectiveInput.
+			//
+			// It lives here, above the session loop, deliberately: contact is
+			// physical and a wipe does not lift a finger. Resetting it per
+			// session would manufacture a spurious press edge on the first
+			// reading after every wipe -- which is the one moment the clock
+			// most needs to be honest.
+			pressed bool
 		}{}
 		versionText := "Firmware: " + version + "\nHardware: " + pl.HardwareVersion()
 		if !pl.Features().Has(FeatureSecureBoot) {
@@ -248,7 +329,18 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					// keepAwake holds off the SCREENSAVER but is ignored while
 					// armed: a screen must never be able to postpone a §10.2.4
 					// wipe. Read before ctx.Reset(), which clears it.
-					if len(evts) > 0 || (ctx.keepAwake && !armed) {
+					//
+					// effectiveInput, NOT len(evts) > 0. That is F-103: event
+					// ARRIVAL is not evidence an operator is present, and a
+					// panel with the factory film on it arrives forever.
+					//
+					// Bound to its own variable rather than inlined as the
+					// left operand of ||, because effectiveInput also ADVANCES
+					// a.pressed: written inline, a later reordering of the two
+					// terms would short-circuit past the tracking and lose the
+					// contact state silently.
+					effective := effectiveInput(evts, &a.pressed)
+					if effective || (ctx.keepAwake && !armed) {
 						a.idle.start = now
 					}
 					ctx.Reset()
