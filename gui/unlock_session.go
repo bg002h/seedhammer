@@ -254,19 +254,21 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 //	LIVE    plate.Spline, for the duration of the cut. It IS the seed rendered
 //	        as geometry and must exist while the needle moves. F-83, accepted.
 //
-// The ZEROED rows are defence in depth with the usual TinyGo caveat. `m` and
-// `rec` are pinned by tests. The 64-byte seed and the BIP-32 master key are
-// NOT, and the reason is scheduling, not impossibility: an earlier version of
-// this comment said they "cannot be without unsafe — they are internal to
-// functions that return neither", and that is false by this file's own
-// precedent. `unlockMnemonicHook` pins `m`, also a local, in a function that
-// does not return it, with an ordinary package var. A `var deriveSeedHook
-// func([]byte)` fired beside `seed := bip39.MnemonicSeed(...)` would do the
-// same for the seed, with no unsafe. It is not done here because
-// deriveMasterKey and masterFingerprintFor are SHARED funds-path code that this
-// phase only scrubbed, so the seam belongs with the phase that owns them —
-// filed as F-94. A comment that licenses a coverage gap on seed-equivalent
-// material must not overstate the obstacle (lens 2 M2).
+// The ZEROED rows are defence in depth with the usual TinyGo caveat. `m`,
+// `rec`, the 64-byte seed and the BIP-32 master key are ALL pinned by tests as
+// of the post-merge polish phase (F-94 and F-87, closed 2026-08-11).
+//
+// This comment used to say the seed and master key were NOT pinned, "and the
+// reason is scheduling, not impossibility" — itself a correction of a still
+// earlier version claiming they "cannot be without unsafe". Both readings are
+// now moot: `deriveSeedHook` and `deriveMasterKeyHook` (`gui/gui.go:257,266`)
+// are exactly the ordinary package vars that precedent predicted, and
+// `gui/master_key_residue_test.go` reads the same backing arrays after the
+// wipe to prove it.
+//
+// The history is kept rather than tidied away, because it is the lesson. A
+// comment licensing a coverage gap on seed-equivalent material outlived the gap
+// and overstated its obstacle twice before anyone measured it.
 func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	m, err := bip39.Parse(rec)
 	if err != nil {
