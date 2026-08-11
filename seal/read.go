@@ -60,3 +60,44 @@ func clampRegion(n int) int {
 func hasMagic(b []byte) bool {
 	return len(b) >= len(Magic) && string(b[:len(Magic)]) == Magic
 }
+
+// boundBlob reports how many bytes of region the header declares, so a reader
+// allocates the payload's real size instead of the region's.
+//
+// UNTAGGED and shared by both readers, for this file's own stated reason: a
+// bound placed inside read_tinygo.go is never compiled by `go test` and no
+// automated test can reach it.
+//
+// THE ORDER IS THE SAFETY ARGUMENT. ParseHeader is handed a HeaderLen-bounded
+// slice -- a CONSTANT bound, so nothing attacker-controlled sizes this -- and it
+// rejects pub_len or ct_len above MaxSectionLen. Only after it returns nil may
+// either length be consulted for arithmetic: both are then proven <= 8191, so
+// int() cannot reinterpret them and the sum cannot wrap a 32-bit int. Reading
+// them any earlier reintroduces the negative-length overflow unlock_key.go
+// documents.
+//
+// RegionLen is 65,536 while the format's own caps admit at most
+// 52+8191+8191+16 = 16,450, and the largest real vector is 1,421 bytes -- so
+// this typically allocates ~46x less than the region, and never needs a 64 KiB
+// contiguous run on a non-moving collector.
+func boundBlob(region []byte) (int, error) {
+	if len(region) < HeaderLen {
+		return 0, ErrTooShort
+	}
+	h, err := ParseHeader(region[:HeaderLen])
+	if err != nil {
+		return 0, err
+	}
+	total := HeaderLen + int(h.PubLen) + int(h.CtLen)
+	if h.Sealed() {
+		total += TagLen
+	}
+	// Defence in depth, and UNREACHABLE today: clampRegion(RegionLen) is
+	// RegionLen and total is <= 16,450. Kept for the reason wire.go keeps its
+	// own unreachable total check, and ErrTooLarge rather than ErrTooShort
+	// because "does not fit the flash region" is the condition being reported.
+	if total > len(region) {
+		return 0, ErrTooLarge
+	}
+	return total, nil
+}

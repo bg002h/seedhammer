@@ -1027,6 +1027,28 @@ func planEngraving(knotBuf []bspline.Knot, conf StepperConfig, e Engraving) bspl
 		var ts timeScaler
 		start := bspline.Knot{}
 		spline := knotBuf[:0]
+		// F-108: the knots ARE the seed rendered as geometry. Zero them when the
+		// iterator finishes, on EVERY exit -- completion, an early return from
+		// !yield, and the callers that never cut at all (bspline.Measure at
+		// build time, and any path that builds a plate then backs out). A hook
+		// on the engrave goroutine's exit reaches none of those, and cannot be
+		// written anyway: PlanEngraving allocates knotBuf itself and
+		// planEngraving is unexported, so no caller in gui can name this array.
+		//
+		// Two clears, deliberately. `defer clear(spline[:cap(spline)])` would
+		// bind its argument at DEFER time and zero whichever array was current
+		// then; the closure form re-reads spline and zeroes only the LAST one.
+		// Measured, the rolling window never reallocates -- high-water cap is
+		// exactly maxSplineKnots across 21,360 knots for a 12-word plate and
+		// 32,826 for a 24-word one -- so knotBuf is the only array and the
+		// second clear is dead. It is here because that is a measurement, not an
+		// invariant: appendLine appends an unbounded run.
+		defer func() {
+			clear(knotBuf[:cap(knotBuf)])
+			if cap(spline) != cap(knotBuf) {
+				clear(spline[:cap(spline)])
+			}
+		}()
 		// Initialize the spline with 2 clamping knots at (0, 0).
 		spline = append(spline, start, start)
 		for c := range e {
@@ -1673,10 +1695,59 @@ func (s *SafePointer) Progress(p uint) {
 			continue
 		}
 		rem := copy(s.history, s.history[n:])
+		// F-108: [rem:cap] is dead by construction -- the copy above compacted
+		// the live knots down to [:rem]. Reslicing alone leaves the tail intact,
+		// and these are seed-derived geometry.
+		clear(s.history[rem:cap(s.history)])
 		s.history = s.history[:rem]
 		s.completed = 0
 		s.safePoint = k0.Ctrl
 	}
+}
+
+// HistoryLen reports how many resume knots are retained. Read-only, and it
+// exists so gui can pin the BOTH-DIRECTIONS property of releaseResumeState:
+// that an abandoned job's geometry is cleared, and that a job with a reachable
+// restart is NOT -- the second being R0 round 1's Critical, where clearing too
+// early drove a resumed cut to the origin at T:0.
+func (s *SafePointer) HistoryLen() int {
+	return len(s.history)
+}
+
+// ClearHistory zeroes this SafePointer's retained state -- every field, and the
+// CURRENT history array to cap. F-108: it is the seed rendered as geometry, and
+// SafePointer lives in engrave while the only caller that knows the job is
+// abandoned lives in gui.
+//
+// NOT "all state that ever existed", and the difference is measurable. Knot
+// grows history with a bare `append`, which is an UNFUNNELLED growth site of
+// exactly the class op.Buffer's appendArgs/appendRefs fix: every reallocation
+// orphans an array still holding the knots written before it, and nothing here
+// can reach those. Measured on a real plate under a lockstep driver: 4 orphaned
+// arrays holding 15 knots, rising to 23 arrays / 119,891 knots if the driver
+// reports no progress so the trim never fires. That residue is F-110, not
+// something this function covers.
+//
+// PRECONDITION: the job owning this SafePointer is abandoned -- no engrave
+// goroutine is running against it and no restart is reachable. Calling it on a
+// live job zeroes the state Resume needs and drives a resumed cut's catch-up
+// motion to the origin at T:0, which wrecks a plate. gui's releaseResumeState
+// is the guard; do not call this directly.
+//
+// safePoint and progress are cleared too, not just history. safePoint is the
+// last known-good COORDINATE on the plate -- one bezier.Point of seed-derived
+// geometry that Resume feeds to appendLine, and leaving it behind would have
+// made this function's own name a lie. It is a small residue next to the knots,
+// which is exactly why it would have gone unnoticed.
+//
+// history zeroes to CAP, not to len: the trim in Resume compacts live knots
+// down and reslices, so the tail past len holds knots that are dead but present.
+func (s *SafePointer) ClearHistory() {
+	clear(s.history[:cap(s.history)])
+	s.history = s.history[:0]
+	s.safePoint = bezier.Point{}
+	s.progress = 0
+	s.completed = 0
 }
 
 func (s *SafePointer) Knot(k bspline.Knot) {

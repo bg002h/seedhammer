@@ -79,6 +79,30 @@ func unlockSecretLabel(c seal.Classification, i, n int) string {
 // unlockSecretSession offers every secret record, in order, before the plate
 // list is built.
 func unlockSecretSession(ctx *Context, th *Colors, p *seal.Payload) {
+	// prev, not nil, on the way out -- see unlockPassphraseFlow's own bracket
+	// (§10.2.4 row 4, task9-r0.md M2): these two guards never nest today (this
+	// function always runs after unlockPassphraseFlow has already returned and
+	// uninstalled its own), and save-and-restore makes that a structural fact
+	// rather than an accident of call order.
+	prev := ctx.wipe
+	g := &wipeGuard{}
+	ctx.wipe = g
+	defer func() {
+		ctx.wipe = prev
+		// F-107: the seed is RENDERED here, and op.Glyph encodes every drawn rune
+		// into ctx.B.args as a uint32. Buffer.Reset (per frame) only TRUNCATES
+		// args, so without this the twelve words come back verbatim and in order
+		// from the backing array on a NORMAL exit -- read your words, press back.
+		//
+		// Only the §10.2.4 wipe scrubbed before this (gui/run_flow.go:245), and
+		// the wipe is the RARE path: on hardware runWithFlow never returns, so a
+		// "normal exit" is the flow walking back to the start screen with the
+		// SAME Context and the same Buffer.
+		//
+		// Safe here: the defer runs strictly between frames, so no op still to be
+		// drawn is zeroed (R0 round 0 §(a)).
+		ctx.B.Scrub()
+	}()
 	at := make([]int, 0, len(p.Secret))
 	for i, r := range p.Secret {
 		if seal.IsSecret(r.Class) {
@@ -194,7 +218,12 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 	// a fresh unlock.
 	clear(rec)
 	// ONE engrave, then return regardless of the outcome.
-	NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
+	scr := NewEngraveScreen(ctx, plate)
+	if g := ctx.wipe; g != nil {
+		g.job = scr.job
+		defer func() { g.job = nil }()
+	}
+	scr.Engrave(ctx, &engraveTheme)
 }
 
 // unlockEngraveMnemonic cuts one bare-mnemonic record.
@@ -248,6 +277,13 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	// zeroed by the caller's defer; this one is this function's to zero, and
 	// clear() reaches []Word where wipeBytes ([]byte) does not compile.
 	defer clear(m)
+	// F-87: fires immediately after the defer above is registered, so a test
+	// holds the SAME backing array the defer will zero and can assert it on
+	// every early return below -- not just the success path unlockMnemonicHook
+	// already covers. See unlock_mnemonic_seam.go.
+	if unlockMnemonicParsedHook != nil {
+		unlockMnemonicParsedHook(m)
+	}
 	// NoEdit: the edit nav button (Button2, or a tap on its slot) opens the word
 	// editor, and editing an authoritative payload seed produces a
 	// self-consistent plate that does not restore the payload's wallet. For a
@@ -279,7 +315,7 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	// function RETURNS -- i.e. after Engrave. That left a full copy of the seed
 	// live for the entire ~21-minute cut and indefinitely on the paused or failed
 	// engrave screen, which is precisely the residency the lines above exist to
-	// remove. Worse, nothing else could reach it: §10.2.4's SecretsResident()
+	// remove. Worse, nothing else could reach it: §10.2.4's RecordsResident()
 	// scans p.Secret only, and p.Wipe() loops p.Secret and p.Public -- neither
 	// reaches a local -- so the timer condition reads FALSE while the seed is
 	// live. Found by the B2a-ii whole-diff review, lens 1.
@@ -291,5 +327,10 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 	if unlockMnemonicHook != nil {
 		unlockMnemonicHook(m)
 	}
-	NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme)
+	scr := NewEngraveScreen(ctx, plate)
+	if g := ctx.wipe; g != nil {
+		g.job = scr.job
+		defer func() { g.job = nil }()
+	}
+	scr.Engrave(ctx, &engraveTheme)
 }

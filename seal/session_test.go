@@ -47,13 +47,13 @@ func unlockedVector(t *testing.T, name string) *Payload {
 	return p
 }
 
-// TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone — §10.2.4's condition.
+// TestRecordsResidentGoesFalseOnlyWhenTheSECRETSAreGone — §10.2.4's condition.
 //
 // Vector F is ms1 x3 / mk1 x6 / md1 x6, so it discriminates the two halves of
 // the predicate at once: wiping the twelve CARDS must leave it true (they are
 // not secret and the ms1 records are still there), and wiping the three ms1
 // records must take it false even though the twelve cards stay resident.
-func TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
+func TestRecordsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
 	p := unlockedVector(t, "F")
 	if len(p.Secret) != 15 {
 		t.Fatalf("premise broken: vector F must carry 15 secret-section records, got %d", len(p.Secret))
@@ -70,7 +70,7 @@ func TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
 		t.Fatalf("premise broken: vector F must be 3 secrets + 12 cards, got %d + %d",
 			len(secretAt), len(cardAt))
 	}
-	if !p.SecretsResident() {
+	if !p.RecordsResident() {
 		t.Fatal("a freshly unlocked payload reports no resident secrets")
 	}
 
@@ -96,9 +96,9 @@ func TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
 		if live != len(cardAt) {
 			t.Fatalf("premise broken: %d of %d cards should still be resident", live, len(cardAt))
 		}
-		if q.SecretsResident() {
+		if q.RecordsResident() {
 			t.Errorf("every secret is zeroed but %d md1/mk1 cards are still resident, and "+
-				"SecretsResident() is true; the predicate is not keyed on IsSecret", live)
+				"RecordsResident() is true; the predicate is not keyed on IsSecret", live)
 		}
 	})
 
@@ -107,8 +107,8 @@ func TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
 		for _, i := range cardAt {
 			q.WipeSecretAt(i)
 		}
-		if !q.SecretsResident() {
-			t.Error("wiping the twelve md1/mk1 cards took SecretsResident false")
+		if !q.RecordsResident() {
+			t.Error("wiping the twelve md1/mk1 cards took RecordsResident false")
 		}
 		// It stays true until the LAST secret goes — which is exactly the
 		// statement B2b must design its timer against: what §10.2.2's early
@@ -117,8 +117,8 @@ func TestSecretsResidentGoesFalseOnlyWhenTheSECRETSAreGone(t *testing.T) {
 		for n, i := range secretAt {
 			q.WipeSecretAt(i)
 			want := n < len(secretAt)-1
-			if got := q.SecretsResident(); got != want {
-				t.Errorf("after wiping %d of %d secrets, SecretsResident() = %v, want %v",
+			if got := q.RecordsResident(); got != want {
+				t.Errorf("after wiping %d of %d secrets, RecordsResident() = %v, want %v",
 					n+1, len(secretAt), got, want)
 			}
 		}
@@ -167,7 +167,7 @@ func TestWipeSecretAtOutOfRangeIsANoOp(t *testing.T) {
 	// And on the zero value, where p.Secret is nil.
 	var empty Payload
 	empty.WipeSecretAt(0)
-	if empty.SecretsResident() {
+	if empty.RecordsResident() {
 		t.Error("a payload with no secret section reports resident secrets")
 	}
 }

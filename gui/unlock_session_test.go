@@ -4,8 +4,11 @@ import (
 	"image"
 	"iter"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"seedhammer.com/bip39"
+	"seedhammer.com/engrave"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/seal"
@@ -458,17 +461,17 @@ func TestSecretSessionEngravesAMnemonic(t *testing.T) {
 		}
 	}
 	assertSecretWiped(t, *evts, 0)
-	if p.SecretsResident() {
-		t.Error("SecretsResident() is true after the mnemonic session ended")
+	if p.RecordsResident() {
+		t.Error("RecordsResident() is true after the mnemonic session ended")
 	}
 }
 
-// TestSecretsResidentIsFalseWhenTheSessionEnds — the §10.2.4 predicate B2b will
+// TestRecordsResidentIsFalseWhenTheSessionEnds — the §10.2.4 predicate B2b will
 // key its timer on. It goes false when the LAST secret's plate is built, which
 // for a completed session is when the session returns.
-func TestSecretsResidentIsFalseWhenTheSessionEnds(t *testing.T) {
+func TestRecordsResidentIsFalseWhenTheSessionEnds(t *testing.T) {
 	p := unlockedPayload(t, "F")
-	if !p.SecretsResident() {
+	if !p.RecordsResident() {
 		t.Fatal("premise broken: a freshly unlocked vector F has no resident secrets")
 	}
 	h := runSecretSession(t, p)
@@ -484,8 +487,8 @@ func TestSecretsResidentIsFalseWhenTheSessionEnds(t *testing.T) {
 	if !*h.done {
 		t.Fatal("the session did not end")
 	}
-	if p.SecretsResident() {
-		t.Error("SecretsResident() is still true when the session ended")
+	if p.RecordsResident() {
+		t.Error("RecordsResident() is still true when the session ended")
 	}
 	// The twelve md1/mk1 cards are UNTOUCHED -- they are not secret (§6.3) and
 	// the plate list is about to offer them.
@@ -683,9 +686,187 @@ func TestMnemonicWordsAreZeroWhenThePlateReachesEngrave(t *testing.T) {
 	for i, w := range atEngrave {
 		if w != 0 {
 			t.Fatalf("word %d is still %d at Engrave entry: the seed is live for the "+
-				"whole cut, and neither p.Wipe() nor SecretsResident() can reach it", i, w)
+				"whole cut, and neither p.Wipe() nor RecordsResident() can reach it", i, w)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 6 / F-87 -- unlockEngraveMnemonic's THREE early returns (:265
+// !ss.Confirm, :274 masterFingerprintFor err, :280 engraveSeed err) all share
+// one `defer clear(m)`. unlockMnemonicHook cannot pin it: its one call site is
+// on the success path, after clear(m) has already run, so a test built on it
+// ranges over nil, asserts nothing, and passes with the defer deleted
+// (R0 round1 residue sweep, I1). unlockMnemonicParsedHook fixes that by firing
+// right after the defer is registered, handing a test the SAME backing array.
+//
+// Each test below asserts the hook FIRED before asserting on its contents --
+// without that guard the test is vacuous, which is the exact defect this task
+// exists to fix.
+// ---------------------------------------------------------------------------
+
+// runUnlockEngraveMnemonic drives unlockEngraveMnemonic directly, bypassing
+// unlockSecretSession/the Choice screen: F-87's defect and fix are entirely
+// inside this one function, so there is nothing the outer session adds.
+//
+// pf takes the Platform interface, not *testPlatform, so the engraveSeed-err
+// test below can pass a wrapper that overrides EngraverParams() alone.
+func runUnlockEngraveMnemonic(t *testing.T, pf Platform, rec []byte) *sessionHarness {
+	t.Helper()
+	ctx := NewContext(pf)
+	returned := false
+	frame, drawer, quit := runUITouch(ctx, func() {
+		unlockEngraveMnemonic(ctx, &descriptorTheme, rec)
+		returned = true
+	})
+	h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+	h.frame, h.drawer = frame, drawer
+	t.Cleanup(quit)
+	return h
+}
+
+// watchMnemonicParsed installs unlockMnemonicParsedHook and returns the
+// pointer the hook will write to. A helper rather than three copies, since
+// all three early-return tests want the identical "did it fire, is every
+// word zero" shape.
+func watchMnemonicParsed(t *testing.T) *bip39.Mnemonic {
+	t.Helper()
+	got := new(bip39.Mnemonic)
+	unlockMnemonicParsedHook = func(m bip39.Mnemonic) { *got = m }
+	t.Cleanup(func() { unlockMnemonicParsedHook = nil })
+	return got
+}
+
+// assertMnemonicZeroed is step 6.1's mandatory guard, applied identically by
+// all three tests: the hook must have fired (`got == nil` is vacuous, and
+// vacuous is exactly how F-87's original remedy passed with the defer
+// deleted), and every word it captured must read zero.
+func assertMnemonicZeroed(t *testing.T, got bip39.Mnemonic) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("unlockMnemonicParsedHook never fired -- this test asserted nothing")
+	}
+	for i, w := range got {
+		if w != 0 {
+			t.Errorf("word %d is still %d after the early return -- defer clear(m) did not run", i, w)
+		}
+	}
+}
+
+// holdDiscardConfirm is sessionHarness.hold (gui/wipe_guard_test.go), adapted
+// for the one property that differs here: ConfirmYes makes SeedScreen.Confirm
+// `return false` immediately, with NO further ctx.Frame call, so
+// unlockEngraveMnemonic's own early return (F-87's first) follows straight
+// after -- ending the whole flow. hold's own final h.next() asserts a frame
+// DOES follow, which is true for its callers (hold-to-start an engrave job)
+// and false here, so it cannot be reused verbatim. Duplicated rather than
+// parameterised, matching wipe_guard_test.go's own stated convention of each
+// flow test owning its harness.
+func holdDiscardConfirm(t *testing.T, h *sessionHarness) {
+	t.Helper()
+	dims := h.ctx.Platform.DisplaySize()
+	sz := assets.NavBtnPrimary.Bounds().Size()
+	ys := [3]int{leadingSize, (dims.Y - sz.Y) / 2, dims.Y - leadingSize - sz.Y}
+	pos := image.Pt(dims.X-sz.X/2, ys[int(Button3-Button1)]+sz.Y/2)
+	d := h.drawer()
+	tag, _, hit := d.Hit(pos)
+	if !hit {
+		t.Fatalf("hold Button3: no touch target at %v", pos)
+	}
+	if c, ok := tag.(*Clickable); !ok || (c.Button != Button3 && c.AltButton != Button3) {
+		t.Fatalf("hold Button3: the target at %v is %v", pos, tag)
+	}
+	h.ctx.Router.Events(d, PointerEvent{Pressed: true, Entered: true, Pos: pos}.Event())
+	h.next("hold press")
+	time.Sleep(confirmDelay)
+	// Deliberately not h.next(): the flow may have already returned, and a
+	// park here is fine -- it is what we are testing for.
+	if c, ok := h.frame(); ok {
+		h.content = c
+	}
+}
+
+// TestUnlockEngraveMnemonicZeroesMOnConfirmDiscard -- step 6.1, the :265
+// early return. Backing out of SeedScreen.Confirm (Back, then hold to
+// discard) must zero m before unlockEngraveMnemonic returns.
+//
+// Kills 6.2's `defer clear(m)` deletion row: without it, got's words are
+// still the real seed when this test reads them.
+func TestUnlockEngraveMnemonicZeroesMOnConfirmDiscard(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := unlockedPayload(t, "A")
+		rec := append([]byte(nil), p.Secret[0].Record...)
+		got := watchMnemonicParsed(t)
+
+		pf := newPlatform()
+		pf.display = sh2DisplaySize
+		h := runUnlockEngraveMnemonic(t, pf, rec)
+
+		h.next("initial Confirm screen")
+		h.tapNav(Button1) // Back
+		h.mustReach("Discard Seed")
+		holdDiscardConfirm(t, h)
+
+		if !*h.done {
+			t.Fatal("unlockEngraveMnemonic never returned after the discard was confirmed")
+		}
+		assertMnemonicZeroed(t, *got)
+	})
+}
+
+// tinyEngraverPlatform forces engraveSeed's toPlate to fail with
+// backup.ErrTooLarge, deterministically and without a crafted mnemonic:
+// engrave/engrave.go's own doc comment says StrokeWidth is "measured in
+// machine units" -- an ABSOLUTE value, unlike font/glyph sizes, which are
+// always passed through params.F(mm) = mm * Millimeter. Shrinking Millimeter
+// alone therefore shrinks the 85mm-square plate (SquarePlate.Dims) and the
+// content geometry TOGETHER (both go through the same Millimeter), but
+// leaves StrokeWidth's absolute device-unit value fixed -- so at a small
+// enough Millimeter, the unchanged stroke width alone dwarfs the shrunk
+// plate. Verified empirically against vector A's real 24-word mnemonic.
+type tinyEngraverPlatform struct {
+	*testPlatform
+}
+
+func (tinyEngraverPlatform) EngraverParams() engrave.Params {
+	p := engraverParams
+	p.Millimeter = 1
+	return p
+}
+
+// TestUnlockEngraveMnemonicZeroesMOnEngraveSeedError -- step 6.1, the :280
+// early return. masterFingerprintFor succeeds normally (EngraverParams
+// affects only the later engraveSeed call); toPlate then reports
+// ErrTooLarge, and m must be zero by the time unlockEngraveMnemonic returns.
+//
+// Kills 6.2's `defer clear(m)` deletion row on this arm too -- the plan's
+// table says "all three of 6.1's tests" must kill it, and this is the
+// engraveSeed-specific instance.
+func TestUnlockEngraveMnemonicZeroesMOnEngraveSeedError(t *testing.T) {
+	p := unlockedPayload(t, "A")
+	rec := append([]byte(nil), p.Secret[0].Record...)
+	got := watchMnemonicParsed(t)
+
+	pf := &tinyEngraverPlatform{testPlatform: newPlatform()}
+	pf.display = sh2DisplaySize
+	h := runUnlockEngraveMnemonic(t, pf, rec)
+
+	h.mustReach("EngraveSeed")
+	h.tapNav(Button3) // confirm the seed -- checksum-valid, so this accepts
+	h.mustReach("does not fit any plate size")
+	h.tapNav(Button3) // dismiss the error modal (ErrorScreen.ok is bound to Button3)
+	// Deliberately not mustReach/h.next(): dismissing the modal makes
+	// showModal return with nothing left to draw, and unlockEngraveMnemonic's
+	// own early return (:280) follows immediately after -- no further frame
+	// is expected, only the flow ending.
+	if c, ok := h.frame(); ok {
+		h.content = c
+	}
+
+	if !*h.done {
+		t.Fatal("unlockEngraveMnemonic never returned after the engraveSeed error was shown")
+	}
+	assertMnemonicZeroed(t, *got)
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,8 +1238,8 @@ func TestSecretSessionMixesTheTwoSecretClasses(t *testing.T) {
 			assertSecretWiped(t, *evts, i)
 		}
 	}
-	if p.SecretsResident() {
-		t.Error("SecretsResident() is true after the mixed-class session ended")
+	if p.RecordsResident() {
+		t.Error("RecordsResident() is true after the mixed-class session ended")
 	}
 	cards := 0
 	for _, e := range unlockPlates(p) {

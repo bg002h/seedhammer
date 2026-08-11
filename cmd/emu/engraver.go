@@ -18,7 +18,14 @@ import (
 //
 // It does NOT model the machine: no stalls, no load, no failure. What the
 // emulator qualifies is the UI around engraving, not engraving.
-type emuEngraver struct{}
+//
+// It does, however, DECODE the stream on the way past (toolpath.go). Throwing
+// it away left one defect class reachable only by cutting metal: zeroing
+// seed-derived geometry too early does not leave a residue, it sends the head
+// somewhere wrong, and nothing above this line would notice.
+type emuEngraver struct {
+	rec *toolpathRecorder
+}
 
 // stepPace is how long each Write pretends to take. Small enough that a plate
 // does not take its real quarter of an hour, large enough that the browser
@@ -26,6 +33,11 @@ type emuEngraver struct{}
 const stepPace = time.Millisecond
 
 func (e *emuEngraver) Write(steps []uint32) (int, error) {
+	if e.rec != nil {
+		if _, err := e.rec.Write(steps); err != nil {
+			return 0, err
+		}
+	}
 	time.Sleep(stepPace)
 	return len(steps), nil
 }

@@ -28,6 +28,60 @@ type MaskOp struct {
 type Buffer struct {
 	args []uint32
 	refs []any
+	// zeroedArrays/zeroedEntries count the backing arrays this Buffer has
+	// OUTGROWN and zeroed at the moment it outgrew them.
+	//
+	// append REPLACES the array on reallocation, and the old one -- still
+	// holding every rune written into it -- becomes garbage that Scrub can
+	// never reach, because Scrub only ever sees the CURRENT array. Measured on
+	// a rendered 24-word seed frame before this existed: thirteen words came
+	// back verbatim and in index order out of an array Residue() scored 0.
+	//
+	// Zeroing at the reallocation rather than recording the array for a later
+	// Scrub is what keeps the fix free: append has already copied the elements
+	// out, no op aliases an outgrown array (ops carry INDICES, and Drawer.draw
+	// snapshots the current arrays at entry -- nothing appends during a draw),
+	// so the old array is dead the instant append returns. Retaining it
+	// instead would hold 35.5 KB per 24-word frame, which is both a real cost
+	// on a 283 K-free device and indistinguishable from F-109's open ~35 K.
+	//
+	// These two counters exist so a test can prove the zeroing RAN. Without
+	// them the property is invisible: a correctly-zeroed orphan and an orphan
+	// that was never created look identical from outside.
+	zeroedArrays  int
+	zeroedEntries int
+}
+
+// appendArgs is the ONLY route by which b.args grows, and appendRefs the only
+// route for b.refs. Everything in this file goes through them; `git grep
+// '\.args = append'` outside these two functions must return nothing.
+//
+// They detect reallocation AFTER the fact rather than predicting it. A
+// predict-ahead form (`if cap-len < n`) has to be told how many elements are
+// coming, and is silently wrong wherever a site appends TWICE -- ParamImageMask
+// and encodeOp both append the payload and THEN a header word, so a prediction
+// of len(args) lets the first append fit exactly and the SECOND one reallocate
+// unrecorded, orphaning the array that just received the runes. Comparing caps
+// across the append needs no count, holds for any number of appends and any
+// branch, and cannot be got wrong per-site.
+func (b *Buffer) appendArgs(vals ...uint32) {
+	old := b.args
+	b.args = append(b.args, vals...)
+	if cap(b.args) != cap(old) && cap(old) > 0 {
+		b.zeroedArrays++
+		b.zeroedEntries += cap(old)
+		clear(old[:cap(old)])
+	}
+}
+
+func (b *Buffer) appendRefs(vals ...any) {
+	old := b.refs
+	b.refs = append(b.refs, vals...)
+	if cap(b.refs) != cap(old) && cap(old) > 0 {
+		b.zeroedArrays++
+		b.zeroedEntries += cap(old)
+		clear(old[:cap(old)])
+	}
 }
 
 type Drawer struct {
@@ -141,10 +195,10 @@ func ParamImageMask(b *Buffer, img *ImageHandle, refs []any, args []uint32) Mask
 		end:   len(b.args) + 1 + len(args),
 		refs:  len(b.refs) + 1 + len(refs),
 	}
-	b.args = append(b.args, args...)
-	b.args = append(b.args, encodeHeader(opMask, len(args), 1+len(refs)))
-	b.refs = append(b.refs, img)
-	b.refs = append(b.refs, refs...)
+	b.appendArgs(args...)
+	b.appendArgs(encodeHeader(opMask, len(args), 1+len(refs)))
+	b.appendRefs(img)
+	b.appendRefs(refs...)
 	return MaskOp{op{
 		buf: b,
 		r:   r,
@@ -192,8 +246,7 @@ func ensureLatest(o op) op {
 		return o
 	}
 	start := len(o.buf.args)
-	o.buf.args = append(o.buf.args,
-		uint32(o.r.start),
+	o.buf.appendArgs(uint32(o.r.start),
 		uint32(o.r.end),
 		uint32(o.r.refs),
 		encodeHeader(opJump, 3, 0),
@@ -246,6 +299,20 @@ func (d *Drawer) Draw(dst, maskfb draw.Image, op Op) {
 	if op.buf == nil {
 		return
 	}
+	// clear to CAP, not just truncate. The backing array outlives the slice,
+	// and a mark-sweep collector scans whole allocated objects -- so a stale
+	// frameOp from the PREVIOUS frame keeps that frame's mask source, and its
+	// Buffer, alive indefinitely. When the previous frame belonged to a
+	// session that has since been wiped, that is the whole leak.
+	//
+	// Here rather than only in Release: this makes the property structural, so
+	// a future caller who abandons a Buffer without calling Release cannot
+	// reintroduce it. Costs one clear of <= cap entries per frame, against a
+	// full-screen redraw.
+	//
+	// The recursion's own restore at the end of draw() must NOT do this: those
+	// entries alias the buffer being drawn right now.
+	clear(d.maskStack[:cap(d.maskStack)])
 	d.maskStack = d.maskStack[:0]
 	d.jumpStack = append(d.jumpStack[:0], op.op.r)
 	d.draw(dst, maskfb, op.op.buf, drawState{clip: image.Rect(-1e9, -1e9, 1e9, 1e9)}, math.MaxInt)
@@ -255,6 +322,35 @@ func (d *Drawer) Draw(dst, maskfb draw.Image, op Op) {
 
 func (d *Drawer) Reset() {
 	d.inputs = d.inputs[:0]
+	d.skipInputOps = false
+}
+
+// Release drops every reference this Drawer still holds into buffers it has
+// drawn, so a Buffer abandoned while its Drawer lives on can be collected.
+//
+// Truncation does not do it. maskStack and inputs are re-sliced to length 0
+// between frames, but the backing arrays keep their stale entries, and a
+// mark-sweep collector scans whole allocated objects rather than up to len.
+// Each stale frameOp holds an imageOp whose `refs` and `args` ALIAS the
+// Buffer's own arrays, and whose `src` is an interface-value COPY living here
+// rather than in the Buffer -- so Buffer.Scrub, which zeroes that Buffer's
+// arrays, cannot reach it.
+//
+// Reslicing to cap before clear() is the whole point: clear(d.maskStack) with
+// len 0 zeroes nothing and leaves exactly the entries that leak.
+//
+// Production calls this from the wipe path (gui/run_flow.go), the only place a
+// Buffer is abandoned while this Drawer survives. Draw clears as it goes
+// besides, so a missed call cannot reintroduce the leak.
+func (d *Drawer) Release() {
+	clear(d.maskStack[:cap(d.maskStack)])
+	clear(d.inputs[:cap(d.inputs)])
+	d.maskStack = d.maskStack[:0]
+	d.inputs = d.inputs[:0]
+	// jumpStack is []ops -- three ints, no pointers -- so truncation suffices.
+	// Listed rather than omitted so the audit is total.
+	d.jumpStack = d.jumpStack[:0]
+	d.text = nil
 	d.skipInputOps = false
 }
 
@@ -383,9 +479,9 @@ func encodeOp(b *Buffer, cmd opType, nops int, refs []any, args ...uint32) op {
 		end:   len(b.args) + 1 + len(args),
 		refs:  len(b.refs) + len(refs),
 	}
-	b.args = append(b.args, args...)
-	b.args = append(b.args, encodeHeader(cmd, len(args), len(refs)))
-	b.refs = append(b.refs, refs...)
+	b.appendArgs(args...)
+	b.appendArgs(encodeHeader(cmd, len(args), len(refs)))
+	b.appendRefs(refs...)
 	return op{
 		buf:  b,
 		r:    r,
@@ -412,8 +508,7 @@ func newCompose(op op) op {
 	}
 	if op.r.end != len(op.buf.args) {
 		start := len(op.buf.args)
-		op.buf.args = append(op.buf.args,
-			uint32(op.r.start),
+		op.buf.appendArgs(uint32(op.r.start),
 			uint32(op.r.end),
 			uint32(op.r.refs),
 			encodeHeader(opJump, 3, 0),
@@ -449,10 +544,9 @@ func (g *group) add(op op) {
 			g.discontinuous = true
 			start := g.r.start
 			g.r.start = len(g.buf.args)
-			g.buf.args = append(g.buf.args, uint32(start))
+			g.buf.appendArgs(uint32(start))
 		}
-		g.buf.args = append(g.buf.args,
-			uint32(g.r.end),
+		g.buf.appendArgs(uint32(g.r.end),
 			uint32(g.r.refs),
 			encodeHeader(opJump, 3, 0), uint32(next.start),
 		)
@@ -464,7 +558,7 @@ func (g *group) add(op op) {
 
 func (g *group) Op() op {
 	if g.discontinuous {
-		g.buf.args = append(g.buf.args, uint32(g.r.end), uint32(g.r.refs), encodeHeader(opJump, 3, 0))
+		g.buf.appendArgs(uint32(g.r.end), uint32(g.r.refs), encodeHeader(opJump, 3, 0))
 		g.r.end = len(g.buf.args)
 	}
 	return g.op

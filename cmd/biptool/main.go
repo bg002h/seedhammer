@@ -16,6 +16,8 @@ import (
 	"os"
 	"strings"
 
+	qr "github.com/seedhammer/kortschak-qr"
+
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip32"
@@ -80,7 +82,7 @@ func run(stdout io.Writer, stdin io.Reader, args []string) error {
 		if err := seedFlags.Parse(args); err != nil {
 			seedFlags.Usage()
 		}
-		return genSeed(stdout, stdin)
+		return genSeed(stdout, os.Stderr, stdin)
 	case "interpolate":
 		if err := interpolateFlags.Parse(args); err != nil {
 			interpolateFlags.Usage()
@@ -297,7 +299,7 @@ func genRand(stdout io.Writer) error {
 }
 
 // genSeed encodes a secret in codex32 form.
-func genSeed(stdout io.Writer, stdin io.Reader) error {
+func genSeed(stdout, stderr io.Writer, stdin io.Reader) error {
 	conf, err := parseCodex32Conf()
 	if err != nil {
 		return err
@@ -314,7 +316,57 @@ func genSeed(stdout io.Writer, stdin io.Reader) error {
 		return err
 	}
 	fmt.Fprintln(stdout, key)
+	warnUnengraveable(stderr, key.String())
 	return nil
+}
+
+// warnUnengraveable prints to stderr when a generated codex32 string is one the
+// SeedHammer cannot cut (F-116).
+//
+// -seedlen admits 16-64 bytes, and the top of that range produces a 125-127
+// character LONG code whose plate QR needs more modules than the seed plate
+// allows. So this tool is DESIGNED to reach a range the engraver refuses, and
+// said nothing about it -- we shipped a generator whose output our own machine
+// rejects, which reads as an engraver bug rather than a generator one.
+//
+// It WARNS rather than refusing, deliberately. F-113's test vectors need a
+// generator for 125/127-character strings and this is the only one; capping
+// -seedlen would delete the fixtures for the very refusal being added.
+//
+// The limit is MEASURED here, not hardcoded, by making the same call
+// backup.EngraveSeedString makes (backup/backup.go:126-131): uppercase, qr.M,
+// refuse Size > 33. A literal 90 would silently drift if the plate's QR cap or
+// its error-correction level ever moved.
+func warnUnengraveable(stderr io.Writer, s string) {
+	// Worse than unengraveable, and found by exercising the full -seedlen range:
+	// 41-62 bytes lands in codex32's DEAD ZONE (94-124 characters), which
+	// codex32.New rejects outright -- neither the short band (48-93) nor the
+	// long one (125-127). Such a string is not merely uncuttable, it is not a
+	// valid codex32 string, and saying "cannot be engraved" would understate it.
+	if _, err := codex32.New(s); err != nil {
+		fmt.Fprintf(stderr,
+			"biptool: WARNING -- this %d-character string is NOT VALID codex32: %v\n"+
+				"    -seedlen 41-62 falls between codex32's two length bands (48-93 short,\n"+
+				"    125-127 long). Nothing will parse this, let alone engrave it.\n",
+			len(s), err)
+		return
+	}
+	qrc, err := qr.Encode(strings.ToUpper(s), qr.M)
+	if err != nil {
+		// Encoding failed entirely, which is a stronger form of the same news.
+		fmt.Fprintf(stderr, "biptool: WARNING -- this string cannot be encoded as a QR "+
+			"code at all (%v), so the SeedHammer cannot engrave it.\n", err)
+		return
+	}
+	if qrc.Size <= 33 {
+		return
+	}
+	fmt.Fprintf(stderr,
+		"biptool: WARNING -- this %d-character string CANNOT BE ENGRAVED.\n"+
+			"    Its plate QR needs %d modules; the seed plate allows 33.\n"+
+			"    The machine will accept and decrypt it, then refuse at the plate.\n"+
+			"    Use -seedlen 32 or less for a string this machine can cut.\n",
+		len(s), qrc.Size)
 }
 
 // interpolate a set of codex32 shares.

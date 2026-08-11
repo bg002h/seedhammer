@@ -110,6 +110,38 @@ func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	if unlockPassphraseHook != nil {
 		unlockPassphraseHook()
 	}
+	// §10.2.4 row 4: an in-flight passphrase is seed-equivalent (operator
+	// ruling 2026-08-09) -- it derives the key that opens everything, and the
+	// machine holds it beside the sealed blob in flash. This bracket is THE
+	// SEAM (F-105 / task9-r0.md §4): it wraps this function's own lifetime --
+	// both unlockSealedFlow's per-attempt retry (a fresh call on every wrong
+	// passphrase) and the checksum-retry loop below -- and nothing else.
+	//
+	// The bracket CLOSES on every return path (defer), which is BEFORE
+	// unlockAttemptOnce and therefore unlockDerive ever run. That closure IS
+	// row 5, not a flag on wipeGuard: arming across the KDF is unsurvivable,
+	// because Run's warning branch draws and `continue`s without returning
+	// control, so a derivation that reaches 3:00 is frozen for the whole 30 s
+	// window and the wipe becomes certain -- measured at ~1,343,284
+	// iterations, 34.6% of §6.2's legal range, permanently un-openable on the
+	// device (task9-r0.md §2). ctx.wipe must therefore read nil for the
+	// derivation's ENTIRE run, not merely disarmed -- armed() itself is
+	// unchanged and untouched.
+	//
+	// prev, not nil, on the way out: unlockSealedFlow never nests a guard
+	// today (this function always returns before unlockSecretSession runs),
+	// but save-and-restore makes that a structural fact rather than an
+	// accident of call order (task9-r0.md M2).
+	prev := ctx.wipe
+	ctx.wipe = &wipeGuard{subject: wipeWarningSubjectPassphrase}
+	defer func() {
+		ctx.wipe = prev
+		// F-107 (R0 round 0, I1): §8's twelve-word passphrase is rendered HERE,
+		// outside unlockSecretSession's bracket, and on the give-up routes
+		// nothing scrubbed at all. The passphrase opens the payload, so its
+		// glyphs are as sensitive as the seed's.
+		ctx.B.Scrub()
+	}()
 	// The screen's identity is established by unlockPassphraseNotice, before
 	// entry, and the title passed to inputWordsFlow stays "" (R0 round 0, M4).
 	// The title parameter is an either/or: gui/gui.go:765-770 renders
@@ -281,17 +313,25 @@ func unlockDerive(ctx *Context, th *Colors, h seal.Header, pass []byte) ([]byte,
 		// whole screen exists to satisfy. EngraveScreen.Engrave has the correct
 		// order (gui/gui.go:2733 before :2741); this now matches it.
 		//
-		// WHAT THIS ORDER DOES NOT FIX, so nobody reads it as fixed: Run refreshes
-		// a.idle.start only on `len(evts) > 0`, and a derivation produces no
-		// events, so a derivation longer than idleTimeout still trips the saver --
-		// whose branch `continue`s without breaking, so ctx.Frame does not return
-		// and the KDF stops until a touch. At §7.1's measured 9,715 it/s that is
-		// iterations >= 180 * 9,715 = 1,748,700, against §6.2's ceiling of
-		// 2,000,000 (205.9 s): the top 13.2% of the LEGAL range, reachable with a
-		// conforming blob. The default is 300,000 (30.9 s), nowhere near it.
-		// Closing it needs a Run-side change and must be reconciled with §10.2.4's
-		// residency timer, which is F-89's territory -- so it is B2b's, filed as
-		// F-93. The log line above is the half that could be fixed here.
+		// F-93, closed by Task 5. Run refreshes a.idle.start only on
+		// `len(evts) > 0`, and a derivation produces no events, so without
+		// the KeepAwake call below a derivation longer than idleTimeout still
+		// trips the saver -- whose branch `continue`s without breaking, so
+		// ctx.Frame does not return and the KDF stops until a touch. At
+		// §7.1's measured 9,715 it/s that is iterations >= 180 * 9,715 =
+		// 1,748,700, against §6.2's ceiling of 2,000,000 (205.9 s): the top
+		// 13.2% of the LEGAL range, reachable with a conforming blob. The
+		// default is 300,000 (30.9 s), nowhere near it.
+		//
+		// ctx.KeepAwake() is the caller half of the fix; the Run-side term
+		// (`ctx.keepAwake && !armed`, run_flow.go) is the other, and the
+		// `&& !armed` there is what reconciles this with §10.2.4's residency
+		// timer: KeepAwake is ignored whenever the timer is armed, so a
+		// derivation can never use it to postpone a wipe (F-93's own scope is
+		// the screensaver, not the wipe). It must be called BEFORE
+		// ctx.Frame, for the same reason WakeupAt must: Run reads and clears
+		// the flag from inside this very call.
+		ctx.KeepAwake()
 		ctx.WakeupAt(time.Now())
 		ctx.Frame(op.Layer(
 			nav,
@@ -390,6 +430,25 @@ func unlockSealedFlow(ctx *Context, th *Colors, blob []byte, p *seal.Payload) bo
 			// operator chasing a compromise that did not happen.
 			showError(ctx, th, unlockTitle,
 				"This payload declares more records than the machine accepts.")
+			return false
+		case errors.Is(err, seal.ErrCodex32TooLong):
+			// §10.2.1a, and the same §6.4 argument as the case above: the length
+			// and the classification are authenticated plaintext, so naming them
+			// leaks nothing, and the operator's backup is INTACT. Falling through
+			// to "Payload unreadable." would tell someone with a perfectly good
+			// seed card that it had been tampered with -- after a successful
+			// authentication and a ~31 s key derivation. Nothing was opened: the
+			// per-record pass wiped every record it had copied and AdmitSection
+			// returned none.
+			//
+			// The number comes from the constant, never from a literal in this
+			// string: F-117/F-118 may raise the plate's QR cap deliberately, and
+			// a screen that still says 90 while the machine refuses at some other
+			// length is worse than no number at all.
+			showError(ctx, th, unlockTitle, fmt.Sprintf(
+				"This payload holds a codex32 secret longer than %d characters, "+
+					"which this machine cannot engrave. Nothing was opened.",
+				seal.MaxEngraveableCodex32Len))
 			return false
 		default:
 			showError(ctx, th, unlockTitle, "Payload unreadable.")

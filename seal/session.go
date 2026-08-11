@@ -17,7 +17,7 @@ func IsSecret(c Classification) bool {
 	return c == ClassCodex32Secret || c == ClassMnemonic
 }
 
-// SecretsResident reports whether any SEAL-OWNED secret record still holds
+// RecordsResident reports whether any SEAL-OWNED secret record still holds
 // non-zero bytes.
 //
 // READ THAT NARROWLY, and do not build a control on the wide reading (lens 3 M2
@@ -36,16 +36,19 @@ func IsSecret(c Classification) bool {
 //     arm. This function scans p.Secret only and reaches none of them.
 //
 // So what it measures is exactly "no seal-owned record buffer is non-zero",
-// which is NOT "no seed material is resident". §10.2.4's third row currently
-// reads the two as equivalent. Nothing consumes the predicate in B2a, so this
-// is not a defect today — but B2b's timer is specified to key on it, and on the
-// ms1 arm (six of the seven canonical vectors) it would report "nothing to
-// protect" while four string copies of the share are still live. Fix the
-// contract before building the timer on it.
+// which is NOT "no seed material is resident" — on the ms1 arm (six of the
+// seven canonical vectors) it goes false while four string copies of the
+// share are still live (codex32.String, backup.SeedString and their
+// derivatives). §10.2.4 as amended (2026-08-09) resolves the confusion the
+// old name invited by FORBIDDING this predicate as the residency timer's
+// key: B2b's timer (gui/wipe_guard.go) keys on the secret SESSION BRACKET's
+// lifetime instead — which is also why this function was renamed from
+// SecretsResident to RecordsResident, so nobody builds a control on the wide
+// reading again.
 //
-// B2a has no timer (that is B2b), but the predicate ships here because it is
-// the definition the RECORD wipe must satisfy, and a test can assert on it.
-func (p *Payload) SecretsResident() bool {
+// The predicate still ships: it is the definition the RECORD wipe must
+// satisfy, and a test can assert on it.
+func (p *Payload) RecordsResident() bool {
 	for _, r := range p.Secret {
 		if !IsSecret(r.Class) {
 			continue

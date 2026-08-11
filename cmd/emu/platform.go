@@ -34,6 +34,10 @@ type platform struct {
 	events  chan gui.Event
 	wakeups chan struct{}
 
+	// toolpath decodes every step the GUI writes to an engraver. See
+	// toolpath.go; exposed to the page as window.shToolpath.
+	toolpath *toolpathRecorder
+
 	// The JS side. buf is a Uint8ClampedArray the same length as fb.Pix; Go
 	// cannot hand a []byte to putImageData directly, so each frame is copied
 	// through it.
@@ -49,9 +53,11 @@ func newPlatform() *platform {
 		// Buffered so a tap that lands while the GUI is laying out a frame is
 		// queued rather than dropped -- the browser delivers events on the JS
 		// side, which cannot block waiting for Go to be ready for them.
-		events:  make(chan gui.Event, 16),
-		wakeups: make(chan struct{}, 1),
+		events:   make(chan gui.Event, 16),
+		wakeups:  make(chan struct{}, 1),
+		toolpath: newToolpathRecorder(),
 	}
+	installToolpathAPI(p.toolpath)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -177,7 +183,9 @@ func (p *platform) Wakeup() {
 }
 
 func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
-	return &emuEngraver{}, nil
+	// One recorder across every job, so a plate that is aborted and resumed
+	// records as ONE motion -- which is the thing being compared.
+	return &emuEngraver{rec: p.toolpath}, nil
 }
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
@@ -189,18 +197,26 @@ func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 // Returning a reader that never yields would hang those screens instead.
 func (p *platform) NFCReader() io.ReadCloser { return nil }
 
-// PayloadReader returns nil: a browser build has no XIP flash, so §10.1's
-// detection finds nothing and the Sealed Payload entry stays invisible.
+// PayloadReader returns a reader over the built-in EMULATOR-ONLY test sealed
+// payload (sealed_test_payload.go), so §10.1's detection finds MNEMBLOB and
+// the Sealed Payload entry appears — letting an operator walk the whole
+// passphrase/KDF/decrypt/plate flow in the browser with no hardware.
 //
-// It is deliberately NOT a seal.FileReader fed from a flag. This file is
-// //go:build js, built GOOS=js GOARCH=wasm and run from a static page through
-// wasm_exec.js: there is no flag.Parse() in the package and os.Args carries no
-// real argv under the browser glue, so a flag.String would compile, run, and
-// SILENTLY NEVER RECEIVE A VALUE -- a non-failing no-op, the worst shape a test
-// affordance can have. The automated coverage runs through gui's test platform
-// instead. If a browser-side payload is ever wanted, the mechanism is a
-// syscall/js read of location.search or a JS global set from the host page.
-func (p *platform) PayloadReader() seal.Reader { return nil }
+// This USED TO return nil unconditionally ("a browser build has no XIP
+// flash"), which was true and is still true — the change below is not a
+// browser flash read, it is a fixed in-memory blob. It is still deliberately
+// NOT a seal.FileReader fed from a flag: this file is //go:build js, built
+// GOOS=js GOARCH=wasm and run from a static page through wasm_exec.js, so
+// there is no flag.Parse() in the package, no real argv under the browser
+// glue, and — unlike Node — no globalThis.fs for os.Open to talk to, so a
+// FileReader's os.Open would simply fail every read in an actual browser.
+// The automated coverage runs through gui's test platform instead. If an
+// OPERATOR-SUPPLIED browser-side payload is ever wanted on top of this, the
+// mechanism is a syscall/js read of location.search or a JS global set from
+// the host page — nothing here forecloses that.
+func (p *platform) PayloadReader() seal.Reader {
+	return embeddedPayloadReader{data: []byte(sealedTestPayload)}
+}
 
 // Features reports no secure boot, so the version line reads "(UNLOCKED)".
 // That is true here and worth saying: nothing about a browser build is signed.
