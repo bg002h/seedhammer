@@ -20,7 +20,9 @@ import (
 //   - the error-correction level. MEASURED here, not asserted in prose: at qr.Q
 //     the limit drops to 67 -- below EncodeMS1's ordinary output -- so that
 //     change would BOTH silently reopen F-113 and start rejecting ordinary
-//     seeds. Nothing else in the tree would have noticed.
+//     seeds. This test is the one that names WHY; the sibling direct test also
+//     goes red, so the tree is not silent -- an earlier draft of this comment
+//     claimed it was, and the whole-diff review measured otherwise.
 //
 // qrScale is NOT among them: the boundary is decided by qr.Encode before
 // qrScale is ever read. It changes how big the QR is cut, not which version the
