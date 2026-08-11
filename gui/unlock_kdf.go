@@ -431,6 +431,25 @@ func unlockSealedFlow(ctx *Context, th *Colors, blob []byte, p *seal.Payload) bo
 			showError(ctx, th, unlockTitle,
 				"This payload declares more records than the machine accepts.")
 			return false
+		case errors.Is(err, seal.ErrCodex32TooLong):
+			// §10.2.1a, and the same §6.4 argument as the case above: the length
+			// and the classification are authenticated plaintext, so naming them
+			// leaks nothing, and the operator's backup is INTACT. Falling through
+			// to "Payload unreadable." would tell someone with a perfectly good
+			// seed card that it had been tampered with -- after a successful
+			// authentication and a ~31 s key derivation. Nothing was opened: the
+			// per-record pass wiped every record it had copied and AdmitSection
+			// returned none.
+			//
+			// The number comes from the constant, never from a literal in this
+			// string: F-117/F-118 may raise the plate's QR cap deliberately, and
+			// a screen that still says 90 while the machine refuses at some other
+			// length is worse than no number at all.
+			showError(ctx, th, unlockTitle, fmt.Sprintf(
+				"This payload holds a codex32 secret longer than %d characters, "+
+					"which this machine cannot engrave. Nothing was opened.",
+				seal.MaxEngraveableCodex32Len))
+			return false
 		default:
 			showError(ctx, th, unlockTitle, "Payload unreadable.")
 			return false

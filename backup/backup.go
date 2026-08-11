@@ -122,13 +122,33 @@ func EngraveSeed(params engrave.Params, plate Seed) (engrave.Engraving, error) {
 	return side, nil
 }
 
+// seedQRLevel and seedQRMaxSize are the two inputs -- and the ONLY two -- that
+// decide seal.MaxEngraveableCodex32Len, §10.2.1a's admission limit. They are
+// named rather than written inline so the test that re-derives that limit can
+// read them instead of restating them: a duplicated `qr.M` in the test would
+// keep computing 90 while this function had moved to another level, which is
+// the exact silent drift §10.2.1a says must not be possible. Behaviour is
+// unchanged -- these are the values that were already here.
+//
+// Measured: at qr.Q the limit drops from 90 to 67, below EncodeMS1's ordinary
+// output, so that change would both reopen F-113 and reject ordinary seeds.
+// Raising seedQRMaxSize is F-117/F-118 and deliberately not done here.
+//
+// qrScale is NOT one of them: the version is decided by qr.Encode before
+// qrScale is ever read. It changes how big the QR is cut, not which version the
+// string needs.
+const (
+	seedQRLevel   = qr.M
+	seedQRMaxSize = 33
+)
+
 func EngraveSeedString(params engrave.Params, plate SeedString) (engrave.Engraving, error) {
 	seed := strings.ToUpper(plate.Seed)
-	qrc, err := qr.Encode(seed, qr.M)
+	qrc, err := qr.Encode(seed, seedQRLevel)
 	if err != nil {
 		return nil, err
 	}
-	if qrc.Size > 33 {
+	if qrc.Size > seedQRMaxSize {
 		return nil, errors.New("seed too long to engrave QR")
 	}
 	qrCmd, err := engrave.ConstantQR(qrc)
