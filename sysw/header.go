@@ -39,7 +39,15 @@ func ParseHeader(buf []byte) (Header, error) {
 	h.PubLen = binary.BigEndian.Uint32(buf[44:48])
 	h.CtLen = binary.BigEndian.Uint32(buf[48:52])
 
-	if int(h.PubLen) > MaxSectionLen || int(h.CtLen) > MaxSectionLen {
+	// Compared as uint32, NOT widened to int. `int` is 32 bits on the device
+	// (Cortex-M33 via tinygo), so `int(h.PubLen)` is NEGATIVE for any pub_len
+	// with the top bit set and the cap is bypassed. Measured under GOARCH=386:
+	// pub_len=0x80000000 gives int()=-2147483648, and pub_len=0xFFFFFFFF gives
+	// int()=-1 with TotalLen()=67 -- a small POSITIVE length the device would
+	// have accepted while the 64-bit host rejects the same bytes. The Rust
+	// primary compares `as usize`, which is unsigned and correct on both widths;
+	// this is a Go-only porting error, so it is fixed here as convergence.
+	if h.PubLen > MaxSectionLen || h.CtLen > MaxSectionLen {
 		return Header{}, fmt.Errorf("%w: pub_len=%d ct_len=%d cap=%d",
 			ErrSectionTooLong, h.PubLen, h.CtLen, MaxSectionLen)
 	}
