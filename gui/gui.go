@@ -2417,6 +2417,22 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 			return m, true
 		}
 	}
+	// §3.3.2 admits ClassCodex32Secret here too, and this is the one program
+	// that already has a carrier for it: the typed menu's `M*1 STRING` row
+	// returns the same codex32.String that engraveObjectFlow's case expects
+	// (plan stage 13a). The other three seam programs admit the cell as well and
+	// CANNOT serve it — §3.1's seam signature returns bip39.Mnemonic, which
+	// carries no codex32 secret. The spec records that inconsistency (§3.3.2)
+	// and nothing here papers over it.
+	//
+	// It is a SECOND offer rather than a widened first one because syswOffer
+	// takes one class: the operator sees this screen only when the payload holds
+	// an ms1 AND either holds no seed or declined it.
+	if body, ok := syswOffer(ctx, th, sysw.ClassCodex32Secret, "Seed from where?"); ok {
+		if s, err := codex32.New(body); err == nil {
+			return s, true
+		}
+	}
 	for {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",

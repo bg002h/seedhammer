@@ -298,7 +298,11 @@ func deriveXpubFlow(ctx *Context, th *Colors) {
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
 	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := passphraseFlow(ctx, th); ok {
+		// §3.3.2 admits ClassPassphrase to this program, so the payload is
+		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
+		// syswPassphraseFlow for the two normative rules a shared edit inside
+		// passphraseFlow would have broken.
+		if pass, ok := syswPassphraseFlow(ctx, th); ok {
 			passphrase = pass
 		}
 	}
