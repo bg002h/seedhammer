@@ -164,3 +164,42 @@ func contains(ss []string, want string) bool {
 
 func idBytes(a [32]byte) []byte   { return a[:] }
 func hashBytes(a [16]byte) []byte { return a[:] }
+
+// TestPaddedRegionMatchesTheBareVector is I5 from the pre-flash conformance
+// review. What actually gets written to 0x10D00000 is a 65536-byte REGION:
+// the container at offset 0, then 0xFF to the end (`me sysw pack --region`).
+// Every vector is a bare blob, so nothing pinned that both implementations trim
+// to the header's declared total before hashing.
+//
+// They agree today — measured during the review. This is what keeps them
+// agreeing. If it ever fails, the device and the host disagree about every
+// payload ever flashed, and the operator's on-screen digest comparison silently
+// stops meaning anything.
+//
+// The mirror of this test lives in the Rust primary
+// (sysw::vectors::tests::padding_a_vector_to_a_full_region_changes_no_identity_and_no_digest),
+// so the property is pinned on both sides rather than assumed on one.
+func TestPaddedRegionMatchesTheBareVector(t *testing.T) {
+	for _, v := range loadVectors(t) {
+		t.Run(v.Name, func(t *testing.T) {
+			blob, err := hex.DecodeString(v.Blob)
+			if err != nil {
+				t.Fatalf("vector blob is not hex: %v", err)
+			}
+			region := make([]byte, RegionLen)
+			for i := range region {
+				region[i] = 0xFF
+			}
+			copy(region, blob)
+
+			h, err := ParseHeader(region)
+			if err != nil {
+				t.Fatalf("a padded region must still parse: %v", err)
+			}
+			if got := hex.EncodeToString(idBytes(Identity(region[:h.TotalLen()]))); got != v.Identity {
+				t.Errorf("padding to a full region moved the identity\n got %s\nwant %s",
+					got, v.Identity)
+			}
+		})
+	}
+}
