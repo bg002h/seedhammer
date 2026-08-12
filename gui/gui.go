@@ -183,6 +183,14 @@ const (
 	engraveBundle
 	engraveSingleSig
 	engraveMultisig
+	// loadPayload is UNCONDITIONAL and therefore inserted mid-enum per the house
+	// rule, before bip85Derive, so bip85Derive stays the bound StartScreen.lastNav
+	// returns and unlockPayload stays the last navigable program. Two
+	// conditionally-visible trailing entries cannot both be expressed as one
+	// bound, which is why this one is always shown and reports an empty region
+	// itself. It is NOT the Sealed Payload: different container, different
+	// region, and that one stays frozen.
+	loadPayload
 	bip85Derive
 	// unlockPayload is APPENDED, not inserted, and it is the one program whose
 	// visibility is CONDITIONAL (§10.1: absent payload -> the feature is
@@ -1716,6 +1724,17 @@ func uiFlow(ctx *Context, version string) {
 	if r := ctx.Platform.PayloadReader(); r != nil && r.Probe() {
 		payloadReader = r
 	}
+
+	// The SYSTEMWIDE payload, offered once at boot. Separate from the Sealed
+	// Payload above in every way that matters -- different container, different
+	// region (0x10D00000), different program -- and that one stays frozen.
+	//
+	// Offered, not imposed: syswLoadFlow asks before reading, and a machine with
+	// no payload never sees a prompt at all. The operator can also reach it any
+	// time from the `Load Payload` carousel entry, which is why declining here
+	// costs nothing.
+	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), true)
+
 	s := &StartScreen{
 		Version:    version,
 		hasPayload: payloadReader != nil,
@@ -1747,6 +1766,9 @@ func uiFlow(ctx *Context, version string) {
 				continue
 			case engraveMultisig:
 				engraveMultisigFlow(ctx, th)
+				continue
+			case loadPayload:
+				syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
 				continue
 			case bip85Derive:
 				bip85DeriveFlow(ctx, th)
@@ -1945,6 +1967,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Engrave Single-Sig"
 	case engraveMultisig:
 		titleTxt = "Engrave Multisig"
+	case loadPayload:
+		titleTxt = "Load Payload"
 	case bip85Derive:
 		titleTxt = "BIP-85 Child Seed"
 	case unlockPayload:
@@ -2150,7 +2174,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive, unlockPayload:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, loadPayload, bip85Derive, unlockPayload:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()

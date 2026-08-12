@@ -49,8 +49,12 @@ type syswRecord struct {
 
 // load replaces whatever was held. Returns the flags the consuming screen must
 // show (§3.3.3).
-func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbove bool) {
-	*s = syswSession{loaded: true, identity: identity, sealed: sealed, weak: !cliffAbove}
+// `compared` is decided by the LOAD FLOW, which is the only place that can see
+// both of [compared]'s routes (§12.2): the operator confirming the displayed
+// digest, and a successful AEAD open. Passing it in keeps that decision in one
+// place instead of letting each caller invent half the rule.
+func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbove, compared bool) {
+	*s = syswSession{loaded: true, identity: identity, sealed: sealed, weak: !cliffAbove, compared: compared}
 	for _, r := range p.Public {
 		s.records = append(s.records, syswRecord{class: sysw.Classify(r), body: r})
 	}
