@@ -89,3 +89,25 @@ func (s *syswSession) has(want sysw.Class) bool {
 	}
 	return false
 }
+
+// syswOffer asks whether to take a record of `want` from the loaded payload.
+//
+// Returns ok=false when there is nothing to offer OR the operator declines, so
+// every caller is `if body, ok := syswOffer(...); ok { … }` and otherwise falls
+// through to its existing input path. That shape keeps the payload strictly
+// ADDITIVE: a machine with no payload behaves exactly as it did before.
+//
+// The four programs that do not share seedEntryFlow each call this — measured,
+// they share no helper at all, which is why the seam covers 4 of 8 programs and
+// the other four are wired individually (plan stage 5d).
+func syswOffer(ctx *Context, th *Colors, want sysw.Class, lead string) (string, bool) {
+	if ctx.sysw == nil || !ctx.sysw.has(want) {
+		return "", false
+	}
+	cs := &ChoiceScreen{Title: "Input", Lead: lead, Choices: []string{"ENTER IT", "FROM PAYLOAD"}}
+	choice, ok := cs.Choose(ctx, th)
+	if !ok || choice == 0 {
+		return "", false
+	}
+	return ctx.sysw.take(want)
+}

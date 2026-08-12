@@ -6,6 +6,7 @@ import (
 	"image"
 	"io"
 	"log"
+	"seedhammer.com/sysw"
 	"time"
 
 	"seedhammer.com/gui/assets"
@@ -22,6 +23,12 @@ import (
 // REFUSED in this channel (hand-typed only); a single mk1 is refused (malformed,
 // no integrity). No secret is ever gathered, displayed, or engraved.
 func bundleFlow(ctx *Context, th *Colors) {
+	// A payload card is offered ONCE, before gathering, and then the operator
+	// continues scanning as usual — the bundle is a SET, and a source that
+	// short-circuited the gather would cap it at whatever the payload held.
+	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+		ctx.syswBundleSeed = body
+	}
 	for {
 		cards, ok := bundleGatherFlow(ctx, th)
 		if !ok {
@@ -94,6 +101,14 @@ func (s *bundleGatherScreen) tally() []string {
 // review flow are driven directly in tests.
 func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{g: &bundleGatherer{}}
+	// A payload card enters through the SAME offer() every scanned card does,
+	// so it is deduplicated, chunk-assembled and validated identically. A
+	// separate insertion path would be a second way for a card to become part
+	// of a bundle, and only one of them would have the checks.
+	if seed := ctx.syswBundleSeed; seed != "" {
+		ctx.syswBundleSeed = ""
+		scr.g.offer(mdmkText(seed))
+	}
 	scans := make(chan scanResult, 1)
 	if r := ctx.Platform.NFCReader(); r != nil {
 		closer := make(chan struct{})

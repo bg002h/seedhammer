@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"seedhammer.com/sysw"
 	"strconv"
 	"unicode/utf8"
 
@@ -607,6 +608,18 @@ func engravePassphraseFlow(ctx *Context, th *Colors) {
 		passphraseSecretHook(secret)
 	}
 	n := 0
+	// The payload PRE-FILLS the passphrase; the operator still walks the
+	// fingerprint fields and the confirm screen.
+	//
+	// Copied into `secret`, the caller-owned buffer that wipeBytes above
+	// scrubs — never held as a Go string. §6.2.2's no-regrow rule is why the
+	// buffer is written into rather than replaced, and the copy is bounded by
+	// the buffer so an over-long record truncates rather than overruns.
+	if body, ok := syswOffer(ctx, th, sysw.ClassPassphrase, "Password from where?"); ok {
+		if raw, err := sysw.DecodeBody(body); err == nil {
+			n = copy(secret, raw)
+		}
+	}
 	var seedFP, combinedFP string
 	qr := false
 	// The pass-proof trigger fires inside ONE field but must populate all

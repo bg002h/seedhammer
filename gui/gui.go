@@ -63,13 +63,16 @@ const (
 
 type Context struct {
 	// sysw is the systemwide payload session, or nil. See sysw_session.go.
-	sysw          *syswSession
-	Platform      Platform
-	Styles        Styles
-	Wakeup        time.Time
-	Done          bool
-	FrameCallback func(op.Op)
-	B             op.Buffer
+	sysw *syswSession
+	// syswBundleSeed is a first card taken from the payload, consumed by
+	// bundleGatherFlow. Empty when none was offered or taken.
+	syswBundleSeed string
+	Platform       Platform
+	Styles         Styles
+	Wakeup         time.Time
+	Done           bool
+	FrameCallback  func(op.Op)
+	B              op.Buffer
 
 	Router EventRouter
 
@@ -2386,6 +2389,14 @@ func descriptorFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
 }
 
 func newInputFlow(ctx *Context, th *Colors) (any, bool) {
+	// Backup Wallet takes a mnemonic or a codex32 secret; it REFUSES a
+	// passphrase, because it engraves the mnemonic itself and the passphrase is
+	// never engraved and never in the QR (§3.3.2).
+	if body, ok := syswOffer(ctx, th, sysw.ClassMnemonic, "Seed from where?"); ok {
+		if m, err := bip39.ParseMnemonic(body); err == nil {
+			return m, true
+		}
+	}
 	for {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",

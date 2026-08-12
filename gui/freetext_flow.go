@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"seedhammer.com/sysw"
 	"slices"
 	"strings"
 
@@ -1470,6 +1471,17 @@ const (
 func engraveTextFlow(ctx *Context, th *Colors) {
 	params := ctx.Platform.EngraverParams()
 	var text, title, footer string
+	// The payload PRE-FILLS the text and nothing else: the operator still walks
+	// title, footer, size and the confirm screen. A payload source that skipped
+	// them would engrave a plate nobody had seen.
+	//
+	// The body is hex-encoded — EPD §6.4 forbids the spaces and newlines free
+	// text contains — so it is decoded here (spec §5.3.1).
+	if body, ok := syswOffer(ctx, th, sysw.ClassFreeText, "Text from where?"); ok {
+		if raw, err := sysw.DecodeBody(body); err == nil {
+			text = string(raw)
+		}
+	}
 	useQR := false
 	// The rung the operator named on a proof trigger, or 0 for auto-fit. Held
 	// here beside the other fields so it survives Back exactly as they do.
