@@ -30,8 +30,12 @@ func syswSourceName(src syswSource) string {
 // F3 and F4 only. F1 and F2 are payload-level facts about the whole container,
 // and syswLoadWarnings already states them ONCE at load over every class the
 // payload holds; repeating them per record would say the same sentence up to
-// seven times for one payload, and F1's erase offer belongs to the erase item
-// (§5.3.2) which does not exist yet. They are not filtered out of syswFlags —
+// seven times for one payload. F1's own offer belongs there too, beside the
+// warning: since §13 D10 it offers to UNLOAD rather than to erase, and
+// syswLoadFlow makes it. (This sentence used to end "F1's erase offer belongs to
+// the erase item (§5.3.2) which does not exist yet" — the ruling deleted that
+// item, and a comment naming an unbuilt thing nobody is going to build is how a
+// stale condition outlives its claim.) They are not filtered out of syswFlags —
 // the rule stays whole, in one place — they are simply not RENDERED here.
 //
 // `unconfirmed` is false at every call site by construction: §12.6 is about

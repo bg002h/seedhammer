@@ -36,6 +36,18 @@ type syswSession struct {
 	// so weak == false does not mean strong.
 	weak bool
 
+	// digestShown records whether this payload HAD a digest to show —
+	// `[digest-shown]` (§12.4), which is exactly `pub_len > 0`.
+	//
+	// It is here for the UNLOAD confirmation and nothing else. Reloading has to
+	// re-earn `[compared]` (§12.2), and what that costs depends on which of the
+	// two routes is still open: a plaintext payload costs one digest comparison,
+	// a sealed one a passphrase entry and its KDF, and a SEALED payload with no
+	// digest costs the passphrase and NOTHING ELSE will do, because the AEAD
+	// open is then the only route there is. The screen cannot say that without
+	// knowing which case it is in, and the record list cannot answer it.
+	digestShown bool
+
 	// records are classified ONCE, at load. Re-sniffing at the point of use
 	// would let one byte string be admitted as one class and consumed as
 	// another.
@@ -63,8 +75,9 @@ type syswRecord struct {
 // both of [compared]'s routes (§12.2): the operator confirming the displayed
 // digest, and a successful AEAD open. Passing it in keeps that decision in one
 // place instead of letting each caller invent half the rule.
-func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbove, compared bool) {
-	*s = syswSession{loaded: true, identity: identity, sealed: sealed, weak: !cliffAbove, compared: compared}
+func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbove, compared, digestShown bool) {
+	*s = syswSession{loaded: true, identity: identity, sealed: sealed, weak: !cliffAbove,
+		compared: compared, digestShown: digestShown}
 
 	// `[mdmk-decode]` (§12.6) is a WHOLE-PAYLOAD question -- a card set is
 	// confirmed by the presence of its other chunks -- so it is computed once

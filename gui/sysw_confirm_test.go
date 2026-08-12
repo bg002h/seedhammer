@@ -27,7 +27,7 @@ func TestSyswSessionMarksUnconfirmedRecordsAtLoad(t *testing.T) {
 	// A complete 3-chunk card plus one record of another class: nothing here is
 	// unconfirmed, which is the direction that catches a marker stuck on.
 	p := &sysw.Payload{Public: []string{gMD1A, gMD1B, gMD1C, gFreeText}}
-	s.load(p, [32]byte{}, false, true, true)
+	s.load(p, [32]byte{}, false, true, true, true)
 	for i, r := range s.records {
 		if r.unconfirmed {
 			t.Errorf("record %d of a complete card set is marked unconfirmed", i)
@@ -36,7 +36,7 @@ func TestSyswSessionMarksUnconfirmedRecordsAtLoad(t *testing.T) {
 
 	// And the other direction: one chunk of the same declared set, alone.
 	var t2 syswSession
-	t2.load(&sysw.Payload{Public: []string{gFreeText, gMD1A}}, [32]byte{}, false, true, true)
+	t2.load(&sysw.Payload{Public: []string{gFreeText, gMD1A}}, [32]byte{}, false, true, true, true)
 	if t2.records[0].unconfirmed {
 		t.Error("a text: record is not ClassMDMK and must never be marked")
 	}
@@ -53,7 +53,7 @@ func TestUnconfirmedMarkingSurvivesTheSecretRecordsBeingAppended(t *testing.T) {
 	s.load(&sysw.Payload{
 		Public: []string{gFreeText, gMD1A},
 		Secret: []string{gSeed},
-	}, [32]byte{}, true, true, true)
+	}, [32]byte{}, true, true, true, true)
 	if len(s.records) != 3 {
 		t.Fatalf("INCONCLUSIVE: %d records, want 3", len(s.records))
 	}
@@ -74,7 +74,7 @@ func TestUnconfirmedMarkingSurvivesTheSecretRecordsBeingAppended(t *testing.T) {
 // the machine is complaining about, or the warning reads as data loss.
 func TestSyswLoadWarningsNamesTheUnconfirmedCaseDistinctly(t *testing.T) {
 	var s syswSession
-	s.load(&sysw.Payload{Public: []string{gMD1A}}, [32]byte{}, false, true, true)
+	s.load(&sysw.Payload{Public: []string{gMD1A}}, [32]byte{}, false, true, true, true)
 	lines := syswLoadWarnings(&s)
 	if len(lines) == 0 {
 		t.Fatal("an unconfirmed md1 in a plaintext container must raise F1")
@@ -87,13 +87,13 @@ func TestSyswLoadWarningsNamesTheUnconfirmedCaseDistinctly(t *testing.T) {
 	// The other direction. A COMPLETE card set in the same container warns about
 	// nothing, and a real secret still gets the plain sentence.
 	var ok syswSession
-	ok.load(&sysw.Payload{Public: []string{gMD1A, gMD1B, gMD1C}}, [32]byte{}, false, true, true)
+	ok.load(&sysw.Payload{Public: []string{gMD1A, gMD1B, gMD1C}}, [32]byte{}, false, true, true, true)
 	if got := syswLoadWarnings(&ok); len(got) != 0 {
 		t.Errorf("a complete card set must warn about nothing; got %q", got)
 	}
 
 	var secret syswSession
-	secret.load(&sysw.Payload{Public: []string{gSeed}}, [32]byte{}, false, true, true)
+	secret.load(&sysw.Payload{Public: []string{gSeed}}, [32]byte{}, false, true, true, true)
 	got := strings.Join(syswLoadWarnings(&secret), " ")
 	if !strings.Contains(got, "SECRET") {
 		t.Errorf("a real secret must still raise the plain F1 line; got %q", got)
@@ -108,7 +108,7 @@ func TestSyswLoadWarningsNamesTheUnconfirmedCaseDistinctly(t *testing.T) {
 // would silently drop one of them.
 func TestBothF1LinesAppearWhenBothCausesArePresent(t *testing.T) {
 	var s syswSession
-	s.load(&sysw.Payload{Public: []string{gSeed, gMD1A}}, [32]byte{}, false, true, true)
+	s.load(&sysw.Payload{Public: []string{gSeed, gMD1A}}, [32]byte{}, false, true, true, true)
 	lines := syswLoadWarnings(&s)
 	var plain, named bool
 	for _, l := range lines {

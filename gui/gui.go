@@ -1797,7 +1797,7 @@ func uiFlow(ctx *Context, version string) {
 				engraveMultisigFlow(ctx, th)
 				continue
 			case loadPayload:
-				syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+				syswPayloadMenu(ctx, th)
 				continue
 			case bip85Derive:
 				bip85DeriveFlow(ctx, th)

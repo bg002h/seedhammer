@@ -170,7 +170,11 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 
 	cliffAbove := pass != "" && sysw.CliffAbove(pass)
 	ctx.sysw = &syswSession{}
-	ctx.sysw.load(p, identity, h.Sealed(), cliffAbove, compared)
+	// h.PubLen > 0 is `[digest-shown]` (§12.4) — carried into the session
+	// because the UNLOAD confirmation has to say what RELOADING will cost, and a
+	// sealed payload with no digest can only be re-compared by entering the
+	// passphrase again.
+	ctx.sysw.load(p, identity, h.Sealed(), cliffAbove, compared, h.PubLen > 0)
 
 	if !compared {
 		// Loaded but not authenticated: `take` refuses, so every program will
@@ -185,8 +189,42 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	// was actually loaded. None of them refuses anything (§13).
 	if lines := syswLoadWarnings(ctx.sysw); len(lines) > 0 {
 		confirmReviewScreen(ctx, th, "Payload Warnings", lines)
+		// §3.3.3's F1 row reads "offers erase". Since §13 D10 there is no erase:
+		// the offer is to UNLOAD, which drops the session and leaves the bytes
+		// exactly where they are. Offered HERE because F1 is the moment the
+		// operator learns a secret is sitting unencrypted in flash, and the
+		// answer to "I did not want that" should not be a hunt through the
+		// carousel.
+		if syswHasFlag(ctx.sysw, flagSecretInPlaintext) {
+			cs := &ChoiceScreen{
+				Title:   "Payload",
+				Lead:    "Keep this payload loaded?",
+				Choices: []string{"KEEP", "UNLOAD"},
+			}
+			if choice, ok := cs.Choose(ctx, th); ok && choice == 1 {
+				if syswUnloadFlow(ctx, th) {
+					// The session is gone, so nothing was left loaded.
+					return false
+				}
+			}
+		}
 	}
 	return true
+}
+
+// syswHasFlag reports whether any loaded record raises `f`, evaluated through
+// syswFlags so the rule stays in one place — asking `class.IsSecret()` here
+// would be §12.6's secrecy rule written a second time, which is the defect
+// shape §12 exists to stop.
+func syswHasFlag(s *syswSession, f syswFlag) bool {
+	for _, r := range s.records {
+		for _, got := range syswFlags(r.class, r.unconfirmed, srcPayload, s.sealed, s.weak) {
+			if got == f {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // syswLoadWarnings renders the payload-level flags once, over the classes that
