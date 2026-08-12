@@ -221,3 +221,206 @@ func TestSyswLoadFlowPassphraseBufferStartsEmpty(t *testing.T) {
 		t.Logf("Word(0) is %q -- a zero-filled buffer reads as 24 filled slots", got)
 	}
 }
+
+// syswTypeWords enters `n` copies of "abandon" into the passphrase keyboard,
+// one frame per word. It does NOT queue them all up front: the keyboard drains
+// every pending rune before it looks at Button3, so a batched queue would spell
+// one long fragment instead of n words.
+func syswTypeWords(t *testing.T, ctx *Context, frame func() (string, bool), n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		runes(&ctx.Router, "abandon")
+		click(&ctx.Router, Button3)
+		if _, ok := frame(); !ok {
+			t.Fatalf("passphrase entry ended after %d of %d words", i, n)
+		}
+	}
+}
+
+// Spec test 22 (§8c). THE TRUNCATION TRAP: Back and `done` both returned
+// entered(), so backing out with three words filled was indistinguishable from
+// finishing at three — the load flow ran the ~31 s KDF on a passphrase the
+// operator meant to abandon, and the failure read as "wrong passphrase".
+//
+// Driven BY TOUCH rather than by a synthesised ButtonEvent. §8c requires a
+// SCREEN-LEVEL button, and a button event carried by no drawn target would pass
+// this test on a machine where `done` cannot be pressed at all — which is
+// exactly the state stage 5c left the flow in.
+func TestSyswPassphraseDoneConfirmsTheShortCount(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.sysw = syswRegionFor(t, "S-C") // sealed, so the flow asks for a passphrase
+	ctx := NewContext(p)
+
+	frame, drawer, quit := runUITouch(ctx, func() {
+		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
+	})
+	defer quit()
+
+	content, ok := pumpUntil(frame, "1:", 64)
+	if !ok {
+		t.Fatalf("passphrase entry never appeared; got %q", content)
+	}
+	syswTypeWords(t, ctx, frame, 3)
+
+	tapNavSlot(t, ctx, drawer(), Button2) // `done`
+	content, ok = pumpUntil(frame, "3 words", 32)
+	if !ok {
+		t.Fatalf("no confirmation naming the SHORT count; got %q", content)
+	}
+	if uiContains(content, "12 words") {
+		t.Errorf("the confirmation names an intended count rather than what was entered: %q", content)
+	}
+	if !uiContains(content, "UNLOCK") {
+		t.Errorf("the confirmation does not offer UNLOCK; got %q", content)
+	}
+}
+
+// Back out of passphrase entry ABORTS the load: no KDF, and no error screen —
+// the operator asked to leave, and reporting a failure would tell them their
+// passphrase was wrong when they never finished typing one.
+//
+// Two words are entered first, deliberately: an EMPTY buffer already aborted
+// before stage 9, so a test that backed out of an empty keyboard would pass
+// against the truncation trap it exists to catch.
+func TestSyswPassphraseBackAbortsTheLoad(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.sysw = syswRegionFor(t, "S-C")
+	ctx := NewContext(p)
+
+	var ret bool
+	frame, drawer, quit := runUITouch(ctx, func() {
+		ret = syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
+	})
+	defer quit()
+
+	content, ok := pumpUntil(frame, "1:", 64)
+	if !ok {
+		t.Fatalf("passphrase entry never appeared; got %q", content)
+	}
+	syswTypeWords(t, ctx, frame, 2)
+
+	tapNavSlot(t, ctx, drawer(), Button1) // Back
+	// Run to COMPLETION rather than quitting: quit() cancels the coroutine
+	// mid-flow, so the return value would never be produced and an assertion on
+	// it could not fail.
+	var after []string
+	done := false
+	for i := 0; i < 64; i++ {
+		c, ok := frame()
+		if !ok {
+			done = true
+			break
+		}
+		after = append(after, c)
+	}
+	if !done {
+		t.Fatalf("the flow did not return after Back; last frames %q", after)
+	}
+	if ret {
+		t.Error("Back out of passphrase entry reported a payload loaded")
+	}
+	if ctx.sysw != nil {
+		t.Error("Back out of passphrase entry left a session behind")
+	}
+	for _, c := range after {
+		if uiContains(c, "did not open") {
+			t.Errorf("Back produced a wrong-passphrase error screen: %q", c)
+		}
+		if uiContains(c, "words") && uiContains(c, "unlock") {
+			t.Errorf("Back produced the `done` confirmation: %q", c)
+		}
+	}
+}
+
+// BACK at the confirmation re-enters entry with the slots INTACT. Without this
+// the confirmation is a trap of its own: an operator who notices the count is
+// wrong has no way back to the words they already typed.
+func TestSyswPassphraseConfirmBackReturnsToEntryWithSlotsIntact(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.sysw = syswRegionFor(t, "S-C")
+	ctx := NewContext(p)
+
+	frame, drawer, quit := runUITouch(ctx, func() {
+		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
+	})
+	defer quit()
+
+	content, ok := pumpUntil(frame, "1:", 64)
+	if !ok {
+		t.Fatalf("passphrase entry never appeared; got %q", content)
+	}
+	syswTypeWords(t, ctx, frame, 3)
+	tapNavSlot(t, ctx, drawer(), Button2) // `done`
+	if content, ok = pumpUntil(frame, "3 words", 32); !ok {
+		t.Fatalf("no confirmation; got %q", content)
+	}
+	click(&ctx.Router, Button3) // choice 0 == BACK
+
+	// The cursor lands on slot 4 ("4:" is the word line), so the three entered
+	// words are still there: a re-entry at slot 1 would overwrite the first word
+	// on the next keystroke. The screen's TITLE is "Passphrase" at both steps,
+	// which is why the needle is the slot number and not the title.
+	content, ok = pumpUntil(frame, "4:", 32)
+	if !ok {
+		t.Fatalf("BACK did not re-enter word entry at the next free slot; got %q", content)
+	}
+	// And `done` again still confirms three, not zero.
+	tapNavSlot(t, ctx, drawer(), Button2)
+	if content, ok = pumpUntil(frame, "3 words", 32); !ok {
+		t.Fatalf("the second `done` lost the entered words; got %q", content)
+	}
+}
+
+// The distinction at the level it is MADE, not only where it is consumed. Both
+// exits leave with the same count, so a caller reading the count alone cannot
+// tell them apart — which is precisely the state stage 5c shipped.
+func TestSyswWordEntryBackIsNotDone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		exit     Button
+		wantDone bool
+	}{
+		{"Back", Button1, false},
+		{"done", Button2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewContext(newPlatform())
+			m := emptyBIP39Mnemonic(24)
+			var n int
+			var done bool
+			frame, quit := runUI(ctx, func() {
+				n, done = inputWordsFlow(ctx, &descriptorTheme, m, 0, "Passphrase",
+					wordEntryOpts{checksumGate: false, terminator: true})
+			})
+			defer quit()
+			if _, ok := frame(); !ok {
+				t.Fatal("word entry produced no frame")
+			}
+			runes(&ctx.Router, "abandon")
+			click(&ctx.Router, Button3)
+			if _, ok := frame(); !ok {
+				t.Fatal("word entry ended before the first word was committed")
+			}
+			click(&ctx.Router, tc.exit)
+			finished := false
+			for i := 0; i < 8; i++ {
+				if _, ok := frame(); !ok {
+					finished = true
+					break
+				}
+			}
+			if !finished {
+				t.Fatalf("%v did not end word entry", tc.exit)
+			}
+			if n != 1 {
+				t.Errorf("count = %d, want 1 — both exits must report the FILLED slots", n)
+			}
+			if done != tc.wantDone {
+				t.Errorf("done = %v, want %v", done, tc.wantDone)
+			}
+		})
+	}
+}

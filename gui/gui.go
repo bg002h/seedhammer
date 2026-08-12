@@ -761,12 +761,28 @@ type wordEntryOpts struct {
 	terminator bool
 }
 
-// inputWordsFlow returns how many words were actually entered.
+// inputWordsFlow returns how many words were actually entered, and whether
+// entry TERMINATED rather than being abandoned.
 //
-// It RETURNS that count because §2.2 item 8 records its having no return value
+// It RETURNS the count because §2.2 item 8 records its having no return value
 // as one of the five obstacles to arbitrary-N entry: without it a caller cannot
 // tell a 7-word passphrase from a 24-word one abandoned early.
-func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string, opt wordEntryOpts) int {
+//
+// AND IT RETURNS `done` BECAUSE THE COUNT ALONE CANNOT SEPARATE THE TWO WAYS OF
+// LEAVING (§8c). Back and the `done` button both left with entered() and nothing
+// else, so backing out with three words filled was indistinguishable from
+// finishing at three: the caller ran a ~31 s KDF on a passphrase the operator
+// meant to abandon, and the failure read as "wrong passphrase".
+//
+//	done == true   the terminator was pressed, or every slot was filled
+//	done == false  Back, or ctx.Done unwound the flow
+//
+// ctx.Done is a false as deliberately as Back is: the machine is shutting down
+// or a screen above unwound, and neither is an operator saying "use this".
+// The count is honest in every case — it counts FILLED slots — so a caller that
+// only wants the words is unaffected, which is why the five existing non-test
+// callers invoke this in statement position and need no edit.
+func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string, opt wordEntryOpts) (int, bool) {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
@@ -783,7 +799,6 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		}
 		return n
 	}
-	_ = doneBtn
 	layoutWord := func(buf *op.Buffer, n int, word string) (op.Op, image.Point) {
 		style := ctx.Styles.word
 		return widget.Labelf(buf, style, th.Background, "%2d: %s", n, word)
@@ -838,12 +853,12 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			}
 		}
 		if backBtn.Clicked(ctx) {
-			return entered()
+			return entered(), false
 		}
 		// §8c: `done` ends variable-length entry. Only drawn when the caller
 		// asked for it, so it cannot appear where a length is already known.
 		if opt.terminator && doneBtn.Clicked(ctx) {
-			return entered()
+			return entered(), true
 		}
 		for okBtn.Clicked(ctx) {
 			w, ok := completeWord(kbd.Fragment, nvalid)
@@ -857,7 +872,9 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			for {
 				selected++
 				if selected == len(mnemonic) {
-					return entered()
+					// Ran off the end: every slot is filled, which is entry
+					// finishing of its own accord — done, not abandoned.
+					return entered(), true
 				}
 				if mnemonic[selected] == -1 {
 					break
@@ -904,7 +921,18 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			countOp = cl.Offset(image.Pt((dims.X-csz.X)/2, countY))
 		}
 
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}...)
+		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
+		if opt.terminator {
+			// §8c's terminator is a SCREEN-LEVEL button, and drawing it is what
+			// makes it one. layoutNavigation is also what installs the touch
+			// target (op.Input, gui.go:2053), and this panel is driven by
+			// touch — so an undrawn Clickable is not a button with no icon, it
+			// is a button that cannot be pressed at all. Stage 5c added the
+			// Clickable and its handler and never drew it, which left `done`
+			// unreachable on the machine and §8c's confirmation dead code.
+			navBtns = append(navBtns, NavButton{Clickable: doneBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		if _, ok := completeWord(kbd.Fragment, nvalid); ok {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
 			nav = op.Layer(
@@ -930,7 +958,8 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			op.Color(&ctx.B, th.Background),
 		))
 	}
-	return entered()
+	// ctx.Done: the machine is unwinding, which is not an operator finishing.
+	return entered(), false
 }
 
 func inputCodex32Flow(ctx *Context, th *Colors, title string) (any, bool) {

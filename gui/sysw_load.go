@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"strings"
 
 	"seedhammer.com/bip39"
@@ -85,18 +86,48 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 		// unconsumable. Every other caller in this package uses the helper; this
 		// one did not, and that was the whole bug.
 		m := emptyBIP39Mnemonic(24)
-		// checksumGate FALSE: a passphrase is not a seed and §12.5 puts no
-		// checksum on it. terminator TRUE gives the `done` key, because a
-		// passphrase has no fixed length to end on.
+		var n int
+		// §8c: THE COUNT IS CONFIRMED BEFORE THE KDF, and Back is not `done`.
 		//
-		// It returns the count of FILLED slots and nothing else, so zero is the
-		// only signal for "backed out" -- and it is the right one here: an empty
-		// passphrase cannot open anything, and §12.2 already refuses to treat
-		// one as absence.
-		n := inputWordsFlow(ctx, th, m, 0, "Passphrase",
-			wordEntryOpts{checksumGate: false, terminator: true})
-		if n == 0 {
-			return false
+		// Variable-length entry adds a second way to be wrong that looks exactly
+		// like the first: a stray `done` at three words of an intended twelve
+		// produces a ~31 s wait and an error indistinguishable from having typed
+		// the wrong words. The confirmation is the safety, not the key — it makes
+		// the truncation visible while it still costs nothing.
+		//
+		// Back is separate now: it ABORTS the load outright. No KDF, and no error
+		// screen, because the operator did not fail to unlock anything — they
+		// left. Reporting a wrong passphrase there is the sentence that sends
+		// someone hunting a typo in words they never finished typing.
+		for {
+			var done bool
+			// checksumGate FALSE: a passphrase is not a seed and §12.5 puts no
+			// checksum on it. terminator TRUE draws the `done` button, because a
+			// passphrase has no fixed length to end on.
+			//
+			// Re-entry resumes at the first FREE slot, not at slot 1 — "with the
+			// slots intact" is only true if the next keystroke does not overwrite
+			// the first word. Clamped, because a full 24-slot buffer has no free
+			// slot to resume at.
+			n, done = inputWordsFlow(ctx, th, m, min(n, len(m)-1), "Passphrase",
+				wordEntryOpts{checksumGate: false, terminator: true})
+			if !done || n == 0 {
+				// Back, or `done` on an empty keyboard. An empty passphrase opens
+				// nothing and §12.2 refuses to treat one as absence, so both leave.
+				return false
+			}
+			cs := &ChoiceScreen{
+				Title:   "Passphrase",
+				Lead:    fmt.Sprintf("%d words — unlock?", n),
+				Choices: []string{"BACK", "UNLOCK"},
+			}
+			// BACK is choice 0 and therefore the DEFAULT: the confirmation exists
+			// because the count may be wrong, so the resting position is the one
+			// that costs nothing. Cancelling the screen re-enters entry too — it
+			// is the same "no, take me back" the operator just expressed.
+			if choice, ok := cs.Choose(ctx, th); ok && choice == 1 {
+				break
+			}
 		}
 		words := make([]string, 0, n)
 		for i := 0; i < n; i++ {
