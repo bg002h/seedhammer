@@ -11,6 +11,15 @@ jobs:
       with:
         go-version: '1.26'
     - run: CGO_ENABLED=0 go test ./...
+    # F-142: `int` is 64 bits here and 32 bits on the device, so a uint32 read
+    # off the wire and widened to `int` behaves differently on the machine than
+    # in CI. It already did: ParseHeader compared the section cap as
+    # `int(h.PubLen)`, so pub_len=0xFFFFFFFF became -1, slipped the cap, and gave
+    # TotalLen()==67 -- a plausible small positive length the device would have
+    # accepted for a payload the host calls malformed. The shared vectors could
+    # not have caught it: they are evaluated at the BUILDER's word size. Proven
+    # to bite -- restoring the old comparison passes the line above, fails this.
+    - run: ./scripts/test-32bit.sh
   tinygo-device-build:
     # The TinyGo pico-plus2 build of ./cmd/controller compiles the whole
     # gui -> codex32 import graph, so it exercises codex32 (incl. the dormant
