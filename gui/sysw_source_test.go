@@ -19,14 +19,21 @@ func nfcTag(rec string) func() io.ReadCloser {
 // Payload` — and the code offered two of the three. §2.1 made
 // NFC-for-everything a deliberate capability; nothing consumed from it.
 //
-// SCAN is offered whether or not a payload is loaded, and whether or not the
-// platform has a reader. It is NOT conditioned on NFCReader() != nil, and that
-// is deliberate rather than lazy: on the emulator NFCReader() HANDS OUT the
-// pending tag and marks it consumed, so probing for nil to decide whether to
-// draw a row would eat the operator's tag before they chose anything.
+// SCAN is offered whether or not a payload is loaded. It is NOT conditioned on
+// NFCReader() != nil, and that is deliberate rather than lazy: on the emulator
+// NFCReader() HANDS OUT the pending tag and marks it consumed, so probing for
+// nil to decide whether to draw a row would eat the operator's tag before they
+// chose anything -- the reader is reported by Features()/FeatureNFC instead.
+//
+// AMENDED for §13 D9: the platform is given a reader, because the picker is now
+// drawn only where a choice exists and a machine with neither source goes
+// straight to the keyboard. Without the reader this test would assert that a
+// screen D9 deleted still appears. The no-choice case is
+// TestSeedEntrySkipsThePickerWhenThereIsNoChoice.
 func TestSyswSeedPickerOffersScanWithoutAPayload(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
+	p.nfc = nfcTag(testSeedPhrase)
 	ctx := NewContext(p)
 	frame, _, quit := runUITouch(ctx, func() { seedEntryFlow(ctx, &descriptorTheme) })
 	defer quit()

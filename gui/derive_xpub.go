@@ -137,39 +137,57 @@ func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	}
 }
 
-// syswSeedPicker offers every source §3.1 names: Typed, Scanned, and — when a
-// payload is loaded and holds a seed — the payload.
+// syswSeedPicker offers every source §3.1 names that this machine ACTUALLY HAS:
+// Typed, Scanned when there is a reader, and the payload when one is loaded and
+// holds a seed.
 //
 //	(nil, srcTyped,  false)  Back: leave seed entry
 //	(nil, srcTyped,  true)   the operator wants the keyboard
 //	(m,   src,       true)   a seed arrived from src, and was accepted
 //	(nil, src,       true)   that source produced nothing; the caller re-offers
 //
-// SCAN IS OFFERED UNCONDITIONALLY, not gated on `NFCReader() != nil`. The
-// obvious gate is a trap: cmd/emu's reader() HANDS OUT the pending tag and marks
-// it consumed, so probing for nil to decide whether to draw the row would eat
-// the operator's tag before they had chosen anything. A machine with no reader
-// gets a scan screen it can only Back out of, which is the shape mk1GatherFlow
-// and scanAddressFlow have always had.
+// §13 D9: A PICKER WITH ONE ROW IS NOT A CHOICE, AND IS NOT DRAWN. Stage 10 made
+// this the first screen of every seed entry in four programs — the most-walked
+// path in the firmware — where on a machine with neither source it cost a click
+// to offer the keyboard the operator was going to get anyway. So the rows are
+// built first and the screen is skipped when only one survives, which makes the
+// rule one comparison instead of a condition repeated per row.
+//
+// THE READER IS ASKED FOR VIA Features(), NOT VIA `NFCReader() != nil`. The
+// obvious probe is a trap: cmd/emu's reader() HANDS OUT the pending tag and
+// marks it consumed, so probing to decide whether to draw a row would eat the
+// operator's tag before they had chosen anything. FeatureNFC (gui.go) exists to
+// answer the same question for free.
 func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool) {
-	choices := []string{"TYPE IT", "SCAN"}
-	const (
-		pickTyped = iota
-		pickScan
-		pickPayload
-	)
+	type seedSource struct {
+		label string
+		src   syswSource
+	}
+	rows := []seedSource{{"TYPE IT", srcTyped}}
+	if ctx.Platform.Features().Has(FeatureNFC) {
+		rows = append(rows, seedSource{"SCAN", srcNFC})
+	}
 	if ctx.sysw != nil && ctx.sysw.has(sysw.ClassMnemonic) {
-		choices = append(choices, "FROM PAYLOAD")
+		rows = append(rows, seedSource{"FROM PAYLOAD", srcPayload})
+	}
+	if len(rows) == 1 {
+		// Exactly the keyboard, so say so by going there rather than by drawing
+		// a menu of one.
+		return nil, srcTyped, true
+	}
+	choices := make([]string, len(rows))
+	for i, r := range rows {
+		choices[i] = r.label
 	}
 	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: choices}
 	choice, ok := cs.Choose(ctx, th)
 	if !ok {
 		return nil, srcTyped, false
 	}
-	switch choice {
-	case pickTyped:
+	switch rows[choice].src {
+	case srcTyped:
 		return nil, srcTyped, true
-	case pickScan:
+	case srcNFC:
 		m, ok := scanSeedFlow(ctx, th)
 		if !ok {
 			return nil, srcNFC, true
@@ -178,7 +196,7 @@ func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool)
 			return nil, srcNFC, true
 		}
 		return m, srcNFC, true
-	case pickPayload:
+	case srcPayload:
 		body, ok := ctx.sysw.take(sysw.ClassMnemonic)
 		if !ok {
 			return nil, srcPayload, true

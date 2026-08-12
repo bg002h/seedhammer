@@ -424,7 +424,13 @@ func (p *testPlatform) HardwareVersion() string {
 	return "v1.0.0-testing"
 }
 
+// The test platform has a reader exactly when a test gave it one, so the D9
+// picker gate is exercised in BOTH directions by the tests that already set
+// p.nfc — rather than being a constant that only ever proves one branch.
 func (p *testPlatform) Features() Features {
+	if p.nfc != nil {
+		return FeatureNFC
+	}
 	return 0
 }
 

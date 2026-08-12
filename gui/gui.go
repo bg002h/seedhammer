@@ -3083,6 +3083,19 @@ type Features int
 
 const (
 	FeatureSecureBoot Features = 1 << iota
+	// FeatureNFC: this platform has a tag reader at all.
+	//
+	// IT IS A CAPABILITY BIT RATHER THAN AN `NFCReader() != nil` PROBE, because
+	// probing COSTS a tag. cmd/emu's reader() hands out the pending record and
+	// marks it consumed (it says so at the method), so asking "is there a
+	// reader" merely to decide whether to draw a SCAN row would eat the
+	// operator's tag before they had chosen anything. §13 D9 needs that question
+	// answered, and this is the only way to answer it for free.
+	//
+	// It reports the READER, not a tag: a machine with a reader and nothing held
+	// to it still has the source, exactly as a machine with an empty region
+	// still has a SyswReader.
+	FeatureNFC
 )
 
 func (f Features) Has(feat Features) bool {

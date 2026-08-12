@@ -252,7 +252,15 @@ func (p *platform) PayloadReader() seal.Reader {
 
 // Features reports no secure boot, so the version line reads "(UNLOCKED)".
 // That is true here and worth saying: nothing about a browser build is signed.
-func (p *platform) Features() gui.Features { return 0 }
+//
+// It DOES report FeatureNFC, and that is not a fib: nfcSource above is a real
+// tag source, fed from `window.shNFC`, and §8.2 makes walking the NFC journeys
+// in a browser part of this work. Reporting no reader here would take the SCAN
+// row off every seed entry in the emulator and leave J-C unwalkable by the very
+// tool that exists to walk it. The bit reports the READER, not a pending tag —
+// which is why it is a constant rather than a peek at p.nfc, a peek that would
+// consume the tag it looked at.
+func (p *platform) Features() gui.Features { return gui.FeatureNFC }
 
 func (p *platform) HardwareVersion() string { return "emulator" }
 

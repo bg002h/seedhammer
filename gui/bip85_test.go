@@ -230,11 +230,6 @@ func TestBip85DeriveFlow_ScrubsBothMnemonics(t *testing.T) {
 		// Master entry: word-count picker -> 12 words (choice 0), then type the
 		// abandon-about phrase. (seedEntryFlow's master count is []int{12,24};
 		// default index 0 = 12 words, so confirm with Button3.)
-		// §3.1's source picker (stage 10b) now precedes the word-count picker
-		// on every seed entry: TYPE IT / SCAN [/ FROM PAYLOAD]. TYPE IT is
-		// choice 0.
-		click(&ctx.Router, Button3) // TYPE IT
-		frame()
 		click(&ctx.Router, Button3) // 12 WORDS
 		frame()
 		driveWords(&ctx.Router, abandonAboutPhrase())

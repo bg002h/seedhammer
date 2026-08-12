@@ -305,6 +305,12 @@ func Init() (*Platform, error) {
 
 	nfc := st25r3916.New(mi2c, NFC_INT)
 	p.nfc = newNFCDevice(nfc)
+	// The ST25R3916 is soldered to every board, so the reader is unconditional
+	// here — unlike SyswReader/PayloadReader, which report a REGION that may be
+	// empty. gui reads this bit instead of calling NFCReader(), because calling
+	// NFCReader() to ask whether a reader exists consumes a tag on the emulator
+	// (§13 D9; gui.FeatureNFC says why).
+	p.feats |= gui.FeatureNFC
 	if initHook != nil {
 		initHook(stdin)
 	}
