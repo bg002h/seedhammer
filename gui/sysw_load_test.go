@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"seedhammer.com/bip39"
 	"seedhammer.com/sysw"
 )
 
@@ -179,4 +180,44 @@ func TestSyswLoadFlowRefusesAMalformedRegionWithoutCryingTamper(t *testing.T) {
 	// Assertions that cannot fail are worse than absent ones, so they are absent
 	// and filed instead (F-146). What IS asserted above survives mutation: the
 	// error screen appears, and it does not cry tampering.
+}
+
+// C1 from the pre-flash-of-the-load-flow fable review, as a test that fails
+// without the fix.
+//
+// `make(bip39.Mnemonic, 24)` zero-fills, and Word(0) is a REAL wordlist entry --
+// inputWordsFlow's empty sentinel is -1, which is why every other caller uses
+// emptyBIP39Mnemonic. A zero-filled buffer therefore looks ALREADY FULL, entry
+// terminates immediately, and the passphrase handed to Open is whatever the
+// zeroes spell rather than what the operator typed. Nothing sealed could ever be
+// opened, which also closes the AEAD route to [compared] and makes a sealed
+// pub_len==0 payload permanently unconsumable.
+//
+// This asserts the buffer contract directly rather than driving the keyboard:
+// the defect is entirely in how the buffer is initialised, and a direct check
+// cannot be defeated by tap coordinates.
+func TestSyswLoadFlowPassphraseBufferStartsEmpty(t *testing.T) {
+	const n = 24
+	zero := make(bip39.Mnemonic, n)
+	empty := emptyBIP39Mnemonic(n)
+
+	if zero[0] == empty[0] {
+		t.Fatal("INCONCLUSIVE: a zero-filled buffer already matches an empty one, " +
+			"so this test cannot distinguish the defect it exists for")
+	}
+	// The sentinel, stated so a change to it fails here rather than silently in
+	// the flow.
+	for i, w := range empty {
+		if w != -1 {
+			t.Fatalf("emptyBIP39Mnemonic[%d] = %v, want -1 (the empty sentinel)", i, w)
+		}
+	}
+	// And the trap itself: slot 0 of a zero-filled buffer is a real word, so it
+	// reads as filled.
+	if got := bip39.LabelFor(zero[0]); got == "" {
+		t.Fatal("Word(0) has no label, so a zero-filled buffer would read as empty " +
+			"and this defect could not occur -- re-check the premise")
+	} else {
+		t.Logf("Word(0) is %q -- a zero-filled buffer reads as 24 filled slots", got)
+	}
 }

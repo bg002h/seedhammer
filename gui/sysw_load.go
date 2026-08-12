@@ -76,9 +76,15 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 		// Route 1: any successful AEAD open, whatever the passphrase. The
 		// operator's ruling (§13) is that an open is an open; F2 still tells
 		// them it was weakly protected and they proceed.
-		// A passphrase is up to 24 words (§12.5); the buffer is sized once and
-		// inputWordsFlow fills what the operator enters.
-		m := make(bip39.Mnemonic, 24)
+		// emptyBIP39Mnemonic, NOT make(). inputWordsFlow's empty-slot sentinel is
+		// -1, and make() zero-fills — Word(0) is "ABANDON", a real wordlist entry,
+		// so a zeroed buffer reads as 24 ALREADY-FILLED slots. Entry then ends
+		// immediately and Open receives whatever the zeroes spell instead of what
+		// was typed, so NO sealed payload could ever be opened: the AEAD route to
+		// [compared] is closed and a sealed pub_len==0 payload is permanently
+		// unconsumable. Every other caller in this package uses the helper; this
+		// one did not, and that was the whole bug.
+		m := emptyBIP39Mnemonic(24)
 		// checksumGate FALSE: a passphrase is not a seed and §12.5 puts no
 		// checksum on it. terminator TRUE gives the `done` key, because a
 		// passphrase has no fixed length to end on.
