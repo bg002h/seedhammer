@@ -45,6 +45,16 @@ type syswSession struct {
 type syswRecord struct {
 	class sysw.Class
 	body  string
+
+	// unconfirmed is `[mdmk-decode]` (§12.6) for a ClassMDMK record: the payload
+	// does not contain the complete card set this record belongs to, or that set
+	// does not reassemble and decode. Always false for every other class.
+	//
+	// Set ONCE, at load, for the same reason `class` is: classification is
+	// at-load (§3.2.1), and a confirmation re-decided at the point of use would
+	// let one byte string be admitted under one answer and consumed under
+	// another. It is also not free -- it runs the real decoders.
+	unconfirmed bool
 }
 
 // load replaces whatever was held. Returns the flags the consuming screen must
@@ -55,11 +65,31 @@ type syswRecord struct {
 // place instead of letting each caller invent half the rule.
 func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbove, compared bool) {
 	*s = syswSession{loaded: true, identity: identity, sealed: sealed, weak: !cliffAbove, compared: compared}
-	for _, r := range p.Public {
-		s.records = append(s.records, syswRecord{class: sysw.Classify(r), body: r})
+
+	// `[mdmk-decode]` (§12.6) is a WHOLE-PAYLOAD question -- a card set is
+	// confirmed by the presence of its other chunks -- so it is computed once
+	// over every record rather than per record.
+	//
+	// Public THEN Secret, matching the append order below, because the indices
+	// come back into the list that was passed in. Passing the secret records too
+	// costs nothing and changes no answer: ClassMDMK is not a secret class, so
+	// every md1/mk1 is in Public in both container variants. It is passed anyway
+	// so that the indices need no adjustment -- an offset applied here is the
+	// kind of arithmetic that marks the wrong card.
+	all := make([]string, 0, len(p.Public)+len(p.Secret))
+	all = append(all, p.Public...)
+	all = append(all, p.Secret...)
+
+	unconfirmed := make(map[int]bool)
+	for _, i := range sysw.MDMKUnconfirmed(all) {
+		unconfirmed[i] = true
 	}
-	for _, r := range p.Secret {
-		s.records = append(s.records, syswRecord{class: sysw.Classify(r), body: r})
+	for i, r := range all {
+		s.records = append(s.records, syswRecord{
+			class:       sysw.Classify(r),
+			body:        r,
+			unconfirmed: unconfirmed[i],
+		})
 	}
 }
 

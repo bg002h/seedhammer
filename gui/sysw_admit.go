@@ -77,18 +77,33 @@ const (
 
 // syswFlags evaluates §3.3.3 AFTER admission, never as part of it. Each rule is
 // independent and more than one can fire.
-func syswFlags(c sysw.Class, src syswSource, sealed, weak bool) []syswFlag {
+//
+// `unconfirmed` is `[mdmk-decode]` (§12.6), and §3.3.3's 2026-08-12 amendment is
+// the whole of its effect here: SECRECY IN F1, F2 AND F4 READS THROUGH IT. A
+// ClassMDMK record the device could not reassemble-and-decode may hold anything,
+// including the 32 bytes of seed entropy §5.3.2 names, so it counts as secret
+// for flags. It does NOT change admission -- §3.3.2's table is class-only, and a
+// confirmation input there would be the container axis §3.3 removed, arriving by
+// another door.
+//
+// F3 is untouched: it is "always, for anything not typed" and says nothing about
+// secrecy.
+func syswFlags(c sysw.Class, unconfirmed bool, src syswSource, sealed, weak bool) []syswFlag {
+	// The ONE place the two routes to secrecy are joined. Writing
+	// `c.IsSecret() || unconfirmed` at each of the three sites below is how one
+	// of them ends up not being updated.
+	secret := c.IsSecret() || unconfirmed
 	var f []syswFlag
-	if c.IsSecret() && src == srcPayload && !sealed {
+	if secret && src == srcPayload && !sealed {
 		f = append(f, flagSecretInPlaintext)
 	}
-	if c.IsSecret() && src == srcPayload && sealed && weak {
+	if secret && src == srcPayload && sealed && weak {
 		f = append(f, flagWeakPassphrase)
 	}
 	if src != srcTyped {
 		f = append(f, flagSource)
 	}
-	if c.IsSecret() && src == srcNFC {
+	if secret && src == srcNFC {
 		f = append(f, flagNFCNoIntegrity)
 	}
 	return f

@@ -160,19 +160,41 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 
 // syswLoadWarnings renders the payload-level flags once, over the classes that
 // are actually present, rather than repeating them at every point of use.
+//
+// DE-DUPLICATION IS BY (flag, cause), NOT BY FLAG. Since §12.6, F1 has two
+// causes -- a genuinely secret class, and a ClassMDMK record the device could
+// not confirm -- and they need different sentences. An operator who deliberately
+// wrote one card of a chunked set has to be told THAT is what the machine is
+// complaining about; the plain sentence would read as data loss on a payload
+// that is exactly as intended. Keying `seen` on the flag alone would print
+// whichever cause came first and silently drop the other.
 func syswLoadWarnings(s *syswSession) []string {
+	type cause struct {
+		f           syswFlag
+		unconfirmed bool
+	}
 	var out []string
-	seen := map[syswFlag]bool{}
+	seen := map[cause]bool{}
 	for _, r := range s.records {
-		for _, f := range syswFlags(r.class, srcPayload, s.sealed, s.weak) {
-			if seen[f] {
+		for _, f := range syswFlags(r.class, r.unconfirmed, srcPayload, s.sealed, s.weak) {
+			// Only F1 and F2 read through secrecy AND are rendered here, so the
+			// cause is only meaningful for them; the key carries it regardless so
+			// a future flag cannot inherit the wrong sentence by omission.
+			k := cause{f: f, unconfirmed: r.unconfirmed}
+			if seen[k] {
 				continue
 			}
-			seen[f] = true
-			switch f {
-			case flagSecretInPlaintext:
+			seen[k] = true
+			switch {
+			case f == flagSecretInPlaintext && r.unconfirmed:
+				out = append(out, "An md1/mk1 the device could not confirm — treated as a "+
+					"secret — is stored unencrypted in flash.")
+			case f == flagSecretInPlaintext:
 				out = append(out, "A SECRET is stored unencrypted in flash.")
-			case flagWeakPassphrase:
+			case f == flagWeakPassphrase && r.unconfirmed:
+				out = append(out, "An md1/mk1 the device could not confirm — treated as a "+
+					"secret — is protected by a passphrase below the word-count floor.")
+			case f == flagWeakPassphrase:
 				out = append(out, "The passphrase is below the word-count floor.")
 			}
 		}

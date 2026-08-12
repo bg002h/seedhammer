@@ -28,6 +28,15 @@ type vector struct {
 	Sealed     bool     `json:"sealed"`
 	Digest     *string  `json:"digest"`
 	Identity   string   `json:"identity"`
+	// Unconfirmed is `[mdmk-decode]` (§12.6): the indices of the PUBLIC-SECTION
+	// records that are not decode-confirmed.
+	//
+	// Indices are into the public section, NOT into Records -- the public
+	// section is the one list both implementations reconstruct identically from
+	// Blob, while Records is the primary's packing order, which a sealed
+	// payload never reveals. It costs nothing: ClassMDMK is not a secret class,
+	// so every md1/mk1 record is in the public section in both variants.
+	Unconfirmed []int `json:"mdmk_unconfirmed"`
 }
 
 // loadVectors resolves the file, and FAILS rather than skipping when
@@ -150,6 +159,65 @@ func TestTheVectorSetIsMeaningful(t *testing.T) {
 	}
 	if !encoded {
 		t.Error("the set must contain an encoded text: record")
+	}
+}
+
+// TestConformanceMDMKDecode is `[mdmk-decode]` (§12.6) across the language
+// boundary. The primary computes the expected set; this recomputes it from the
+// BLOB, which is all a device ever has, and they must match record for record.
+//
+// It also guards the guard, and that is the load-bearing half. A vector set in
+// which every record answered "unconfirmed" would be passed by an
+// implementation that answers "unconfirmed" to everything, and one in which
+// every record answered "confirmed" by its mirror image. So the set must hold
+// BOTH answers, and hold them inside ONE payload -- only there does the
+// (hrp, chunk_set_id) grouping have to be right, and only there can a port that
+// grouped by HRP alone be caught.
+func TestConformanceMDMKDecode(t *testing.T) {
+	vs := loadVectors(t)
+	var bothInOnePayload int
+	for _, v := range vs {
+		t.Run(v.Name, func(t *testing.T) {
+			blob, err := hex.DecodeString(v.Blob)
+			if err != nil {
+				t.Fatalf("vector blob is not hex: %v", err)
+			}
+			h, err := ParseHeader(blob)
+			if err != nil {
+				t.Fatalf("ParseHeader: %v", err)
+			}
+			var pub []string
+			if h.PubLen > 0 {
+				pub, err = splitRecords(blob[HeaderLen : HeaderLen+int(h.PubLen)])
+				if err != nil {
+					t.Fatalf("public section: %v", err)
+				}
+			}
+			got := MDMKUnconfirmed(pub)
+			if len(got) != len(v.Unconfirmed) {
+				t.Fatalf("unconfirmed set\n got %v\nwant %v", got, v.Unconfirmed)
+			}
+			for i := range got {
+				if got[i] != v.Unconfirmed[i] {
+					t.Fatalf("unconfirmed set\n got %v\nwant %v", got, v.Unconfirmed)
+				}
+			}
+
+			var mdmk int
+			for _, r := range pub {
+				if Classify(r) == ClassMDMK {
+					mdmk++
+				}
+			}
+			if len(v.Unconfirmed) > 0 && mdmk > len(v.Unconfirmed) {
+				bothInOnePayload++
+			}
+		})
+	}
+	if bothInOnePayload == 0 {
+		t.Error("INCONCLUSIVE: no vector holds a confirmed card BESIDE an unconfirmed " +
+			"one, so nothing here can fail an implementation that answers the same way " +
+			"for every record")
 	}
 }
 
