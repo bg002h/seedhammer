@@ -28,6 +28,7 @@ import (
 	"seedhammer.com/nfc/poller"
 	"seedhammer.com/nfc/type5"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 const (
@@ -572,6 +573,13 @@ func (p *Platform) NFCReader() io.ReadCloser {
 // than a direct reference from gui.
 func (p *Platform) PayloadReader() seal.Reader {
 	return seal.XIPReader{}
+}
+
+// This is the ONLY platform with a systemwide region, for the same reason it is
+// the only one with a payload region: sysw.XIPReader exists only under the
+// tinygo build tag.
+func (p *Platform) SyswReader() sysw.Reader {
+	return sysw.XIPReader{}
 }
 
 func (p *Platform) Engraver(stall bool) (gui.Engraver, error) {

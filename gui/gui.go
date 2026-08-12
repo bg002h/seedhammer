@@ -42,6 +42,7 @@ import (
 	"seedhammer.com/seal"
 	"seedhammer.com/seedqr"
 	slip39words "seedhammer.com/slip39"
+	"seedhammer.com/sysw"
 )
 
 var ErrTooLarge = errors.New("backup: data does not fit plate")
@@ -2979,6 +2980,13 @@ type Platform interface {
 	// It exists so gui never names a build-tagged type: seal.XIPReader is
 	// tinygo-only and seal.FileReader is the host stand-in.
 	PayloadReader() seal.Reader
+	// SyswReader returns a reader for the SYSTEMWIDE region (0x10D00000), or
+	// nil if this platform has none. nil is a SUPPORTED value, not a stub —
+	// the same contract PayloadReader has, and for the same reason: the
+	// emulator and the test platform have no XIP flash, and a feature that is
+	// invisible when no payload is readable is the same operator-visible
+	// outcome.
+	SyswReader() sysw.Reader
 	EngraverParams() engrave.Params
 	DisplaySize() image.Point
 	// Dirty begins a refresh of the content

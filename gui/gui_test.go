@@ -26,6 +26,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/image/rgb565"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 func BenchmarkRedraw(b *testing.B) {
@@ -339,6 +340,7 @@ func fillDescriptor(t testing.TB, desc *bip380.Descriptor, path bip32.Path, seed
 }
 
 type testPlatform struct {
+	sysw     sysw.Reader
 	events   []Event
 	wakeups  chan struct{}
 	engraver *testEngraver
@@ -440,6 +442,9 @@ func (p *testPlatform) NFCReader() io.ReadCloser {
 	}
 	return nil
 }
+
+// nil: the test platform has no XIP flash. A supported value, not a stub.
+func (p *testPlatform) SyswReader() sysw.Reader { return p.sysw }
 
 func (p *testPlatform) PayloadReader() seal.Reader {
 	return p.payload

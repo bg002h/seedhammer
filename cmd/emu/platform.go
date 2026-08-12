@@ -14,6 +14,7 @@ import (
 	"seedhammer.com/gui"
 	"seedhammer.com/internal/sh2"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 // platform runs the real firmware GUI against a browser canvas.
@@ -224,6 +225,12 @@ func (p *platform) NFCReader() io.ReadCloser { return nil }
 // OPERATOR-SUPPLIED browser-side payload is ever wanted on top of this, the
 // mechanism is a syscall/js read of location.search or a JS global set from
 // the host page — nothing here forecloses that.
+// SyswReader returns nil: this build has no systemwide region. nil is a
+// SUPPORTED value — §10.1's detection simply finds nothing and the payload
+// sources stay invisible, which is the same operator-visible outcome as a
+// machine with an empty region.
+func (p *platform) SyswReader() sysw.Reader { return nil }
+
 func (p *platform) PayloadReader() seal.Reader {
 	return embeddedPayloadReader{data: []byte(sealedTestPayload)}
 }
