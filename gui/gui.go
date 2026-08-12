@@ -2363,6 +2363,12 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 			continue
 		}
 		if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+			// §7: the word-plate verify, offered AFTER the cut and REGARDLESS OF
+			// SOURCE — §7.1 says there is no gate the device can honestly
+			// evaluate, and the menu carries its own `skip` row so offering it
+			// is not forcing it. The baseline is the mnemonic this flow just
+			// engraved, still in scope here; nothing reads the session (§7.4).
+			plateVerifyFlow(ctx, th, mnemonic)
 			return
 		}
 	}
