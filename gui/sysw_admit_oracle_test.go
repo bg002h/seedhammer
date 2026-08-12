@@ -180,7 +180,8 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 // syswPassphraseFlow is one site serving four programs, so the test above checks
 // it against those four and would say nothing if backupWalletFlow started
 // calling it — which is exactly the defect plan stage 13b's literal wording
-// would have introduced, because passphraseFlow has ten callers and three of
+// would have introduced, because passphraseFlow has NINE call sites (measured;
+// the plan says four and an earlier correction said ten) and three of
 // them must never see a payload passphrase.
 func TestTheSeamPassphraseOfferReachesOnlyProgramsThatAdmitIt(t *testing.T) {
 	// The five sites, in the four programs §3.3.2 admits ClassPassphrase to.

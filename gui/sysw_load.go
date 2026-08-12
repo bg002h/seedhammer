@@ -118,7 +118,7 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			}
 			cs := &ChoiceScreen{
 				Title:   "Passphrase",
-				Lead:    fmt.Sprintf("%d words — unlock?", n),
+				Lead:    fmt.Sprintf("%d %s — unlock?", n, map[bool]string{true: "word", false: "words"}[n == 1]),
 				Choices: []string{"BACK", "UNLOCK"},
 			}
 			// BACK is choice 0 and therefore the DEFAULT: the confirmation exists

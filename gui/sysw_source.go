@@ -51,7 +51,9 @@ func syswSourceName(src syswSource) string {
 // IT IS A WRAPPER, AND THAT IS A DEPARTURE FROM PLAN STAGE 13b, which said to
 // put the offer at passphraseFlow's head — "one edit serving all four callers".
 // Measured with grep before writing anything: passphraseFlow has TEN non-test
-// callers, and the edit as written would have broken two NORMATIVE rules.
+// call sites (nine, plus the definition — NOT the four the plan says nor the
+// ten an earlier correction said; measured), and the edit as written would have
+// broken two NORMATIVE rules.
 //
 //   - §3.3.2: BACKUP WALLET REFUSES ClassPassphrase. It engraves the mnemonic
 //     itself and the passphrase is deliberately never engraved and never in the
