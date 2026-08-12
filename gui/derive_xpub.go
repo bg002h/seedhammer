@@ -12,6 +12,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/mk"
+	"seedhammer.com/sysw"
 )
 
 // scriptTypeChoices is the stage-1 list of the six standard script types the
@@ -79,7 +80,31 @@ func pathPickerFlow(ctx *Context, th *Colors) (bip32.Path, *chaincfg.Params, str
 // seedEntryFlow reuses the typed BIP-39 word entry (12 or 24 words) and returns
 // the SECRET mnemonic. Returns ok==false on Back. The caller MUST scrub the
 // returned mnemonic when done.
+// seedEntryFlow offers every source a seed may come from: typed, scanned, or
+// the systemwide payload.
+//
+// **Verify flows must NOT call this** — they call seedEntryFlowTypedOnly. See
+// its comment for why the distinction is two functions rather than a parameter.
 func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	if m, ok := syswSeedPicker(ctx, th); ok {
+		return m, true
+	}
+	return seedEntryFlowTypedOnly(ctx, th)
+}
+
+// seedEntryFlowTypedOnly offers ONE source: the keyboard.
+//
+// TWO ENTRY POINTS, NOT A BOOLEAN, and the choice is the mechanism rather than a
+// style preference. §7.4 forbids a payload-sourced secret from reaching a
+// verification comparison: a verify that accepted the same secret the engrave
+// used would compare the engrave source against itself and pass
+// unconditionally, certifying a WRONG PLATE as good.
+//
+// A boolean parameter can be passed wrongly and the wrong value still compiles.
+// A verify flow that has no way to NAME the payload source cannot reach it by
+// any argument, which makes the test structural — no verify flow mentions
+// seedEntryFlow — instead of behavioural.
+func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Choose number of words", Choices: []string{"12 WORDS", "24 WORDS"}}
 	for {
 		choice, ok := cs.Choose(ctx, th)
@@ -87,12 +112,35 @@ func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 			return nil, false
 		}
 		mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-		inputWordsFlow(ctx, th, mnemonic, 0, "")
+		inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true})
 		if !isEmptyMnemonic(mnemonic) {
 			return mnemonic, true
 		}
 		// Back out of word entry without finishing -> re-show the count picker.
 	}
+}
+
+// syswSeedPicker offers the payload as a source when one is loaded and holds a
+// seed. Returns false when there is nothing to offer, so the caller falls
+// through to typing.
+func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	if ctx.sysw == nil || !ctx.sysw.has(sysw.ClassMnemonic) {
+		return nil, false
+	}
+	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: []string{"TYPE IT", "FROM PAYLOAD"}}
+	choice, ok := cs.Choose(ctx, th)
+	if !ok || choice == 0 {
+		return nil, false
+	}
+	body, ok := ctx.sysw.take(sysw.ClassMnemonic)
+	if !ok {
+		return nil, false
+	}
+	m, err := bip39.ParseMnemonic(body)
+	if err != nil {
+		return nil, false
+	}
+	return m, true
 }
 
 // deriveXpubFlow is the engraveXpub program: a hand-typed BIP-39 seed (SECRET)

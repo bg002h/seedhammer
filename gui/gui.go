@@ -62,6 +62,8 @@ const (
 )
 
 type Context struct {
+	// sysw is the systemwide payload session, or nil. See sysw_session.go.
+	sysw          *syswSession
 	Platform      Platform
 	Styles        Styles
 	Wakeup        time.Time
@@ -725,11 +727,52 @@ func fadeClip(b *op.Buffer, o op.Op, r image.Rectangle) op.Op {
 
 const wordKeys = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 
-func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string) {
+// wordEntryOpts is per-INVOCATION, because the checksum gate is a property of
+// the CALL and not of the keyboard.
+//
+// Seed entry wants the gate: it catches a mistyped last word before anything is
+// derived. Passphrase entry must not have it — §8b — and the cost of getting
+// that wrong is not subtle: refreshCands masks the final slot to
+// bip39.LastWordCandidates, 128 of 2048, so 15 of every 16 uniformly generated
+// 12-word passphrases would be permanently unopenable (R1-C2).
+type wordEntryOpts struct {
+	// checksumGate restricts the final slot to checksum-valid words.
+	checksumGate bool
+	// terminator draws a `done` affordance in the free nav slot, for entry
+	// whose length is not known in advance (§8c).
+	//
+	// A NAV BUTTON, NOT A KEY. The word path builds NewKeyboard, which has no
+	// opt-in parameter, and its rune() would feed a `done` rune into Fragment
+	// and panic in bip39.ClosestWord. Button2 is unused by this flow — Button1
+	// is back and Button3 is ok — and (*Keyboard).Update filters only the
+	// arrows, Center and runes, so a nav-slot button structurally cannot reach
+	// Fragment.
+	terminator bool
+}
+
+// inputWordsFlow returns how many words were actually entered.
+//
+// It RETURNS that count because §2.2 item 8 records its having no return value
+// as one of the five obstacles to arbitrary-N entry: without it a caller cannot
+// tell a 7-word passphrase from a 24-word one abandoned early.
+func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string, opt wordEntryOpts) int {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
+	doneBtn := &Clickable{Button: Button2}
+	// entered counts FILLED slots, which is the honest answer at every exit —
+	// backing out, running off the end, or pressing done part way.
+	entered := func() int {
+		n := 0
+		for _, w := range mnemonic {
+			if w != -1 {
+				n++
+			}
+		}
+		return n
+	}
+	_ = doneBtn
 	layoutWord := func(buf *op.Buffer, n int, word string) (op.Op, image.Point) {
 		style := ctx.Styles.word
 		return widget.Labelf(buf, style, th.Background, "%2d: %s", n, word)
@@ -738,7 +781,11 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	var nvalid int
 	var cands []bip39.Word
 	candsFor := -1
-	onLastWord := func() bool { return selected == len(mnemonic)-1 && cands != nil }
+	// The gate is conditional on the CALL. With it off, cands is never
+	// populated, so onLastWord is false forever and no mask is applied.
+	onLastWord := func() bool {
+		return opt.checksumGate && selected == len(mnemonic)-1 && cands != nil
+	}
 	updateKeys := func(frag string) int {
 		if onLastWord() {
 			return updateValidCandidateKeys(cands, frag, kbd.allKeys)
@@ -757,6 +804,9 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	// candidate restriction applies on the SAME frame (no one-frame full-
 	// keyboard flash).
 	refreshCands := func() {
+		if !opt.checksumGate {
+			return
+		}
 		if selected == len(mnemonic)-1 && candsFor != selected {
 			cands = bip39.LastWordCandidates(mnemonic)
 			candsFor = selected
@@ -777,7 +827,12 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			}
 		}
 		if backBtn.Clicked(ctx) {
-			return
+			return entered()
+		}
+		// §8c: `done` ends variable-length entry. Only drawn when the caller
+		// asked for it, so it cannot appear where a length is already known.
+		if opt.terminator && doneBtn.Clicked(ctx) {
+			return entered()
 		}
 		for okBtn.Clicked(ctx) {
 			w, ok := completeWord(kbd.Fragment, nvalid)
@@ -791,7 +846,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			for {
 				selected++
 				if selected == len(mnemonic) {
-					return
+					return entered()
 				}
 				if mnemonic[selected] == -1 {
 					break
@@ -864,6 +919,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			op.Color(&ctx.B, th.Background),
 		))
 	}
+	return entered()
 }
 
 func inputCodex32Flow(ctx *Context, th *Colors, title string) (any, bool) {
@@ -2344,7 +2400,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 			switch choice {
 			case 0, 1:
 				mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-				inputWordsFlow(ctx, th, mnemonic, 0, "")
+				inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true})
 				if !isEmptyMnemonic(mnemonic) {
 					return mnemonic, true
 				}
@@ -2443,7 +2499,7 @@ events:
 		// consuming ButtonFilter(Button2) and ButtonFilter(Center) whether or
 		// not anything was drawn for it.
 		if !s.NoEdit && editBtn.Clicked(ctx) {
-			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
+			inputWordsFlow(ctx, th, mnemonic, s.selected, "", wordEntryOpts{checksumGate: true})
 			continue
 		}
 		if confirmBtn.Clicked(ctx) {

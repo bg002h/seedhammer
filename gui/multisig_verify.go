@@ -47,7 +47,7 @@ func verifyMultisig(derived bundle.Bundle, ms1Readback string, mk1, md1 []string
 // the re-derived mk1 (H1: never the re-derived value against itself). `full`
 // reports whether an ms1 was engraved (and so must be hand-typed for verify).
 func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bool) {
-	reMnemonic, ok := seedEntryFlow(ctx, th)
+	reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 	if !ok {
 		return
 	}

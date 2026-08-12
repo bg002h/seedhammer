@@ -49,7 +49,7 @@ func combineSeedXORFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	parts := make([]bip39.Mnemonic, 0, n)
 	for i := 0; i < n; i++ {
 		m := emptyBIP39Mnemonic(nwords)
-		inputWordsFlow(ctx, th, m, 0, fmt.Sprintf("Part %d of %d", i+1, n))
+		inputWordsFlow(ctx, th, m, 0, fmt.Sprintf("Part %d of %d", i+1, n), wordEntryOpts{checksumGate: true})
 		// I1 guard: inputWordsFlow returns a PARTIAL slice on Back. Only a
 		// complete, checksum-valid part may be collected — else Entropy()
 		// panics in Combine. A partial/invalid part aborts the whole flow.

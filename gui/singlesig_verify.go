@@ -64,7 +64,7 @@ func verifySingleSig(derived bundle.Bundle, ms1Readback string, mk1, md1 []strin
 // ms1, and reports PASS/FAIL.
 func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool) {
 	// Re-type the seed (fresh residency) and re-derive deterministically.
-	reMnemonic, ok := seedEntryFlow(ctx, th)
+	reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 	if !ok {
 		return
 	}
