@@ -80,9 +80,14 @@ func syswUnloadFlow(ctx *Context, th *Colors) bool {
 	// ctx.sysw = nil, and NOTHING ELSE. No Eraser, no Platform method, no
 	// _tinygo.go file, no flash call anywhere.
 	ctx.sysw = nil
-	showNotice(ctx, th, "Payload",
-		"Payload unloaded. It is still in flash — overwrite it from the host with "+
-			"`me sysw wipe`.")
+	// SHORT, and plain ASCII. Reported from the panel: the previous body -- one
+	// ~110-character sentence carrying an em dash and backticks -- rendered as an
+	// almost entirely blank screen with only the checkmark. The test below
+	// asserted its words and PASSED, because the frame extractor reads text ops
+	// whether or not the device can draw them, so the harness cannot see this
+	// class of defect at all (filed as F-151).
+	showNotice(ctx, th, "Payload Unloaded",
+		"Still in flash.\nWipe it from the host.")
 	return true
 }
 

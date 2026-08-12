@@ -162,10 +162,10 @@ func TestSyswUnloadDropsTheSessionAndSaysTheBytesRemain(t *testing.T) {
 	if content, ok = pumpUntil(frame, "unloaded", 32); !ok {
 		t.Fatalf("no result screen after unloading; got %q", content)
 	}
-	if !uiContains(content, "still in flash") {
+	if !uiContains(content, "Still in flash") {
 		t.Errorf("the result screen does not say the bytes are still there; got %q", content)
 	}
-	if !uiContains(content, "me sysw wipe") {
+	if !uiContains(content, "Wipe it from the host") {
 		t.Errorf("the result screen does not name the HOST command that actually "+
 			"overwrites the region; got %q", content)
 	}
