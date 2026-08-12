@@ -581,11 +581,23 @@ func confirmReviewScreen(ctx *Context, th *Colors, title string, lines []string)
 			continue
 		}
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		// The pager is drawn ONLY when there is a second page. It used to be
+		// unconditional, so a four-line screen -- the payload digest, which is
+		// the screen an operator meets first -- showed a right arrow that did
+		// nothing when pressed. A control that is present and inert teaches the
+		// operator that controls here may be inert, which is expensive on a
+		// device whose other buttons cut steel.
+		//
+		// `shown` is the count this frame's loop actually laid out, so the test
+		// is exact rather than a guess at how many lines fit.
+		navs := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight},
-			{Clickable: contBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
-		}...)
+		}
+		if start > 0 || shown < len(lines) {
+			navs = append(navs, NavButton{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		navs = append(navs, NavButton{Clickable: contBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navs...)
 		frameOps := append([]op.Op{nav, titleOp}, body...)
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
