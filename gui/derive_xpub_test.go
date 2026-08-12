@@ -126,6 +126,11 @@ func TestDeriveXpubFlow_StubWarningThenEngrave(t *testing.T) {
 		defer quit()
 		frame()
 
+		// §3.1's source picker (stage 10b) now precedes the word-count picker
+		// on every seed entry: TYPE IT / SCAN [/ FROM PAYLOAD]. TYPE IT is
+		// choice 0.
+		click(&ctx.Router, Button3) // TYPE IT
+		frame()
 		// Seed entry: word-count picker -> 12 words (choice 0).
 		click(&ctx.Router, Button3) // choose "12 WORDS"
 		frame()

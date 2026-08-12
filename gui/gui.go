@@ -1861,57 +1861,10 @@ type startScreenAction struct {
 const scanStatusTimeout = 1 * time.Second
 
 func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
-	scans := make(chan scanResult, 1)
-	if r := ctx.Platform.NFCReader(); r != nil {
-		closer := make(chan struct{})
-		closed := make(chan struct{})
-		defer func() {
-			close(closer)
-			r.Close()
-			<-closed
-		}()
-		wakeup := ctx.Platform.Wakeup
-		go func() {
-			s := new(scanner)
-			for {
-				select {
-				case <-closer:
-					close(closed)
-					return
-				default:
-				}
-				obj, err := s.Scan(r)
-				scan := scanResult{
-					Object: obj,
-				}
-				switch {
-				case errors.Is(err, errScanInProgress):
-					scan.Status = scanStarted
-				case errors.Is(err, errScanUnknownFormat):
-					scan.Status = scanUnknownFormat
-				case err == nil || err == io.EOF:
-				default:
-					scan.Status = scanFailed
-					log.Printf("nfc scan: %v", err)
-				}
-				// Merge the previous result.
-				select {
-				case old := <-scans:
-					if scan.Object == nil {
-						scan.Object = old.Object
-					}
-					scan.Status = max(scan.Status, old.Status)
-				default:
-				}
-				scans <- scan
-				wakeup()
-				if scan.Status == scanFailed {
-					// Wait a bit before attempting to scan again.
-					time.Sleep(1 * time.Second)
-				}
-			}
-		}()
-	}
+	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
+	// reader is handled there and yields a channel that never delivers.
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}
 	// The program pager must be driveable by TOUCH, not just by Left/Right
 	// button events: SeedHammer II has no directional buttons at all -- its
@@ -2251,6 +2204,14 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 		descriptorFlow(ctx, th, scan)
 	case mdmkText:
 		mdmkFlow(ctx, th, scan)
+	case freeTextScan:
+		// §5.3's two new record forms, arriving the way §2.1 says everything
+		// else already may. Both are srcNFC by construction -- this switch is
+		// only ever reached from a scan -- and each program's own acceptance
+		// screen states that (F3) before anything is entered.
+		engraveTextFlowFrom(ctx, th, string(scan), srcNFC)
+	case passScan:
+		engravePassphraseFlowFrom(ctx, th, scan, srcNFC)
 	default:
 		return false
 	}

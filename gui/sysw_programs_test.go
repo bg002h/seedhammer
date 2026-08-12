@@ -68,24 +68,61 @@ func TestTheBundleSeedIsBothWrittenAndRead(t *testing.T) {
 
 // Engrave Text must PRE-FILL, not bypass: a payload source that skipped the
 // title, footer, size and confirm screens would engrave a plate nobody saw.
+//
+// ASSERTED OVER THE AST, not over a fixed window of characters. This test used
+// to read the 400 bytes following the syswOffer call and forbid the word
+// "return" anywhere in them. That window is not the offer branch: stage 10d put
+// the F3 acceptance screen -- whose decline path is a legitimate `return` -- a
+// few lines below the branch, and the test failed on code that had not bypassed
+// anything. The property is about the BRANCH, so the branch is what is parsed.
 func TestEngraveTextPreFillsRatherThanBypassing(t *testing.T) {
-	src, err := os.ReadFile("freetext_flow.go")
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "freetext_flow.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(src)
-	i := strings.Index(s, "syswOffer(ctx, th, sysw.ClassFreeText")
-	if i < 0 {
+	var offer *ast.IfStmt
+	ast.Inspect(f, func(n ast.Node) bool {
+		is, ok := n.(*ast.IfStmt)
+		if !ok || is.Init == nil {
+			return true
+		}
+		var names bool
+		ast.Inspect(is.Init, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok &&
+				(id.Name == "syswOffer" || id.Name == "ClassFreeText") {
+				names = true
+			}
+			return true
+		})
+		if names {
+			offer = is
+		}
+		return true
+	})
+	if offer == nil {
 		t.Fatal("Engrave Text does not offer the payload")
 	}
-	// Within the offer block, the only assignment is to `text`; there is no
-	// early return that would skip the remaining screens.
-	block := s[i:min(i+400, len(s))]
-	if strings.Contains(block, "return") {
+	var returns, prefills bool
+	ast.Inspect(offer.Body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.ReturnStmt:
+			returns = true
+		case *ast.AssignStmt:
+			// text = string(raw)
+			if len(n.Lhs) == 1 {
+				if id, ok := n.Lhs[0].(*ast.Ident); ok && id.Name == "text" {
+					prefills = true
+				}
+			}
+		}
+		return true
+	})
+	if returns {
 		t.Error("the payload branch returns early, skipping the screens the operator " +
 			"must still walk")
 	}
-	if !strings.Contains(block, "text = string(raw)") {
+	if !prefills {
 		t.Error("the payload branch must pre-fill text")
 	}
 }

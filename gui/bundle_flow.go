@@ -1,13 +1,9 @@
 package gui
 
 import (
-	"errors"
 	"fmt"
 	"image"
-	"io"
-	"log"
 	"seedhammer.com/sysw"
-	"time"
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
@@ -109,53 +105,10 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 		ctx.syswBundleSeed = ""
 		scr.g.offer(mdmkText(seed))
 	}
-	scans := make(chan scanResult, 1)
-	if r := ctx.Platform.NFCReader(); r != nil {
-		closer := make(chan struct{})
-		closed := make(chan struct{})
-		defer func() {
-			close(closer)
-			r.Close()
-			<-closed
-		}()
-		wakeup := ctx.Platform.Wakeup
-		go func() {
-			s := new(scanner)
-			for {
-				select {
-				case <-closer:
-					close(closed)
-					return
-				default:
-				}
-				obj, err := s.Scan(r)
-				scan := scanResult{Object: obj}
-				switch {
-				case errors.Is(err, errScanInProgress):
-					scan.Status = scanStarted
-				case errors.Is(err, errScanUnknownFormat):
-					scan.Status = scanUnknownFormat
-				case err == nil || err == io.EOF:
-				default:
-					scan.Status = scanFailed
-					log.Printf("nfc scan: %v", err)
-				}
-				select {
-				case old := <-scans:
-					if scan.Object == nil {
-						scan.Object = old.Object
-					}
-					scan.Status = max(scan.Status, old.Status)
-				default:
-				}
-				scans <- scan
-				wakeup()
-				if scan.Status == scanFailed {
-					time.Sleep(1 * time.Second)
-				}
-			}
-		}()
-	}
+	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
+	// reader is handled there and yields a channel that never delivers.
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	doneBtn := &Clickable{Button: Button3, AltButton: Center}
 	dims := ctx.Platform.DisplaySize()

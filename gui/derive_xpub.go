@@ -86,10 +86,27 @@ func pathPickerFlow(ctx *Context, th *Colors) (bip32.Path, *chaincfg.Params, str
 // **Verify flows must NOT call this** — they call seedEntryFlowTypedOnly. See
 // its comment for why the distinction is two functions rather than a parameter.
 func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
-	if m, ok := syswSeedPicker(ctx, th); ok {
-		return m, true
+	for {
+		m, src, ok := syswSeedPicker(ctx, th)
+		if !ok {
+			// Back at the SOURCE picker leaves seed entry entirely. It used to
+			// fall through to the word-count picker, which was invisible while
+			// the picker only appeared for a loaded payload; now that the picker
+			// is the first screen of every seed entry, a Back that landed the
+			// operator one screen DEEPER would be the wrong sentence on the most
+			// common path there is.
+			return nil, false
+		}
+		if src == srcTyped {
+			return seedEntryFlowTypedOnly(ctx, th)
+		}
+		if m != nil {
+			return m, true
+		}
+		// The chosen source produced nothing — Back out of the scan, a declined
+		// acceptance, or a payload record that would not parse. Re-offer the
+		// sources rather than dropping the operator out of seed entry.
 	}
-	return seedEntryFlowTypedOnly(ctx, th)
 }
 
 // seedEntryFlowTypedOnly offers ONE source: the keyboard.
@@ -120,27 +137,122 @@ func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	}
 }
 
-// syswSeedPicker offers the payload as a source when one is loaded and holds a
-// seed. Returns false when there is nothing to offer, so the caller falls
-// through to typing.
-func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
-	if ctx.sysw == nil || !ctx.sysw.has(sysw.ClassMnemonic) {
-		return nil, false
+// syswSeedPicker offers every source §3.1 names: Typed, Scanned, and — when a
+// payload is loaded and holds a seed — the payload.
+//
+//	(nil, srcTyped,  false)  Back: leave seed entry
+//	(nil, srcTyped,  true)   the operator wants the keyboard
+//	(m,   src,       true)   a seed arrived from src, and was accepted
+//	(nil, src,       true)   that source produced nothing; the caller re-offers
+//
+// SCAN IS OFFERED UNCONDITIONALLY, not gated on `NFCReader() != nil`. The
+// obvious gate is a trap: cmd/emu's reader() HANDS OUT the pending tag and marks
+// it consumed, so probing for nil to decide whether to draw the row would eat
+// the operator's tag before they had chosen anything. A machine with no reader
+// gets a scan screen it can only Back out of, which is the shape mk1GatherFlow
+// and scanAddressFlow have always had.
+func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool) {
+	choices := []string{"TYPE IT", "SCAN"}
+	const (
+		pickTyped = iota
+		pickScan
+		pickPayload
+	)
+	if ctx.sysw != nil && ctx.sysw.has(sysw.ClassMnemonic) {
+		choices = append(choices, "FROM PAYLOAD")
 	}
-	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: []string{"TYPE IT", "FROM PAYLOAD"}}
+	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: choices}
 	choice, ok := cs.Choose(ctx, th)
-	if !ok || choice == 0 {
-		return nil, false
-	}
-	body, ok := ctx.sysw.take(sysw.ClassMnemonic)
 	if !ok {
-		return nil, false
+		return nil, srcTyped, false
 	}
-	m, err := bip39.ParseMnemonic(body)
-	if err != nil {
-		return nil, false
+	switch choice {
+	case pickTyped:
+		return nil, srcTyped, true
+	case pickScan:
+		m, ok := scanSeedFlow(ctx, th)
+		if !ok {
+			return nil, srcNFC, true
+		}
+		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcNFC) {
+			return nil, srcNFC, true
+		}
+		return m, srcNFC, true
+	case pickPayload:
+		body, ok := ctx.sysw.take(sysw.ClassMnemonic)
+		if !ok {
+			return nil, srcPayload, true
+		}
+		m, err := bip39.ParseMnemonic(body)
+		if err != nil {
+			return nil, srcPayload, true
+		}
+		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcPayload) {
+			return nil, srcPayload, true
+		}
+		return m, srcPayload, true
 	}
-	return m, true
+	return nil, srcTyped, false
+}
+
+// scanSeedFlow collects a seed from a tag.
+//
+// IT ACCEPTS A bip39.Mnemonic AND NOTHING ELSE. The scanner recognises seven
+// forms and this seam is seed material only; admitting any of the others because
+// "it came off a tag" would hand a program a class its §3.3.2 row never granted
+// it, by a door the table cannot see. Source is a FLAG input, never an admission
+// input (§3.3.2a).
+//
+// Returns (nil, false) on Back.
+func scanSeedFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
+	backBtn := &Clickable{Button: Button1}
+	dims := ctx.Platform.DisplaySize()
+	msg := ""
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return nil, false
+		}
+		select {
+		case scan := <-scans:
+			if m, ok := scan.Object.(bip39.Mnemonic); ok {
+				return m, true
+			}
+			switch {
+			case scan.Object != nil:
+				// Recognised, and not a seed. Named distinctly from an
+				// unreadable tag: the operator held up the wrong card, and
+				// "unrecognized" would send them cleaning the reader.
+				msg = "That tag is not a seed."
+			case scan.Status == scanUnknownFormat:
+				msg = "Unrecognized tag."
+			case scan.Status == scanFailed:
+				msg = "Scan failed — try again."
+			}
+		default:
+		}
+		lines := []string{"Hold the seed tag to the reader."}
+		if msg != "" {
+			lines = append(lines, msg)
+		}
+		lineWidth := dims.X - 2*8
+		y := leadingSize + 8
+		body := make([]op.Op, 0, len(lines))
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Scan Seed")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return nil, false
 }
 
 // deriveXpubFlow is the engraveXpub program: a hand-typed BIP-39 seed (SECRET)

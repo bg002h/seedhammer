@@ -206,11 +206,21 @@ func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 
-// NFCReader returns nil: this emulator has no tag source.
+// NFCReader hands out the record the PAGE presented, once, and nil after that.
 //
-// nil is a SUPPORTED value, not a stub -- gui checks it (verify_address.go,
-// mk1_inspect.go, md1_gather.go) and offers Back-only where a scan would go.
-// Returning a reader that never yields would hang those screens instead.
+// The comment here used to read "returns nil: this emulator has no tag source",
+// which stopped being true when nfc.go was added and was never updated. It
+// matters now: stage 10 made the consuming half of NFC real, so this is the
+// source every J-C walk in a browser goes through.
+//
+// nil is still a SUPPORTED value, not a stub -- gui checks it (verify_address.go,
+// mk1_inspect.go, md1_gather.go, derive_xpub.go) and offers Back-only where a
+// scan would go.
+//
+// AND CALLING THIS CONSUMES THE TAG. reader() marks the pending record done, so
+// no flow may call it merely to ask whether a reader exists: doing that to
+// decide whether to draw a SCAN row would eat the operator's tag before they
+// chose anything. syswSeedPicker says the same at its own site.
 func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 
 // PayloadReader returns a reader over the built-in EMULATOR-ONLY test sealed

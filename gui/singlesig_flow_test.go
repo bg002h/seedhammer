@@ -51,6 +51,11 @@ func TestEngraveSingleSigFlowFull(t *testing.T) {
 		})
 		defer quit()
 		frame()
+		// §3.1's source picker (stage 10b) now precedes the word-count picker
+		// on every seed entry: TYPE IT / SCAN [/ FROM PAYLOAD]. TYPE IT is
+		// choice 0.
+		click(&ctx.Router, Button3) // TYPE IT
+		frame()
 		// Seed entry: 12 WORDS (choice 0).
 		click(&ctx.Router, Button3)
 		frame()
@@ -90,6 +95,11 @@ func TestEngraveSingleSigFlowWatchOnly(t *testing.T) {
 			engraveSingleSigFlow(ctx, &descriptorTheme)
 		})
 		defer quit()
+		frame()
+		// §3.1's source picker (stage 10b) now precedes the word-count picker
+		// on every seed entry: TYPE IT / SCAN [/ FROM PAYLOAD]. TYPE IT is
+		// choice 0.
+		click(&ctx.Router, Button3) // TYPE IT
 		frame()
 		click(&ctx.Router, Button3) // 12 WORDS
 		frame()
@@ -137,6 +147,11 @@ func TestEngraveSingleSigFlowSeedScrubbed(t *testing.T) {
 			done = true
 		})
 		defer quit()
+		frame()
+		// §3.1's source picker (stage 10b) now precedes the word-count picker
+		// on every seed entry: TYPE IT / SCAN [/ FROM PAYLOAD]. TYPE IT is
+		// choice 0.
+		click(&ctx.Router, Button3) // TYPE IT
 		frame()
 		click(&ctx.Router, Button3) // 12 WORDS
 		frame()
