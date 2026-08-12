@@ -35,13 +35,20 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	}
 
 	if atBoot {
+		// LOAD FIRST, so it is the highlighted default: ChoiceScreen opens on
+		// index 0, and a payload the operator deliberately wrote to flash is
+		// almost always one they mean to use. SKIP stays one tap away, and Back
+		// still skips, so nothing is forced -- only the cheap path is the
+		// expected one (operator ruling 2026-08-12).
 		cs := &ChoiceScreen{
 			Title:   "Payload",
 			Lead:    "A systemwide payload is present. Load it?",
-			Choices: []string{"SKIP", "LOAD"},
+			Choices: []string{"LOAD", "SKIP"},
 		}
 		choice, ok := cs.Choose(ctx, th)
-		if !ok || choice == 0 {
+		// !ok is Back, which must remain a skip: backing out of a prompt has
+		// never meant "yes" anywhere else on this device.
+		if !ok || choice == 1 {
 			return false
 		}
 	}

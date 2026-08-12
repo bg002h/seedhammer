@@ -424,3 +424,31 @@ func TestSyswWordEntryBackIsNotDone(t *testing.T) {
 		})
 	}
 }
+
+// Operator ruling 2026-08-12: LOAD is the boot offer's DEFAULT, so confirming
+// without moving the selection loads. SKIP and Back both still refuse.
+//
+// Asserted by confirming immediately — the point is what happens when the
+// operator presses the obvious button, which is the thing a default IS.
+func TestSyswLoadFlowBootDefaultsToLoad(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.sysw = syswRegionFor(t, "S-A")
+	ctx := NewContext(p)
+
+	frame, drawer, quit := runUITouch(ctx, func() {
+		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), true)
+	})
+	defer quit()
+	content, ok := pumpUntil(frame, "Load it?", 32)
+	if !ok {
+		t.Fatalf("the boot offer never appeared; got %q", content)
+	}
+	// Confirm WITHOUT moving the selection: whatever sits at index 0 is taken.
+	tapNavSlot(t, ctx, drawer(), Button3)
+	content, ok = pumpUntil(frame, "digest", 64)
+	if !ok {
+		t.Fatalf("confirming the boot offer did not proceed to the digest — LOAD is "+
+			"not the default; got %q", content)
+	}
+}
