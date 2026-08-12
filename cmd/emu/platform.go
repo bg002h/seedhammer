@@ -38,6 +38,9 @@ type platform struct {
 	// toolpath decodes every step the GUI writes to an engraver. See
 	// toolpath.go; exposed to the page as window.shToolpath.
 	toolpath *toolpathRecorder
+	// nfc is a tag source the PAGE supplies; see nfc.go. Without it the
+	// emulator cannot walk any NFC journey, which spec §8.2 calls out.
+	nfc *nfcSource
 	// plan is the plate currently being cut, rendered whole at the moment the
 	// engrave begins. See plate.go. It arrives through gui.PlateAware, which
 	// exists in this build and NOT in the firmware's.
@@ -62,8 +65,10 @@ func newPlatform() *platform {
 		wakeups:  make(chan struct{}, 1),
 		toolpath: newToolpathRecorder(),
 		plan:     new(platePlan),
+		nfc:      new(nfcSource),
 	}
 	installToolpathAPI(p.toolpath, p.plan)
+	installNFCAPI(p.nfc)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -206,7 +211,7 @@ func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 // nil is a SUPPORTED value, not a stub -- gui checks it (verify_address.go,
 // mk1_inspect.go, md1_gather.go) and offers Back-only where a scan would go.
 // Returning a reader that never yields would hang those screens instead.
-func (p *platform) NFCReader() io.ReadCloser { return nil }
+func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 
 // PayloadReader returns a reader over the built-in EMULATOR-ONLY test sealed
 // payload (sealed_test_payload.go), so §10.1's detection finds MNEMBLOB and
