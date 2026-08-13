@@ -184,12 +184,20 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	ctx.sysw.load(p, identity, h.Sealed(), cliffAbove, compared, h.PubLen > 0)
 
 	if !compared {
-		// Loaded but not authenticated: `take` refuses, so every program will
-		// behave as though there were no payload. Say so, rather than letting
-		// the operator discover it as a menu that never appears.
-		showError(ctx, th, "Load Payload",
-			"Loaded, but not compared — no program will use it. Load again to compare.")
-		return true
+		// DECLINING THE COMPARISON UNLOADS (operator ruling 2026-08-13). An
+		// uncompared session used to survive here, and it was the worst of both
+		// states: `has` ignores `compared` so every picker DEFAULTED to the
+		// payload, while `take` requires it and refused -- so the operator would
+		// press the obvious button and get nothing, in ten places.
+		//
+		// Dropping the session removes the state rather than teaching ten call
+		// sites to avoid it. It also makes the rule the operator asked for true
+		// by construction: a payload is a default if and only if it is loaded,
+		// and it is only loaded if it was compared.
+		ctx.sysw = nil
+		showError(ctx, th, "Not Loaded",
+			"Digest not compared.\nNothing was loaded.")
+		return false
 	}
 
 	// §3.3.3 flags are per-record-class, so they are summarised here over what

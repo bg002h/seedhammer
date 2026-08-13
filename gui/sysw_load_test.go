@@ -452,3 +452,36 @@ func TestSyswLoadFlowBootDefaultsToLoad(t *testing.T) {
 			"not the default; got %q", content)
 	}
 }
+
+// Operator ruling 2026-08-13: declining the digest comparison must leave NO
+// session. An uncompared one is the worst state available -- `has` ignores
+// `compared`, so every picker would default to the payload, while `take`
+// requires it and refuses. The operator presses the obvious button and gets
+// nothing, in ten places.
+func TestSyswLoadFlowDecliningTheDigestUnloads(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	p.sysw = syswRegionFor(t, "S-A") // plaintext, so the digest is the only route
+	ctx := NewContext(p)
+
+	frame, drawer, quit := runUITouch(ctx, func() {
+		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
+	})
+	defer quit()
+	content, ok := pumpUntil(frame, "digest", 64)
+	if !ok {
+		t.Fatalf("the digest screen never appeared; got %q", content)
+	}
+	// Button1 is Back on the review screen: decline the comparison.
+	tapNavSlot(t, ctx, drawer(), Button1)
+	for i := 0; i < 64; i++ {
+		if _, more := frame(); !more {
+			break
+		}
+	}
+	quit()
+	if ctx.sysw != nil {
+		t.Error("declining the digest left a session behind — every picker would " +
+			"then default to a payload that take() refuses")
+	}
+}
