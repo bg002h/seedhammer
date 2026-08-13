@@ -240,11 +240,23 @@ func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 // OPERATOR-SUPPLIED browser-side payload is ever wanted on top of this, the
 // mechanism is a syscall/js read of location.search or a JS global set from
 // the host page — nothing here forecloses that.
-// SyswReader returns nil: this build has no systemwide region. nil is a
-// SUPPORTED value — §10.1's detection simply finds nothing and the payload
-// sources stay invisible, which is the same operator-visible outcome as a
-// machine with an empty region.
-func (p *platform) SyswReader() sysw.Reader { return nil }
+// SyswReader serves the built-in systemwide test container, so Load Payload
+// and the FROM PAYLOAD input default can be walked in the browser.
+//
+// This USED TO return nil, on the same reasoning the paragraph above once
+// carried: "a browser build has no systemwide region." Also true, also beside
+// the point — nil is a supported value, and §10.1 detection finding nothing is
+// a faithful emulation of a machine with an EMPTY region. What it cannot
+// emulate is a machine with a FULL one, which is every interesting screen this
+// program has: the boot offer, the digest comparison, the pickers acquiring a
+// payload row. Load Payload was the only one of the ten programs the simulator
+// could not walk at all.
+//
+// See sysw_test_payload.go for the blob's provenance and why it carries three
+// record classes rather than one.
+func (p *platform) SyswReader() sysw.Reader {
+	return embeddedSyswReader{data: []byte(syswTestPayload)}
+}
 
 func (p *platform) PayloadReader() seal.Reader {
 	return embeddedPayloadReader{data: []byte(sealedTestPayload)}
