@@ -93,17 +93,24 @@
             build-firmware = pkgs.writeShellScriptBin "build-firmware" ''
               set -eu -o pipefail
 
-              # Fork builds are versioned v0.0.0-g<sha>, NOT by `git describe
+              # Fork builds are versioned v0.0.0-bg<sha>, NOT by `git describe
               # --tags`. The fork inherits upstream's release tags, so describe
               # yielded e.g. "v1.4.3-244-g86e0da9" -- which reads on the device
               # home screen as though this were official SeedHammer v1.4.3. It is
-              # not. The -g<sha> suffix keeps each build traceable to a commit.
+              # not. The -bg<sha> suffix keeps each build traceable to a commit.
               # Override with VERSION=... to stamp something else.
+              #
+              # WHY bg AND NOT g (2026-08-13, operator): `g` is what `git
+              # describe` prefixes a SHA with, for "git". Borrowing it here made
+              # our hand-built string look like describe output -- the exact
+              # confusion the paragraph above exists to prevent, just one layer
+              # in. `bg` is the fork owner, matches the bg002h remote, and is a
+              # letter no tool will claim to have generated.
               if [ -z "''${VERSION:-}" ]; then
                 SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
                 DIRTY=""
                 ${pkgs.git}/bin/git diff --quiet HEAD || DIRTY="-dirty"
-                VERSION="v0.0.0-g''${SHA}''${DIRTY}"
+                VERSION="v0.0.0-bg''${SHA}''${DIRTY}"
               fi
               WORKDIR="$(mktemp -d)"
               OUTPUT="seedhammerii-$VERSION.uf2"
@@ -127,7 +134,10 @@
                 SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
                 DIRTY=""
                 ${pkgs.git}/bin/git diff --quiet HEAD || DIRTY="-dirty"
-                VERSION="v0.0.0-g''${SHA}''${DIRTY}"
+                # Same scheme as build-firmware above, deliberately -- a
+                # tinygo flash/gdb build must stamp what build-firmware would,
+                # or the home screen disagrees with the artifact name.
+                VERSION="v0.0.0-bg''${SHA}''${DIRTY}"
               fi
               ${pkgs.tinygo}/bin/tinygo "$VERB" -ldflags="-X main.Version=$VERSION" ${tinygo-flags} \
                 -programmer=cmsis-dap -ocd-commands "adapter speed 10000" \

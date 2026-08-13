@@ -363,7 +363,8 @@ retryable and costs no slots.
 ```sh
 # from this repo (needs Nix with flakes)
 nix run .#build-firmware
-# -> seedhammerii-<version>.uf2, named by `git describe`
+# -> seedhammerii-<version>.uf2, named v0.0.0-bg<sha> by flake.nix -- NOT by
+#    `git describe`, which would inherit upstream's tags and read as official
 
 # sign it
 /path/to/mnemonic-engrave/scripts/sign-firmware.sh <image>.uf2 ~/.sh2/sh2-boot-key.pem
