@@ -163,12 +163,17 @@ func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool)
 		label string
 		src   syswSource
 	}
-	rows := []seedSource{{"TYPE IT", srcTyped}}
-	if ctx.Platform.Features().Has(FeatureNFC) {
-		rows = append(rows, seedSource{"SCAN", srcNFC})
-	}
+	// PAYLOAD FIRST when there is one, because ChoiceScreen opens on index 0 and
+	// an operator who loaded a payload almost always means to use it (operator
+	// ruling 2026-08-12, matching the boot offer's LOAD default). Typing stays
+	// one tap away; nothing is forced, only re-ordered.
+	var rows []seedSource
 	if ctx.sysw != nil && ctx.sysw.has(sysw.ClassMnemonic) {
 		rows = append(rows, seedSource{"FROM PAYLOAD", srcPayload})
+	}
+	rows = append(rows, seedSource{"TYPE IT", srcTyped})
+	if ctx.Platform.Features().Has(FeatureNFC) {
+		rows = append(rows, seedSource{"SCAN", srcNFC})
 	}
 	if len(rows) == 1 {
 		// Exactly the keyboard, so say so by going there rather than by drawing

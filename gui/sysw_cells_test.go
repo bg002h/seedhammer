@@ -44,7 +44,7 @@ func TestBackupWalletTakesACodex32SecretFromThePayload(t *testing.T) {
 	if !found {
 		t.Fatalf("Backup Wallet did not offer the payload's codex32 secret; got %q", content)
 	}
-	click(&ctx.Router, Down)              // ENTER IT -> FROM PAYLOAD
+	// FROM PAYLOAD is index 0 now (operator ruling 2026-08-12), so no Down.
 	tapNavSlot(t, ctx, drawer(), Button3) // choose
 	for i := 0; i < 32; i++ {
 		if _, more := frame(); !more {
@@ -99,7 +99,7 @@ func TestTheSeamPassphraseComesFromThePayloadWithoutTyping(t *testing.T) {
 	if !found {
 		t.Fatalf("the seam did not offer the payload's password; got %q", content)
 	}
-	click(&ctx.Router, Down)
+	// FROM PAYLOAD is index 0 now (operator ruling 2026-08-12), so no Down.
 	tapNavSlot(t, ctx, drawer(), Button3)
 	var after []string
 	for i := 0; i < 32; i++ {
@@ -137,7 +137,8 @@ func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
 	if !found {
 		t.Fatalf("no offer; got %q", content)
 	}
-	tapNavSlot(t, ctx, drawer(), Button3) // choice 0 == ENTER IT
+	click(&ctx.Router, Down)              // index 0 is FROM PAYLOAD now
+	tapNavSlot(t, ctx, drawer(), Button3) // so ENTER IT is index 1
 	if content, found = pumpUntil(frame, "Enter Passphrase", 32); !found {
 		t.Fatalf("declining the offer did not reach the keyboard; got %q", content)
 	}
@@ -189,7 +190,7 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 			if !found {
 				t.Fatalf("no payload offer before the gather; got %q", content)
 			}
-			click(&ctx.Router, Down)              // ENTER IT -> FROM PAYLOAD
+			// FROM PAYLOAD is index 0 now (operator ruling 2026-08-12), so no Down.
 			tapNavSlot(t, ctx, drawer(), Button3) // choose
 			if content, found = pumpUntil(frame, "md1 descriptors: 1", 32); !found {
 				t.Fatalf("the payload card never reached the gatherer's tally; got %q", content)

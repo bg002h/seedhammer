@@ -151,9 +151,12 @@ func syswOffer(ctx *Context, th *Colors, want sysw.Class, lead string) (string, 
 	if ctx.sysw == nil || !ctx.sysw.has(want) {
 		return "", false
 	}
-	cs := &ChoiceScreen{Title: "Input", Lead: lead, Choices: []string{"ENTER IT", "FROM PAYLOAD"}}
+	// PAYLOAD FIRST: this screen is only reached when a payload HOLDS the wanted
+	// class (the guard above), so the loaded record is the expected answer and
+	// ChoiceScreen opens on index 0. Back still declines, as everywhere else.
+	cs := &ChoiceScreen{Title: "Input", Lead: lead, Choices: []string{"FROM PAYLOAD", "ENTER IT"}}
 	choice, ok := cs.Choose(ctx, th)
-	if !ok || choice == 0 {
+	if !ok || choice == 1 {
 		return "", false
 	}
 	return ctx.sysw.take(want)
