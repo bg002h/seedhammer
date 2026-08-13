@@ -14,6 +14,7 @@ import (
 	"seedhammer.com/gui"
 	"seedhammer.com/internal/sh2"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 // platform runs the real firmware GUI against a browser canvas.
@@ -37,6 +38,9 @@ type platform struct {
 	// toolpath decodes every step the GUI writes to an engraver. See
 	// toolpath.go; exposed to the page as window.shToolpath.
 	toolpath *toolpathRecorder
+	// nfc is a tag source the PAGE supplies; see nfc.go. Without it the
+	// emulator cannot walk any NFC journey, which spec §8.2 calls out.
+	nfc *nfcSource
 	// plan is the plate currently being cut, rendered whole at the moment the
 	// engrave begins. See plate.go. It arrives through gui.PlateAware, which
 	// exists in this build and NOT in the firmware's.
@@ -61,8 +65,10 @@ func newPlatform() *platform {
 		wakeups:  make(chan struct{}, 1),
 		toolpath: newToolpathRecorder(),
 		plan:     new(platePlan),
+		nfc:      new(nfcSource),
 	}
 	installToolpathAPI(p.toolpath, p.plan)
+	installNFCAPI(p.nfc)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -200,12 +206,22 @@ func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 
-// NFCReader returns nil: this emulator has no tag source.
+// NFCReader hands out the record the PAGE presented, once, and nil after that.
 //
-// nil is a SUPPORTED value, not a stub -- gui checks it (verify_address.go,
-// mk1_inspect.go, md1_gather.go) and offers Back-only where a scan would go.
-// Returning a reader that never yields would hang those screens instead.
-func (p *platform) NFCReader() io.ReadCloser { return nil }
+// The comment here used to read "returns nil: this emulator has no tag source",
+// which stopped being true when nfc.go was added and was never updated. It
+// matters now: stage 10 made the consuming half of NFC real, so this is the
+// source every J-C walk in a browser goes through.
+//
+// nil is still a SUPPORTED value, not a stub -- gui checks it (verify_address.go,
+// mk1_inspect.go, md1_gather.go, derive_xpub.go) and offers Back-only where a
+// scan would go.
+//
+// AND CALLING THIS CONSUMES THE TAG. reader() marks the pending record done, so
+// no flow may call it merely to ask whether a reader exists: doing that to
+// decide whether to draw a SCAN row would eat the operator's tag before they
+// chose anything. syswSeedPicker says the same at its own site.
+func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 
 // PayloadReader returns a reader over the built-in EMULATOR-ONLY test sealed
 // payload (sealed_test_payload.go), so §10.1's detection finds MNEMBLOB and
@@ -224,13 +240,27 @@ func (p *platform) NFCReader() io.ReadCloser { return nil }
 // OPERATOR-SUPPLIED browser-side payload is ever wanted on top of this, the
 // mechanism is a syscall/js read of location.search or a JS global set from
 // the host page — nothing here forecloses that.
+// SyswReader returns nil: this build has no systemwide region. nil is a
+// SUPPORTED value — §10.1's detection simply finds nothing and the payload
+// sources stay invisible, which is the same operator-visible outcome as a
+// machine with an empty region.
+func (p *platform) SyswReader() sysw.Reader { return nil }
+
 func (p *platform) PayloadReader() seal.Reader {
 	return embeddedPayloadReader{data: []byte(sealedTestPayload)}
 }
 
 // Features reports no secure boot, so the version line reads "(UNLOCKED)".
 // That is true here and worth saying: nothing about a browser build is signed.
-func (p *platform) Features() gui.Features { return 0 }
+//
+// It DOES report FeatureNFC, and that is not a fib: nfcSource above is a real
+// tag source, fed from `window.shNFC`, and §8.2 makes walking the NFC journeys
+// in a browser part of this work. Reporting no reader here would take the SCAN
+// row off every seed entry in the emulator and leave J-C unwalkable by the very
+// tool that exists to walk it. The bit reports the READER, not a pending tag —
+// which is why it is a constant rather than a peek at p.nfc, a peek that would
+// consume the tag it looked at.
+func (p *platform) Features() gui.Features { return gui.FeatureNFC }
 
 func (p *platform) HardwareVersion() string { return "emulator" }
 

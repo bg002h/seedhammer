@@ -15,6 +15,7 @@ import (
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
+	"seedhammer.com/sysw"
 )
 
 // ─── T6c Phase B: the on-device "Build policy" authoring path ────────────────
@@ -44,6 +45,15 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (2) Gather the n-1 cosigner mk1 cards over NFC (PUBLIC; ms1 refused at
 	// classify). Decode each to an mk.Card.
+	//
+	// §3.3.2 admits ClassMDMK to this program (plan stage 13c). One card comes
+	// from the payload if the operator wants it, through the SAME offer() a
+	// scanned card takes, and the operator keeps scanning the rest — the set is
+	// n-1 cards and a source that short-circuited the gather would cap it at
+	// whatever the payload held.
+	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+		ctx.syswBundleSeed = body
+	}
 	cards, ok := bundleGatherFlow(ctx, th)
 	if !ok {
 		return
@@ -70,7 +80,11 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
 	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := passphraseFlow(ctx, th); ok {
+		// §3.3.2 admits ClassPassphrase to this program, so the payload is
+		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
+		// syswPassphraseFlow for the two normative rules a shared edit inside
+		// passphraseFlow would have broken.
+		if pass, ok := syswPassphraseFlow(ctx, th); ok {
 			passphrase = pass
 		}
 	}
@@ -567,11 +581,23 @@ func confirmReviewScreen(ctx *Context, th *Colors, title string, lines []string)
 			continue
 		}
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		// The pager is drawn ONLY when there is a second page. It used to be
+		// unconditional, so a four-line screen -- the payload digest, which is
+		// the screen an operator meets first -- showed a right arrow that did
+		// nothing when pressed. A control that is present and inert teaches the
+		// operator that controls here may be inert, which is expensive on a
+		// device whose other buttons cut steel.
+		//
+		// `shown` is the count this frame's loop actually laid out, so the test
+		// is exact rather than a guess at how many lines fit.
+		navs := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight},
-			{Clickable: contBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
-		}...)
+		}
+		if start > 0 || shown < len(lines) {
+			navs = append(navs, NavButton{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		navs = append(navs, NavButton{Clickable: contBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navs...)
 		frameOps := append([]op.Op{nav, titleOp}, body...)
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))

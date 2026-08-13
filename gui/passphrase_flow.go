@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"seedhammer.com/sysw"
 	"strconv"
 	"unicode/utf8"
 
@@ -598,7 +599,22 @@ const (
 //     ppBuildPlate. Both are marked at their site. What is achievable is that
 //     the buffers this flow OWNS are zeroed, and that no additional string
 //     copy is made for display, counting or proof-reading.
+//
+// The no-argument entry is the srcTyped wrapper: it is what the carousel calls,
+// and the source it names is the keyboard.
 func engravePassphraseFlow(ctx *Context, th *Colors) {
+	engravePassphraseFlowFrom(ctx, th, nil, srcTyped)
+}
+
+// engravePassphraseFlowFrom is engravePassphraseFlow with the record already in
+// hand.
+//
+// `body` is the DECODED passphrase bytes and is a SECRET. It is []byte rather
+// than a string for this file's own reason: the flow owns a buffer it can
+// scrub, and `body` is copied into it immediately rather than being held.
+// §6.2.2a accepts that the caller's copy is itself unwipeable -- the scanner
+// produced it -- and this does not add another.
+func engravePassphraseFlowFrom(ctx *Context, th *Colors, body []byte, src syswSource) {
 	secret := make([]byte, passphrase.MaxLen)
 	// The only scrub defer, and so the last to run: it zeroes the backing
 	// array after every other defer, on every return path.
@@ -606,7 +622,29 @@ func engravePassphraseFlow(ctx *Context, th *Colors) {
 	if passphraseSecretHook != nil {
 		passphraseSecretHook(secret)
 	}
-	n := 0
+	// Bounded by the buffer, so an over-long record truncates rather than
+	// overruns -- the same bound the payload path below relies on.
+	n := copy(secret, body)
+	// The payload PRE-FILLS the passphrase; the operator still walks the
+	// fingerprint fields and the confirm screen.
+	//
+	// Copied into `secret`, the caller-owned buffer that wipeBytes above
+	// scrubs — never held as a Go string. §6.2.2's no-regrow rule is why the
+	// buffer is written into rather than replaced, and the copy is bounded by
+	// the buffer so an over-long record truncates rather than overruns.
+	if src == srcTyped {
+		if body, ok := syswOffer(ctx, th, sysw.ClassPassphrase, "Password from where?"); ok {
+			if raw, err := sysw.DecodeBody(body); err == nil {
+				n = copy(secret, raw)
+				src = srcPayload
+			}
+		}
+	}
+	// F3, and F4: this class IS secret, so a record off a tag says plainly that
+	// nothing stands behind it (§3.3.3). Typed entry draws nothing.
+	if !syswSourceAccept(ctx, th, "BIP-39 Password", sysw.ClassPassphrase, src) {
+		return
+	}
 	var seedFP, combinedFP string
 	qr := false
 	// The pass-proof trigger fires inside ONE field but must populate all

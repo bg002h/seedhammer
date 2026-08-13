@@ -12,6 +12,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/mk"
+	"seedhammer.com/sysw"
 )
 
 // scriptTypeChoices is the stage-1 list of the six standard script types the
@@ -79,7 +80,48 @@ func pathPickerFlow(ctx *Context, th *Colors) (bip32.Path, *chaincfg.Params, str
 // seedEntryFlow reuses the typed BIP-39 word entry (12 or 24 words) and returns
 // the SECRET mnemonic. Returns ok==false on Back. The caller MUST scrub the
 // returned mnemonic when done.
+// seedEntryFlow offers every source a seed may come from: typed, scanned, or
+// the systemwide payload.
+//
+// **Verify flows must NOT call this** — they call seedEntryFlowTypedOnly. See
+// its comment for why the distinction is two functions rather than a parameter.
 func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	for {
+		m, src, ok := syswSeedPicker(ctx, th)
+		if !ok {
+			// Back at the SOURCE picker leaves seed entry entirely. It used to
+			// fall through to the word-count picker, which was invisible while
+			// the picker only appeared for a loaded payload; now that the picker
+			// is the first screen of every seed entry, a Back that landed the
+			// operator one screen DEEPER would be the wrong sentence on the most
+			// common path there is.
+			return nil, false
+		}
+		if src == srcTyped {
+			return seedEntryFlowTypedOnly(ctx, th)
+		}
+		if m != nil {
+			return m, true
+		}
+		// The chosen source produced nothing — Back out of the scan, a declined
+		// acceptance, or a payload record that would not parse. Re-offer the
+		// sources rather than dropping the operator out of seed entry.
+	}
+}
+
+// seedEntryFlowTypedOnly offers ONE source: the keyboard.
+//
+// TWO ENTRY POINTS, NOT A BOOLEAN, and the choice is the mechanism rather than a
+// style preference. §7.4 forbids a payload-sourced secret from reaching a
+// verification comparison: a verify that accepted the same secret the engrave
+// used would compare the engrave source against itself and pass
+// unconditionally, certifying a WRONG PLATE as good.
+//
+// A boolean parameter can be passed wrongly and the wrong value still compiles.
+// A verify flow that has no way to NAME the payload source cannot reach it by
+// any argument, which makes the test structural — no verify flow mentions
+// seedEntryFlow — instead of behavioural.
+func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Choose number of words", Choices: []string{"12 WORDS", "24 WORDS"}}
 	for {
 		choice, ok := cs.Choose(ctx, th)
@@ -87,12 +129,153 @@ func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 			return nil, false
 		}
 		mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-		inputWordsFlow(ctx, th, mnemonic, 0, "")
+		inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true})
 		if !isEmptyMnemonic(mnemonic) {
 			return mnemonic, true
 		}
 		// Back out of word entry without finishing -> re-show the count picker.
 	}
+}
+
+// syswSeedPicker offers every source §3.1 names that this machine ACTUALLY HAS:
+// Typed, Scanned when there is a reader, and the payload when one is loaded and
+// holds a seed.
+//
+//	(nil, srcTyped,  false)  Back: leave seed entry
+//	(nil, srcTyped,  true)   the operator wants the keyboard
+//	(m,   src,       true)   a seed arrived from src, and was accepted
+//	(nil, src,       true)   that source produced nothing; the caller re-offers
+//
+// §13 D9: A PICKER WITH ONE ROW IS NOT A CHOICE, AND IS NOT DRAWN. Stage 10 made
+// this the first screen of every seed entry in four programs — the most-walked
+// path in the firmware — where on a machine with neither source it cost a click
+// to offer the keyboard the operator was going to get anyway. So the rows are
+// built first and the screen is skipped when only one survives, which makes the
+// rule one comparison instead of a condition repeated per row.
+//
+// THE READER IS ASKED FOR VIA Features(), NOT VIA `NFCReader() != nil`. The
+// obvious probe is a trap: cmd/emu's reader() HANDS OUT the pending tag and
+// marks it consumed, so probing to decide whether to draw a row would eat the
+// operator's tag before they had chosen anything. FeatureNFC (gui.go) exists to
+// answer the same question for free.
+func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool) {
+	type seedSource struct {
+		label string
+		src   syswSource
+	}
+	// PAYLOAD FIRST when there is one, because ChoiceScreen opens on index 0 and
+	// an operator who loaded a payload almost always means to use it (operator
+	// ruling 2026-08-12, matching the boot offer's LOAD default). Typing stays
+	// one tap away; nothing is forced, only re-ordered.
+	var rows []seedSource
+	if ctx.sysw != nil && ctx.sysw.has(sysw.ClassMnemonic) {
+		rows = append(rows, seedSource{"FROM PAYLOAD", srcPayload})
+	}
+	rows = append(rows, seedSource{"TYPE IT", srcTyped})
+	if ctx.Platform.Features().Has(FeatureNFC) {
+		rows = append(rows, seedSource{"SCAN", srcNFC})
+	}
+	if len(rows) == 1 {
+		// Exactly the keyboard, so say so by going there rather than by drawing
+		// a menu of one.
+		return nil, srcTyped, true
+	}
+	choices := make([]string, len(rows))
+	for i, r := range rows {
+		choices[i] = r.label
+	}
+	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: choices}
+	choice, ok := cs.Choose(ctx, th)
+	if !ok {
+		return nil, srcTyped, false
+	}
+	switch rows[choice].src {
+	case srcTyped:
+		return nil, srcTyped, true
+	case srcNFC:
+		m, ok := scanSeedFlow(ctx, th)
+		if !ok {
+			return nil, srcNFC, true
+		}
+		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcNFC) {
+			return nil, srcNFC, true
+		}
+		return m, srcNFC, true
+	case srcPayload:
+		body, ok := ctx.sysw.take(sysw.ClassMnemonic)
+		if !ok {
+			return nil, srcPayload, true
+		}
+		m, err := bip39.ParseMnemonic(body)
+		if err != nil {
+			return nil, srcPayload, true
+		}
+		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcPayload) {
+			return nil, srcPayload, true
+		}
+		return m, srcPayload, true
+	}
+	return nil, srcTyped, false
+}
+
+// scanSeedFlow collects a seed from a tag.
+//
+// IT ACCEPTS A bip39.Mnemonic AND NOTHING ELSE. The scanner recognises seven
+// forms and this seam is seed material only; admitting any of the others because
+// "it came off a tag" would hand a program a class its §3.3.2 row never granted
+// it, by a door the table cannot see. Source is a FLAG input, never an admission
+// input (§3.3.2a).
+//
+// Returns (nil, false) on Back.
+func scanSeedFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
+	backBtn := &Clickable{Button: Button1}
+	dims := ctx.Platform.DisplaySize()
+	msg := ""
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return nil, false
+		}
+		select {
+		case scan := <-scans:
+			if m, ok := scan.Object.(bip39.Mnemonic); ok {
+				return m, true
+			}
+			switch {
+			case scan.Object != nil:
+				// Recognised, and not a seed. Named distinctly from an
+				// unreadable tag: the operator held up the wrong card, and
+				// "unrecognized" would send them cleaning the reader.
+				msg = "That tag is not a seed."
+			case scan.Status == scanUnknownFormat:
+				msg = "Unrecognized tag."
+			case scan.Status == scanFailed:
+				msg = "Scan failed — try again."
+			}
+		default:
+		}
+		lines := []string{"Hold the seed tag to the reader."}
+		if msg != "" {
+			lines = append(lines, msg)
+		}
+		lineWidth := dims.X - 2*8
+		y := leadingSize + 8
+		body := make([]op.Op, 0, len(lines))
+		for _, ln := range lines {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, ln)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Scan Seed")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return nil, false
 }
 
 // deriveXpubFlow is the engraveXpub program: a hand-typed BIP-39 seed (SECRET)
@@ -120,7 +303,11 @@ func deriveXpubFlow(ctx *Context, th *Colors) {
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
 	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := passphraseFlow(ctx, th); ok {
+		// §3.3.2 admits ClassPassphrase to this program, so the payload is
+		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
+		// syswPassphraseFlow for the two normative rules a shared edit inside
+		// passphraseFlow would have broken.
+		if pass, ok := syswPassphraseFlow(ctx, th); ok {
 			passphrase = pass
 		}
 	}

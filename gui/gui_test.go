@@ -26,6 +26,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/image/rgb565"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 func BenchmarkRedraw(b *testing.B) {
@@ -289,7 +290,7 @@ func TestWordKeyboardScreen(t *testing.T) {
 		runes(&ctx.Router, w)
 		click(&ctx.Router, Button3)
 		m := make(bip39.Mnemonic, 1)
-		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "", wordEntryOpts{checksumGate: true})
 		if got := bip39.LabelFor(m[0]); got != w {
 			t.Errorf("keyboard mapped %q to %q", w, got)
 		}
@@ -339,6 +340,7 @@ func fillDescriptor(t testing.TB, desc *bip380.Descriptor, path bip32.Path, seed
 }
 
 type testPlatform struct {
+	sysw     sysw.Reader
 	events   []Event
 	wakeups  chan struct{}
 	engraver *testEngraver
@@ -422,7 +424,13 @@ func (p *testPlatform) HardwareVersion() string {
 	return "v1.0.0-testing"
 }
 
+// The test platform has a reader exactly when a test gave it one, so the D9
+// picker gate is exercised in BOTH directions by the tests that already set
+// p.nfc — rather than being a constant that only ever proves one branch.
 func (p *testPlatform) Features() Features {
+	if p.nfc != nil {
+		return FeatureNFC
+	}
 	return 0
 }
 
@@ -440,6 +448,9 @@ func (p *testPlatform) NFCReader() io.ReadCloser {
 	}
 	return nil
 }
+
+// nil: the test platform has no XIP flash. A supported value, not a stub.
+func (p *testPlatform) SyswReader() sysw.Reader { return p.sysw }
 
 func (p *testPlatform) PayloadReader() seal.Reader {
 	return p.payload
@@ -524,7 +535,7 @@ func TestWordFlowProgressTitle(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := emptyBIP39Mnemonic(24)
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "", wordEntryOpts{checksumGate: true})
 	})
 	defer quit()
 	content, ok := frame()
@@ -540,7 +551,7 @@ func TestWordFlowMatchCount(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	m := emptyBIP39Mnemonic(24)
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 0, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 0, "", wordEntryOpts{checksumGate: true})
 	})
 	defer quit()
 
@@ -637,7 +648,7 @@ func TestWordFlowLastWord24(t *testing.T) {
 		copy(m, v)
 		m[23] = -1 // last slot unset; first 23 are valid
 		frame, quit := runUI(ctx, func() {
-			inputWordsFlow(ctx, &descriptorTheme, m, 23, "")
+			inputWordsFlow(ctx, &descriptorTheme, m, 23, "", wordEntryOpts{checksumGate: true})
 		})
 		content, ok := frame()
 		quit()
@@ -658,7 +669,7 @@ func TestWordFlowLastWord24(t *testing.T) {
 		want := v[23]
 		runes(&ctx.Router, bip39.LabelFor(want))
 		click(&ctx.Router, Button3)
-		inputWordsFlow(ctx, &descriptorTheme, m, 23, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 23, "", wordEntryOpts{checksumGate: true})
 		if m[23] != want {
 			t.Errorf("last word committed %d (%q), want %d (%q)",
 				m[23], bip39.LabelFor(m[23]), want, bip39.LabelFor(want))
@@ -675,7 +686,7 @@ func TestWordFlowLastWord12(t *testing.T) {
 		copy(m, v)
 		m[11] = -1
 		frame, quit := runUI(ctx, func() {
-			inputWordsFlow(ctx, &descriptorTheme, m, 11, "")
+			inputWordsFlow(ctx, &descriptorTheme, m, 11, "", wordEntryOpts{checksumGate: true})
 		})
 		content, ok := frame()
 		quit()
@@ -695,7 +706,7 @@ func TestWordFlowLastWord12(t *testing.T) {
 		want := v[11]
 		runes(&ctx.Router, bip39.LabelFor(want))
 		click(&ctx.Router, Button3)
-		inputWordsFlow(ctx, &descriptorTheme, m, 11, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 11, "", wordEntryOpts{checksumGate: true})
 		if m[11] != want {
 			t.Errorf("last word committed %d (%q), want %d (%q)",
 				m[11], bip39.LabelFor(m[11]), want, bip39.LabelFor(want))
@@ -714,7 +725,7 @@ func TestWordFlowLastWordNoFlash(t *testing.T) {
 	m[22] = -1
 	m[23] = -1
 	frame, quit := runUI(ctx, func() {
-		inputWordsFlow(ctx, &descriptorTheme, m, 22, "")
+		inputWordsFlow(ctx, &descriptorTheme, m, 22, "", wordEntryOpts{checksumGate: true})
 	})
 	defer quit()
 	frame() // word-22 entry frame (empty fragment)

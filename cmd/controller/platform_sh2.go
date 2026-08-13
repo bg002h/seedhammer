@@ -28,6 +28,7 @@ import (
 	"seedhammer.com/nfc/poller"
 	"seedhammer.com/nfc/type5"
 	"seedhammer.com/seal"
+	"seedhammer.com/sysw"
 )
 
 const (
@@ -304,6 +305,12 @@ func Init() (*Platform, error) {
 
 	nfc := st25r3916.New(mi2c, NFC_INT)
 	p.nfc = newNFCDevice(nfc)
+	// The ST25R3916 is soldered to every board, so the reader is unconditional
+	// here — unlike SyswReader/PayloadReader, which report a REGION that may be
+	// empty. gui reads this bit instead of calling NFCReader(), because calling
+	// NFCReader() to ask whether a reader exists consumes a tag on the emulator
+	// (§13 D9; gui.FeatureNFC says why).
+	p.feats |= gui.FeatureNFC
 	if initHook != nil {
 		initHook(stdin)
 	}
@@ -572,6 +579,13 @@ func (p *Platform) NFCReader() io.ReadCloser {
 // than a direct reference from gui.
 func (p *Platform) PayloadReader() seal.Reader {
 	return seal.XIPReader{}
+}
+
+// This is the ONLY platform with a systemwide region, for the same reason it is
+// the only one with a payload region: sysw.XIPReader exists only under the
+// tinygo build tag.
+func (p *Platform) SyswReader() sysw.Reader {
+	return sysw.XIPReader{}
 }
 
 func (p *Platform) Engraver(stall bool) (gui.Engraver, error) {

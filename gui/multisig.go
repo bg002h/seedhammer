@@ -7,6 +7,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 	"seedhammer.com/md"
+	"seedhammer.com/sysw"
 )
 
 // ─── T6b: the SUPPLIED-multisig engrave orchestrator ─────────────────────────
@@ -64,6 +65,17 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (1) Gather the SUPPLIED md1 over NFC (PUBLIC). Refuse a polluted/ambiguous
 	// supply BEFORE any seed is typed (no secret exists yet).
+	//
+	// §3.3.2 admits ClassMDMK to this program for exactly this supplied-md1
+	// path (plan stage 13c). A payload card is offered ONCE, before gathering,
+	// and enters through the SAME offer() a scanned card does — so it is
+	// deduplicated, chunk-assembled and validated identically. bundleFlow does
+	// it this way and for the same reason: a separate insertion path would be a
+	// second way for a card to become part of a bundle, and only one of them
+	// would have the checks.
+	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+		ctx.syswBundleSeed = body
+	}
 	cards, ok := bundleGatherFlow(ctx, th)
 	if !ok {
 		return
@@ -107,7 +119,11 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
 	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := passphraseFlow(ctx, th); ok {
+		// §3.3.2 admits ClassPassphrase to this program, so the payload is
+		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
+		// syswPassphraseFlow for the two normative rules a shared edit inside
+		// passphraseFlow would have broken.
+		if pass, ok := syswPassphraseFlow(ctx, th); ok {
 			passphrase = pass
 		}
 	}

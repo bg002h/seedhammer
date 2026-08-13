@@ -47,7 +47,7 @@ func verifyMultisig(derived bundle.Bundle, ms1Readback string, mk1, md1 []string
 // the re-derived mk1 (H1: never the re-derived value against itself). `full`
 // reports whether an ms1 was engraved (and so must be hand-typed for verify).
 func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bool) {
-	reMnemonic, ok := seedEntryFlow(ctx, th)
+	reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 	if !ok {
 		return
 	}
@@ -66,6 +66,13 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 	}
 
 	// Read back the PUBLIC cards over NFC via the T5 gatherer.
+	//
+	// NO PAYLOAD OFFER HERE, deliberately (plan stage 13c). §3.3.2 admits
+	// ClassMDMK to this program, but a verify READBACK must come from the
+	// plate's own cards: §7.4's reasoning applied to the bundle rather than to
+	// the seed — a readback taken from the session would compare the engrave
+	// source against itself and pass unconditionally, certifying a wrong plate.
+	// The passphrase step above uses passphraseFlow for the same reason.
 	cards, ok := bundleGatherFlow(ctx, th)
 	if !ok {
 		return

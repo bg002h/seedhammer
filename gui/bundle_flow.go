@@ -1,12 +1,9 @@
 package gui
 
 import (
-	"errors"
 	"fmt"
 	"image"
-	"io"
-	"log"
-	"time"
+	"seedhammer.com/sysw"
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
@@ -22,6 +19,12 @@ import (
 // REFUSED in this channel (hand-typed only); a single mk1 is refused (malformed,
 // no integrity). No secret is ever gathered, displayed, or engraved.
 func bundleFlow(ctx *Context, th *Colors) {
+	// A payload card is offered ONCE, before gathering, and then the operator
+	// continues scanning as usual — the bundle is a SET, and a source that
+	// short-circuited the gather would cap it at whatever the payload held.
+	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+		ctx.syswBundleSeed = body
+	}
 	for {
 		cards, ok := bundleGatherFlow(ctx, th)
 		if !ok {
@@ -94,53 +97,18 @@ func (s *bundleGatherScreen) tally() []string {
 // review flow are driven directly in tests.
 func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{g: &bundleGatherer{}}
-	scans := make(chan scanResult, 1)
-	if r := ctx.Platform.NFCReader(); r != nil {
-		closer := make(chan struct{})
-		closed := make(chan struct{})
-		defer func() {
-			close(closer)
-			r.Close()
-			<-closed
-		}()
-		wakeup := ctx.Platform.Wakeup
-		go func() {
-			s := new(scanner)
-			for {
-				select {
-				case <-closer:
-					close(closed)
-					return
-				default:
-				}
-				obj, err := s.Scan(r)
-				scan := scanResult{Object: obj}
-				switch {
-				case errors.Is(err, errScanInProgress):
-					scan.Status = scanStarted
-				case errors.Is(err, errScanUnknownFormat):
-					scan.Status = scanUnknownFormat
-				case err == nil || err == io.EOF:
-				default:
-					scan.Status = scanFailed
-					log.Printf("nfc scan: %v", err)
-				}
-				select {
-				case old := <-scans:
-					if scan.Object == nil {
-						scan.Object = old.Object
-					}
-					scan.Status = max(scan.Status, old.Status)
-				default:
-				}
-				scans <- scan
-				wakeup()
-				if scan.Status == scanFailed {
-					time.Sleep(1 * time.Second)
-				}
-			}
-		}()
+	// A payload card enters through the SAME offer() every scanned card does,
+	// so it is deduplicated, chunk-assembled and validated identically. A
+	// separate insertion path would be a second way for a card to become part
+	// of a bundle, and only one of them would have the checks.
+	if seed := ctx.syswBundleSeed; seed != "" {
+		ctx.syswBundleSeed = ""
+		scr.g.offer(mdmkText(seed))
 	}
+	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
+	// reader is handled there and yields a channel that never delivers.
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	doneBtn := &Clickable{Button: Button3, AltButton: Center}
 	dims := ctx.Platform.DisplaySize()

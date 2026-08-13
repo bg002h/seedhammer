@@ -11,6 +11,7 @@ import (
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
 	"seedhammer.com/nonstandard"
+	"seedhammer.com/sysw"
 )
 
 type scanner struct {
@@ -58,6 +59,24 @@ func (s *scanner) Scan(r io.Reader) (any, error) {
 	if bytes.HasPrefix(buf, []byte(cmdPrefix)) {
 		cmd := debugCommand{string(buf[len(cmdPrefix):])}
 		return cmd, nil
+	} else if isSyswEncoded(buf) {
+		// §5.3.1: THE TWO PREFIXES ARE MATCHED BEFORE THE SNIFFERS, and they
+		// are RESERVED. A text:/pass: record whose body is not valid lowercase
+		// hex is refused here rather than falling through -- a sniffer below
+		// could otherwise claim it, and treating it as free text would turn a
+		// malformed record into an engraved plate.
+		//
+		// Decoded through sysw's OWN codec, never a local hex call: the encoding
+		// is normative (§5.3.1) and a second implementation of it is the shape
+		// this module has already been burnt by.
+		body, err := sysw.DecodeBody(string(buf))
+		if err != nil {
+			return nil, errScanUnknownFormat
+		}
+		if bytes.HasPrefix(buf, []byte(sysw.PassPrefix)) {
+			return passScan(body), nil
+		}
+		return freeTextScan(body), nil
 	} else if m, err := bip39.Parse(buf); err == nil {
 		return m, nil
 		// TODO: re-enable SLIP39 support. Note that
@@ -79,6 +98,22 @@ func (s *scanner) Scan(r io.Reader) (any, error) {
 		return nil, errScanUnknownFormat
 	}
 }
+
+func isSyswEncoded(buf []byte) bool {
+	return bytes.HasPrefix(buf, []byte(sysw.TextPrefix)) ||
+		bytes.HasPrefix(buf, []byte(sysw.PassPrefix))
+}
+
+// freeTextScan is a ClassFreeText record read off a tag, ALREADY DECODED: the
+// wire form is hex (§5.3.1) and nothing downstream should have to know that.
+type freeTextScan string
+
+// passScan is a ClassPassphrase record read off a tag, already decoded. It is a
+// SECRET, and it is []byte rather than a string for the reason
+// engravePassphraseFlow gives at length: the passphrase program owns a buffer it
+// can scrub, and a Go string is a copy nothing can reach. §6.2.2a accepts the
+// residue this path already carries; it does not invite another copy.
+type passScan []byte
 
 // addressText is a candidate Bitcoin address recognized by the scanner, consumed
 // only by the verify-address flow. engraveObjectFlow has no addressText case, so

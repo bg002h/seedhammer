@@ -157,7 +157,7 @@ func unlockPassphraseFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 		if unlockPassphraseWordsHook != nil {
 			unlockPassphraseWordsHook(m)
 		}
-		inputWordsFlow(ctx, th, m, 0, "")
+		inputWordsFlow(ctx, th, m, 0, "", wordEntryOpts{checksumGate: true})
 		// inputWordsFlow returns on Back with whatever has been typed, so an
 		// incomplete mnemonic is the ordinary shape of "the operator left".
 		// Treating it as an error would report a typo they did not make.

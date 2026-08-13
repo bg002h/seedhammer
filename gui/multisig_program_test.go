@@ -39,6 +39,17 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Multisig") {
 		t.Fatalf("engraveMultisig not reachable/titled after fifth Right; got %q", content)
 	}
+	// Right -> loadPayload, which now sits between engraveMultisig and
+	// bip85Derive: it is unconditional, so it was inserted mid-enum and
+	// bip85Derive stayed the bound lastNav returns.
+	click(&ctx.Router, Right)
+	content, ok = frame()
+	if !ok {
+		t.Fatal("no frame after the Right onto Load Payload")
+	}
+	if !uiContains(content, "Load Payload") {
+		t.Fatalf("loadPayload not reachable between Multisig and BIP-85; got %q", content)
+	}
 	// Right -> bip85Derive (the navigable upper bound after T7b).
 	click(&ctx.Router, Right)
 	content, ok = frame()

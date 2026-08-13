@@ -42,6 +42,7 @@ import (
 	"seedhammer.com/seal"
 	"seedhammer.com/seedqr"
 	slip39words "seedhammer.com/slip39"
+	"seedhammer.com/sysw"
 )
 
 var ErrTooLarge = errors.New("backup: data does not fit plate")
@@ -61,12 +62,17 @@ const (
 )
 
 type Context struct {
-	Platform      Platform
-	Styles        Styles
-	Wakeup        time.Time
-	Done          bool
-	FrameCallback func(op.Op)
-	B             op.Buffer
+	// sysw is the systemwide payload session, or nil. See sysw_session.go.
+	sysw *syswSession
+	// syswBundleSeed is a first card taken from the payload, consumed by
+	// bundleGatherFlow. Empty when none was offered or taken.
+	syswBundleSeed string
+	Platform       Platform
+	Styles         Styles
+	Wakeup         time.Time
+	Done           bool
+	FrameCallback  func(op.Op)
+	B              op.Buffer
 
 	Router EventRouter
 
@@ -177,6 +183,14 @@ const (
 	engraveBundle
 	engraveSingleSig
 	engraveMultisig
+	// loadPayload is UNCONDITIONAL and therefore inserted mid-enum per the house
+	// rule, before bip85Derive, so bip85Derive stays the bound StartScreen.lastNav
+	// returns and unlockPayload stays the last navigable program. Two
+	// conditionally-visible trailing entries cannot both be expressed as one
+	// bound, which is why this one is always shown and reports an empty region
+	// itself. It is NOT the Sealed Payload: different container, different
+	// region, and that one stays frozen.
+	loadPayload
 	bip85Derive
 	// unlockPayload is APPENDED, not inserted, and it is the one program whose
 	// visibility is CONDITIONAL (§10.1: absent payload -> the feature is
@@ -724,11 +738,67 @@ func fadeClip(b *op.Buffer, o op.Op, r image.Rectangle) op.Op {
 
 const wordKeys = "qwertyuiop\nasdfghjkl\nzxcvbnm"
 
-func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string) {
+// wordEntryOpts is per-INVOCATION, because the checksum gate is a property of
+// the CALL and not of the keyboard.
+//
+// Seed entry wants the gate: it catches a mistyped last word before anything is
+// derived. Passphrase entry must not have it — §8b — and the cost of getting
+// that wrong is not subtle: refreshCands masks the final slot to
+// bip39.LastWordCandidates, 128 of 2048, so 15 of every 16 uniformly generated
+// 12-word passphrases would be permanently unopenable (R1-C2).
+type wordEntryOpts struct {
+	// checksumGate restricts the final slot to checksum-valid words.
+	checksumGate bool
+	// terminator draws a `done` affordance in the free nav slot, for entry
+	// whose length is not known in advance (§8c).
+	//
+	// A NAV BUTTON, NOT A KEY. The word path builds NewKeyboard, which has no
+	// opt-in parameter, and its rune() would feed a `done` rune into Fragment
+	// and panic in bip39.ClosestWord. Button2 is unused by this flow — Button1
+	// is back and Button3 is ok — and (*Keyboard).Update filters only the
+	// arrows, Center and runes, so a nav-slot button structurally cannot reach
+	// Fragment.
+	terminator bool
+}
+
+// inputWordsFlow returns how many words were actually entered, and whether
+// entry TERMINATED rather than being abandoned.
+//
+// It RETURNS the count because §2.2 item 8 records its having no return value
+// as one of the five obstacles to arbitrary-N entry: without it a caller cannot
+// tell a 7-word passphrase from a 24-word one abandoned early.
+//
+// AND IT RETURNS `done` BECAUSE THE COUNT ALONE CANNOT SEPARATE THE TWO WAYS OF
+// LEAVING (§8c). Back and the `done` button both left with entered() and nothing
+// else, so backing out with three words filled was indistinguishable from
+// finishing at three: the caller ran a ~31 s KDF on a passphrase the operator
+// meant to abandon, and the failure read as "wrong passphrase".
+//
+//	done == true   the terminator was pressed, or every slot was filled
+//	done == false  Back, or ctx.Done unwound the flow
+//
+// ctx.Done is a false as deliberately as Back is: the machine is shutting down
+// or a screen above unwound, and neither is an operator saying "use this".
+// The count is honest in every case — it counts FILLED slots — so a caller that
+// only wants the words is unaffected, which is why the five existing non-test
+// callers invoke this in statement position and need no edit.
+func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected int, title string, opt wordEntryOpts) (int, bool) {
 	kbd := NewKeyboard(ctx, wordKeys)
 	wordLabel := ""
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
+	doneBtn := &Clickable{Button: Button2}
+	// entered counts FILLED slots, which is the honest answer at every exit —
+	// backing out, running off the end, or pressing done part way.
+	entered := func() int {
+		n := 0
+		for _, w := range mnemonic {
+			if w != -1 {
+				n++
+			}
+		}
+		return n
+	}
 	layoutWord := func(buf *op.Buffer, n int, word string) (op.Op, image.Point) {
 		style := ctx.Styles.word
 		return widget.Labelf(buf, style, th.Background, "%2d: %s", n, word)
@@ -737,7 +807,11 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	var nvalid int
 	var cands []bip39.Word
 	candsFor := -1
-	onLastWord := func() bool { return selected == len(mnemonic)-1 && cands != nil }
+	// The gate is conditional on the CALL. With it off, cands is never
+	// populated, so onLastWord is false forever and no mask is applied.
+	onLastWord := func() bool {
+		return opt.checksumGate && selected == len(mnemonic)-1 && cands != nil
+	}
 	updateKeys := func(frag string) int {
 		if onLastWord() {
 			return updateValidCandidateKeys(cands, frag, kbd.allKeys)
@@ -756,6 +830,9 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 	// candidate restriction applies on the SAME frame (no one-frame full-
 	// keyboard flash).
 	refreshCands := func() {
+		if !opt.checksumGate {
+			return
+		}
 		if selected == len(mnemonic)-1 && candsFor != selected {
 			cands = bip39.LastWordCandidates(mnemonic)
 			candsFor = selected
@@ -776,7 +853,12 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			}
 		}
 		if backBtn.Clicked(ctx) {
-			return
+			return entered(), false
+		}
+		// §8c: `done` ends variable-length entry. Only drawn when the caller
+		// asked for it, so it cannot appear where a length is already known.
+		if opt.terminator && doneBtn.Clicked(ctx) {
+			return entered(), true
 		}
 		for okBtn.Clicked(ctx) {
 			w, ok := completeWord(kbd.Fragment, nvalid)
@@ -790,7 +872,9 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			for {
 				selected++
 				if selected == len(mnemonic) {
-					return
+					// Ran off the end: every slot is filled, which is entry
+					// finishing of its own accord — done, not abandoned.
+					return entered(), true
 				}
 				if mnemonic[selected] == -1 {
 					break
@@ -837,7 +921,18 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			countOp = cl.Offset(image.Pt((dims.X-csz.X)/2, countY))
 		}
 
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}...)
+		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
+		if opt.terminator {
+			// §8c's terminator is a SCREEN-LEVEL button, and drawing it is what
+			// makes it one. layoutNavigation is also what installs the touch
+			// target (op.Input, gui.go:2053), and this panel is driven by
+			// touch — so an undrawn Clickable is not a button with no icon, it
+			// is a button that cannot be pressed at all. Stage 5c added the
+			// Clickable and its handler and never drew it, which left `done`
+			// unreachable on the machine and §8c's confirmation dead code.
+			navBtns = append(navBtns, NavButton{Clickable: doneBtn, Style: StyleSecondary, Icon: assets.IconRight})
+		}
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
 		if _, ok := completeWord(kbd.Fragment, nvalid); ok {
 			nav2, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark}}...)
 			nav = op.Layer(
@@ -863,6 +958,8 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 			op.Color(&ctx.B, th.Background),
 		))
 	}
+	// ctx.Done: the machine is unwinding, which is not an operator finishing.
+	return entered(), false
 }
 
 func inputCodex32Flow(ctx *Context, th *Colors, title string) (any, bool) {
@@ -1656,6 +1753,17 @@ func uiFlow(ctx *Context, version string) {
 	if r := ctx.Platform.PayloadReader(); r != nil && r.Probe() {
 		payloadReader = r
 	}
+
+	// The SYSTEMWIDE payload, offered once at boot. Separate from the Sealed
+	// Payload above in every way that matters -- different container, different
+	// region (0x10D00000), different program -- and that one stays frozen.
+	//
+	// Offered, not imposed: syswLoadFlow asks before reading, and a machine with
+	// no payload never sees a prompt at all. The operator can also reach it any
+	// time from the `Load Payload` carousel entry, which is why declining here
+	// costs nothing.
+	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), true)
+
 	s := &StartScreen{
 		Version:    version,
 		hasPayload: payloadReader != nil,
@@ -1687,6 +1795,9 @@ func uiFlow(ctx *Context, version string) {
 				continue
 			case engraveMultisig:
 				engraveMultisigFlow(ctx, th)
+				continue
+			case loadPayload:
+				syswPayloadMenu(ctx, th)
 				continue
 			case bip85Derive:
 				bip85DeriveFlow(ctx, th)
@@ -1750,57 +1861,10 @@ type startScreenAction struct {
 const scanStatusTimeout = 1 * time.Second
 
 func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
-	scans := make(chan scanResult, 1)
-	if r := ctx.Platform.NFCReader(); r != nil {
-		closer := make(chan struct{})
-		closed := make(chan struct{})
-		defer func() {
-			close(closer)
-			r.Close()
-			<-closed
-		}()
-		wakeup := ctx.Platform.Wakeup
-		go func() {
-			s := new(scanner)
-			for {
-				select {
-				case <-closer:
-					close(closed)
-					return
-				default:
-				}
-				obj, err := s.Scan(r)
-				scan := scanResult{
-					Object: obj,
-				}
-				switch {
-				case errors.Is(err, errScanInProgress):
-					scan.Status = scanStarted
-				case errors.Is(err, errScanUnknownFormat):
-					scan.Status = scanUnknownFormat
-				case err == nil || err == io.EOF:
-				default:
-					scan.Status = scanFailed
-					log.Printf("nfc scan: %v", err)
-				}
-				// Merge the previous result.
-				select {
-				case old := <-scans:
-					if scan.Object == nil {
-						scan.Object = old.Object
-					}
-					scan.Status = max(scan.Status, old.Status)
-				default:
-				}
-				scans <- scan
-				wakeup()
-				if scan.Status == scanFailed {
-					// Wait a bit before attempting to scan again.
-					time.Sleep(1 * time.Second)
-				}
-			}
-		}()
-	}
+	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
+	// reader is handled there and yields a channel that never delivers.
+	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	defer stopScanner()
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}
 	// The program pager must be driveable by TOUCH, not just by Left/Right
 	// button events: SeedHammer II has no directional buttons at all -- its
@@ -1885,6 +1949,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Engrave Single-Sig"
 	case engraveMultisig:
 		titleTxt = "Engrave Multisig"
+	case loadPayload:
+		titleTxt = "Load Payload"
 	case bip85Derive:
 		titleTxt = "BIP-85 Child Seed"
 	case unlockPayload:
@@ -2090,7 +2156,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, bip85Derive, unlockPayload:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, loadPayload, bip85Derive, unlockPayload:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
@@ -2138,6 +2204,14 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 		descriptorFlow(ctx, th, scan)
 	case mdmkText:
 		mdmkFlow(ctx, th, scan)
+	case freeTextScan:
+		// §5.3's two new record forms, arriving the way §2.1 says everything
+		// else already may. Both are srcNFC by construction -- this switch is
+		// only ever reached from a scan -- and each program's own acceptance
+		// screen states that (F3) before anything is entered.
+		engraveTextFlowFrom(ctx, th, string(scan), srcNFC)
+	case passScan:
+		engravePassphraseFlowFrom(ctx, th, scan, srcNFC)
 	default:
 		return false
 	}
@@ -2289,6 +2363,12 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 			continue
 		}
 		if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+			// §7: the word-plate verify, offered AFTER the cut and REGARDLESS OF
+			// SOURCE — §7.1 says there is no gate the device can honestly
+			// evaluate, and the menu carries its own `skip` row so offering it
+			// is not forcing it. The baseline is the mnemonic this flow just
+			// engraved, still in scope here; nothing reads the session (§7.4).
+			plateVerifyFlow(ctx, th, mnemonic)
 			return
 		}
 	}
@@ -2329,6 +2409,30 @@ func descriptorFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
 }
 
 func newInputFlow(ctx *Context, th *Colors) (any, bool) {
+	// Backup Wallet takes a mnemonic or a codex32 secret; it REFUSES a
+	// passphrase, because it engraves the mnemonic itself and the passphrase is
+	// never engraved and never in the QR (§3.3.2).
+	if body, ok := syswOffer(ctx, th, sysw.ClassMnemonic, "Seed from where?"); ok {
+		if m, err := bip39.ParseMnemonic(body); err == nil {
+			return m, true
+		}
+	}
+	// §3.3.2 admits ClassCodex32Secret here too, and this is the one program
+	// that already has a carrier for it: the typed menu's `M*1 STRING` row
+	// returns the same codex32.String that engraveObjectFlow's case expects
+	// (plan stage 13a). The other three seam programs admit the cell as well and
+	// CANNOT serve it — §3.1's seam signature returns bip39.Mnemonic, which
+	// carries no codex32 secret. The spec records that inconsistency (§3.3.2)
+	// and nothing here papers over it.
+	//
+	// It is a SECOND offer rather than a widened first one because syswOffer
+	// takes one class: the operator sees this screen only when the payload holds
+	// an ms1 AND either holds no seed or declined it.
+	if body, ok := syswOffer(ctx, th, sysw.ClassCodex32Secret, "Seed from where?"); ok {
+		if s, err := codex32.New(body); err == nil {
+			return s, true
+		}
+	}
 	for {
 		cs := &ChoiceScreen{
 			Title:   "Input Seed",
@@ -2343,7 +2447,7 @@ func newInputFlow(ctx *Context, th *Colors) (any, bool) {
 			switch choice {
 			case 0, 1:
 				mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-				inputWordsFlow(ctx, th, mnemonic, 0, "")
+				inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true})
 				if !isEmptyMnemonic(mnemonic) {
 					return mnemonic, true
 				}
@@ -2442,7 +2546,7 @@ events:
 		// consuming ButtonFilter(Button2) and ButtonFilter(Center) whether or
 		// not anything was drawn for it.
 		if !s.NoEdit && editBtn.Clicked(ctx) {
-			inputWordsFlow(ctx, th, mnemonic, s.selected, "")
+			inputWordsFlow(ctx, th, mnemonic, s.selected, "", wordEntryOpts{checksumGate: true})
 			continue
 		}
 		if confirmBtn.Clicked(ctx) {
@@ -2979,6 +3083,13 @@ type Platform interface {
 	// It exists so gui never names a build-tagged type: seal.XIPReader is
 	// tinygo-only and seal.FileReader is the host stand-in.
 	PayloadReader() seal.Reader
+	// SyswReader returns a reader for the SYSTEMWIDE region (0x10D00000), or
+	// nil if this platform has none. nil is a SUPPORTED value, not a stub —
+	// the same contract PayloadReader has, and for the same reason: the
+	// emulator and the test platform have no XIP flash, and a feature that is
+	// invisible when no payload is readable is the same operator-visible
+	// outcome.
+	SyswReader() sysw.Reader
 	EngraverParams() engrave.Params
 	DisplaySize() image.Point
 	// Dirty begins a refresh of the content
@@ -2994,6 +3105,19 @@ type Features int
 
 const (
 	FeatureSecureBoot Features = 1 << iota
+	// FeatureNFC: this platform has a tag reader at all.
+	//
+	// IT IS A CAPABILITY BIT RATHER THAN AN `NFCReader() != nil` PROBE, because
+	// probing COSTS a tag. cmd/emu's reader() hands out the pending record and
+	// marks it consumed (it says so at the method), so asking "is there a
+	// reader" merely to decide whether to draw a SCAN row would eat the
+	// operator's tag before they had chosen anything. §13 D9 needs that question
+	// answered, and this is the only way to answer it for free.
+	//
+	// It reports the READER, not a tag: a machine with a reader and nothing held
+	// to it still has the source, exactly as a machine with an empty region
+	// still has a SyswReader.
+	FeatureNFC
 )
 
 func (f Features) Has(feat Features) bool {

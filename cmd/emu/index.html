@@ -69,6 +69,12 @@
   <code>mosquito neither reopen morning canoe find tiny brand resist satisfy gun ball</code>
 </div>
 
+<!-- The emulator can now present an NFC tag, which the device otherwise has
+     no source for. From the console:
+       shNFC.present("md1fv9wjpq…")   hold a tag to the reader, once
+       shNFC.clear()                  take it away
+     One-shot on purpose: a real tag crosses the reader once, and a source that
+     replayed forever would let a polling flow see a tag never presented. -->
 <script src="wasm_exec.js"></script>
 <script>
   const status = document.getElementById("status");

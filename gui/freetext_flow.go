@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"seedhammer.com/sysw"
 	"slices"
 	"strings"
 
@@ -1467,9 +1468,43 @@ const (
 
 // engraveTextFlow is the engraveText program (spec 7). Back from any step
 // preserves every entered value.
+//
+// The no-argument entry is the srcTyped wrapper: it is what the carousel calls,
+// and the source it names is the keyboard.
 func engraveTextFlow(ctx *Context, th *Colors) {
+	engraveTextFlowFrom(ctx, th, "", srcTyped)
+}
+
+// engraveTextFlowFrom is engraveTextFlow with the record already in hand.
+//
+// `body` is the DECODED text -- the wire form is hex (§5.3.1) and the caller has
+// already been through sysw's codec. `src` is where it came from, and it is the
+// only thing this program does differently for a scan: the payload offer is
+// skipped (there is nothing to offer -- a record has arrived) and the acceptance
+// screen names the source.
+func engraveTextFlowFrom(ctx *Context, th *Colors, body string, src syswSource) {
 	params := ctx.Platform.EngraverParams()
-	var text, title, footer string
+	var title, footer string
+	text := body
+	// The payload PRE-FILLS the text and nothing else: the operator still walks
+	// title, footer, size and the confirm screen. A payload source that skipped
+	// them would engrave a plate nobody had seen.
+	//
+	// The body is hex-encoded — EPD §6.4 forbids the spaces and newlines free
+	// text contains — so it is decoded here (spec §5.3.1).
+	if src == srcTyped {
+		if body, ok := syswOffer(ctx, th, sysw.ClassFreeText, "Text from where?"); ok {
+			if raw, err := sysw.DecodeBody(body); err == nil {
+				text = string(raw)
+				src = srcPayload
+			}
+		}
+	}
+	// F3, at the screen where the record ENTERS the program (§3.2). Typed entry
+	// gets nothing -- syswSourceAccept returns true without drawing.
+	if !syswSourceAccept(ctx, th, "Engrave Text", sysw.ClassFreeText, src) {
+		return
+	}
 	useQR := false
 	// The rung the operator named on a proof trigger, or 0 for auto-fit. Held
 	// here beside the other fields so it survives Back exactly as they do.
