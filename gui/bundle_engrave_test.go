@@ -128,9 +128,9 @@ func TestBundlePlanValidatesEachPlate(t *testing.T) {
 	g := &bundleGatherer{}
 	offerAll(t, g, mk1CardA(t))
 	offerAll(t, g, md1CardA(t))
-	params := newPlatform().EngraverParams()
+	pl := newPlatform()
 	for _, p := range bundlePlatePlan(g.cards) {
-		labels, plates, err := validateMdmk(params, p.str)
+		labels, plates, err := validateMdmk(pl, p.str)
 		if err != nil || len(plates) == 0 || len(labels) == 0 {
 			t.Fatalf("plate %q does not fit any engraving variant: err=%v plates=%d", p.str, err, len(plates))
 		}

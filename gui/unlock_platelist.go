@@ -219,7 +219,7 @@ func unlockEngraveFlow(ctx *Context, th *Colors, rec seal.AdmittedRecord, label 
 	if unlockEngraveHook != nil {
 		unlockEngraveHook(label, rec.Record)
 	}
-	variants, plates, err := validateMdmk(ctx.Platform.EngraverParams(), str)
+	variants, plates, err := validateMdmk(ctx.Platform, str)
 	if err != nil || len(plates) == 0 {
 		showError(ctx, th, unlockTitle, "This record does not fit any plate size.")
 		return false

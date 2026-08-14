@@ -294,9 +294,8 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 // shows the ms1 reminder (mirror host bundle.rs:296-306).
 func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
 	plan := bundlePlatePlan(cards)
-	params := ctx.Platform.EngraverParams()
 	for _, p := range plan {
-		labels, plates, err := validateMdmk(params, p.str)
+		labels, plates, err := validateMdmk(ctx.Platform, p.str)
 		if err != nil || len(plates) == 0 {
 			// A verified card whose string can't fit a plate is unexpected; abort
 			// the whole set rather than engrave a partial bundle.

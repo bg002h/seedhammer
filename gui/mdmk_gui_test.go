@@ -9,7 +9,7 @@ import (
 // variants (the TEXT+QR / TEXT / QR-ONLY plates mdmkFlow offers).
 func TestMdmkEngrave(t *testing.T) {
 	ctx := NewContext(newPlatform())
-	labels, plates, err := validateMdmk(ctx.Platform.EngraverParams(), "md1yqpqqxqq8xtwhw4xwn4qh")
+	labels, plates, err := validateMdmk(ctx.Platform, "md1yqpqqxqq8xtwhw4xwn4qh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestMdmkEngrave(t *testing.T) {
 func TestMdmkOversizeRejected(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	huge := "md1" + strings.Repeat("q", 5000)
-	if _, _, err := validateMdmk(ctx.Platform.EngraverParams(), huge); err == nil {
+	if _, _, err := validateMdmk(ctx.Platform, huge); err == nil {
 		t.Error("expected error for oversize input (QR overflow)")
 	}
 }
@@ -35,7 +35,7 @@ func TestMdmkOversizeRejected(t *testing.T) {
 func TestMdmkNoModeFitsRejected(t *testing.T) {
 	ctx := NewContext(newPlatform())
 	big := "md1" + strings.Repeat("q", 1200)
-	if _, _, err := validateMdmk(ctx.Platform.EngraverParams(), big); err == nil {
+	if _, _, err := validateMdmk(ctx.Platform, big); err == nil {
 		t.Error("expected error: no engraving variant fits a plate")
 	}
 }

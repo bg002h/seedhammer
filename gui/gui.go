@@ -582,7 +582,32 @@ type Plate struct {
 	// divergence this field exists to remove, and a quiet wrong feed is worse
 	// than a crash.
 	Conf engrave.StepperConfig
+	// id identifies this plate to gui/engraved_hook.go, and is ZERO for every
+	// plate that did not come from validateMdmk.
+	//
+	// AN ID AND NOT THE TEXT, deliberately and permanently. Putting the
+	// md1/mk1/ms1 string here would be the obvious way to let a walk report
+	// what was engraved, and it would break §10.2.2: unlock_session.go clears
+	// the decrypted record BEFORE building the engrave screen precisely because
+	// this struct carries only geometry, so a string field would hold
+	// seed-derived text -- unwipeable, since Go strings cannot be zeroed -- for
+	// the whole ~21-minute cut, and the comment defending that clear would
+	// quietly have become false. A number carries nothing.
+	//
+	// Unexported because nothing outside this package may set it: an id the
+	// hook never announced would be attributed to whatever string was announced
+	// last, which is exactly the mis-attribution the id exists to prevent.
+	id uint64
 }
+
+// plateTextSeq numbers the plates validateMdmk builds, so a finished plate can
+// be matched to the string it rendered.
+//
+// Monotonic and never reused, because the failure it guards is silent:
+// recycling an id would let a plate cut an hour ago claim a string validated
+// since. uint64 at one increment per engraving variant per validated string
+// cannot wrap in any life this machine has.
+var plateTextSeq uint64
 
 func engraveSeed(params engrave.Params, m bip39.Mnemonic, mfp uint32) (Plate, error) {
 	qrc, err := qr.Encode(string(seedqr.QR(m)), qr.M)
@@ -2222,7 +2247,15 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 // mirroring validateDescriptor but engraving the string verbatim (the QR
 // payload is the string itself). Modes that don't fit a plate are dropped; an
 // error is returned only if none fit.
-func validateMdmk(params engrave.Params, s string) ([]string, []Plate, error) {
+// validateMdmk renders s as every engraving variant that fits a plate.
+//
+// It takes the Platform rather than engrave.Params because it needs both: the
+// params come from the platform at every one of its call sites, production and
+// test alike, and the platform is also who gui/engraved_hook.go offers the
+// rendered text to. Passing both would have made the second derivable from the
+// first and let them disagree.
+func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
+	params := pl.EngraverParams()
 	qrc, err := qr.Encode(s, qr.L)
 	if err != nil {
 		return nil, nil, err
@@ -2257,6 +2290,17 @@ func validateMdmk(params engrave.Params, s string) ([]string, []Plate, error) {
 	if len(validEngravings) == 0 {
 		return nil, nil, lastErr
 	}
+	// Number the variants, and offer the text all of them render. Every variant
+	// gets its OWN id because the operator has not chosen yet and any of the
+	// three may be the one that is cut; announcing one id would make the census
+	// depend on which variant they picked.
+	for i := range validEngravings {
+		plateTextSeq++
+		validEngravings[i].id = plateTextSeq
+	}
+	// The plates, not an id slice: lifting the ids out allocates, and
+	// gui/engraved_hook.go does it in a file the firmware never compiles.
+	notifyPlateText(pl, validEngravings, s)
 	return validLabels, validEngravings, nil
 }
 
@@ -2266,7 +2310,7 @@ func validateMdmk(params engrave.Params, s string) ([]string, []Plate, error) {
 // engraving. md1 behaviour is unchanged until T2c.
 func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 	str := string(s)
-	labels, engravings, err := validateMdmk(ctx.Platform.EngraverParams(), str)
+	labels, engravings, err := validateMdmk(ctx.Platform, str)
 	if err != nil {
 		// Only reached if no engraving variant fits a plate (rare for an md1/mk1
 		// string). Return silently — like backupSeedStringFlow, NOT like
@@ -2861,6 +2905,7 @@ func NewEngraveScreen(ctx *Context, plate Plate) *EngraveScreen {
 		duration: plate.Duration,
 		// The plate's OWN config, never the platform's: see Plate.Conf.
 		job: newEngraverJob(ctx.Platform, plate.Spline, plate.Conf, 0),
+		id:  plate.id,
 	}
 }
 
@@ -2869,6 +2914,11 @@ type EngraveScreen struct {
 	// bspline.Attributes.Duration.
 	duration uint64
 	job      *engraveJob
+	// id is the plate's, carried so a COMPLETED engrave can be matched to the
+	// string it rendered. Zero for every plate that did not come from
+	// validateMdmk, and gui/engraved_hook.go requires a consumer to ignore
+	// those rather than guess. See Plate.id for why this is a number.
+	id uint64
 }
 
 func (s *EngraveScreen) Engrave(ctx *Context, th *Colors) bool {
@@ -2894,6 +2944,12 @@ frames:
 		switch s.job.Status().State {
 		case engraveDone:
 			if selectBtn.Clicked(ctx) {
+				// The ONE place an engrave is finished AND accepted. Not when
+				// the job reaches engraveDone: the operator still has to
+				// confirm, and can leave with Back instead -- which is a plate
+				// that ran and was not taken. gui/engraved_hook.go; a no-op in
+				// the firmware, which does not contain the interface.
+				notifyPlateEngraved(ctx.Platform, s.id)
 				return true
 			}
 		default:
