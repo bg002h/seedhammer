@@ -41,6 +41,12 @@ type platform struct {
 	// nfc is a tag source the PAGE supplies; see nfc.go. Without it the
 	// emulator cannot walk any NFC journey, which spec §8.2 calls out.
 	nfc *nfcSource
+	// syswChoice selects which systemwide payload SyswReader serves, set from
+	// the page by window.shSysw. Defaults to the records blob, which is what
+	// every existing journey and screenshot was captured against — a walk opts
+	// IN to the cards blob rather than silently inheriting a different machine.
+	syswChoice string
+
 	// plan is the plate currently being cut, rendered whole at the moment the
 	// engrave begins. See plate.go. It arrives through gui.PlateAware, which
 	// exists in this build and NOT in the firmware's.
@@ -69,6 +75,7 @@ func newPlatform() *platform {
 	}
 	installToolpathAPI(p.toolpath, p.plan)
 	installNFCAPI(p.nfc)
+	installWalkAPI(p)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -255,7 +262,19 @@ func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 // See sysw_test_payload.go for the blob's provenance and why it carries three
 // record classes rather than one.
 func (p *platform) SyswReader() sysw.Reader {
-	return embeddedSyswReader{data: []byte(syswTestPayload)}
+	switch p.syswChoice {
+	case "cards":
+		// The cosigner-card blob: what Build policy's gather needs, and what
+		// the records blob does not have. See sysw_cards_payload.go.
+		return syswCardsReader{data: []byte(syswCardsPayload)}
+	case "none":
+		// A machine with an empty region. nil is a SUPPORTED value, not a stub
+		// — §10.1's detection finding nothing is a real machine state, and a
+		// walk must be able to reach it.
+		return nil
+	default:
+		return embeddedSyswReader{data: []byte(syswTestPayload)}
+	}
 }
 
 func (p *platform) PayloadReader() seal.Reader {
