@@ -56,6 +56,39 @@ func TestPaceIsClampedSoAWalkCannotWedgeTheBrowser(t *testing.T) {
 	}
 }
 
+// The same failure from the other direction. Nothing above 2048 measured any
+// faster, so an unbounded knob offers only ways to starve the browser.
+func TestPaceIsCappedAtTheTop(t *testing.T) {
+	defer setWritesPerYield(1)
+	for _, n := range []int64{maxPace + 1, 100000, 1 << 40} {
+		if got := setWritesPerYield(n); got != maxPace {
+			t.Errorf("setWritesPerYield(%d) = %d, want the %d cap", n, got, maxPace)
+		}
+	}
+	// The cap must be an actual bound on yielding, not just on the stored
+	// number: at maxPace a yield still has to arrive on the batch boundary.
+	setWritesPerYield(1 << 40)
+	var p pacer
+	for i := int64(0); i < maxPace-1; i++ {
+		if p.yield() {
+			t.Fatalf("yielded at write %d, before the %d cap", i+1, maxPace)
+		}
+	}
+	if !p.yield() {
+		t.Errorf("never yielded within %d writes; the browser would be starved", maxPace)
+	}
+}
+
+// The pace the walk actually ships with must be reachable -- a cap set below it
+// would silently slow every walk.
+func TestTheWalksDefaultPaceIsUnderTheCap(t *testing.T) {
+	defer setWritesPerYield(1)
+	const walkDefault = 2048 // walk_trace_a.js run({pace})
+	if got := setWritesPerYield(walkDefault); got != walkDefault {
+		t.Errorf("the walk's default pace %d clamps to %d", walkDefault, got)
+	}
+}
+
 // A pace change must reach a cut that is already running, because that is when
 // the operator finds out the plate is slow.
 func TestARaisedPaceTakesEffectMidPlate(t *testing.T) {

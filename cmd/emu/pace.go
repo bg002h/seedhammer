@@ -43,7 +43,15 @@
 // the walk is dominated by the DRIVER's fixed cost -- the hold threshold, the
 // stall-detect poll, the settle sleeps -- and not by cutting, so a bundle big
 // enough to hurt (25 plates is about 12 minutes at 2048) gets faster by trimming
-// those, not by raising this. Raising it further is not harmful, just useless.
+// those, not by raising this.
+//
+// WHICH IS WHY THERE IS A CEILING. Since nothing above 2048 pays, an unbounded
+// knob offers only ways to lose: at a large enough value the engrave goroutine
+// effectively never yields, and a wedged tab reports no result at all rather
+// than a slow one -- the precise failure stepPace exists to prevent. maxPace is
+// 4096, double the useful setting and comfortably below anything that starves
+// the browser. The 8192 row above stays because it is the evidence the ceiling
+// costs nothing, not because it is reachable.
 //
 // WHAT IT DOES NOT CHANGE, which is the whole reason it is safe: every knot
 // still passes through the driver and the recorder still decodes all of it. The
@@ -65,14 +73,26 @@ import "sync/atomic"
 // engrave goroutine while shPace is set from a JS callback on the main one.
 var writesPerYield atomic.Int64
 
+// maxPace is the highest pace a walk may ask for: double the 2048 that measured
+// as the last real gain, so the useful range keeps headroom while the useless
+// range stays out of reach.
+const maxPace = 4096
+
 // setWritesPerYield clamps and stores the pace, returning what was stored.
 //
-// Clamped at the bottom to 1 -- zero or negative would mean "never yield", which
-// is precisely the frozen tab stepPace exists to prevent, and a walk that wedges
-// the browser reports no result at all rather than a fast one.
+// Clamped at BOTH ends, and returning the stored value rather than nothing so a
+// caller can see it was clamped -- window.shPace hands this straight back.
+//
+// Bottom: zero or negative would mean "never yield", the frozen tab stepPace
+// exists to prevent. Top: see maxPace. Both ends are the same failure, reached
+// from opposite directions -- a walk that wedges the browser reports no result
+// at all, which is worse than a slow one.
 func setWritesPerYield(n int64) int64 {
 	if n < 1 {
 		n = 1
+	}
+	if n > maxPace {
+		n = maxPace
 	}
 	writesPerYield.Store(n)
 	return n

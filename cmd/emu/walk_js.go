@@ -35,7 +35,8 @@ import (
 //	shPress(x, y)   press and HOLD; pair with shRelease for hold-to-confirm
 //	shRelease(x, y) let go
 //	shSysw(which)   choose the systemwide payload: "records" | "cards" | "none"
-//	shPace(n)       Writes between yields; 1 is the human pace, higher is a walk
+//	shPace(n)       Writes between yields; 1 is the human pace, 2048 a walk.
+//	                Clamped to 1..maxPace and returns what was stored.
 //
 // There is deliberately no shTapHold(x,y,ms) -- see the comment on shPress for
 // why the gesture is split. This list said otherwise until a walk called it and
@@ -89,8 +90,10 @@ func installWalkAPI(p *platform) {
 	// once per Write, which is what made a six-plate bundle walk take over an
 	// hour and a gate that costs an hour a gate nobody runs.
 	//
-	// Returns the pace actually stored, which is clamped: a walk asking for
-	// "never yield" would wedge the tab and report nothing at all.
+	// Returns the pace actually STORED, which is clamped at both ends -- so a
+	// caller that asked for something silly can see what it got. Below 1 and
+	// above maxPace are the same failure from opposite directions: an engrave
+	// goroutine that never yields wedges the tab and reports nothing at all.
 	js.Global().Set("shPace", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) < 1 || args[0].Type() != js.TypeNumber {
 			return "shPace(n): writes between yields, 1 or more"
