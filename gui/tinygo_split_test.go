@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,28 +42,50 @@ import (
 // discovers every //go:build pair instead, so hook number three is covered by
 // existing without anybody remembering to add it here.
 //
-// WHAT IT DOES NOT COVER, said plainly rather than left for a reviewer: it
-// finds pairs by the `_tinygo.go` FILENAME SUFFIX. A split written as
-// `foo_host.go`/`foo_device.go` would carry the same risk and be invisible
-// here. The suffix is the convention both existing pairs use and the one Go
-// programmers reach for; it is not enforced by anything. It also says nothing
-// about a `!tinygo` file with no stub at all -- gui/preview.go is one, is
-// legitimate, and is excluded wholesale rather than hooked.
+// WHAT IT DOES NOT COVER, said plainly rather than left for a reviewer -- and
+// this paragraph is shorter than it was, because review found that two of the
+// things it did not cover were things it CLAIMED to:
+//
+//   - It finds pairs by the `_tinygo.go` FILENAME SUFFIX. A split written as
+//     `foo_host.go`/`foo_device.go` would carry the same risk and be invisible.
+//     The suffix is the convention both existing pairs use and the one Go
+//     programmers reach for; nothing enforces it.
+//   - It says nothing about a `!tinygo` file with NO stub at all --
+//     gui/preview.go is one, is legitimate, and is excluded wholesale.
+//   - It cannot see outside this module's `gui/` tree. Within it the walk is
+//     recursive (it was not, and that was an Important finding: a pair moved
+//     into gui/op or gui/widget was invisible while the doc here claimed the
+//     walk "discovers every //go:build pair").
+//
+// Its own history is the argument for keeping this list honest. The first
+// version checked only the HOST file of each pair for interfaces and never
+// parsed the stub, so an interface declared inside the firmware-side file --
+// the one place it must never be -- passed cleanly. That was a Critical, found
+// by an independent review and proven with a real tinygo build, against a guard
+// whose entire purpose was that property.
 func TestBuildTaggedHooksAreAbsentFromTheFirmwareImage(t *testing.T) {
-	ents, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("reading gui: %v", err)
-	}
+	// RECURSIVE, and it was not. os.ReadDir(".") saw only this directory, so a
+	// hook pair moved into gui/op, gui/widget or any other subpackage was
+	// invisible to every check below -- and all of them compile into the
+	// firmware exactly as this package does. Found by review; the doc above
+	// claimed "discovers every //go:build pair" while the walk could not see
+	// most of the tree.
 	var files []string
-	for _, ent := range ents {
-		name := ent.Name()
-		if ent.IsDir() || filepath.Ext(name) != ".go" || strings.HasSuffix(name, "_test.go") {
-			continue
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		files = append(files, name)
+		if d.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		files = append(files, filepath.ToSlash(path))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking gui: %v", err)
 	}
 	if len(files) < 20 {
-		t.Fatalf("INCONCLUSIVE: only %d non-test .go files found in gui, which is too few to be "+
+		t.Fatalf("INCONCLUSIVE: only %d non-test .go files found under gui, which is too few to be "+
 			"this package -- the walk is looking in the wrong place", len(files))
 	}
 
@@ -73,7 +96,7 @@ func TestBuildTaggedHooksAreAbsentFromTheFirmwareImage(t *testing.T) {
 		if !strings.HasSuffix(stub, "_tinygo.go") {
 			continue
 		}
-		host := strings.TrimSuffix(stub, "_tinygo.go") + ".go"
+		host := strings.TrimSuffix(stub, "_tinygo.go") + ".go" // same directory, by construction
 		if !slices.Contains(files, host) {
 			t.Errorf("%s has no %s beside it -- a firmware stub with no host counterpart means "+
 				"the host build has no implementation at all", stub, host)
@@ -102,16 +125,49 @@ func TestBuildTaggedHooksAreAbsentFromTheFirmwareImage(t *testing.T) {
 		}
 	}
 
+	// NOTHING EXPORTED-INTERFACE-SHAPED MAY LIVE IN A STUB. This is the check
+	// the guard was missing, and its absence was the exact hole the guard
+	// exists to close: the stub was read once, for its build constraint, and
+	// never parsed. So an interface DECLARED AND USED entirely inside the
+	// //go:build tinygo file -- with the host carrying a decoy interface to
+	// satisfy the per-pair check below -- passed cleanly while the firmware
+	// image carried it. Proven by review with a real tinygo build at CI's
+	// flags, which linked a reachable call site into a 1,342,308-byte image
+	// with this test green.
+	//
+	// The rule is stated directly rather than inferred: a tinygo-tagged file is
+	// firmware, and a hook interface in the firmware is the thing being
+	// forbidden, so the stub may declare no exported interface at all.
+	for _, p := range pairs {
+		f, err := parser.ParseFile(token.NewFileSet(), p.stub, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", p.stub, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			if _, isIface := ts.Type.(*ast.InterfaceType); isIface && ts.Name.IsExported() {
+				t.Errorf("%s declares exported interface %s -- that file IS the firmware, so an "+
+					"interface in it is in the image, which is the one thing this split exists "+
+					"to prevent", p.stub, ts.Name.Name)
+			}
+			return true
+		})
+	}
+
 	// Every exported interface declared in a host file, and the file that owns
 	// it. These are the hooks: the shapes cmd/emu implements and the firmware
 	// must not know the names of.
 	//
-	// Mode 0 throughout: comments are not parsed, so only real identifiers
-	// reach the scan. A substring scan is what the predecessor did FIRST, and
-	// it failed on engraver.go and on the tinygo stub -- both of which only
-	// mention the interface in a comment POINTING AT the split, which is the
-	// opposite of the defect. A check that forbids naming the rule is a check
-	// that gets the explanation deleted to make it pass.
+	// The scan is over the AST rather than the bytes, so a file that MENTIONS a
+	// hook in a comment pointing at the split is not a violation -- a check
+	// that forbids naming the rule is a check that gets the explanation deleted
+	// to make it pass. (An earlier comment here credited parser mode 0 with
+	// that. It does not: comments are not Idents, so ast.Inspect never visits
+	// them whatever the mode. Verified -- the mode makes no difference. The
+	// behaviour was right and the stated mechanism was wrong.)
 	fset := token.NewFileSet()
 	owner := make(map[string]string)
 	for _, p := range pairs {
