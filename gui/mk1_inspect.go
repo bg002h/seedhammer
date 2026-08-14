@@ -70,10 +70,33 @@ func (g *mk1Gatherer) offer(s string) gatherStatus {
 
 func (g *mk1Gatherer) complete() bool { return g.primed && len(g.set) == g.total }
 
+// collected returns the gathered chunk strings in ascending ChunkIndex order
+// (0..total-1), deterministically — NEVER Go's randomized map-iteration order.
+//
+// F-162: this ranged the map until 2026-08-14, so a card's chunks came back in
+// a different order on different runs. bundlePlatePlan walks these to build the
+// engrave plan, so the plates of one card were cut in an arbitrary sequence and
+// the "Plate 1 of 2" label — a claim about WHICH chunk is on the plate — was
+// wrong about half the time. Caught by running the emulator walk three times
+// and getting three different plate orders; md1 had the identical defect fixed
+// at 3a23dbb and this line was missed.
+//
+// NOT a decode hazard, which is why it survived: mk.Decode reassembles by
+// ChunkIndex into slots (mk/mk.go, reassemble) and tolerates any input order,
+// as does the primary Rust mk-codec. Nothing compares mk1 chunk strings
+// positionally either — bundle/verify.go's equalStrings is used on MD1 only, and
+// both MK1 sides go through mk.Decode. So this was an ordering and labelling
+// defect, never a wrong-key one.
+//
+// collected() is only ever called after complete() (mk1_inspect.go:155,175;
+// bundle.go:194), which requires len(set) == total; and offer() cannot store an
+// out-of-range index because mk.ParseHeader rejects ChunkIndex >= TotalChunks
+// (mk/mk.go, parseHeaderSyms). Every index 0..total-1 is therefore populated and
+// no lookup here can yield a "" gap.
 func (g *mk1Gatherer) collected() []string {
-	out := make([]string, 0, len(g.set))
-	for _, s := range g.set {
-		out = append(out, s)
+	out := make([]string, 0, g.total)
+	for i := 0; i < g.total; i++ {
+		out = append(out, g.set[i])
 	}
 	return out
 }

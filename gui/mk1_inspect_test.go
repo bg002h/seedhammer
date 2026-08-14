@@ -136,3 +136,109 @@ func TestMdmkFlowMK1ShowsInspect(t *testing.T) {
 		t.Errorf("mk1 chooser missing Inspect key; got %q", content)
 	}
 }
+
+// A THREE-chunk mk1 set, in ChunkIndex order 0,1,2 (chunk_set_id 702021,
+// m/48h/0h/1h/2h). Verified with mk.ParseHeader rather than assumed from the
+// order the generator printed them in.
+//
+// Three rather than two on purpose: with two chunks a random readback order
+// agrees with index order half the time, so a map-iteration regression would
+// slip past a single trial far too often. With three it is one in six.
+//
+// Test material, public by construction: this is card A@1 of cmd/emu's cosigner
+// payload, whose master is BIP-39's own published `abandon…about` vector.
+// Regenerate with `go run ./cmd/buildpayloadcards`. Never put funds behind it.
+var mk1ThreeChunks = []string{
+	"mk1qp4dj9zqqsq4kj90x4eutks2lcztpqyqsqygpqyqsqygrqyqsqyg9qyqsqyqfz9jrcld706hn9svfgll7zvw5qnkxgea7y6pqcgj2njpw0xx",
+	"mk1qp4dj9zp68w6hzragnj3g5qrl85zeape8wq0vdczfyy55tqsd5576trsa3p40nfpd7hsyjyf7vlx6hk2j6ckr4wf0m36k7q0920s9wqfx6hj",
+	"mk1qp4dj9zzv308jhm5uzl5tlxr6z",
+}
+
+// F-162, and the mk1 twin of TestMD1GathererCollectedIndexOrder (T-H2):
+// collected() must return chunks in ChunkIndex order whatever order they
+// ARRIVED in. The gatherer keys its map BY ChunkIndex and then, before the fix,
+// ranged that map — and Go randomises map iteration, so the engrave plan built
+// from it put a card's plates in a different sequence on different runs.
+//
+// Found by running the emulator walk three times and getting three different
+// plate orders. The identical defect was fixed for md1 at 3a23dbb; this line
+// was never touched.
+//
+// Asserts the CONTRACT (the string at slot i declares ChunkIndex i) rather than
+// equality against a canonical slice, so the test cannot drift from the fixture.
+func TestMK1GathererCollectedIndexOrder(t *testing.T) {
+	orders := [][]int{
+		{2, 0, 1},
+		{1, 2, 0},
+		{0, 1, 2},
+		{2, 1, 0},
+	}
+	for _, order := range orders {
+		// Repeat: Go's map iteration is randomised per run, so one trial could
+		// coincidentally agree. Ten makes a regression observable.
+		for trial := 0; trial < 10; trial++ {
+			g := &mk1Gatherer{}
+			for _, i := range order {
+				if st := g.offer(mk1ThreeChunks[i]); st != gatherAdded {
+					t.Fatalf("order %v: offer chunk %d status %v", order, i, st)
+				}
+			}
+			if !g.complete() {
+				t.Fatalf("order %v: not complete after %d chunks", order, len(order))
+			}
+			got := g.collected()
+			if len(got) != len(mk1ThreeChunks) {
+				t.Fatalf("order %v: collected %d, want %d", order, len(got), len(mk1ThreeChunks))
+			}
+			for i, s := range got {
+				h, err := mk.ParseHeader(s)
+				if err != nil {
+					t.Fatalf("order %v trial %d: collected()[%d] does not parse: %v", order, trial, i, err)
+				}
+				if int(h.ChunkIndex) != i {
+					t.Fatalf("order %v trial %d: collected()[%d] declares ChunkIndex %d — "+
+						"not index order, so the engrave plan is nondeterministic",
+						order, trial, i, h.ChunkIndex)
+				}
+			}
+		}
+	}
+}
+
+// The same property through the PRODUCTION path that F-162 actually broke: a
+// bundle gathered out of order must lay its plates out in index order. This is
+// the one that binds the engrave plan, since bundlePlatePlan walks
+// bundleCard.strings — documented as "verbatim chunk strings in index order".
+//
+// TestBundlePlanVerbatim looks like it covers this and does not: it compares the
+// plan against c.strings, so it stays self-consistent however c.strings is
+// ordered.
+func TestBundleGatherOutOfOrderPlatesInIndexOrder(t *testing.T) {
+	for trial := 0; trial < 10; trial++ {
+		g := &bundleGatherer{}
+		// Arrive last-chunk-first; the queue makes this ordinary in practice.
+		for i := len(mk1ThreeChunks) - 1; i >= 0; i-- {
+			if st := g.offer(mdmkText(mk1ThreeChunks[i])); st == bundleDropped {
+				t.Fatalf("trial %d: chunk %d dropped", trial, i)
+			}
+		}
+		if len(g.cards) != 1 {
+			t.Fatalf("trial %d: %d cards, want 1", trial, len(g.cards))
+		}
+		plan := bundlePlatePlan(g.cards)
+		if len(plan) != len(mk1ThreeChunks) {
+			t.Fatalf("trial %d: %d plates, want %d", trial, len(plan), len(mk1ThreeChunks))
+		}
+		for i, p := range plan {
+			h, err := mk.ParseHeader(p.str)
+			if err != nil {
+				t.Fatalf("trial %d: plate %d does not parse: %v", trial, i, err)
+			}
+			if int(h.ChunkIndex) != i {
+				t.Fatalf("trial %d: plate %d (labelled \"Plate %d of %d\") carries ChunkIndex %d — "+
+					"the label is a claim about which chunk this is",
+					trial, i, p.plateIdx, p.plateTotal, h.ChunkIndex)
+			}
+		}
+	}
+}
