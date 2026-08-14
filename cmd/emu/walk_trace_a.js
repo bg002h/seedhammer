@@ -124,9 +124,11 @@ const HANDLERS = [
  * Drive Trace A end to end.
  *
  * @param {object}  [opts]
- * @param {number}  [opts.pace=2048]    Writes between yields; see cmd/emu/pace.go.
- *        2048 measured 186s for this bundle against 236s at 512, and 8192 buys
- *        only three seconds more -- past here the driver's own sleeps dominate.
+ * @param {number}  [opts.pace]        Writes between yields; see cmd/emu/pace.go.
+ *        OMITTED BY DEFAULT ON PURPOSE: the emulator already starts at the walk
+ *        pace, so there is ONE source of truth for it and a future walk that
+ *        forgets to set one is still fast. Pass a number only to override --
+ *        e.g. 1 to watch a plate cut in real time.
  * @param {number}  [opts.plates=6]     Stop once this many plates are engraved.
  * @param {boolean} [opts.perPlateDigest=false] Record each plate's toolpath
  *        digest as it completes. The recording resets per plate, so this is the
@@ -141,7 +143,7 @@ const HANDLERS = [
  *        guessed at.
  * @returns {Promise<object>} census, digests, acts and elapsed time.
  */
-export async function run({ pace = 2048, plates = 6, perPlateDigest = false,
+export async function run({ pace, plates = 6, perPlateDigest = false,
                             pollMs = 75, settleMs = 150, chunkGapMs = 150 } = {}) {
   if (typeof window.shPace !== "function") {
     throw new Error("shPace is missing -- this is a STALE emu.wasm. " +
@@ -151,7 +153,10 @@ export async function run({ pace = 2048, plates = 6, perPlateDigest = false,
   const acts = [];
   const digests = [];
 
-  window.shPace(pace);
+  // Only when overridden. Left alone, the emulator's own default governs, so
+  // the pace has one home rather than two that can drift apart.
+  if (pace !== undefined) window.shPace(pace);
+  const pacing = window.shPace();                     // no args reads, never sets
   window.shSysw("cards");                 // must precede the menu load; the boot offer ate the first read
   await tap(BACK);                        // Back == skip, per gui/sysw_load.go
   await waitFor("SeedHammer");
@@ -244,7 +249,10 @@ export async function run({ pace = 2048, plates = 6, perPlateDigest = false,
 
   const census = JSON.parse(window.shToolpath.strings());
   return {
-    pace,
+    // What was actually in force, read back rather than echoed from the
+    // argument -- which is the whole point when the argument is usually absent.
+    pace: pacing,
+    paceOverridden: pace !== undefined,
     elapsedSec: Math.round((performance.now() - t0) / 1000),
     census,
     digests,

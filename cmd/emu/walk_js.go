@@ -35,8 +35,10 @@ import (
 //	shPress(x, y)   press and HOLD; pair with shRelease for hold-to-confirm
 //	shRelease(x, y) let go
 //	shSysw(which)   choose the systemwide payload: "records" | "cards" | "none"
-//	shPace(n)       Writes between yields; 1 is the human pace, 2048 a walk.
-//	                Clamped to 1..maxPace and returns what was stored.
+//	shPace(n)       Writes between yields. The emulator already STARTS at the
+//	                walk pace (pace.go, defaultPace) -- call this only to change
+//	                it, e.g. shPace(1) for the real-time countdown. Clamped to
+//	                1..maxPace and returns what was stored.
 //
 // There is deliberately no shTapHold(x,y,ms) -- see the comment on shPress for
 // why the gesture is split. This list said otherwise until a walk called it and
@@ -94,9 +96,15 @@ func installWalkAPI(p *platform) {
 	// caller that asked for something silly can see what it got. Below 1 and
 	// above maxPace are the same failure from opposite directions: an engrave
 	// goroutine that never yields wedges the tab and reports nothing at all.
+	// With no argument it READS and does not set, so a caller can ask what is in
+	// force without perturbing it. A getter that had to write a value first
+	// would be a fine way to silently install the wrong pace.
 	js.Global().Set("shPace", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		if len(args) < 1 || args[0].Type() != js.TypeNumber {
-			return "shPace(n): writes between yields, 1 or more"
+		if len(args) < 1 {
+			return writesPerYield.Load()
+		}
+		if args[0].Type() != js.TypeNumber {
+			return "shPace(n): writes between yields, 1 or more; shPace() reads"
 		}
 		return setWritesPerYield(int64(args[0].Int()))
 	}))

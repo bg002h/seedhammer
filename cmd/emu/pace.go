@@ -66,12 +66,32 @@ package main
 
 import "sync/atomic"
 
+// defaultPace is what the emulator runs at unless something says otherwise.
+//
+// It is the WALK pace, not 1, and that is deliberate. A walk that has to
+// remember to opt into the fast path is a walk that will one day forget, and
+// every later stage's gate is a walk (§4.5). Making the fast pace the default
+// means a future walk script, a bare console session, and this one all get it
+// without asking.
+//
+// Nothing is lost by it. The emulator does not model the machine -- engraver.go
+// says so plainly -- so the twenty minutes were never fidelity, only sleeping.
+// The original argument for a slow pace was that returning IMMEDIATELY would
+// flash the screen past and freeze the tab; 2048 does neither, measured: the
+// screen still refreshes 1.38 times a second and a plate takes about twenty
+// seconds, which is more watchable than twenty minutes, not less.
+//
+// An operator who wants the real-time countdown back has shPace(1).
+const defaultPace = 2048
+
 // writesPerYield is how many Writes the engraver performs between yields to the
-// browser. 1 is the human pace and the default; a walk raises it.
+// browser. 1 is the human pace; defaultPace is where it starts.
 //
 // Atomic because the two ends are different goroutines: Write runs on the
 // engrave goroutine while shPace is set from a JS callback on the main one.
 var writesPerYield atomic.Int64
+
+func init() { writesPerYield.Store(defaultPace) }
 
 // maxPace is the highest pace a walk may ask for: double the 2048 that measured
 // as the last real gain, so the useful range keeps headroom while the useless
