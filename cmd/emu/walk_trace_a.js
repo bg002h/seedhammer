@@ -13,16 +13,19 @@
 // and re-deriving this one cost an afternoon, most of it spent on the three
 // traps below, each of which is a wrong answer that looks right.
 //
-// TRAP 1 -- THE SCREEN IS NOT A PROGRESS SIGNAL DURING A CUT. The harness
-// documents shWaitFor (poll the TEXT) as the way to wait. During an engrave the
-// text is stale: measured, 0 frames drawn across 6s while 1,020,312 steps
-// executed, with every page timer cleared so the browser could not be the
-// cause. The countdown sits frozen for most of a plate. A walk waiting for
-// "Engraving completed successfully" therefore times out against a perfectly
-// healthy machine. So progress is read from shToolpath, and the screen is
-// consulted only after motion STALLS -- with a tap first, to force a redraw.
-// See F-161: whether the device shares this is an open question needing
-// hardware.
+// TRAP 1 -- THE SCREEN LAGS DURING A CUT, so progress is read from shToolpath
+// and the screen is consulted only after motion STALLS, with a tap first to
+// force a redraw.
+//
+// The reason is a MARGIN, not a freeze, and an earlier version of this comment
+// got that wrong -- it claimed the GUI stops redrawing entirely. It does not.
+// EngraveScreen.Engrave asks for a wakeup twice a second and delivers it:
+// measured 2.0 frames/s at pace 1. But the refresh degrades as shPace rises --
+// 1.38 frames/s at 2048, 0.87 at 4096 -- because the engrave goroutine yields
+// less often, so at exactly the paces a walk uses a screen read can be a second
+// or more stale. shWaitFor would work here given a generous timeout; keying off
+// the toolpath is simply the honest signal. See F-161, which records both the
+// retraction and how a broken instrument produced it.
 //
 // TRAP 2 -- THE BROWSER CACHES emu.wasm, and a cache-buster on index.html does
 // not bust it. Serve on a fresh port and check a symbol only the new build has
