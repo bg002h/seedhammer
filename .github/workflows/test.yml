@@ -20,6 +20,17 @@ jobs:
     # not have caught it: they are evaluated at the BUILDER's word size. Proven
     # to bite -- restoring the old comparison passes the line above, fails this.
     - run: ./scripts/test-32bit.sh
+    # The emulator is a GOOS=js build, and NOTHING above compiles it: `go test
+    # ./...` builds cmd/emu's //go:build !js stub (main_notjs.go, which exists
+    # so repo-wide commands do not fail here) and never touches platform.go,
+    # walk_js.go, screen_js.go, toolpath_js.go or nfc_js.go. That left the whole
+    # emulator -- including the walk harness the plan makes the closing gate of
+    # every stage -- checked by nobody but a human remembering to run
+    # cmd/emu/build.sh. A gate whose instrument does not compile is not a gate.
+    #
+    # vet rather than build, because it type-checks the package and reports
+    # more; it subsumes the compile.
+    - run: GOOS=js GOARCH=wasm go vet ./cmd/emu/
   tinygo-device-build:
     # The TinyGo pico-plus2 build of ./cmd/controller compiles the whole
     # gui -> codex32 import graph, so it exercises codex32 (incl. the dormant
