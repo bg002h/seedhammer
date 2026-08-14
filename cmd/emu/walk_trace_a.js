@@ -40,6 +40,17 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const squash = (s) => String(s).replace(/\s+/g, "");
 
+// HOLD_MS is the one wait here that cannot be replaced by a condition:
+// gui.confirmDelay (gui/gui.go) is ONE SECOND of wall clock and releasing early
+// aborts the gesture, so this is that second plus margin. The margin is not
+// generosity -- raising the pace slows the GUI's own refresh (2.0 frames/s at
+// pace 1, 1.4 at 2048, 0.87 at 4096, measured), so the loop that watches the
+// press runs less often at exactly the paces a walk uses.
+const HOLD_MS = 1300;
+// Ticks of no motion that mean "idle, not cutting" rather than "between
+// batches". Three at the poll interval below.
+const STALL_TICKS = 3;
+
 // The cards payload's digest, as sysw_cards_payload.go pins it. The records
 // blob is 55adb800...; getting the other one is the failure this catches.
 export const CARDS_DIGEST = "25271e583f3eaa03ae18f359c72b76e3";
@@ -117,9 +128,18 @@ const HANDLERS = [
  * @param {boolean} [opts.perPlateDigest=false] Record each plate's toolpath
  *        digest as it completes. The recording resets per plate, so this is the
  *        only moment a plate's digest can be read.
+ * @param {number}  [opts.pollMs=75]     How often to sample progress.
+ * @param {number}  [opts.settleMs=150]  Pause after the redraw tap before reading.
+ * @param {number}  [opts.chunkGapMs=150] Gap between queued NFC chunks.
+ *        These three are the driver's own overhead, which dominates the walk
+ *        once the pace is past ~2048 -- so on a big bundle they are the lever,
+ *        not the pace. Lower them and the walk gets faster right up to the
+ *        point it starts missing screens; the defaults were measured, not
+ *        guessed at.
  * @returns {Promise<object>} census, digests, acts and elapsed time.
  */
-export async function run({ pace = 2048, plates = 6, perPlateDigest = false } = {}) {
+export async function run({ pace = 2048, plates = 6, perPlateDigest = false,
+                            pollMs = 75, settleMs = 150, chunkGapMs = 150 } = {}) {
   if (typeof window.shPace !== "function") {
     throw new Error("shPace is missing -- this is a STALE emu.wasm. " +
       "The browser caches it and a cache-buster on index.html does not help; serve on a fresh port.");
@@ -154,9 +174,16 @@ export async function run({ pace = 2048, plates = 6, perPlateDigest = false } = 
 
   // shNFC.present QUEUES, so every chunk crosses the one reader the screen
   // fetched at entry. Before the queue existed no bundle gather could finish.
+  //
+  // The delay between chunks is deliberately small. A card's INTERMEDIATE
+  // chunks produce no visible change -- only the last one prints "Card added"
+  // -- so there is nothing to wait ON until the set completes, and the queue
+  // means nothing is lost by presenting faster than the flow drains. The real
+  // check is the waitFor below: if a chunk were dropped the card never
+  // completes and this fails loudly rather than engraving a short bundle.
   const gathered = [];
   for (const [name, ...chunks] of CARDS) {
-    for (const c of chunks) { window.shNFC.present(c); await sleep(900); }
+    for (const c of chunks) { window.shNFC.present(c); await sleep(chunkGapMs); }
     await waitFor("Cardadded");
     gathered.push({ card: name, screen: window.shScreen() });
   }
@@ -165,15 +192,19 @@ export async function run({ pace = 2048, plates = 6, perPlateDigest = false } = 
   await tap(CONFIRM); await waitFor("Chooseengraving");
 
   // The cut loop. Progress comes from the toolpath, never the screen -- trap 1.
+  //
+  // Every wait here is on an OBSERVABLE condition rather than a guessed
+  // duration, except the hold, which cannot be: gui.confirmDelay is one second
+  // of wall clock and releasing early aborts the gesture.
   let stall = 0, lastSteps = -1;
-  for (let guard = 0; guard < 6000; guard++) {
+  for (let guard = 0; guard < 20000; guard++) {
     const census = JSON.parse(window.shToolpath.strings());
     if (census.strings.length >= plates) break;
     const steps = JSON.parse(window.shToolpath.summary()).steps;
     if (steps === lastSteps) stall++; else { stall = 0; lastSteps = steps; }
-    if (stall < 3) { await sleep(200); continue; }
+    if (stall < STALL_TICKS) { await sleep(pollMs); continue; }
 
-    await tap(NOWHERE, 300);                       // force a redraw before reading
+    await tap(NOWHERE, settleMs);                  // force a redraw before reading
     const screen = squash(window.shScreen());
     const h = HANDLERS.find((h) => screen.includes(h.match));
     if (!h) {
@@ -186,12 +217,25 @@ export async function run({ pace = 2048, plates = 6, perPlateDigest = false } = 
     acts.push({ act: h.act, screen: h.name });
     if (h.act === "hold") {
       window.shPress(...CONFIRM);
-      await sleep(1200);                            // the GUI's own threshold decides
+      await sleep(HOLD_MS);                        // > gui.confirmDelay, which is 1s
       window.shRelease(...CONFIRM);
+      // Wait for MOTION, not for a screen: the cut starting is the thing that
+      // proves the hold registered, and it is visible in the toolpath at once.
+      const before = JSON.parse(window.shToolpath.summary()).steps;
+      for (let i = 0; i < 100; i++) {
+        if (JSON.parse(window.shToolpath.summary()).steps !== before) break;
+        await sleep(pollMs);
+      }
     } else {
       window.shTap(...CONFIRM);
+      // Wait for the screen to actually leave the one just answered, instead of
+      // sleeping long enough that it probably has.
+      for (let i = 0; i < 100; i++) {
+        window.shTap(...NOWHERE);
+        await sleep(pollMs);
+        if (!squash(window.shScreen()).includes(h.match)) break;
+      }
     }
-    await sleep(600);
     stall = 0; lastSteps = -1;
   }
 
