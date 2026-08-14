@@ -12,6 +12,7 @@ import (
 
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui"
+	"seedhammer.com/gui/op"
 	"seedhammer.com/internal/sh2"
 	"seedhammer.com/seal"
 	"seedhammer.com/sysw"
@@ -51,6 +52,12 @@ type platform struct {
 	// engrave begins. See plate.go. It arrives through gui.PlateAware, which
 	// exists in this build and NOT in the firmware's.
 	plan *platePlan
+	// screen holds the text of the last frame drawn, so an automated walk can
+	// say which screen it is on. See screen.go; exposed to the page as
+	// window.shScreen. It arrives through gui.FrameAware, which -- like
+	// PlateAware above, and for the same reason -- exists in this build and NOT
+	// in the firmware's.
+	screen *screenRecorder
 
 	// The JS side. buf is a Uint8ClampedArray the same length as fb.Pix; Go
 	// cannot hand a []byte to putImageData directly, so each frame is copied
@@ -72,10 +79,14 @@ func newPlatform() *platform {
 		toolpath: newToolpathRecorder(),
 		plan:     new(platePlan),
 		nfc:      new(nfcSource),
+		// Bounded to the DISPLAY, so shScreen reports what an operator can see
+		// rather than everything the flow composed. See screen.go.
+		screen: newScreenRecorder(image.Rectangle{Max: size}),
 	}
 	installToolpathAPI(p.toolpath, p.plan)
 	installNFCAPI(p.nfc)
 	installWalkAPI(p)
+	installScreenAPI(p.screen)
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")
@@ -128,6 +139,21 @@ func (p *platform) post(e gui.Event) {
 func (p *platform) DisplaySize() image.Point {
 	return image.Pt(sh2.DisplayWidth, sh2.DisplayHeight)
 }
+
+// A method named Frame with the wrong signature is not a compile error, it is a
+// hook that never fires -- and the symptom would be shScreen() returning "" on
+// every screen, which reads as "the GUI drew nothing" rather than as "the
+// emulator stopped implementing the interface". Assert the shape instead.
+var _ gui.FrameAware = (*platform)(nil)
+
+// Frame implements gui.FrameAware: it is handed each frame's content after that
+// frame reaches the display, which is what lets window.shScreen say where a
+// walk actually is.
+//
+// The interface exists only in non-TinyGo builds, so the firmware neither calls
+// this nor contains the type -- see gui/frame_hook.go for why a frame's content
+// op is not something to hand out casually.
+func (p *platform) Frame(content op.Op) { p.screen.Frame(content) }
 
 func (p *platform) Dirty(r image.Rectangle) error {
 	r = r.Intersect(p.fb.Rect)

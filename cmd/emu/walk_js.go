@@ -22,6 +22,12 @@ import (
 // bypass no flow, and cannot make the GUI do anything a finger could not.
 // Anything that let a walk skip a step would make the walk prove less than the
 // operator's own hands do, which is the opposite of the point.
+//
+// The READING half is window.shScreen, next door in screen_js.go. It is a
+// separate file because it is a separate kind of thing, and because the
+// paragraph above has to stay literally true of this one: driving and reading
+// are what a walk alternates between, and only one of them touches the
+// machine's state. Driving without reading is not a walk -- see screen.go.
 
 // installWalkAPI exposes the driving primitives as window.shTap / window.shSysw.
 //

@@ -165,6 +165,69 @@
       (s.truncated ? " · RECORDING TRUNCATED" : "");
   }
 
+  // ----------------------------------------------------------------- walk --
+  //
+  // The two helpers an automated walk should use, rather than shTap + shScreen
+  // by hand. They exist because the obvious hand-written idiom is WRONG, and
+  // measured wrong on this exact build:
+  //
+  //   seq 2   the boot offer
+  //   shPress(453,249)   -> seq 4, text UNCHANGED  (the button's pressed state)
+  //   shRelease(453,249) -> seq 6, text is the next screen
+  //
+  // So a walk that taps and then waits for shScreenSeq() to move reads the
+  // screen after the PRESS redraw and sees the screen it was already on. It
+  // then asserts against the wrong frame and passes while standing still --
+  // which is how four consecutive "steps" once sat on one screen unnoticed.
+  // The frame count cannot answer "did the screen change"; only the text can.
+  //
+  // shWaitFor therefore polls the TEXT. The count survives only in the failure
+  // message, and only for what it can actually answer -- WAS ANYTHING DRAWN AT
+  // ALL. It cannot tell a tap that missed every widget from one that hit: also
+  // measured, a tap at (5,5), a corner holding nothing, still drew three
+  // frames, because the GUI redraws on any pointer event. A harness that
+  // reported "the tap hit nothing" from a zero-ish count would send the next
+  // person to check coordinates that were fine.
+  //
+  // Whitespace is stripped from both sides of the comparison so a walk can be
+  // written in the words on the screen. op.Drawer collects the runes of glyphs
+  // that INK, and a space inks nothing, so shScreen() reports "LoadPayload"
+  // for "Load Payload".
+  const shSquash = s => String(s).replace(/\s+/g, "");
+
+  window.shWaitFor = async (needle, timeoutMs = 5000) => {
+    const want = shSquash(needle);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const text = window.shScreen();
+      if (shSquash(text).includes(want)) return text;
+      if (Date.now() >= deadline) {
+        throw new Error(`shWaitFor(${JSON.stringify(needle)}) timed out after ${timeoutMs}ms; ` +
+          `screen reads ${JSON.stringify(text)} at frame ${window.shScreenSeq()}`);
+      }
+      await new Promise(r => setTimeout(r, 20));
+    }
+  };
+
+  // One walk step: tap, then wait until the screen says what it should.
+  // Returns the screen text it settled on, and throws with the reason if it
+  // never does -- a step that cannot say where it landed is not a step.
+  window.shStep = async (x, y, needle, timeoutMs = 5000) => {
+    const before = window.shScreenSeq();
+    window.shTap(x, y);
+    try {
+      return await window.shWaitFor(needle, timeoutMs);
+    } catch (err) {
+      const drew = window.shScreenSeq() - before;
+      throw new Error(`step tap(${x},${y}) -> ${JSON.stringify(needle)} failed: ` +
+        (drew === 0
+          ? `NOTHING was drawn, so the GUI never processed the tap at all -- it is parked or wedged`
+          : `${drew} frame(s) drew, so the GUI is live and the screen below is where it really is ` +
+            `(this says nothing about whether the tap hit a widget: a tap on empty screen redraws too)`) +
+        `. ${err.message}`);
+    }
+  };
+
   WebAssembly.instantiateStreaming(fetch("emu.wasm"), go.importObject)
     .then(res => {
       status.textContent = "tap the screen to drive it — this is the firmware GUI, not a mock";
