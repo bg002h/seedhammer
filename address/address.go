@@ -111,10 +111,7 @@ func addressAt(desc *bip380.Descriptor, index uint32, change bool) (string, erro
 			}
 			keys = append(keys, addrPub)
 		}
-		slices.SortFunc(keys, func(addr1, addr2 *address.AddressPubKey) int {
-			return bytes.Compare(addr1.PubKey().SerializeCompressed(), addr2.PubKey().SerializeCompressed())
-		})
-		script, err := txscript.MultiSigScript(keys, desc.Threshold)
+		script, err := sortedMultisigScript(keys, desc.Threshold)
 		if err != nil {
 			return "", fmt.Errorf("address: %w", err)
 		}
@@ -169,6 +166,23 @@ func addressAt(desc *bip380.Descriptor, index uint32, change bool) (string, erro
 		}
 	}
 	return addr.String(), nil
+}
+
+// sortedMultisigScript returns the threshold-of-len(keys) multisig script with
+// the keys in BIP-67 order: ascending lexicographic by compressed public key.
+// It sorts keys in place.
+//
+// Split out of addressAt so that BIP-67's published vectors can drive the
+// ordering rule directly (bip_vectors_test.go). Those vectors are raw public
+// keys, which no descriptor this device parses can carry, so without a seam
+// here the only conformance check possible would be a re-implementation of this
+// function next to it — and a wrong sort is a wrong address with no other
+// symptom.
+func sortedMultisigScript(keys []*address.AddressPubKey, threshold int) ([]byte, error) {
+	slices.SortFunc(keys, func(addr1, addr2 *address.AddressPubKey) int {
+		return bytes.Compare(addr1.PubKey().SerializeCompressed(), addr2.PubKey().SerializeCompressed())
+	})
+	return txscript.MultiSigScript(keys, threshold)
 }
 
 func derivePubKey(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
