@@ -57,10 +57,14 @@ type engravedRecorder struct {
 	// forgetting one would turn a legitimate engrave into an ignored id.
 	candidates map[uint64]string
 	engraved   []string
-	// unknown counts engraved ids nobody announced -- every seed, passphrase
-	// and free-text plate, which carry id 0. Kept rather than dropped so a walk
-	// that reports NO strings can tell "no constellation plate was cut" from
-	// "the hook is not wired up at all".
+	// unknown counts engraved ids nobody announced -- every plate that did not
+	// come through validateMdmk, which carries id 0. That is seeds,
+	// passphrases, free text AND an ms1 cut through the standalone codex32
+	// flows; see this file's header for why the last one is here and not in
+	// the census. Kept rather than dropped so a walk that reports NO strings
+	// can tell "no constellation plate was cut" from "the hook is not wired up
+	// at all" -- and so a mis-cut ms1 is at least COUNTED where it cannot be
+	// named.
 	unknown int
 }
 
@@ -125,8 +129,14 @@ func (r *engravedRecorder) StringsJSON() string {
 		// not that nothing was cut.
 		Announced int `json:"announced"`
 		// Unattributed counts finished plates that never came from
-		// validateMdmk -- seeds, passphrases, free text. Expected to be
-		// non-zero on any walk that cuts one, and NOT an error.
+		// validateMdmk -- seeds, passphrases, free text, and an ms1 cut
+		// through the standalone codex32 flows.
+		//
+		// NOT self-evidently benign, and this comment used to say it was. A
+		// non-zero count is EXPECTED on any walk that cuts a seed, and it is
+		// also the only trace a mis-cut ms1 leaves. A gate must therefore read
+		// it as "something was cut that this census cannot name" and account
+		// for each one, rather than skipping past it. See the header.
 		Unattributed int `json:"unattributed"`
 	}{
 		Strings:      append([]string{}, r.engraved...),

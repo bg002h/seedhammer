@@ -133,6 +133,15 @@ func (n *nfcSource) Read(p []byte) (int, error) {
 // the same walk-stopping shape this type was just rewritten to remove. It drops
 // a half-read record, because a tag interrupted mid-read did not finish
 // crossing the reader.
+//
+// That interruption is a NEW possibility the one-shot source did not have, so
+// it is written down rather than left implicit: a record big enough to span
+// several Reads can be cut off by Close or by shNFC.clear(), and the bytes
+// already handed over reach gui/scan.go as a truncated record. Probed rather
+// than reasoned about -- the parser rejects them (errScanUnknownFormat), never
+// mistaking them for a different valid tag, and the result lands on a channel
+// that is already tearing down. Benign, but it is the kind of benign that stops
+// being benign if the parser ever gains a lenient path.
 func (n *nfcSource) Close() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
