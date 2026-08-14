@@ -10,8 +10,9 @@ for operating the machine.
 ## About this fork
 
 This is a community fork of [seedhammer/seedhammer](https://github.com/seedhammer/seedhammer).
-The `main` branch tracks upstream `main` plus two additive features, merged as
-`dbb187a` and `e3c0c21` (the original feature branches are kept intact):
+The `main` branch tracks upstream `main` plus a growing set of additive
+features — the first two merged as `dbb187a` and `e3c0c21` (the original
+feature branches are kept intact):
 
 - **On-device CODEX32 seed entry** — re-enables the (upstream-disabled) CODEX32
   input flow. Upstream [PR #34](https://github.com/seedhammer/seedhammer/pull/34)
@@ -28,6 +29,12 @@ The `main` branch tracks upstream `main` plus two additive features, merged as
   your share words verbatim, or use the
   [mnemonic-toolkit](https://github.com/bg002h/mnemonic-toolkit) CLI to recover
   off-device.
+- **BIP-39 Password** — a top-level program on the start screen that engraves a
+  BIP-39 passphrase on its own plate, with two optional master-fingerprint fields (bare
+  seed vs. passphrase-derived) and an opt-in QR carrying the passphrase and
+  nothing else. For anyone running a passphrase-protected wallet who wants that
+  passphrase backed up on steel instead of trusted to memory alone. Fork-side
+  only; no upstream PR.
 
 These formats back up arbitrary wallet descriptors across multiple plates. The
 `ms1` *secret* string is never accepted over NFC — it is hand-typed on the
