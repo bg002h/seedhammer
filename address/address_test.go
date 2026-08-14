@@ -8,6 +8,40 @@ import (
 	"seedhammer.com/nonstandard"
 )
 
+// PROVENANCE OF THE FIXTURES BELOW — read before adding to them.
+//
+// Where they came from: upstream `seedhammer`, commit 309ad2b (2023-05-31),
+// the commit that created this package. Unchanged since, apart from f5889ea
+// removing the unsorted multi() variant and 5f63161 adding networks. They have
+// shipped on every SeedHammer II since.
+//
+// What they are NOT: published. No BIP publishes an address for most of these
+// shapes, so these expected values were produced by this implementation and
+// then frozen. Left unlabelled, that is self-agreement wearing the costume of a
+// test — the whole reason S0 exists.
+//
+// What they therefore prove, and it is worth having: a REGRESSION LOCK. This
+// code still derives what it derived in 2023, on hardware in the field. That is
+// a real property and a different one from standard conformance.
+//
+// Where conformance lives: bip_vectors_test.go, against vendored published
+// vectors (testdata/bips/README.md). Coverage of the shapes below, measured
+// rather than assumed:
+//
+//	pkh(...)                  NO published anchor — BIP-44 publishes no vectors
+//	wpkh(...)                 anchored, BIP-84 (address, quoted)
+//	sh(wpkh(...))             NO published anchor — BIP-49's are testnet upub,
+//	                          which ParseExtendedKey rejects; needs a SLIP-132
+//	                          rewrite, deliberately not invented in a test
+//	tr(...)                   anchored, BIP-86 (address + scriptPubKey, quoted)
+//	wsh(sortedmulti(...))     script anchored, BIP-383; the wsh wrap is composed
+//	sh(wsh(sortedmulti(...))) nesting anchored, BIP-143 + BIP-383
+//	sh(sortedmulti(...))      order + script + address anchored, BIP-67
+//
+// So two rows have no external anchor at all. Do not read the green suite as
+// saying otherwise, and do not add a new fixture here without asking which row
+// it lands in.
+//
 // xpubs is package-level so Find tests can reference the same fixtures.
 var xpubs = []string{
 	"xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan",
