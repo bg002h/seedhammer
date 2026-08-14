@@ -58,6 +58,11 @@ type platform struct {
 	// PlateAware above, and for the same reason -- exists in this build and NOT
 	// in the firmware's.
 	screen *screenRecorder
+	// engraved is the census of md1/mk1/ms1 strings whose plates were actually
+	// cut and accepted. See engraved.go; exposed to the page as
+	// shToolpath.strings(). It arrives through gui.EngravedAware, which -- like
+	// the two hooks above -- exists in this build and NOT in the firmware's.
+	engraved *engravedRecorder
 
 	// The JS side. buf is a Uint8ClampedArray the same length as fb.Pix; Go
 	// cannot hand a []byte to putImageData directly, so each frame is copied
@@ -81,9 +86,10 @@ func newPlatform() *platform {
 		nfc:      new(nfcSource),
 		// Bounded to the DISPLAY, so shScreen reports what an operator can see
 		// rather than everything the flow composed. See screen.go.
-		screen: newScreenRecorder(image.Rectangle{Max: size}),
+		screen:   newScreenRecorder(image.Rectangle{Max: size}),
+		engraved: newEngravedRecorder(),
 	}
-	installToolpathAPI(p.toolpath, p.plan)
+	installToolpathAPI(p.toolpath, p.plan, p.engraved)
 	installNFCAPI(p.nfc)
 	installWalkAPI(p)
 	installScreenAPI(p.screen)
@@ -154,6 +160,18 @@ var _ gui.FrameAware = (*platform)(nil)
 // this nor contains the type -- see gui/frame_hook.go for why a frame's content
 // op is not something to hand out casually.
 func (p *platform) Frame(content op.Op) { p.screen.Frame(content) }
+
+// The same reason as FrameAware above: a method whose signature drifts is not a
+// compile error, it is a census that silently reports nothing engraved.
+var _ gui.EngravedAware = (*platform)(nil)
+
+// PlateText and PlateEngraved implement gui.EngravedAware, which is what lets
+// shToolpath.strings() say WHAT was cut rather than only how much motion it
+// took. See gui/engraved_hook.go for why the string travels on a hook the
+// firmware does not contain, and why plates carry an id instead of their text.
+func (p *platform) PlateText(ids []uint64, text string) { p.engraved.PlateText(ids, text) }
+
+func (p *platform) PlateEngraved(id uint64) { p.engraved.PlateEngraved(id) }
 
 func (p *platform) Dirty(r image.Rectangle) error {
 	r = r.Intersect(p.fb.Rect)

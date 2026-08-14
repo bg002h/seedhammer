@@ -22,6 +22,16 @@ import "syscall/js"
 //	shToolpath.svg()            an SVG of the decoded motion
 //	shToolpath.planSeq()        which plate is loaded; 0 before the first
 //	shToolpath.plan()           that plate's layout, as an SVG document
+//	shToolpath.strings()        JSON census of what was ENGRAVED (see below)
+//
+// strings() is the §4.5 census: {"strings":[...], "announced":N,
+// "unattributed":N}. strings holds the md1/mk1/ms1 whose plates were cut AND
+// accepted, in cut order. The two counts exist so an EMPTY census can be told
+// apart from a BROKEN one -- announced=0 on a walk that reached an engrave
+// screen means the hook is not wired, which otherwise reads exactly like "no
+// plates were cut" and would pass a gate that tested nothing. It is cumulative
+// for the session and has no reset: reload the page. See engraved.go for why
+// hanging one on reset() would be a trap.
 //
 // planSeq is separate from plan so the page can poll cheaply. A full seed plate
 // renders to about 640KB of SVG and changes once per plate, while progress
@@ -36,7 +46,7 @@ import "syscall/js"
 //	b = JSON.parse(shToolpath.summary())
 //	a.digest === b.digest   // the resumed plate follows the same path
 //	b.cutsThroughOrigin     // must be false: a dive home is the F-108 failure
-func installToolpathAPI(r *toolpathRecorder, p *platePlan) {
+func installToolpathAPI(r *toolpathRecorder, p *platePlan, e *engravedRecorder) {
 	api := map[string]any{
 		"reset": js.FuncOf(func(js.Value, []js.Value) any {
 			r.Reset()
@@ -62,6 +72,9 @@ func installToolpathAPI(r *toolpathRecorder, p *platePlan) {
 		"plan": js.FuncOf(func(js.Value, []js.Value) any {
 			svg, _ := p.Snapshot()
 			return svg
+		}),
+		"strings": js.FuncOf(func(js.Value, []js.Value) any {
+			return e.StringsJSON()
 		}),
 	}
 	js.Global().Set("shToolpath", js.ValueOf(api))
