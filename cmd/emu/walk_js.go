@@ -32,8 +32,14 @@ import (
 // installWalkAPI exposes the driving primitives as window.shTap / window.shSysw.
 //
 //	shTap(x, y)     tap at DEVICE coordinates (0..479, 0..319)
-//	shTapHold(x,y,ms) press, hold, release -- the hold-to-confirm idiom
+//	shPress(x, y)   press and HOLD; pair with shRelease for hold-to-confirm
+//	shRelease(x, y) let go
 //	shSysw(which)   choose the systemwide payload: "records" | "cards" | "none"
+//
+// There is deliberately no shTapHold(x,y,ms) -- see the comment on shPress for
+// why the gesture is split. This list said otherwise until a walk called it and
+// got `shTapHold is not a function` on the engrave screen, one hold away from
+// the first bundle cut.
 func installWalkAPI(p *platform) {
 	js.Global().Set("shTap", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) < 2 {
