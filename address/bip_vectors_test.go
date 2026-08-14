@@ -36,6 +36,8 @@ import (
 // silent change of ground truth.
 var bipVectorSources = map[string]string{
 	"bip-0067.mediawiki": "4cc48c5c159c05585962a8eb264b05ccb4ad710b1a16c870232e0f0eb1428991",
+	"bip-0084.mediawiki": "1900feec6cafca65b8c09906ca0658d2d742b4c9b44cb15678996985b6bfe627",
+	"bip-0086.mediawiki": "d8d01dee331da07c2562615bc1f064c1868ec3fce61184973da76d1196c7f5b0",
 	"bip-0143.mediawiki": "62bc71351563e68baeb12643c68355d217953ae9eb6a6e68b2b0323275b6beec",
 	"bip-0383.mediawiki": "54d752399568838555d6224f271ed9f2875f16628396c3e0d4c60543bc81ad21",
 }
@@ -491,4 +493,131 @@ func TestBip143NestedP2wshScriptPubKeyMatchesPublishedVector(t *testing.T) {
 			}
 		}
 	})
+}
+
+// --- BIP-84 / BIP-86 — the singlesig shapes ----------------------------------
+
+// bip8xAccount is the shape BIP-84 and BIP-86 share: one account-level extended
+// public key plus the first two receive addresses and the first change address
+// derived under it. Both are rooted at the standard
+// "abandon abandon … about" mnemonic.
+type bip8xAccount struct {
+	xpub    string
+	recv    [2]string
+	change0 string
+	// spk is BIP-86's published scriptPubKey per receive address; BIP-84
+	// publishes none, so it stays empty there.
+	spk [2]string
+}
+
+// parseBip8xAccount reads the `key = value` lines of a BIP-84/86 Test vectors
+// block, keyed by the `// Account 0, …` comment that introduces each group.
+func parseBip8xAccount(t *testing.T, src string) bip8xAccount {
+	t.Helper()
+	var out bip8xAccount
+	var group string
+	for _, ln := range section(t, src, "==Test vectors==", "==Reference==") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "//") {
+			group = ln
+			continue
+		}
+		key, val, ok := strings.Cut(ln, "=")
+		if !ok {
+			continue
+		}
+		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+		switch {
+		case strings.Contains(group, "Account 0, root") && key == "xpub":
+			out.xpub = val
+		case strings.Contains(group, "first receiving address"):
+			switch key {
+			case "address":
+				out.recv[0] = val
+			case "scriptPubKey":
+				out.spk[0] = val
+			}
+		case strings.Contains(group, "second receiving address"):
+			switch key {
+			case "address":
+				out.recv[1] = val
+			case "scriptPubKey":
+				out.spk[1] = val
+			}
+		case strings.Contains(group, "first change address") && key == "address":
+			out.change0 = val
+		}
+	}
+	if out.xpub == "" || out.recv[0] == "" || out.recv[1] == "" || out.change0 == "" {
+		t.Fatalf("incomplete account vector: %+v", out)
+	}
+	return out
+}
+
+// TestBip84And86SinglesigAddressesMatchPublishedVectors runs the two singlesig
+// shapes for which a BIP publishes real mainnet addresses.
+//
+// Everything asserted here is quoted — the account xpub, all three addresses,
+// and BIP-86's scriptPubKeys. Nothing is derived, and no descriptor text is
+// invented beyond the script function itself, because both BIPs publish the
+// account-level key that a descriptor names directly.
+//
+// The unqualified xpub relies on this package's documented default of <0;1>/*,
+// so Receive(i) is .../0/i and Change(i) is .../1/i — which is exactly the
+// m/84'/0'/0'/{0,1}/i and m/86'/0'/0'/{0,1}/i the vectors publish. That default
+// is therefore itself pinned here, against published bytes.
+//
+// The other two singlesig shapes have no equivalent, and this is not an
+// oversight — see testdata/bips/README.md:
+//   - pkh: BIP-44 publishes no test vectors of any kind.
+//   - sh(wpkh): BIP-49's vectors are TESTNET (upub / 2Mww8…), and this package
+//     rejects the upub version outright, so reaching them needs a SLIP-132
+//     version rewrite. Left undone rather than done quietly.
+func TestBip84And86SinglesigAddressesMatchPublishedVectors(t *testing.T) {
+	for _, tc := range []struct {
+		bip    string
+		script string
+	}{
+		{"bip-0084.mediawiki", "wpkh"}, // account xpub is a zpub
+		{"bip-0086.mediawiki", "tr"},
+	} {
+		t.Run(tc.script, func(t *testing.T) {
+			v := parseBip8xAccount(t, readBIP(t, tc.bip))
+			desc, err := bip380.Parse(tc.script + "(" + v.xpub + ")")
+			if err != nil {
+				t.Fatalf("parse %s(%s): %v", tc.script, v.xpub, err)
+			}
+			for i, want := range v.recv {
+				got, err := Receive(desc, uint32(i))
+				if err != nil {
+					t.Fatalf("receive %d: %v", i, err)
+				}
+				if got != want {
+					t.Errorf("receive %d: got %s, want %s", i, got, want)
+				}
+				if v.spk[i] == "" {
+					continue
+				}
+				// Second published field: the output script the address encodes.
+				a, err := address.DecodeAddress(got, &chaincfg.MainNetParams)
+				if err != nil {
+					t.Fatalf("decode %s: %v", got, err)
+				}
+				spk, err := txscript.PayToAddrScript(a)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if h := hex.EncodeToString(spk); h != v.spk[i] {
+					t.Errorf("receive %d scriptPubKey: got %s, want %s", i, h, v.spk[i])
+				}
+			}
+			got, err := Change(desc, 0)
+			if err != nil {
+				t.Fatalf("change 0: %v", err)
+			}
+			if got != v.change0 {
+				t.Errorf("change 0: got %s, want %s", got, v.change0)
+			}
+		})
+	}
 }

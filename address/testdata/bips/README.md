@@ -21,6 +21,8 @@ rather than a silent change of ground truth. **Re-pinning to a newer commit
 means updating the commit above and all three hashes.**
 
     4cc48c5c159c05585962a8eb264b05ccb4ad710b1a16c870232e0f0eb1428991  bip-0067.mediawiki
+    1900feec6cafca65b8c09906ca0658d2d742b4c9b44cb15678996985b6bfe627  bip-0084.mediawiki
+    d8d01dee331da07c2562615bc1f064c1868ec3fce61184973da76d1196c7f5b0  bip-0086.mediawiki
     62bc71351563e68baeb12643c68355d217953ae9eb6a6e68b2b0323275b6beec  bip-0143.mediawiki
     54d752399568838555d6224f271ed9f2875f16628396c3e0d4c60543bc81ad21  bip-0383.mediawiki
 
@@ -83,8 +85,36 @@ Used: the layer chain, to pin `sh(wsh(...))` nesting.
   `grep -cE '[0-9a-f]{40,}'` over the whole document returns 0. There was
   nothing in it to quote, and nothing to derive from either.
 
+### `bip-0084.mediawiki` — `wpkh`, and `bip-0086.mediawiki` — `tr`
+
+Both publish, from the standard `abandon abandon … about` mnemonic, an
+**account-level extended public key** plus the first two receive addresses and
+the first change address under it. BIP-86 publishes each receive
+**scriptPubKey** too. All mainnet.
+
+Used: both, end to end, nothing derived. They are the only BIPs that publish an
+address for a shape this device's descriptors can name directly, and because
+they give the account key rather than a root key, the descriptor is
+`wpkh(<published zpub>)` / `tr(<published xpub>)` with no invented text at all.
+
+A side effect worth naming: this package defaults an unqualified key to
+`<0;1>/*`, so `Receive(i)` is `.../0/i` and `Change(i)` is `.../1/i`. That is
+exactly what these vectors publish, so the **default itself is now pinned
+against published bytes** rather than only against itself.
+
 ## Not vendored, and why
 
+- **BIP-44** — `pkh`, one of the two singlesig shapes left unanchored. It
+  publishes **no test vectors of any kind**: no keys, no addresses, nothing to
+  quote.
+- **BIP-49** — `sh(wpkh)`, the other one, unanchored for a different reason. Its
+  vectors exist and are complete, and they are **testnet**: a `upub` account key
+  and a `2Mww8…` address. `bip380.ParseExtendedKey` rejects the `upub` version
+  outright — it is not in the accepted set — so reaching them means rewriting
+  the SLIP-132 version bytes to a `tpub` first. That is a legitimate and
+  checkable transformation, and it is deliberately **not** done here: a
+  conversion invented by a test is exactly the sort of step that quietly becomes
+  the thing being tested. Filed rather than smuggled in.
 - **BIP-48** publishes no vectors at all — its Examples table is path semantics
   with no keys. **No published vector pins `m/48'` derivation**, so nothing here
   should be read as doing so.
