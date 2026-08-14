@@ -1,12 +1,6 @@
 package gui
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -136,98 +130,9 @@ func TestPlateHookFiresOncePerJobWithTheWholeSpline(t *testing.T) {
 	}
 }
 
-// TestPlateHookIsAbsentFromTheFirmwareBuild is the structural half, and it is
-// the reason the hook is split across two files instead of being one type
-// assertion in engraver.go.
-//
-// A Plate spline is SEED-DERIVED GEOMETRY -- the same material F-107/F-108 are
-// about -- and the emulator's consumer for it is JavaScript on a page, outside
-// anything Go can wipe. So the firmware must not merely decline to use the
-// hook, it must not CONTAIN it: `//go:build !tinygo` puts PlateAware and its
-// type assertion outside the image the way gui/preview.go already puts the
-// plate previews outside it.
-//
-// Nothing about a hook that leaked into the TinyGo build would fail to compile,
-// which is why this is a test and not a comment.
-//
-// Mutations this pins: drop the `!tinygo` constraint from plate_hook.go; name
-// PlateAware from any unconstrained gui file; delete the tinygo stub.
-func TestPlateHookIsAbsentFromTheFirmwareBuild(t *testing.T) {
-	const (
-		hostFile   = "plate_hook.go"
-		tinygoFile = "plate_hook_tinygo.go"
-	)
-
-	for _, f := range []struct{ name, want string }{
-		{hostFile, "!tinygo"},
-		{tinygoFile, "tinygo"},
-	} {
-		b, err := os.ReadFile(f.name)
-		if err != nil {
-			t.Fatalf("reading %s: %v -- the hook's build split is what keeps seed-derived "+
-				"geometry out of the firmware image", f.name, err)
-		}
-		if got := buildConstraint(string(b)); got != "//go:build "+f.want {
-			t.Errorf("%s carries %q, want %q", f.name, got, "//go:build "+f.want)
-		}
-	}
-
-	// And no OTHER file in gui may name the interface IN CODE, tests excepted:
-	// this file must be free to talk about it.
-	//
-	// The identifier is looked for in the parsed AST rather than in the bytes.
-	// A substring scan is what this test did first, and it failed on
-	// engraver.go and on the tinygo stub -- both of which only mention
-	// PlateAware in a comment POINTING AT the split, which is the opposite of
-	// the defect. A check that forbids naming the rule is a check that gets the
-	// explanation deleted to make it pass.
-	ents, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("reading gui: %v", err)
-	}
-	fset := token.NewFileSet()
-	var scanned int
-	for _, ent := range ents {
-		name := ent.Name()
-		if ent.IsDir() || filepath.Ext(name) != ".go" || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		scanned++
-		// Mode 0: comments are not parsed, so only real identifiers are here.
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", name, err)
-		}
-		var uses bool
-		ast.Inspect(f, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && id.Name == "PlateAware" {
-				uses = true
-			}
-			return !uses
-		})
-		if uses && name != hostFile {
-			t.Errorf("%s uses PlateAware in code but is not %s -- the interface and the type "+
-				"assertion that reaches it belong in the one file the firmware build drops",
-				name, hostFile)
-		}
-	}
-	if scanned < 20 {
-		t.Fatalf("INCONCLUSIVE: only %d non-test .go files scanned in gui, which is too few "+
-			"to be this package -- the walk is looking in the wrong place", scanned)
-	}
-}
-
-// buildConstraint returns the //go:build line preceding the package clause, or
-// "" if the file carries none.
-func buildConstraint(src string) string {
-	for line := range strings.SplitSeq(src, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "package ") {
-			return ""
-		}
-		if strings.HasPrefix(line, "//go:build ") {
-			return line
-		}
-	}
-	return ""
-}
+// The structural half -- that PlateAware is absent from the firmware image --
+// now lives in tinygo_split_test.go, which checks the property for EVERY
+// //go:build pair in this package rather than for this one by name. It moved
+// when frame_hook.go became the second such hook: a guard keyed to one file and
+// one identifier is a hand-maintained list, and the version there discovers its
+// subjects from the tree instead.

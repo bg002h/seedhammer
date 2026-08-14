@@ -1,0 +1,190 @@
+package gui
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// The guard over every optional hook this package keeps OUT of the firmware
+// image.
+//
+// WHY THE PROPERTY MATTERS. gui/plate_hook.go hands out a spline -- the
+// operator's words as geometry -- and gui/frame_hook.go hands out a frame's
+// content op -- the operator's words as words. Both are the material F-107/F-108
+// are about, both have exactly one consumer, and that consumer is JavaScript on
+// a page, outside anything Go can wipe. So the firmware must not merely decline
+// to use them, it must not CONTAIN them: `//go:build !tinygo` puts each
+// interface and the type assertion that reaches it outside the image, the way
+// gui/preview.go already puts the plate previews outside it. The copy inventory
+// of seed-derived material is then true by CONSTRUCTION rather than by
+// argument.
+//
+// WHY IT IS A TEST AND NOT THE COMPILER. CI does build the device image
+// (.github/workflows/test.yml's tinygo-device-build), so the loud mutations --
+// delete a stub, drop a constraint, call the hook from shared code -- fail
+// there. What builds CLEANLY on both targets is the quiet one: move the
+// interface into an untagged file. Nothing then fails to compile, the image
+// carries it, and the only thing that notices is this.
+//
+// WHY IT IS DERIVED FROM THE TREE. Its predecessor,
+// TestPlateHookIsAbsentFromTheFirmwareBuild, hard-coded "plate_hook.go" and
+// "PlateAware". That is a hand-maintained list of one, and adding the SECOND
+// hook is exactly the moment such a list starts going stale -- the same defect
+// commit 3009f22 removed from cmd/emu's embed confinement, which used to be
+// keyed to a names list and now discovers every //go:embed under the tree. This
+// discovers every //go:build pair instead, so hook number three is covered by
+// existing without anybody remembering to add it here.
+//
+// WHAT IT DOES NOT COVER, said plainly rather than left for a reviewer: it
+// finds pairs by the `_tinygo.go` FILENAME SUFFIX. A split written as
+// `foo_host.go`/`foo_device.go` would carry the same risk and be invisible
+// here. The suffix is the convention both existing pairs use and the one Go
+// programmers reach for; it is not enforced by anything. It also says nothing
+// about a `!tinygo` file with no stub at all -- gui/preview.go is one, is
+// legitimate, and is excluded wholesale rather than hooked.
+func TestBuildTaggedHooksAreAbsentFromTheFirmwareImage(t *testing.T) {
+	ents, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading gui: %v", err)
+	}
+	var files []string
+	for _, ent := range ents {
+		name := ent.Name()
+		if ent.IsDir() || filepath.Ext(name) != ".go" || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files = append(files, name)
+	}
+	if len(files) < 20 {
+		t.Fatalf("INCONCLUSIVE: only %d non-test .go files found in gui, which is too few to be "+
+			"this package -- the walk is looking in the wrong place", len(files))
+	}
+
+	// The pairs, discovered from the stub side: X_tinygo.go implies X.go.
+	type pair struct{ host, stub string }
+	var pairs []pair
+	for _, stub := range files {
+		if !strings.HasSuffix(stub, "_tinygo.go") {
+			continue
+		}
+		host := strings.TrimSuffix(stub, "_tinygo.go") + ".go"
+		if !slices.Contains(files, host) {
+			t.Errorf("%s has no %s beside it -- a firmware stub with no host counterpart means "+
+				"the host build has no implementation at all", stub, host)
+			continue
+		}
+		pairs = append(pairs, pair{host: host, stub: stub})
+	}
+	if len(pairs) < 2 {
+		t.Fatalf("INCONCLUSIVE: %d //go:build pair(s) found in gui, want at least the plate and "+
+			"frame hooks -- either a stub was deleted or this walk is not finding them", len(pairs))
+	}
+
+	for _, p := range pairs {
+		for _, f := range []struct{ name, want string }{
+			{p.host, "!tinygo"},
+			{p.stub, "tinygo"},
+		} {
+			b, err := os.ReadFile(f.name)
+			if err != nil {
+				t.Fatalf("reading %s: %v -- the build split is what keeps seed-derived material "+
+					"out of the firmware image", f.name, err)
+			}
+			if got := buildConstraint(string(b)); got != "//go:build "+f.want {
+				t.Errorf("%s carries %q, want %q", f.name, got, "//go:build "+f.want)
+			}
+		}
+	}
+
+	// Every exported interface declared in a host file, and the file that owns
+	// it. These are the hooks: the shapes cmd/emu implements and the firmware
+	// must not know the names of.
+	//
+	// Mode 0 throughout: comments are not parsed, so only real identifiers
+	// reach the scan. A substring scan is what the predecessor did FIRST, and
+	// it failed on engraver.go and on the tinygo stub -- both of which only
+	// mention the interface in a comment POINTING AT the split, which is the
+	// opposite of the defect. A check that forbids naming the rule is a check
+	// that gets the explanation deleted to make it pass.
+	fset := token.NewFileSet()
+	owner := make(map[string]string)
+	for _, p := range pairs {
+		f, err := parser.ParseFile(fset, p.host, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", p.host, err)
+		}
+		found := 0
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			if _, isIface := ts.Type.(*ast.InterfaceType); isIface && ts.Name.IsExported() {
+				owner[ts.Name.Name] = p.host
+				found++
+			}
+			return true
+		})
+		// PER PAIR, not merely in total. A total-only floor has a hole that
+		// grows as hooks are added: with three pairs and a floor of two,
+		// MOVING one interface into an untagged file leaves the count
+		// satisfied and the scan below simply stops looking for the one that
+		// moved -- which is the quiet mutation this whole test exists for, and
+		// it would pass. Measured: with the floor alone, that mutation was
+		// killed by a compile error rather than by this guard.
+		//
+		// If a //go:build pair is ever legitimately not an interface hook, this
+		// is a deliberate edit and not a stale list: the check has to be told,
+		// out loud, that the pair carries no interface to protect.
+		if found == 0 {
+			t.Errorf("%s declares no exported interface, so nothing about it is checked below -- "+
+				"if this pair is not an interface hook, say so here rather than leaving the "+
+				"scan silently vacuous", p.host)
+		}
+	}
+	if len(owner) < 2 {
+		t.Fatalf("INCONCLUSIVE: %d exported hook interface(s) found across %d pair(s) -- with "+
+			"nothing to look for, the scan below passes without checking anything",
+			len(owner), len(pairs))
+	}
+
+	for _, name := range files {
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if host, isHook := owner[id.Name]; isHook && host != name {
+				t.Errorf("%s uses %s in code but is not %s -- the interface and the type "+
+					"assertion that reaches it belong in the one file the firmware build drops",
+					name, id.Name, host)
+			}
+			return true
+		})
+	}
+}
+
+// buildConstraint returns the //go:build line preceding the package clause, or
+// "" if the file carries none.
+func buildConstraint(src string) string {
+	for line := range strings.SplitSeq(src, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			return ""
+		}
+		if strings.HasPrefix(line, "//go:build ") {
+			return line
+		}
+	}
+	return ""
+}

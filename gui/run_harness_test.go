@@ -174,7 +174,13 @@ const maxRunFrames = 100000
 // exist precisely to observe that. A harness that always t.Fatal'd on a park
 // would fail them unconditionally. Callers that require completion use
 // mustFinish.
-func runSession(t *testing.T, p *deadlinePlatform, flow func(ctx *Context, version string), onDraw func(o op.Op, text string)) (drawn []string, parked bool) {
+// p is the Platform interface rather than *deadlinePlatform because a test may
+// need to WRAP that platform -- frame_hook_test.go embeds it in a type that also
+// implements FrameAware, and a driver typed to the concrete struct could not
+// drive the wrapper. Nothing in here touches p beyond handing it to
+// runWithFlow; callers that need tap() or onDirty still hold the concrete
+// value themselves.
+func runSession(t *testing.T, p Platform, flow func(ctx *Context, version string), onDraw func(o op.Op, text string)) (drawn []string, parked bool) {
 	t.Helper()
 	defer func() {
 		r := recover()
@@ -211,7 +217,7 @@ func runSession(t *testing.T, p *deadlinePlatform, flow func(ctx *Context, versi
 }
 
 // mustFinish is runSession for the common case, where a park is a failure.
-func mustFinish(t *testing.T, p *deadlinePlatform, flow func(ctx *Context, version string), onDraw func(o op.Op, text string)) []string {
+func mustFinish(t *testing.T, p Platform, flow func(ctx *Context, version string), onDraw func(o op.Op, text string)) []string {
 	t.Helper()
 	drawn, parked := runSession(t, p, flow, onDraw)
 	if parked {

@@ -255,6 +255,13 @@ func runWithFlow(pl Platform, version string, flow func(ctx *Context, version st
 					a.mask.Rect = image.Rectangle{Max: fbdims}
 					d.Draw(fb, a.mask, content)
 				}
+				// The frame is on the screen; offer it to a platform that wants
+				// to read it. AFTER the chunk loop, so a consumer can never see
+				// a frame the display did not get -- and inside draw rather than
+				// in the range body below, so §10.2.4's warning reaches it too.
+				// gui/frame_hook.go; a no-op in the firmware, which does not
+				// contain the interface.
+				notifyFrame(pl, content)
 				if onDraw != nil {
 					onDraw(content)
 				}
