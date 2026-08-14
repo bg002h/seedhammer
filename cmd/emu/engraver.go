@@ -39,6 +39,10 @@ type emuEngraver struct {
 	// and an engraver's life is one pass over it.
 	plan   *platePlan
 	params engrave.Params
+	// pace counts Writes between yields. Zero value is correct: it reads the
+	// pace fresh on every call, so a new engraver starts at whatever the page
+	// last set rather than at a stale copy.
+	pace pacer
 }
 
 // Plate implements gui.PlateAware: it is handed the plan before the first
@@ -55,13 +59,21 @@ func (e *emuEngraver) Plate(spline bspline.Curve, conf engrave.StepperConfig, re
 // stepPace is how long each Write pretends to take. Small enough that a plate
 // does not take its real quarter of an hour, large enough that the browser
 // gets a turn between writes.
+//
+// How OFTEN a Write sleeps is the walk's business, not this constant's -- see
+// pace.go, and window.shPace. The duration stays fixed because shortening it
+// buys nothing against the browser's timer granularity.
 const stepPace = time.Millisecond
 
 func (e *emuEngraver) Write(steps []uint32) (int, error) {
 	if _, err := e.job.Write(steps); err != nil {
 		return 0, err
 	}
-	time.Sleep(stepPace)
+	// The recorder above ran unconditionally: the pace decides when to yield,
+	// never what to record, so the step stream is identical at any pace.
+	if e.pace.yield() {
+		time.Sleep(stepPace)
+	}
 	return len(steps), nil
 }
 

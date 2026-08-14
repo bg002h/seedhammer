@@ -35,6 +35,7 @@ import (
 //	shPress(x, y)   press and HOLD; pair with shRelease for hold-to-confirm
 //	shRelease(x, y) let go
 //	shSysw(which)   choose the systemwide payload: "records" | "cards" | "none"
+//	shPace(n)       Writes between yields; 1 is the human pace, higher is a walk
 //
 // There is deliberately no shTapHold(x,y,ms) -- see the comment on shPress for
 // why the gesture is split. This list said otherwise until a walk called it and
@@ -81,6 +82,22 @@ func installWalkAPI(p *platform) {
 	// Takes effect on the NEXT read. The session caches what it loaded, so a
 	// walk switching mid-session sees the payload it already loaded — which is
 	// the machine's behaviour too, and not a limitation worth papering over.
+	// How fast the emulator pretends to engrave. NOT a model of the machine and
+	// not a shortcut past one: every knot still reaches the driver and the
+	// recorder still decodes all of it at any pace, so the toolpath digest is
+	// unchanged -- see pace.go. It only stops the engrave goroutine sleeping
+	// once per Write, which is what made a six-plate bundle walk take over an
+	// hour and a gate that costs an hour a gate nobody runs.
+	//
+	// Returns the pace actually stored, which is clamped: a walk asking for
+	// "never yield" would wedge the tab and report nothing at all.
+	js.Global().Set("shPace", js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) < 1 || args[0].Type() != js.TypeNumber {
+			return "shPace(n): writes between yields, 1 or more"
+		}
+		return setWritesPerYield(int64(args[0].Int()))
+	}))
+
 	js.Global().Set("shSysw", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) < 1 {
 			return "shSysw(\"records\"|\"cards\"|\"none\")"
