@@ -3,11 +3,31 @@
 // that decides what counts as engraved can, and is (engraved_test.go).
 //
 // WHAT IT IS FOR. §4.5 makes an emulator walk the closing gate of every stage,
-// and the gate is a BYTE COMPARISON -- the md1/mk1/ms1 strings that came out
-// must be the ones the inputs require. Until this file the walk could count
-// plates and could not say what was on them: the toolpath recorder decodes
-// geometry, gui.PlateAware hands over geometry, and no exported call turns an
-// arbitrary md1 back into a plate.
+// and the gate is a BYTE COMPARISON -- the engraved strings that came out must
+// be the ones the inputs require.
+//
+// WHAT THIS COVERS, EXACTLY -- because saying "md1/mk1/ms1" was an
+// OVERCLAIM and a review caught it as a Critical. Covered: every string that
+// passes through validateMdmk. That is md1 and mk1 cards on all four
+// constellation engrave paths, and the ms1 that bundleEngrave cuts as a bundle
+// card (the T6a-2 full single-sig and multisig traces §4.5 actually gates).
+//
+// NOT covered: an ms1 engraved through the standalone codex32 flows --
+// engraveCodex32 (gui/codex32_polish.go:218), which goes to
+// backupSeedStringFlow, and unlockEngraveCodex32 (gui/unlock_session.go:186),
+// which builds its plate with toPlate directly. Neither reaches validateMdmk,
+// so both carry id 0 and appear ONLY in `unattributed`, indistinguishable from
+// a seed plate.
+//
+// A GATE MUST THEREFORE TREAT unattributed > 0 AS "something was cut that this
+// census cannot name", not as noise. Extending coverage to those paths needs a
+// source-tagged variant of backupSeedStringFlow -- it also serves ordinary
+// BIP-39 seed-string backups, which must NOT be announced -- and is filed as a
+// follow-up rather than done blind.
+//
+// Until this file the walk could count plates and could not say what was on any
+// of them: the toolpath recorder decodes geometry, gui.PlateAware hands over
+// geometry, and no exported call turns an arbitrary md1 back into a plate.
 //
 // The strings arrive through gui.EngravedAware, an interface that exists in
 // this build and NOT in the firmware's. See gui/engraved_hook.go for why the

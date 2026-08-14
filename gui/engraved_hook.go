@@ -1,6 +1,26 @@
 //go:build !tinygo
 
-// The engraved-text seam: which md1/mk1/ms1 string each finished plate carried.
+// The engraved-text seam: which constellation string each finished plate
+// carried.
+//
+// WHAT THE CENSUS COVERS, EXACTLY -- because saying "md1/mk1/ms1" was an
+// OVERCLAIM and a review caught it as a Critical. Covered: every string that
+// passes through validateMdmk. That is md1 and mk1 cards on all four
+// constellation engrave paths, and the ms1 that bundleEngrave cuts as a bundle
+// card (the T6a-2 full single-sig and multisig traces §4.5 actually gates).
+//
+// NOT covered: an ms1 engraved through the standalone codex32 flows --
+// engraveCodex32 (gui/codex32_polish.go:218), which goes to
+// backupSeedStringFlow, and unlockEngraveCodex32 (gui/unlock_session.go:186),
+// which builds its plate with toPlate directly. Neither reaches validateMdmk,
+// so both carry id 0 and appear ONLY in `unattributed`, indistinguishable from
+// a seed plate.
+//
+// A GATE MUST THEREFORE TREAT unattributed > 0 AS "something was cut that this
+// census cannot name", not as noise. Extending coverage to those paths needs a
+// source-tagged variant of backupSeedStringFlow -- it also serves ordinary
+// BIP-39 seed-string backups, which must NOT be announced -- and is filed as a
+// follow-up rather than done blind.
 // The third build-tagged pair in this package; plate_hook.go states the general
 // argument for the split and frame_hook.go the measurement discipline around
 // it.
@@ -44,7 +64,9 @@
 package gui
 
 // EngravedAware is an OPTIONAL interface a [Platform] may implement to learn
-// which md1/mk1/ms1 string each engraved plate carried.
+// which string each engraved plate carried. See this file's package comment for
+// exactly which plates are announced and which are not -- "md1/mk1/ms1" was an
+// overclaim, and the boundary is validateMdmk.
 //
 // It is on the Platform for [FrameAware]'s reason rather than [PlateAware]'s:
 // the two events are separated by an operator choosing a variant and holding a
@@ -60,6 +82,11 @@ type EngravedAware interface {
 	// engraving variant of the same string, since the operator has yet to
 	// choose between TEXT+QR, TEXT ONLY and QR ONLY and any of them may be the
 	// one that gets cut.
+	//
+	// ids MAY be retained: notifyPlateText allocates a fresh slice per call and
+	// gui never reads it back. Said explicitly because [FrameAware] states the
+	// OPPOSITE rule about its own argument, and two adjacent hooks that differ
+	// in silence invite a reader to carry the wrong one across.
 	PlateText(ids []uint64, text string)
 	// PlateEngraved reports that the plate with this id finished and the
 	// operator confirmed it. Only then has anything been engraved: a job that

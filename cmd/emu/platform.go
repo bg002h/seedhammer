@@ -58,8 +58,9 @@ type platform struct {
 	// PlateAware above, and for the same reason -- exists in this build and NOT
 	// in the firmware's.
 	screen *screenRecorder
-	// engraved is the census of md1/mk1/ms1 strings whose plates were actually
-	// cut and accepted. See engraved.go; exposed to the page as
+	// engraved is the census of the strings whose plates were actually cut and
+	// accepted -- those that passed through validateMdmk; see engraved.go for the
+	// paths it does NOT cover. See engraved.go; exposed to the page as
 	// shToolpath.strings(). It arrives through gui.EngravedAware, which -- like
 	// the two hooks above -- exists in this build and NOT in the firmware's.
 	engraved *engravedRecorder

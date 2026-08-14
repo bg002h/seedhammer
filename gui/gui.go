@@ -589,7 +589,8 @@ type Plate struct {
 	// md1/mk1/ms1 string here would be the obvious way to let a walk report
 	// what was engraved, and it would break §10.2.2: unlock_session.go clears
 	// the decrypted record BEFORE building the engrave screen precisely because
-	// this struct carries only geometry, so a string field would hold
+	// this struct carries nothing the record can be read back out of -- geometry
+	// and, since this field, a number. A string field would hold
 	// seed-derived text -- unwipeable, since Go strings cannot be zeroed -- for
 	// the whole ~21-minute cut, and the comment defending that clear would
 	// quietly have become false. A number carries nothing.

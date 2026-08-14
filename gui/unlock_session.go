@@ -210,7 +210,10 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 	// §10.2.2, and it must be HERE rather than after Engrave returns. The plate
 	// carries the geometry: newEngraverJob holds plate.Spline
 	// (gui/engraver.go:64) and the engrave loop iterates e.spline (:170), so
-	// nothing reads these bytes again. Waiting for Engrave would leave the seed
+	// nothing reads these bytes again. (NewEngraveScreen also reads plate.id,
+	// which is an opaque number and is 0 on this path -- see Plate.id. The
+	// sentence above is about rec's BYTES, and stays true.) Waiting for Engrave
+	// would leave the seed
 	// resident for the whole ~21-minute cut -- and Back while running does NOT
 	// return (gui/gui.go:2651-2656 calls Stop() and keeps rendering), so the
 	// abort-mid-plate path §10.2.2 calls the machine's most ordinary recovery

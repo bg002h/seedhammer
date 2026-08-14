@@ -25,9 +25,13 @@ import "syscall/js"
 //	shToolpath.strings()        JSON census of what was ENGRAVED (see below)
 //
 // strings() is the §4.5 census: {"strings":[...], "announced":N,
-// "unattributed":N}. strings holds the md1/mk1/ms1 whose plates were cut AND
-// accepted, in cut order. The two counts exist so an EMPTY census can be told
-// apart from a BROKEN one -- announced=0 on a walk that reached an engrave
+// "unattributed":N}. strings holds the strings whose plates were cut AND
+// accepted, in cut order -- those that passed through validateMdmk. An ms1 cut
+// through the standalone codex32 flows is NOT among them and appears only in
+// `unattributed`; see cmd/emu/engraved.go. Treat unattributed > 0 as "something
+// was cut that this census cannot name".
+//
+// The two counts exist so an EMPTY census can be told apart from a BROKEN one -- announced=0 on a walk that reached an engrave
 // screen means the hook is not wired, which otherwise reads exactly like "no
 // plates were cut" and would pass a gate that tested nothing. It is cumulative
 // for the session and has no reset: reload the page. See engraved.go for why
