@@ -47,86 +47,11 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// TestTestPayloadIsConfinedToJSOnlyFiles walks the whole module and fails if any
-// file outside cmd/emu's browser build mentions the payload or its passphrase.
-//
-// Mutations this pins: delete `//go:build js` from sealed_test_payload.go;
-// reference sealedTestPassphrase from any non-js file; copy the words into
-// another package.
-func TestTestPayloadIsConfinedToJSOnlyFiles(t *testing.T) {
-	root := repoRoot(t)
-	emuDir := filepath.Join(root, "cmd", "emu")
-
-	// This file names every guarded identifier, so it must exempt itself --
-	// and nothing else.
-	self := filepath.Join(emuDir, "confinement_test.go")
-
-	var scanned int
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "third_party", "node_modules":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		switch filepath.Ext(path) {
-		case ".go", ".html", ".js", ".md", ".sh":
-		default:
-			return nil
-		}
-		if path == self {
-			return nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		src := string(b)
-		hit := ""
-		for _, g := range guarded {
-			if strings.Contains(src, g) {
-				hit = g
-				break
-			}
-		}
-		if hit == "" {
-			return nil
-		}
-		scanned++
-
-		rel, _ := filepath.Rel(root, path)
-		if filepath.Dir(path) != emuDir {
-			t.Errorf("%s mentions %q but is OUTSIDE cmd/emu -- the emulator's test payload "+
-				"and its passphrase must not be reachable from anything a device builds",
-				rel, hit)
-			return nil
-		}
-		// index.html is served to the browser and never compiled into any
-		// binary, so a build tag is meaningless for it.
-		if filepath.Ext(path) != ".go" {
-			return nil
-		}
-		if !hasJSBuildTag(src) {
-			t.Errorf("%s mentions %q but does not carry a `//go:build js` constraint -- "+
-				"without it this file compiles for every target, including the firmware's",
-				rel, hit)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walking %s: %v", root, err)
-	}
-	if scanned == 0 {
-		t.Fatal("INCONCLUSIVE: no file in the module mentions the test payload at all. " +
-			"Either it was removed -- in which case delete this test -- or the walk is " +
-			"looking in the wrong place and would pass no matter what.")
-	}
-	t.Logf("%d file(s) reference the test payload, all confined to cmd/emu's browser build", scanned)
-}
+// TestTestPayloadIsConfinedToJSOnlyFiles was REMOVED 2026-08-14. It matched a hand-maintained names[] list
+// and an allowed-files list; embed_confinement_test.go now derives both from
+// the tree, so the next payload blob is protected without anyone remembering
+// to add it. That test also flagged any file merely QUOTING the names in a
+// comment, which is what a literal match cannot distinguish.
 
 // packageClause returns the name in src's package declaration. It scans lines
 // rather than matching "\npackage main\n", which silently missed every file

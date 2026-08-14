@@ -13,7 +13,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -100,68 +99,8 @@ func TestSyswTestPayloadCarriesThreeClasses(t *testing.T) {
 	}
 }
 
-// TestSyswTestPayloadIsConfinedToJSOnlyFiles is the sealed blob's confinement
-// argument applied to this one. The reasoning is identical and lives in
-// confinement_test.go; only the identifiers differ.
-//
-// It is a SEPARATE test rather than four more entries in `guarded` because the
-// two blobs fail differently: the sealed one leaks a pre-known PASSPHRASE, and
-// this one leaks a pre-known PAYLOAD -- a device booting with somebody else's
-// records already loaded, which is the thing the boot offer exists to let an
-// operator refuse.
-func TestSyswTestPayloadIsConfinedToJSOnlyFiles(t *testing.T) {
-	root := repoRoot(t)
-	names := []string{"syswTestPayload", "syswTestDigest", "sysw_test_payload.bin"}
-
-	// The js-only files that are ALLOWED to name these, relative to the module
-	// root. Anything else naming them is the failure.
-	allowed := map[string]bool{
-		filepath.Join("cmd", "emu", "sysw_test_payload.go"):           true,
-		filepath.Join("cmd", "emu", "sysw_test_payload_host_test.go"): true,
-		filepath.Join("cmd", "emu", "platform.go"):                    true,
-	}
-
-	checked := 0
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if info.Name() == ".git" || info.Name() == "third_party" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if allowed[rel] {
-			return nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		checked++
-		for _, n := range names {
-			if strings.Contains(string(b), n) {
-				t.Errorf("%s names %q, which must not escape cmd/emu's browser build: "+
-					"a shipped SeedHammer II must never boot with a payload already "+
-					"in its region", rel, n)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walking the module: %v", err)
-	}
-	// Without this the test passes vacuously if the walk is ever misrooted.
-	if checked < 50 {
-		t.Fatalf("INCONCLUSIVE: only %d .go files scanned, so this test is not "+
-			"looking at the module it thinks it is", checked)
-	}
-}
+// TestSyswTestPayloadIsConfinedToJSOnlyFiles was REMOVED 2026-08-14. It matched a hand-maintained names[] list
+// and an allowed-files list; embed_confinement_test.go now derives both from
+// the tree, so the next payload blob is protected without anyone remembering
+// to add it. That test also flagged any file merely QUOTING the names in a
+// comment, which is what a literal match cannot distinguish.
