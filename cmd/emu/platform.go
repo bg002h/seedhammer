@@ -257,7 +257,7 @@ func (p *platform) Engraver(stall bool) (gui.Engraver, error) {
 
 func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 
-// NFCReader hands out the record the PAGE presented, once, and nil after that.
+// NFCReader hands out the page's tag source, which outlives any one tag.
 //
 // The comment here used to read "returns nil: this emulator has no tag source",
 // which stopped being true when nfc.go was added and was never updated. It
@@ -268,10 +268,14 @@ func (p *platform) EngraverParams() engrave.Params { return sh2.Params() }
 // mk1_inspect.go, md1_gather.go, derive_xpub.go) and offers Back-only where a
 // scan would go.
 //
-// AND CALLING THIS CONSUMES THE TAG. reader() marks the pending record done, so
-// no flow may call it merely to ask whether a reader exists: doing that to
-// decide whether to draw a SCAN row would eat the operator's tag before they
-// chose anything. syswSeedPicker says the same at its own site.
+// CALLING THIS NO LONGER CONSUMES A TAG, and the paragraph that used to say so
+// here was true of the one-shot source it described. It is now a queue behind a
+// persistent reader (nfc.go), because a screen fetches this ONCE at entry and
+// the old shape therefore capped every flow at one card -- no bundle gather was
+// walkable. The caution it carried still stands in weaker form: this is the tag
+// SOURCE, so a flow that called it merely to ask whether a reader exists would
+// take the reader away from the screen that needs it. Ask Features() instead,
+// as derive_xpub.go:156 says at its own site.
 func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
 
 // PayloadReader returns a reader over the built-in EMULATOR-ONLY test sealed
