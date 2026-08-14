@@ -27,9 +27,23 @@
 //	  64        3,010,289     18.5x
 //	 512        6,455,772     39.8x
 //
-// So 512 turns a twelve-minute plate into about eighteen seconds, and there is
-// little point going higher. Yields are still frequent in absolute terms: at
-// 512 the engrave goroutine parks about 75 times a second.
+// Yields stay frequent in absolute terms: at 512 the engrave goroutine parks
+// about 75 times a second.
+//
+// WHERE TO SET IT, measured end to end rather than extrapolated from the curve
+// above -- the same six-plate Trace A bundle, whole walk, wall clock:
+//
+//	pace     bundle      vs 512
+//	  64       398s        0.59x
+//	 512       236s        1.00x
+//	2048       186s        1.27x   <- walk_trace_a.js's default
+//	8192       183s        1.02x
+//
+// So 2048 is the last real gain and 8192 buys three seconds. Past roughly 2048
+// the walk is dominated by the DRIVER's fixed cost -- the hold threshold, the
+// stall-detect poll, the settle sleeps -- and not by cutting, so a bundle big
+// enough to hurt (25 plates is about 12 minutes at 2048) gets faster by trimming
+// those, not by raising this. Raising it further is not harmful, just useless.
 //
 // WHAT IT DOES NOT CHANGE, which is the whole reason it is safe: every knot
 // still passes through the driver and the recorder still decodes all of it. The

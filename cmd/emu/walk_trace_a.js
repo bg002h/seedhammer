@@ -110,14 +110,16 @@ const HANDLERS = [
  * Drive Trace A end to end.
  *
  * @param {object}  [opts]
- * @param {number}  [opts.pace=512]     Writes between yields; see cmd/emu/pace.go.
+ * @param {number}  [opts.pace=2048]    Writes between yields; see cmd/emu/pace.go.
+ *        2048 measured 186s for this bundle against 236s at 512, and 8192 buys
+ *        only three seconds more -- past here the driver's own sleeps dominate.
  * @param {number}  [opts.plates=6]     Stop once this many plates are engraved.
  * @param {boolean} [opts.perPlateDigest=false] Record each plate's toolpath
  *        digest as it completes. The recording resets per plate, so this is the
  *        only moment a plate's digest can be read.
  * @returns {Promise<object>} census, digests, acts and elapsed time.
  */
-export async function run({ pace = 512, plates = 6, perPlateDigest = false } = {}) {
+export async function run({ pace = 2048, plates = 6, perPlateDigest = false } = {}) {
   if (typeof window.shPace !== "function") {
     throw new Error("shPace is missing -- this is a STALE emu.wasm. " +
       "The browser caches it and a cache-buster on index.html does not help; serve on a fresh port.");
