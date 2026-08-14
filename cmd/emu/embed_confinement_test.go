@@ -116,6 +116,33 @@ func findEmbedTokens(t *testing.T, dir string) ([]embedToken, int) {
 // hasJSBuildTag is confinement_test.go's, reused rather than reimplemented:
 // its version correctly excludes `!js`, which a second copy of mine did not.
 
+// referencedNames returns every identifier and string literal a Go file uses in
+// CODE. Comments are excluded by construction: the parser keeps them out of the
+// AST unless asked for them, and this asks for the code.
+func referencedNames(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0) // 0 == no comments
+	if err != nil {
+		// A file that does not parse cannot reference anything; skipping it is
+		// safe here and the build would fail anyway.
+		return nil
+	}
+	out := map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.Ident:
+			out[v.Name] = true
+		case *ast.BasicLit:
+			if v.Kind == token.STRING {
+				out[strings.Trim(v.Value, "`\"")] = true
+			}
+		}
+		return true
+	})
+	return out
+}
+
 // TestEveryEmbeddedPayloadIsStructurallyConfined is the guard. It is deliberately
 // one test over ALL embeds rather than one per blob: a per-blob test is a name
 // list wearing a different hat.
@@ -172,8 +199,14 @@ func TestEveryEmbeddedPayloadIsStructurallyConfined(t *testing.T) {
 		if strings.HasSuffix(path, "_test.go") || hasJSBuildTag(string(src)) {
 			return nil // cannot reach a shipped binary
 		}
+		// CODE ONLY, never comments. A doc comment that mentions a payload
+		// filename is documentation; a reference is what ships. The first
+		// version matched raw text and flagged this repo's own generator for
+		// naming the blob it generates -- the same mention-vs-reference
+		// confusion that made the NAME-KEYED guard flag the file replacing it.
+		used := referencedNames(t, path)
 		for _, tok := range tokens {
-			if strings.Contains(string(src), tok.text) {
+			if used[tok.text] {
 				t.Errorf("%s names %q, which is bound to a //go:embed in cmd/emu/%s. "+
 					"That file is neither //go:build js nor a test, so it can reach a "+
 					"shipped firmware binary — and a shipped SeedHammer II must never "+
