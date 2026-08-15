@@ -13,18 +13,20 @@
 // bundleFlow instead — so five "by test and by emulator walk" gates named a
 // flow no walk had ever entered. This is that walk.
 //
-// THE PART THAT IS NOT OBVIOUS, and the reason a stage author cannot simply
-// point the old script at a different carousel entry: BOTH flows end at the
+// THE PART THAT WAS NOT OBVIOUS, and the reason a stage author could not simply
+// point the old script at a different carousel entry: BOTH flows ended at the
 // SAME gather screen, drawn by the same shared gatherer. Measured 2026-08-14 by
 // driving each and squashing shScreen():
 //
 //   via Build policy    EngraveBundlemd1descriptors:0mk1keys:0Scanacard,orDone.
 //   via Engrave Bundle  EngraveBundlemd1descriptors:0mk1keys:0Scanacard,orDone.
 //
-// Character for character. The title reads "Engrave Bundle" even when the
-// operator arrived through Build policy, because layoutTitle is called inside
-// the shared gatherer (gui/bundle_flow.go:155). So "the walk reached a card
-// gather" is not evidence of anything, and neither is the title.
+// Character for character, because layoutTitle was called inside the shared
+// gatherer with a hard-coded title. S2 FIXED THAT (D-4): the title is the
+// caller's now, and the Build path passes its own, so the gather is finally
+// anchorable — NEEDLE_GATHER below. The history is kept because the lesson is
+// not: a screen drawn by shared code proves nothing about which flow you are in
+// unless something on it came from the caller.
 //
 // What IS evidence is a needle with exactly ONE production site. cmd/emu's
 // needle_test.go pins that count and fails if it ever drifts; this file asserts
@@ -63,9 +65,14 @@ export const NEEDLE_SLOT = "Which slot is your key?"; // gui/multisig_build.go
 // `0..n` ruling on screen rather than in a comment.
 export const NEEDLE_PICK = "Payload cards"; // gui/multisig_build_payload.go
 export const NEEDLE_PICK_CARD = "Use payload card"; // gui/multisig_build_payload.go
+// S2/D-4. The cosigner gather's own title, passed by the Build flow into the
+// shared gatherer. Single-site in gui/multisig_build.go per needle_test.go.
+export const NEEDLE_GATHER = "Cosigner Keys"; // gui/multisig_build.go
 
-// The gather text, which is deliberately NOT a needle. Named so that a future
-// author who reaches for it finds this comment instead.
+// The gather's BODY text, which is deliberately NOT a needle: it is drawn by the
+// shared gatherer for every caller and says nothing about which flow drew it.
+// Named so that a future author who reaches for it finds this comment instead.
+// (The title above is a needle precisely because it is NOT shared.)
 const GATHER_NOT_A_NEEDLE = "Scan a card, or Done";
 
 async function waitFor(needle, timeoutMs = 10000) {
@@ -234,6 +241,11 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   // asserted against a hard-coded number: what matters to S1's gate is that the
   // count is the payload's, not the reader's, and `presented === 0` is what says
   // so. The count itself is REPORTED so a record can show it.
+  //
+  // Since D-4 the screen carries a title only this flow passes, so the gather is
+  // ASSERTED to be the Build path's rather than assumed from the tap sequence.
+  await waitFor(NEEDLE_GATHER);
+  proven.push(NEEDLE_GATHER);
   const gatherScreen = window.shScreen();
   const presented = assertNoNFC("at the cosigner gather");
   const mkTally = /mk1keys:(\d+)/.exec(squash(gatherScreen));
@@ -293,6 +305,9 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     // Recorded so a reader can see for themselves that the gather text is
     // identical in the sibling flow, and therefore proves nothing alone.
     gatherTextIsNotEvidence: squash(gatherScreen).includes(squash(GATHER_NOT_A_NEEDLE)),
-    ok: proven.length === 6 && presentedAtEnd === 0 && cardsGathered > 0 && selected,
+    // SEVEN since D-4 gave the gather a needle of its own. The count is spelt
+    // out rather than derived from the array so that a needle silently dropped
+    // from the walk fails here instead of lowering the bar.
+    ok: proven.length === 7 && presentedAtEnd === 0 && cardsGathered > 0 && selected,
   };
 }

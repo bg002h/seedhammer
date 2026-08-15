@@ -64,7 +64,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		return
 	}
 	ctx.syswBundleSeeds = records
-	cards, ok := bundleGatherFlow(ctx, th)
+	cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
 	if !ok {
 		return
 	}
@@ -497,6 +497,20 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 	}
 	return p, true
 }
+
+// buildCosignerGatherTitle is D-4's fix: the Build path's cosigner gather names
+// what the operator is doing instead of naming a different program.
+//
+// It is a CONSTANT, and a single-site one, because cmd/emu/needle_test.go pins
+// the walk's anchors to strings with exactly one production site — and a walk
+// that could finally identify this screen is the second thing D-4 buys. Before
+// the fix this gather and the bundle program's gather were identical character
+// for character (measured 2026-08-14), so no walk could tell them apart.
+//
+// (This comment deliberately does not quote the OLD title. needle_test.go counts
+// a needle's production sites by blunt substring match over gui's source, so a
+// comment carrying a literal is counted as a flow that draws it.)
+const buildCosignerGatherTitle = "Cosigner Keys"
 
 var errBuildSlotCount = errors.New("multisig build: cosigner count != n-1")
 

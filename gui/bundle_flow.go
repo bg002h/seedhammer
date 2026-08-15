@@ -26,7 +26,7 @@ func bundleFlow(ctx *Context, th *Colors) {
 		ctx.syswBundleSeeds = []string{body}
 	}
 	for {
-		cards, ok := bundleGatherFlow(ctx, th)
+		cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 		if !ok {
 			return // Back / empty bundle.
 		}
@@ -127,7 +127,20 @@ func (s *bundleGatherScreen) tally() []string {
 // owns its own scanner goroutine (clone of mk1GatherFlow's shell). With
 // testPlatform.NFCReader()==nil the goroutine doesn't run; the gatherer +
 // review flow are driven directly in tests.
-func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
+//
+// `title` IS THE CALLER'S, and that is D-4's fix (SPEC §2.2). This gatherer has
+// five call sites and only one of them is bundleFlow, so the hard-coded
+// "Engrave Bundle" was a screen naming a different program to four of them —
+// most visibly mid-way through authoring a wallet policy, where the operator has
+// no reason to think they are engraving anything yet.
+//
+// A PARAMETER RATHER THAN A RENAME. "Engrave Bundle" is CORRECT for bundleFlow;
+// renaming the shared default would have fixed one screen by breaking four. It
+// is threaded to the two "Done" refusals as well, because one of them is
+// reachable from Build (see bundleDonePending below) and a refusal titled for
+// the wrong program is D-4 one screen deeper, where the operator is already
+// stuck.
+func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{
 		g:         &bundleGatherer{},
 		hasReader: ctx.Platform.Features().Has(FeatureNFC),
@@ -173,7 +186,7 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 					msg = "No complete cards. Pack them on the host with `me sysw pack` " +
 						"and load the payload again."
 				}
-				showError(ctx, th, "Engrave Bundle", msg)
+				showError(ctx, th, title, msg)
 			case bundleDonePending:
 				// A card is mid-chunk-set: warn it's incomplete and drop it so the
 				// operator never engraves a partial. Then proceed with the complete
@@ -189,7 +202,7 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 					pendingMsg = "Dropped an incomplete card — the payload does not carry " +
 						"all of its chunks. Rewrite it on the host with `me sysw pack` to include it."
 				}
-				showError(ctx, th, "Engrave Bundle", pendingMsg)
+				showError(ctx, th, title, pendingMsg)
 				if len(scr.g.cards) > 0 {
 					return scr.g.cards, true
 				}
@@ -216,7 +229,7 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
 			y += sz.Y + 6
 		}
-		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Engrave Bundle")
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
 			{Clickable: doneBtn, Style: StylePrimary, Icon: assets.IconCheckmark},

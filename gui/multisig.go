@@ -76,7 +76,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
 		ctx.syswBundleSeeds = []string{body}
 	}
-	cards, ok := bundleGatherFlow(ctx, th)
+	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 	if !ok {
 		return
 	}

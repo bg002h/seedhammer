@@ -46,6 +46,15 @@ var buildFlowNeedles = []struct {
 	{"Choose policy type", "gui/multisig_build.go"},
 	{"How many keys (n)?", "gui/multisig_build.go"},
 	{"Which slot is your key?", "gui/multisig_build.go"},
+	// S2/D-4. The cosigner gather's own title, which until D-4 did not exist:
+	// the screen was titled for a DIFFERENT program by the shared gatherer, so
+	// the one screen where the payload's cards become visible could not be
+	// anchored on at all. It is the first needle that identifies a screen the
+	// build flow does not itself draw — bundleGatherFlow draws it, from a title
+	// only this flow passes.
+	// (Spelt as a literal because this is package main, not gui; gui's own
+	// buildCosignerGatherTitle constant is what production reads.)
+	{"Cosigner Keys", "gui/multisig_build.go"},
 	// The front door, one level above the build flow. A walk uses this to prove
 	// it reached Engrave Multisig at all before choosing "Build policy".
 	{"Supply or build a policy?", "gui/multisig.go"},
@@ -74,9 +83,13 @@ var decoyNeedles = []struct {
 	// decoy, and still the reason "the walk reached a card gather" proves
 	// nothing: two flows can draw it.
 	{"First card from where?", 2},
-	// The gather's title comes from the SHARED gatherer, so it reads
-	// "Engrave Bundle" even when the operator arrived via Build policy. A walk
-	// that trusted it would report the wrong flow with total confidence.
+	// CORRECTED BY S2/D-4. This used to read "the gather's title comes from the
+	// SHARED gatherer, so it reads 'Engrave Bundle' even when the operator
+	// arrived via Build policy" — true when it was written, false since D-4 made
+	// the title the caller's. The string stays a DECOY for the reason that
+	// outlives the fix: four flows still pass it, and gui.go's carousel draws it
+	// as a program name, so it identifies no flow. What changed is that the Build
+	// path is no longer one of the four; its anchor is "Cosigner Keys" above.
 	{"Engrave Bundle", 0}, // 0 == "at least one, count not pinned"; see the test
 }
 

@@ -73,7 +73,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, derived bundle.Bundle, full bo
 	// the seed — a readback taken from the session would compare the engrave
 	// source against itself and pass unconditionally, certifying a wrong plate.
 	// The passphrase step above uses passphraseFlow for the same reason.
-	cards, ok := bundleGatherFlow(ctx, th)
+	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 	if !ok {
 		return
 	}
