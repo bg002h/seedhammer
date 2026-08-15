@@ -178,12 +178,16 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			{needle: "Required signatures (k of 3)?", downs: 1}, // k = 2
 			{needle: "Which slot is your key?", downs: 0},       // self @0
 			{needle: "Include key fingerprints?", downs: 0},     // omit
-			{needle: buildCosignerGatherTitle, downs: 0},        // Done adding cards
-			{needle: "Payload cards", downs: 0},                 // the over-supply review
-			{needle: "Use payload card 1 of 4?", downs: 1},      // SKIP A@0: it would duplicate the self key
-			{needle: "Use payload card 2 of 4?", downs: 0},      // USE  B@0
-			{needle: "Use payload card 3 of 4?", downs: 0},      // USE  C@0; card 4 (A@1) is never offered
-			{needle: "Choose number of words", downs: 0},        // 12 WORDS
+			// S4's slot-source question, drawn because this payload carries four
+			// cards against n=3 and could therefore fill @0 too. The default (row
+			// 0, "NO, JUST MY SEED") keeps this walk's subject the TYPED seed.
+			{needle: "key on a card?", downs: 0},
+			{needle: buildCosignerGatherTitle, downs: 0},   // Done adding cards
+			{needle: "Payload cards", downs: 0},            // the over-supply review
+			{needle: "Use payload card 1 of 4?", downs: 1}, // SKIP A@0: it would duplicate the self key
+			{needle: "Use payload card 2 of 4?", downs: 0}, // USE  B@0
+			{needle: "Use payload card 3 of 4?", downs: 0}, // USE  C@0; card 4 (A@1) is never offered
+			{needle: "Choose number of words", downs: 0},   // 12 WORDS
 		}
 		for _, s := range steps {
 			content, ok := pumpUntil(frame, s.needle, 64)
@@ -210,6 +214,7 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 		// The remaining screens, each with its own raster floor.
 		rest := []buildWalkStep{
 			{needle: "Add a BIP-39 passphrase?", downs: 0}, // Skip
+			{needle: "Key sources", downs: 0},              // S4's slot-source review
 			{needle: "Policy stub", downs: 0},              // Policy Review -> continue
 			{needle: "Which md1?", downs: 0},               // Full policy md1
 		}
@@ -274,6 +279,27 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 				ink(), buildWalkRasterFloor)
 		}
 		click(&ctx.Router, Button3) // Full (seed + keys)
+		frame()
+
+		// S4's PLATE CENSUS: how many plates, before the first one is cut. The
+		// count is asserted rather than tapped past, because the whole point of
+		// the screen is that the number is right -- a 2-of-3 full build is
+		// ms1(1) + mk1(2) + md1(6) = 9, and every one of those terms comes from
+		// bundlePlatePlan rather than from this comment.
+		content, ok = pumpUntil(frame, "Plate Count", 64)
+		if !ok {
+			t.Fatalf("the plate census was not shown before the tail; got %q", content)
+		}
+		t.Logf("INK %-34q %d", "plate census", ink())
+		if ink() < buildWalkRasterFloor {
+			t.Errorf("the plate census drew only %d ink pixels (floor %d)",
+				ink(), buildWalkRasterFloor)
+		}
+		if !uiContains(content, "This engraves 9 plates") {
+			t.Errorf("the census does not state the plate count this build actually "+
+				"cuts (ms1 1 + mk1 2 + md1 6 = 9): %q", content)
+		}
+		click(&ctx.Router, Button3)
 		frame()
 
 		// THE ENGRAVE-STYLE PICKER, which is where every previous drive stopped.

@@ -116,7 +116,7 @@ func TestBuildRefusesForeignOriginCardBeforeS5(t *testing.T) {
 	t.Run("the refusal names the slot and both origins", func(t *testing.T) {
 		msg := buildForeignOriginMessage(
 			errBuildForeignOrigin{Slot: 2, Declared: "m/48h/0h/1h/2h"},
-			buildCosignerOrigins(3, 0, []int{0, 1}))
+			buildCosignerOrigins(3, 0, false, []int{0, 1}))
 		for _, want := range []string{
 			"slot @2", "payload card 2", "m/48h/0h/1h/2h",
 			multisigSharedOrigin().String(), "Nothing was engraved",
@@ -177,6 +177,10 @@ func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip
+		if c, ok := pumpUntil(frame, "Key sources", 64); !ok {
+			t.Fatalf("S4's slot-source review was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3)
 		content, ok := pumpUntil(frame, "Key origin", 64)
 		if !ok {
 			t.Fatalf("a card declaring a foreign origin did not refuse; got %q", content)

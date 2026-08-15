@@ -227,7 +227,7 @@ func TestRestoreDocNestedNameIsActuallyDrawn(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
 	}
 	frame, _, ink, quit := runUITouchRaster(ctx, func() {
-		multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys)
+		multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, nil)
 	})
 	defer quit()
 	content, ok := pumpUntil(frame, "P2SH-P2WSH", 64)

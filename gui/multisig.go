@@ -180,7 +180,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys
 	// decoded at step (2) — no second ExpandWalletPolicyChunks (t6b-M2).
-	multisigRestoreDocFlow(ctx, th, tpl, keys)
+	multisigRestoreDocFlow(ctx, th, tpl, keys, nil)
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

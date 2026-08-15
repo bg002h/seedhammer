@@ -170,8 +170,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 		if dup.SlotA != 0 || dup.SlotB != 1 {
 			t.Fatalf("named @%d and @%d; want @0 and @1", dup.SlotA, dup.SlotB)
 		}
-		origins := buildCosignerOrigins(3, 2, []int{0, 0})
-		msg := buildDuplicateKeyMessage(dup, 2, origins)
+		origins := buildCosignerOrigins(3, 2, false, []int{0, 0})
+		msg := buildDuplicateKeyMessage(dup, 2, false, origins)
 		for _, want := range []string{"payload card 1", "Slot @0", "slot @1", "me sysw pack"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("card-vs-card refusal is missing %q:\n%s", want, msg)
@@ -188,8 +188,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 	// say "scan" — a prompt pointing away from the only route the flow takes
 	// dead-ends the operator just as effectively as an impossible one.
 	t.Run("the refusal names both slots, their provenance and the way forward", func(t *testing.T) {
-		origins := buildCosignerOrigins(3, 0, []int{0, 1}) // @1 <- card 1, @2 <- card 2
-		msg := buildDuplicateKeyMessage(errBuildDuplicateKey{SlotA: 0, SlotB: 1}, 0, origins)
+		origins := buildCosignerOrigins(3, 0, false, []int{0, 1}) // @1 <- card 1, @2 <- card 2
+		msg := buildDuplicateKeyMessage(errBuildDuplicateKey{SlotA: 0, SlotB: 1}, 0, false, origins)
 		for _, want := range []string{
 			"Slot @0 (your key, from your seed)",
 			"slot @1 (payload card 1)",
@@ -268,6 +268,14 @@ func TestBuildFlowRefusesDuplicateBeforeReview(t *testing.T) {
 		}
 		click(&ctx.Router, Button3) // Skip
 
+		// S4's pre-assembly slot-source review. It shows WHERE each key came from
+		// and cross-checks nothing here (no slot is `both`), so the duplicate is
+		// still ahead of it.
+		if c, ok := pumpUntil(frame, "Key sources", 64); !ok {
+			t.Fatalf("the slot-source review was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+
 		content, ok := pumpUntil(frame, "Duplicate key", 64)
 		if !ok {
 			t.Fatalf("a build whose two slots hold one key did not refuse; got %q", content)
@@ -331,6 +339,8 @@ func TestBuildFlowDuplicateNeverReachesReview(t *testing.T) {
 		frame()
 		driveWords(&ctx.Router, fixtureMasterA)
 		pump("passphrase", 160)
+		click(&ctx.Router, Button3) // Skip
+		pump("Key sources", 64)     // S4's slot-source review, ahead of assembly
 		click(&ctx.Router, Button3)
 		pump("Duplicate key", 64)
 		for i, c := range seen {

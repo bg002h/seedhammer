@@ -84,11 +84,17 @@ func desc4Display(tpl md.Template) string {
 // read-only screen (the 0-alloc gate posture; reuse the single-sig
 // restoreDocScreen). Display-only — no secret, no engrave. The caller passes the
 // already-decoded tpl/keys (t6b-M2) so the wallet policy is not re-expanded.
-func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey) {
+// `extra` is appended verbatim below the policy. S4 uses it for the SET
+// INVENTORY -- how many plates this backup is, and what each of them is -- which
+// is the one fact that tells a reader holding a pile of steel in five years
+// whether they are holding all of it. It is passed in rather than derived here
+// because only the flow that engraved knows what it cut; the supply path has no
+// set of its own and passes nil.
+func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey, extra []string) {
 	lines, _, err := multisigRestoreLines(tpl, keys)
 	if err != nil {
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return
 	}
-	restoreDocScreen(ctx, th, lines)
+	restoreDocScreen(ctx, th, append(lines, extra...))
 }

@@ -99,6 +99,43 @@ func buildWalkToGather(t *testing.T, ctx *Context, frame func() (string, bool), 
 	}
 	click(&ctx.Router, Button3)
 	frame()
+	buildAnswerSelfSourceIfAsked(t, ctx, frame, false)
+}
+
+// buildAnswerSelfSourceIfAsked answers S4's slot-source question -- "is your @N
+// key on a card?" -- when it is asked, and does nothing when it is not.
+//
+// It has to RACE rather than assume, because the question is only drawn when the
+// payload can supply the operator's own slot as well (len(supply) >= n): a
+// helper that always tapped would answer the GATHER's Done button on every
+// under-supplied payload, and one that never tapped would stall on every
+// over-supplied one. Both failures look like "the walk stopped somewhere".
+//
+// `both` picks "YES, CHECK THE CARD" (row 1); false takes the default. Returns
+// whether the question was asked.
+func buildAnswerSelfSourceIfAsked(t *testing.T, ctx *Context, frame func() (string, bool), both bool) bool {
+	t.Helper()
+	const question = "key on a card?"
+	for i := 0; i < 32; i++ {
+		c, ok := frame()
+		if !ok {
+			t.Fatal("the flow ended while waiting for the slot-source question or the gather")
+		}
+		if uiContains(c, question) {
+			if both {
+				click(&ctx.Router, Down)
+				frame()
+			}
+			click(&ctx.Router, Button3)
+			frame()
+			return true
+		}
+		if uiContains(c, buildCosignerGatherTitle) {
+			return false
+		}
+	}
+	t.Fatal("neither the slot-source question nor the cosigner gather appeared")
+	return false
 }
 
 // readReviewPages returns the text of every page of the paged review screen the
@@ -415,7 +452,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 
 	// The slot->card map the review screen announces must be the SAME mapping
 	// assembleBuildPolicy just produced, not a parallel guess at it.
-	origins := buildCosignerOrigins(p.N, p.SelfSlot, chosen)
+	origins := buildCosignerOrigins(p.N, p.SelfSlot, false, chosen)
 	want := []cosignerOrigin{{slot: 0, card: 1}, {slot: 2, card: 3}}
 	if len(origins) != len(want) {
 		t.Fatalf("buildCosignerOrigins returned %d entries, want %d", len(origins), len(want))
@@ -756,6 +793,15 @@ func TestBuildOverSupplySelectionIsWalkable(t *testing.T) {
 			t.Fatalf("no passphrase choice; screen reads %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip
+
+		// S4's pre-assembly slot-source review (SPEC 4.3), between the seed and the
+		// assembly. It cross-checks nothing here -- no slot is `both` -- so the
+		// screen this test is aiming at is still ahead of it.
+		if c, ok := pumpUntil(frame, "Key sources", 64); !ok {
+			t.Fatalf("S4's slot-source review was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+		frame()
 
 		// THE ASSERTION THIS TEST EXISTS FOR (fold, I1). Everything above is
 		// setup; what follows is the only place the flow's WIRING — picker

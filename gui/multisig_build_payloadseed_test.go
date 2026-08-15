@@ -117,6 +117,13 @@ func TestBuildTakesTheSelfSeedFromThePayload(t *testing.T) {
 		click(&ctx.Router, Button3) // Skip
 		frame()
 
+		// S4's pre-assembly slot-source review (SPEC 4.3).
+		if c, ok := pumpUntil(frame, "Key sources", 96); !ok {
+			t.Fatalf("S4's slot-source review was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+		frame()
+
 		// AND THE BUILD PROCEEDS on a seed that no keyboard entered.
 		review, ok := pumpUntil(frame, "Policy stub", 96)
 		if !ok {
@@ -175,6 +182,10 @@ func TestBuildRefusesDuplicateOnAPayloadSourcedSeed(t *testing.T) {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip
+		if c, ok := pumpUntil(frame, "Key sources", 96); !ok {
+			t.Fatalf("the slot-source review was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3)
 		content, ok := pumpUntil(frame, "Duplicate key", 96)
 		if !ok {
 			t.Fatalf("a payload-sourced seed that repeats a payload card's key was "+
