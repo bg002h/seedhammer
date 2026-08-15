@@ -16,12 +16,41 @@ func hasMDPrefix(s string) bool {
 	return strings.HasPrefix(s, "md1") || strings.HasPrefix(s, "MD1")
 }
 
-// scriptName maps a ScriptKind to its descriptor-script display name.
-func scriptName(k md.ScriptKind) string {
-	switch k {
+// scriptName maps a decoded Template to its descriptor-script display name
+// (SPEC §4.4).
+//
+// IT TAKES THE WHOLE TEMPLATE, NOT Template.Root, and that is the fix. An
+// sh-rooted policy is one of three different wallets, and the root alone cannot
+// tell them apart: until 2026-08-15 a nested-segwit sh(wsh(sortedmulti)) and a
+// bare legacy sh(sortedmulti) both rendered "P2SH" — byte-identical text for two
+// wallets that hash to DIFFERENT addresses (SPEC §2.2 D-3), on the restore
+// document an operator reads years later, alone.
+//
+// The discriminants are md.Template.InnerWsh and InnerWpkh (md/md.go:1212-1225),
+// and each is meaningful ONLY under the root the decoder sets it for — InnerWsh
+// when Root==ScriptSh, InnerWpkh when Root==ScriptSh && Policy==PolicySingle. So
+// both are read INSIDE the ScriptSh arm and nowhere else; reading them at another
+// root would name a wallet from a field the decoder never wrote.
+//
+// Bare "P2SH" is the case where NEITHER wrapper was found, not a default. The two
+// flags are set by disjoint decoder paths (a wsh wrapper vs a wpkh key), so they
+// cannot both hold for one template.
+//
+// It mirrors gui/md1_expand.go:82 scriptForTemplate, which has honoured InnerWsh
+// since R0-C2 — the descriptor projection was already correct and only the NAME
+// for it was wrong, which is why the engraved steel was right and the sentence
+// describing it was not.
+func scriptName(tpl md.Template) string {
+	switch tpl.Root {
 	case md.ScriptPkh:
 		return "P2PKH"
 	case md.ScriptSh:
+		switch {
+		case tpl.InnerWsh:
+			return "P2SH-P2WSH"
+		case tpl.InnerWpkh:
+			return "P2SH-P2WPKH"
+		}
 		return "P2SH"
 	case md.ScriptWsh:
 		return "P2WSH"
@@ -55,7 +84,7 @@ func policyLine(tpl md.Template) string {
 func md1Summary(tpl md.Template) []string {
 	var lines []string
 	if tpl.Renderable {
-		lines = append(lines, "Type: "+scriptName(tpl.Root)+" "+policyLine(tpl))
+		lines = append(lines, "Type: "+scriptName(tpl)+" "+policyLine(tpl))
 	} else {
 		lines = append(lines, "Complex policy — cannot display safely.", fmt.Sprintf("Keys: %d", tpl.N))
 	}

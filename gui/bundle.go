@@ -312,5 +312,5 @@ func mk1Summary(card mk.Card) string {
 // bundleMD1Summary is a one-line review summary for an md1 descriptor card,
 // reusing the same scriptName + policyLine helpers as the single-card display.
 func bundleMD1Summary(tpl md.Template) string {
-	return scriptName(tpl.Root) + " " + policyLine(tpl)
+	return scriptName(tpl) + " " + policyLine(tpl)
 }

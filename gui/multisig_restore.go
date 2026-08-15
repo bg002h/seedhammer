@@ -38,17 +38,46 @@ func multisigRestoreLines(tpl md.Template, keys []md.ExpandedKey) (lines []strin
 	if err != nil {
 		return nil, false, err
 	}
-	lines = []string{"Descriptor:"}
+	// THE TYPE LINE IS ON THIS BRANCH TOO, and it was not until S3.
+	//
+	// SPEC §4.4 says of the three sh-rooted names that "the restore document is
+	// the one that matters most", and §2.2 D-3 names gui/multisig_restore.go:51
+	// as the call site that matters. MEASURED 2026-08-15, running S3's own gate
+	// for the first time: that call site is desc4Display, which sits on the
+	// display-only branch ABOVE, and a full-policy build never reaches it. Every
+	// md1 the Build flow authors is bip380-expressible, so it lands HERE, where
+	// the script type was named nowhere at all. The scriptName fix alone would
+	// therefore have left S3's gate (an emulator walk of an sh(wsh) build showing
+	// the nested-segwit NAME on the restore doc) with nothing to read.
+	//
+	// THE NAME IS NOT SPELT OUT IN THIS COMMENT ON PURPOSE. cmd/emu/needle_test.go
+	// counts a walk needle's production sites by blunt substring match over gui's
+	// source, comments included, so quoting it here would make the walk's anchor
+	// look two-sited and cost it its uniqueness proof. Same reason
+	// buildCosignerGatherTitle's comment does not quote its old title.
+	//
+	// The descriptor below does distinguish the two — it reads "sh(wsh(" against
+	// "sh(" — but only to a reader who parses BIP-380 by eye off a string chunked
+	// 20 characters to a line. The plain-language name is what §4.4 is about, and
+	// it costs two lines.
+	lines = []string{"Type:"}
+	lines = append(lines, chunkString(desc4Display(tpl), 20)...)
+	lines = append(lines, "Descriptor:")
 	lines = append(lines, chunkString(desc.Encode(), 20)...)
 	lines = append(lines, "First receive:", recv0, "First change:", change0)
 	return lines, true, nil
 }
 
-// desc4Display is a short, PUBLIC summary of an un-renderable template for the
-// display-only path (no secret, no address). It reuses the shipped summary
-// helpers used by the bundle review screen.
+// desc4Display is a short, PUBLIC summary of a wallet policy for the restore doc
+// (no secret, no address). It reuses the shipped summary helpers used by the
+// bundle review screen, and since S3 it names the sh-NESTING (SPEC §4.4) instead
+// of collapsing sh(wsh) and bare sh onto one string.
+//
+// BOTH restore-doc branches call it: the display-only path uses it INSTEAD of a
+// descriptor, and the expandOK path uses it as the plain-language heading above
+// one.
 func desc4Display(tpl md.Template) string {
-	return scriptName(tpl.Root) + " " + policyLine(tpl)
+	return scriptName(tpl) + " " + policyLine(tpl)
 }
 
 // multisigRestoreDocFlow displays the multisig restore doc on a plain, paged,
