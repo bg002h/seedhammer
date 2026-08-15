@@ -40,10 +40,27 @@
 #                    and every expectation's recorded oracle identity against
 #                    oracle/pins.json.
 #
-# What this script adds is DRIFT detection: has the primary changed under a pin
-# that did not move? That is a maintainer's question and it is asked here, by
-# hand, deliberately. It also holds the only code path that can mint the S2 md1
-# golden (-update), which is what makes the golden trustworthy elsewhere.
+# What this script adds is FRESHNESS and DRIFT, which are two questions:
+#
+#   FRESHNESS  do the INSTALLED binaries still reproduce the committed bytes,
+#              and are they still the ones pins.json names?
+#   DRIFT      has the PRIMARY moved under a pin that did not? Nothing else in
+#              this repo can ask that — every other check compares a pin against
+#              something derived from the same pin, so a pin can be perfectly
+#              honest and years stale at once. TestPinsAreCurrentWithTheirPrimaries
+#              reads the sibling checkouts and answers it (added 2026-08-15;
+#              before that, this file and live_test.go both CLAIMED drift
+#              detection and neither did any).
+#
+# Both are maintainer's questions and they are asked here, by hand, deliberately.
+# This script also holds the only code path that can mint the S2 md1 golden
+# (-update), which is what makes the golden trustworthy elsewhere.
+#
+# EVERY TAGGED TEST MUST BE NAMED IN THE -run FILTER BELOW. That filter is an
+# ALLOWLIST: a test added behind the tag and not added there still compiles, and
+# still passes `go vet -tags oraclelive` on CI, and never executes anywhere. A
+# check that exists and never runs is the exact defect this deliverable was filed
+# about.
 #
 # The tagged files are type-checked on every push by
 # `go vet -tags oraclelive ./oracle/ ./gui/ ./sysw/` in .github/workflows/
@@ -75,11 +92,12 @@ fi
 
 echo "== live oracle checks (-tags oraclelive) =="
 echo "   pinned oracles expected at ~/.cargo/bin; see oracle/pins.json"
-echo "   a primary checkout of mnemonic-engrave is expected beside this repo"
+echo "   primary checkouts expected BESIDE this repo: descriptor-mnemonic,"
+echo "   mnemonic-key, mnemonic-secret (drift) and mnemonic-engrave (sysw vectors)"
 echo
 
 CGO_ENABLED=0 go test -tags oraclelive -count=1 -v \
-  -run 'TestLiveDerivationReproducesEveryCommittedExpectation|TestRealPinsResolveTheInstalledOracles|TestAssembledMd1MatchesThePrimaryByteForByte|TestVendoredVectorsAreInSyncWithThePrimary' \
+  -run 'TestLiveDerivationReproducesEveryCommittedExpectation|TestRealPinsResolveTheInstalledOracles|TestPinsAreCurrentWithTheirPrimaries|TestBuiltPolicyDerivationMatchesTheS2Golden|TestAssembledMd1MatchesThePrimaryByteForByte|TestVendoredVectorsAreInSyncWithThePrimary' \
   ./oracle/ ./gui/ ./sysw/ "$@"
 rc=$?
 

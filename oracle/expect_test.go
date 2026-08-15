@@ -27,11 +27,22 @@ package oracle
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // ─── LAYER 1: no toolchain, no skip path ────────────────────────────────────
+
+// expectCase is one gate record on disk with the expectation committed beside
+// it. A named type rather than an anonymous struct because several tests need
+// to pass one to a helper, and an anonymous struct cannot be named in a
+// signature.
+type expectCase struct {
+	Name   string
+	Record GateRecord
+	Expect ExpectFile
+}
 
 // loadExpectations returns every gate record on disk paired with the
 // expectation committed beside it, and FAILS on any record that has none.
@@ -41,11 +52,7 @@ import (
 // invented strings and no test would ever open it. The loop is over the
 // DIRECTORY, and a record without an expectation is a failure rather than a
 // record the loop happens not to cover.
-func loadExpectations(t *testing.T) []struct {
-	Name   string
-	Record GateRecord
-	Expect ExpectFile
-} {
+func loadExpectations(t *testing.T) []expectCase {
 	t.Helper()
 	names, err := Records(GateRecordsDir)
 	if err != nil {
@@ -55,11 +62,7 @@ func loadExpectations(t *testing.T) []struct {
 		t.Fatalf("INCONCLUSIVE: %s holds no %s file, so this gate compares nothing",
 			GateRecordsDir, RecordSuffix)
 	}
-	var out []struct {
-		Name   string
-		Record GateRecord
-		Expect ExpectFile
-	}
+	var out []expectCase
 	for _, n := range names {
 		rec, err := LoadRecord(filepath.Join(GateRecordsDir, n))
 		if err != nil {
@@ -73,13 +76,32 @@ func loadExpectations(t *testing.T) []struct {
 				"which derives the expectation live and refuses to write a record whose "+
 				"census disagrees with it.", n, ep, err)
 		}
-		out = append(out, struct {
-			Name   string
-			Record GateRecord
-			Expect ExpectFile
-		}{n, rec, ef})
+		out = append(out, expectCase{n, rec, ef})
 	}
 	return out
+}
+
+// kindOf resolves the ExpectKind an on-disk case declares, from the INPUTS file
+// rather than from the expectation.
+//
+// Deliberately from the inputs: the expectation is the derivation's OUTPUT, and
+// an output that declared its own kind could not contradict itself. The inputs
+// file is what a human wrote, so it is the side that can be wrong — which is the
+// side worth checking against.
+func kindOf(t *testing.T, c expectCase) (ExpectKind, bool) {
+	t.Helper()
+	if c.Expect.Inputs == "" {
+		return "", false
+	}
+	inf, err := LoadInputsFile(filepath.Join(GateRecordsDir, c.Expect.Inputs))
+	if err != nil {
+		t.Errorf("%s: loading inputs %q: %v", c.Name, c.Expect.Inputs, err)
+		return "", false
+	}
+	if inf.Expect == nil {
+		return "", false
+	}
+	return inf.Expect.Kind, true
 }
 
 // THE GATE (F-170 + F-171, C-2). What the inputs REQUIRE, computed by the
@@ -170,16 +192,18 @@ func TestEveryCommittedExpectationBelongsToARecord(t *testing.T) {
 				c.Name, c.Expect.Inputs, inf.Expect.Kind)
 			continue
 		}
-		// The artifacts must be the kind that kind produces. The fabrication
-		// that motivated this set md1 artifacts against a cosigner-cards inputs
-		// block, and nothing noticed.
-		want := ArtifactKindFor(inf.Expect.Kind)
-		for i, a := range c.Expect.Artifacts {
-			if a.Kind != want {
-				t.Errorf("%s: artifact %d is kind %q, but inputs %q declares %q, "+
-					"which produces %q",
-					c.Name, i, a.Kind, c.Expect.Inputs, inf.Expect.Kind, want)
-			}
+		// The artifacts must have the SHAPE that kind produces — every kind it
+		// declares present, in the declared engrave order, and nothing else.
+		// The fabrication that motivated this set md1 artifacts against a
+		// cosigner-cards inputs block, and nothing noticed. Extended for the
+		// multi-kind answer: a single-kind equality check cannot see a
+		// full-mode expectation that lost its ms1 plates, nor one whose secret
+		// plate migrated to the end of the set.
+		if err := CheckArtifactShape(inf.Expect.Kind, c.Expect.Artifacts); err != nil {
+			t.Errorf("%s: the committed artifacts do not have the shape inputs %q declares "+
+				"(kind %q -> %v):\n%v",
+				c.Name, c.Expect.Inputs, inf.Expect.Kind,
+				ArtifactKindsFor(inf.Expect.Kind), err)
 		}
 	}
 }
@@ -231,19 +255,25 @@ func TestPlateCountIsDerivedFromTheInputs(t *testing.T) {
 // The committed fingerprints are the ones ms produced (nothing else can mint
 // them — see expectfile.go); this arm asserts they are PRESENT and DISTINCT, and
 // the live arm below asserts they are still what ms derives today.
+//
+// SCOPED BY KIND, per the S0b fold re-review's M-3. The rule used to be "every
+// artifact carries a fingerprint, and at least two are distinct", which is right
+// for cosigner cards and wrong twice over for a built policy: an md1 chunk
+// belongs to no single master and has no fingerprint to carry, and an ordinary
+// single-self-slot build honestly has ONE master. Both would have failed a
+// correct S5 record at its first artifact. CheckFingerprintScope holds the
+// per-kind rule so the same statement is testable directly, in both directions,
+// before any built-policy record exists on disk to carry it.
 func TestCommittedFingerprintsAreRealAndDistinct(t *testing.T) {
 	for _, c := range loadExpectations(t) {
-		seen := map[string]bool{}
-		for _, a := range c.Expect.Artifacts {
-			if a.Fingerprint == "" {
-				t.Errorf("%s: artifact %q carries no fingerprint", c.Name, a.Label)
-				continue
-			}
-			seen[a.Fingerprint] = true
+		kind, ok := kindOf(t, c)
+		if !ok {
+			t.Errorf("%s: no inputs kind, so no fingerprint rule can be chosen for it "+
+				"(TestEveryCommittedExpectationBelongsToARecord says why that is fatal)", c.Name)
+			continue
 		}
-		if len(seen) < 2 {
-			t.Errorf("%s: only %d distinct fingerprint(s) across the whole census — the cards "+
-				"are not from distinct seeds, so this gate is weaker than it looks", c.Name, len(seen))
+		if err := CheckFingerprintScope(kind, c.Expect.Artifacts); err != nil {
+			t.Errorf("%s (kind %q): %v", c.Name, kind, err)
 		}
 	}
 }
@@ -358,11 +388,24 @@ func TestLoadExpectRefusesAnEmptyExpectation(t *testing.T) {
 
 // An unknown expectation kind must REFUSE rather than derive an empty set that
 // then "matches" an empty census.
+//
+// IT ASSERTS ON THE MESSAGE, and that is a mutation finding rather than a
+// stylistic choice. There are now TWO refusals in this path — KnownExpectKind at
+// the top, and the `default` arm of DeriveExpected's switch, which exists so a
+// kind added to ArtifactKindsFor and not to the switch cannot derive nothing.
+// Measured: deleting the FIRST one left this test green, because the second
+// caught the same input. Belt and braces is right; a test that cannot tell which
+// one fired proves only that one of them exists, and would stay green while the
+// first was removed and the second later "simplified" away.
 func TestDeriveRefusesAnUnknownKind(t *testing.T) {
 	_, err := DeriveExpected(Expect{Kind: "no-such-kind", PolicyIDStub: "5b48af35"},
 		InputTuple{Origins: []string{"m/48h/0h/0h/2h"}}, []Seed{{Label: "x", Words: "y"}}, Bins{})
 	if err == nil {
 		t.Fatal("an unknown expectation kind was accepted")
+	}
+	if !strings.Contains(err.Error(), "unknown expectation kind") {
+		t.Fatalf("the refusal did not come from the KnownExpectKind check at the top of "+
+			"DeriveExpected; got: %v", err)
 	}
 }
 
@@ -393,5 +436,419 @@ func TestDeriveRefusesAnOriginItCannotName(t *testing.T) {
 		if tmpl != wantTmpl || acct != 0 || net != "mainnet" {
 			t.Errorf("origin %q -> (%d, %q, %q), want (0, %q, mainnet)", path, acct, tmpl, net, wantTmpl)
 		}
+	}
+}
+
+// ─── S5.0: the BUILT-POLICY kind, and the traps it had to be built around ────
+//
+// Everything below runs UNTAGGED, with no toolchain. That is deliberate and it
+// is the whole reason the md/ms stdout parsers are separate functions rather
+// than loops inside the exec calls: a refusal that can only be demonstrated on a
+// machine with three Rust binaries installed is a refusal the deciding machine
+// has never seen fail.
+//
+// The captured stdout below is REAL — printed by the pinned md 0.13.0 and
+// ms 0.16.0 on 2026-08-15 for the three BIP-39 published-vector masters at
+// m/48'/0'/0'/2', 2-of-3 wsh — not invented to make a parser pass.
+
+// mdRealStdout is exactly what `md encode … --group-size 0 --force-chunked
+// --policy-id-fingerprint` printed for Trace A's policy. Note the header line
+// FIRST and the policy-id line LAST: the artifacts are in the middle, which is
+// why "skip the first line" would have been a wrong fix.
+const mdRealStdout = `chunk-set-id: 0x30d86
+md1fxrvxzspqjtvyyy4qqxppcgsc27rchwsv0jskp2rsal4egz4ep5859p875x67p5s5tk09nzz08lv4
+md1fxrvxzsg3wem7sgluxl3d2a3syx3m7halwd7s7d5e8l2xm3y3xzfmadfj6e20urgnf9h0eap9ujpc
+md1fxrvxzshanz7jwkzae8efd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emcwp309kt3p7qjm
+md1fxrvxzsag0zr8gh9upnjugr26jfvunvs35jvgdjkm3kghwnt0qqymzc0utyzxyhs535vcd9tq33dm
+md1fxrvxz3ry9pu8uyfgtl737tj9hrdzaved93u3a2nawefnqlk8ycusz0quhfev0as4ure80muhz6hz
+md1fxrvxz3fhqdghjmksz3ry92d3gv4ejtmu9f0zxf3clxvtlnnv86xy4qee32ay5yaf3qfqktd9h9
+policy-id-fingerprint: 0x06215ac0
+`
+
+// TestArtifactKindsForNamesTheFlowsEngraveOrder pins the kind table itself.
+// ArtifactKindsFor's ORDER is load-bearing — CheckArtifactShape enforces it and
+// CompareCensus is order-sensitive — so a future edit that "tidied" the slice
+// would silently redefine what a correct census is.
+func TestArtifactKindsForNamesTheFlowsEngraveOrder(t *testing.T) {
+	for _, tc := range []struct {
+		kind ExpectKind
+		want []string
+	}{
+		{KindCosignerCards, []string{"mk1"}},
+		// gui/multisig_engrave.go:11-35 — ms1 secret card FIRST in full mode.
+		{KindBuiltPolicyFull, []string{"ms1", "mk1", "md1"}},
+		{KindBuiltPolicyWatch, []string{"mk1", "md1"}},
+	} {
+		got := ArtifactKindsFor(tc.kind)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s -> %v, want %v", tc.kind, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s -> %v, want %v (order is part of the answer)", tc.kind, got, tc.want)
+				break
+			}
+		}
+		if !KnownExpectKind(tc.kind) {
+			t.Errorf("%s produces %v but KnownExpectKind says it is not derivable", tc.kind, got)
+		}
+	}
+	if got := ArtifactKindsFor("no-such-kind"); got != nil {
+		t.Errorf("an unknown kind produced %v; it must produce nothing so callers refuse", got)
+	}
+	if KnownExpectKind("no-such-kind") {
+		t.Error("an unknown kind was reported derivable")
+	}
+}
+
+// arts is a tiny builder for shape/fingerprint tables: "kind:fingerprint".
+func arts(spec ...string) []Artifact {
+	out := make([]Artifact, len(spec))
+	for i, s := range spec {
+		kind, fp, _ := strings.Cut(s, ":")
+		out[i] = Artifact{Kind: kind, Label: "a" + strconv.Itoa(i), String: "x", Fingerprint: fp}
+	}
+	return out
+}
+
+// TestCheckArtifactShapeRefusesTheWrongShape — including THE ORDER MUTATION.
+// The reordered case is the one that matters most: CompareCensus refuses a
+// reordered census, but only if the committed expectation was in the right order
+// to begin with, and nothing before this checked that.
+func TestCheckArtifactShapeRefusesTheWrongShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind ExpectKind
+		arts []Artifact
+		ok   bool
+	}{
+		{"cosigner cards", KindCosignerCards, arts("mk1:a", "mk1:b"), true},
+		{"full, one held slot", KindBuiltPolicyFull, arts("ms1:a", "mk1:a", "md1:", "md1:"), true},
+		{"full, two masters", KindBuiltPolicyFull,
+			arts("ms1:a", "ms1:b", "mk1:a", "mk1:b", "md1:", "md1:"), true},
+		{"watch-only", KindBuiltPolicyWatch, arts("mk1:a", "md1:", "md1:"), true},
+
+		// THE ORDER MUTATION: the secret plate moved to the end of the set,
+		// which is exactly the "public plates first, secret last" reordering
+		// the plan DEFERRED. It must be caught here rather than shipped as an
+		// accident.
+		{"full, ms1 last", KindBuiltPolicyFull, arts("mk1:a", "md1:", "ms1:a"), false},
+		{"full, md1 before mk1", KindBuiltPolicyFull, arts("ms1:a", "md1:", "mk1:a"), false},
+		// A MISSING CLASS — the C2 shape: a "Full" backup with no seed in it.
+		{"full, no ms1 at all", KindBuiltPolicyFull, arts("mk1:a", "md1:"), false},
+		{"full, no md1 at all", KindBuiltPolicyFull, arts("ms1:a", "mk1:a"), false},
+		// A CLASS THAT KIND DOES NOT ENGRAVE.
+		{"watch-only carrying an ms1", KindBuiltPolicyWatch, arts("ms1:a", "mk1:a", "md1:"), false},
+		{"cosigner cards carrying an md1", KindCosignerCards, arts("mk1:a", "md1:"), false},
+		// A TRAILING RUN after the last declared kind.
+		{"full, mk1 after the md1s", KindBuiltPolicyFull,
+			arts("ms1:a", "mk1:a", "md1:", "mk1:b"), false},
+		{"empty", KindBuiltPolicyFull, nil, false},
+		{"unknown kind", "no-such-kind", arts("mk1:a"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckArtifactShape(tc.kind, tc.arts)
+			if tc.ok && err != nil {
+				t.Fatalf("an honest %s set was refused: %v", tc.kind, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("a wrong-shape %s set was accepted", tc.kind)
+			}
+		})
+	}
+}
+
+// TestCheckFingerprintScopeHoldsInBothDirections — mk1/ms1 must carry one, md1
+// must NOT, and the >=2-distinct rule belongs to cosigner-cards alone.
+func TestCheckFingerprintScopeHoldsInBothDirections(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind ExpectKind
+		arts []Artifact
+		ok   bool
+	}{
+		{"cosigner cards, two masters", KindCosignerCards, arts("mk1:a", "mk1:b"), true},
+		// DIRECTION 1: a key card with no fingerprint binds no seed to a plate.
+		{"cosigner card with no fingerprint", KindCosignerCards, arts("mk1:a", "mk1:"), false},
+		// The >=2-distinct rule, still enforced where it belongs.
+		{"cosigner cards, one master", KindCosignerCards, arts("mk1:a", "mk1:a"), false},
+
+		{"built policy, fingerprints on ms1+mk1 only", KindBuiltPolicyFull,
+			arts("ms1:a", "mk1:a", "md1:", "md1:"), true},
+		// THE SCOPING DIFFERENCE, proven: one held master is honest for a built
+		// policy and would have been a failure under the old blanket rule.
+		{"built policy, one master only", KindBuiltPolicyFull,
+			arts("ms1:a", "mk1:a", "md1:"), true},
+		// DIRECTION 2: an md1 chunk carrying a fingerprint is a value no oracle
+		// produced. "Not demanded" would have let this through.
+		{"built policy, md1 carrying a fingerprint", KindBuiltPolicyFull,
+			arts("ms1:a", "mk1:a", "md1:a"), false},
+		{"built policy, ms1 with no fingerprint", KindBuiltPolicyFull,
+			arts("ms1:", "mk1:a", "md1:"), false},
+		{"built policy, mk1 with no fingerprint", KindBuiltPolicyWatch,
+			arts("mk1:", "md1:"), false},
+		{"unknown kind", "no-such-kind", arts("mk1:a"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckFingerprintScope(tc.kind, tc.arts)
+			if tc.ok && err != nil {
+				t.Fatalf("an honest %s set was refused: %v", tc.kind, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("a %s set with wrong fingerprint scope was accepted", tc.kind)
+			}
+		})
+	}
+}
+
+// TestParseMdStdoutRefusesTheHeaderAsAnArtifact — the trap mkEncode's comment
+// predicted before any md step existed.
+func TestParseMdStdoutRefusesTheHeaderAsAnArtifact(t *testing.T) {
+	chunks, stub, err := parseMdStdout([]byte(mdRealStdout))
+	if err != nil {
+		t.Fatalf("the pinned md's REAL stdout was refused: %v", err)
+	}
+	if len(chunks) != 6 {
+		t.Errorf("parsed %d chunk(s) from md's real output, want 6", len(chunks))
+	}
+	// THE ADOPTION DIRECTION, asserted rather than assumed: neither non-artifact
+	// line may appear anywhere in the artifact set.
+	for i, c := range chunks {
+		if !strings.HasPrefix(c, "md1") {
+			t.Errorf("chunk %d is %q, which is not an md1 string — a non-artifact line was adopted", i, c)
+		}
+		if strings.Contains(c, "chunk-set-id") || strings.Contains(c, "policy-id-fingerprint") {
+			t.Errorf("chunk %d is %q — md's own header/trailer was collected as an expected "+
+				"engraved string", i, c)
+		}
+	}
+	if stub != "06215ac0" {
+		t.Errorf("policy id parsed as %q, want 06215ac0 (the value the S2 golden's own live test "+
+			"logs for this policy)", stub)
+	}
+
+	for _, tc := range []struct{ name, body string }{
+		// A THIRD header line md does not print today. This is the case the
+		// prefix-matching design exists for: an unrecognised line must refuse,
+		// not be adopted and not be silently skipped.
+		{"an unknown header line", "surprise: 0x1\n" + mdRealStdout},
+		{"an unknown trailer line", mdRealStdout + "note: rebuild me\n"},
+		{"no md1 lines at all", "chunk-set-id: 0x30d86\npolicy-id-fingerprint: 0x06215ac0\n"},
+		{"no policy-id line", strings.ReplaceAll(mdRealStdout, "policy-id-fingerprint: 0x06215ac0\n", "")},
+		{"a policy id that is not a stub", strings.ReplaceAll(mdRealStdout, "0x06215ac0", "0xZZ")},
+		{"two policy-id lines", mdRealStdout + "policy-id-fingerprint: 0x06215ac1\n"},
+		{"empty", ""},
+		// THE SEPARATOR TRAP at the bytes: --group-size was not passed.
+		{"a separated md1", "chunk-set-id: 0x1\nmd1fx rvxzs pqjtv\npolicy-id-fingerprint: 0x06215ac0\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := parseMdStdout([]byte(tc.body)); err == nil {
+				t.Fatal("accepted stdout this gate must refuse")
+			}
+		})
+	}
+}
+
+// TestParseMsStdoutRefusesASeparatedString — the --group-size 0 trap, caught at
+// the bytes rather than trusted to the flag.
+func TestParseMsStdoutRefusesASeparatedString(t *testing.T) {
+	const unbroken = "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f"
+	got, err := parseMsStdout([]byte(unbroken + "\n"))
+	if err != nil {
+		t.Fatalf("the pinned ms's REAL --group-size 0 output was refused: %v", err)
+	}
+	if got != unbroken {
+		t.Errorf("parsed %q, want %q", got, unbroken)
+	}
+	for _, tc := range []struct{ name, body string }{
+		// Exactly what ms 0.16.0 prints WITHOUT --group-size 0. Measured.
+		{"the default group-size 5 form", "ms10e ntrsq qqqqq qqqqq qqqqq qqqqq qqqqq qqcj9 sxraq 34v7f\n"},
+		{"a hyphen separator", "ms10e-ntrsq-qqqqq\n"},
+		{"a header line", "engraving card:\n" + unbroken + "\n"},
+		{"two ms1 strings", unbroken + "\n" + unbroken + "\n"},
+		{"empty", "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseMsStdout([]byte(tc.body)); err == nil {
+				t.Fatal("accepted stdout this gate must refuse")
+			}
+		})
+	}
+}
+
+// TestPolicyTemplateMatchesTheDevicesOwnS2Template binds the generated template
+// to the one the device is already compared against.
+//
+// The literal is s2WantTemplate from gui/multisig_build_oracle_test.go:87 — the
+// string S2's committed md1 golden was minted with. Restating it here would be a
+// second source of truth, so this test exists to make the two provably equal:
+// if either side changes, the gate compares two different wallets, and this goes
+// red instead.
+func TestPolicyTemplateMatchesTheDevicesOwnS2Template(t *testing.T) {
+	const s2WantTemplate = "wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*))"
+	got, err := policyTemplate("bip48-p2wsh", 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != s2WantTemplate {
+		t.Errorf("policyTemplate(bip48-p2wsh, 2, 3) = %q\nS2 encodes                       %q\n"+
+			"These must be identical or the oracle derives a different wallet than the device", got, s2WantTemplate)
+	}
+	sh, err := policyTemplate("bip48-p2sh-p2wsh", 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sh != "sh(wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*)))" {
+		t.Errorf("bip48-p2sh-p2wsh -> %q", sh)
+	}
+	if _, err := policyTemplate("bip84-native-segwit", 2, 3); err == nil {
+		t.Error("a template with no registered md root was accepted")
+	}
+}
+
+// TestBuiltPolicyRefusalsAreReachableWithoutAToolchain drives every refusal the
+// built-policy kind can reach BEFORE it shells out to anything.
+//
+// Bins{} is passed on purpose: with no binary resolved, any case that got as far
+// as an oracle invocation would fail with "no ms binary resolved" instead. Each
+// case below asserts on the refusal's own wording, so a case that started
+// failing for the wrong reason is visible rather than merely still red.
+func TestBuiltPolicyRefusalsAreReachableWithoutAToolchain(t *testing.T) {
+	shared := []string{"m/48h/0h/0h/2h", "m/48h/0h/0h/2h", "m/48h/0h/0h/2h"}
+	threeSeeds := []Seed{{Label: "A", Words: "a"}, {Label: "B", Words: "b"}, {Label: "C", Words: "c"}}
+	base := InputTuple{Template: "t", N: 3, K: 2, Origins: shared}
+
+	for _, tc := range []struct {
+		name  string
+		e     Expect
+		in    InputTuple
+		seeds []Seed
+		want  string
+	}{
+		{
+			name: "held_slots empty",
+			e:    Expect{Kind: KindBuiltPolicyFull},
+			in:   base, seeds: threeSeeds,
+			want: "held_slots names none",
+		}, {
+			name: "held_slots out of range",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0, 3}},
+			in:   base, seeds: threeSeeds,
+			want: "but the tuple has 3 slot(s)",
+		}, {
+			name: "held_slots repeated",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{1, 1}},
+			in:   base, seeds: threeSeeds,
+			want: "strictly ascending and distinct",
+		}, {
+			name: "held_slots descending",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{2, 0}},
+			in:   base, seeds: threeSeeds,
+			want: "strictly ascending and distinct",
+		}, {
+			name:  "n disagrees with the slots supplied",
+			e:     Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in:    InputTuple{Template: "t", N: 4, K: 2, Origins: shared},
+			seeds: threeSeeds,
+			want:  "the tuple says n=4 but supplies 3 slot(s)",
+		}, {
+			name:  "k unset",
+			e:     Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in:    InputTuple{Template: "t", N: 3, K: 0, Origins: shared},
+			seeds: threeSeeds,
+			want:  "k=0 over 3 slot(s)",
+		}, {
+			name:  "k larger than n",
+			e:     Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in:    InputTuple{Template: "t", N: 3, K: 4, Origins: shared},
+			seeds: threeSeeds,
+			want:  "k=4 over 3 slot(s)",
+		}, {
+			// THE DIVERGENT-ORIGIN REFUSAL. Measured: the pinned md has no
+			// invocation that encodes a per-slot origin, so deriving anything
+			// here would derive a DIFFERENT wallet's md1.
+			name: "origins diverge",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in: InputTuple{Template: "t", N: 3, K: 2, Origins: []string{
+				"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/0h/2h"}},
+			seeds: threeSeeds,
+			want:  "the origins DIVERGE",
+		}, {
+			name: "script types mixed",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in: InputTuple{Template: "t", N: 3, K: 2, Origins: []string{
+				"m/48h/0h/0h/2h", "m/48h/0h/0h/1h", "m/48h/0h/0h/2h"}},
+			seeds: threeSeeds,
+			want:  "one md1 encodes ONE script type",
+		}, {
+			name: "networks mixed",
+			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+			in: InputTuple{Template: "t", N: 3, K: 2, Origins: []string{
+				"m/48h/0h/0h/2h", "m/48h/1h/0h/2h", "m/48h/0h/0h/2h"}},
+			seeds: threeSeeds,
+			want:  "one policy is on one network",
+		}, {
+			// Cosigner-cards must not silently accept a field it has no use for.
+			name: "cosigner cards given held_slots",
+			e:    Expect{Kind: KindCosignerCards, PolicyIDStub: "5b48af35", HeldSlots: []int{0}},
+			in:   base, seeds: threeSeeds,
+			want: "engraves GATHERED cards verbatim",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DeriveExpected(tc.e, tc.in, tc.seeds, Bins{})
+			if err == nil {
+				t.Fatal("accepted an expectation this gate must refuse")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refused for the wrong reason.\n  want a message containing %q\n  got %v",
+					tc.want, err)
+			}
+		})
+	}
+}
+
+// TestBuiltPolicyReachesTheOracleOnHonestInputs is the CONTROL for the table
+// above: a well-formed built-policy expectation must get past every structural
+// refusal and fail only at the missing binary. Without it, a validation bug that
+// refused everything would leave that whole table green.
+func TestBuiltPolicyReachesTheOracleOnHonestInputs(t *testing.T) {
+	_, err := DeriveExpected(
+		Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+		InputTuple{Template: "t", N: 3, K: 2, Origins: []string{
+			"m/48h/0h/0h/2h", "m/48h/0h/0h/2h", "m/48h/0h/0h/2h"}},
+		[]Seed{{Label: "A", Words: "a"}, {Label: "B", Words: "b"}, {Label: "C", Words: "c"}},
+		Bins{})
+	if err == nil {
+		t.Fatal("derived a census with no oracle binaries at all")
+	}
+	if !strings.Contains(err.Error(), "no ms binary resolved") {
+		t.Fatalf("honest inputs were refused before reaching the oracle, so the refusal table "+
+			"above proves nothing: %v", err)
+	}
+}
+
+// TestCompareCensusCatchesAMultiKindReorder — CompareCensus is order-sensitive
+// and the built-policy census is the first one where "order" means plates of
+// DIFFERENT kinds. A secret plate cut where a public one was expected is a
+// different engrave, and this proves the comparison sees it.
+func TestCompareCensusCatchesAMultiKindReorder(t *testing.T) {
+	want := []Artifact{
+		{Kind: "ms1", Label: "A", String: "ms1aaa"},
+		{Kind: "mk1", Label: "A", String: "mk1bbb"},
+		{Kind: "md1", Label: "p", String: "md1ccc"},
+	}
+	got := []string{"ms1aaa", "mk1bbb", "md1ccc"}
+	if err := CompareCensus(want, got); err != nil {
+		t.Fatalf("control failed before any mutation: %v", err)
+	}
+	got[0], got[2] = got[2], got[0]
+	err := CompareCensus(want, got)
+	if err == nil {
+		t.Fatal("a census with the secret plate and the descriptor swapped was accepted")
+	}
+	if !strings.Contains(err.Error(), "plate 0") || !strings.Contains(err.Error(), "plate 2") {
+		t.Errorf("the refusal must name both plates that differ; got: %v", err)
 	}
 }
