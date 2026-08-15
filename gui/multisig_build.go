@@ -317,7 +317,12 @@ func templateConsentFlow(ctx *Context, th *Colors, tmplMd1 []string) bool {
 func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "EXPERIMENTAL",
-		Body: "This device-authored multisig policy is NOT validated end-to-end — there is no " +
+		// NO EM-DASH. This body carried one, and S2's whole-walk raster floor
+		// measured what that cost: 4973 ink pixels against a 5482 px title-only
+		// frame, i.e. the BODY DID NOT DRAW AT ALL on the one screen that is the
+		// operator's last chance to stop. F-78's "zero-pixel glyph" understates
+		// it: the glyph takes its whole line with it.
+		Body: "This device-authored multisig policy is NOT validated end-to-end. There is no " +
 			"coordinator or hardware round-trip. You MUST verify the assembled descriptor and the " +
 			"shown policy stub + per-slot fingerprints against your coordinator/wallet BEFORE funding. " +
 			"The fingerprint choice changes the policy id.\n\nHold button to confirm.",
