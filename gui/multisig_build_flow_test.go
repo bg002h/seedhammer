@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -191,75 +192,99 @@ func TestMultisigBuildExperimentalWarningConfirm(t *testing.T) {
 	})
 }
 
-// TestBuildFlow_GatherBeforeSeed asserts the gather-before-seed ordering (no
-// secret exists during gather, mirroring T6b's posture): with no NFC reader the
-// gather yields zero cards, so a Build flow at n=2 returns on gather Back WITHOUT
-// typing a seed (the seed-hook never fires). R0 M-b: Done-with-zero shows an
-// in-gather error and STAYS; Back exits the gather -> the flow returns ok=false.
+// buildWalkParamPickers accepts every buildParamPickFlow default in turn
+// (template wsh -> n=2 -> k=1 -> @0 -> fp Omit), leaving the flow at whatever
+// comes after the pickers. Each stage is asserted on the way past, because
+// tapping through a picker that did not appear silently answers the NEXT one.
+func buildWalkParamPickers(t *testing.T, ctx *Context, frame func() (string, bool)) {
+	t.Helper()
+	for _, stage := range []string{"Template", "Cosigners", "Threshold", "Your slot", "Fingerprints"} {
+		if _, ok := pumpUntil(frame, stage, 16); !ok {
+			t.Fatalf("%s picker not shown", stage)
+		}
+		click(&ctx.Router, Button3)
+		frame()
+	}
+}
+
+// TestBuildFlow_GatherBeforeSeed asserts the gather-before-seed ordering: no
+// secret exists while the cosigner set is being resolved, mirroring T6b's
+// posture. The seed-hook must never fire on any route that leaves the flow
+// before assembly.
+//
+// S1 CHANGED THE NO-PAYLOAD ARM and this test changed with it. It used to drive
+// a reader-less machine into the gather, press Done on zero cards, and read the
+// gather's own "No complete cards yet — scan a card's chunks first". That is
+// exactly the refusal S1 exists to remove: phase-1 hardware has no reader, so it
+// prescribed an impossible action and dead-ended the operator. The Build path
+// now refuses BEFORE the gather and names the host route. The property under
+// test is unchanged — no seed is typed — so both arms assert it.
 func TestBuildFlow_GatherBeforeSeed(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		seedTyped := false
-		buildMultisigSeedHook = func(bip39.Mnemonic) { seedTyped = true }
-		defer func() { buildMultisigSeedHook = nil }()
-		ctx := NewContext(newPlatform())
-		done := false
-		frame, quit := runUI(ctx, func() {
-			buildMultisigPolicyFlow(ctx, &descriptorTheme)
-			done = true
+	t.Run("no payload refuses before the gather, naming the host route", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			seedTyped := false
+			buildMultisigSeedHook = func(bip39.Mnemonic) { seedTyped = true }
+			defer func() { buildMultisigSeedHook = nil }()
+			ctx := NewContext(newPlatform())
+			done := false
+			frame, quit := runUI(ctx, func() {
+				buildMultisigPolicyFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			buildWalkParamPickers(t, ctx, frame)
+			content, ok := pumpUntil(frame, "me sysw pack", 16)
+			if !ok {
+				t.Fatalf("a reader-less machine with no payload did not name the host "+
+					"route; got %q", content)
+			}
+			if strings.Contains(content, "scan") || strings.Contains(content, "Scan") {
+				t.Errorf("the refusal still tells the operator to scan, which phase 1 "+
+					"removed with NFC: %q", content)
+			}
+			click(&ctx.Router, Button3) // dismiss the modal -> the flow returns
+			for i := 0; i < 32 && !done; i++ {
+				frame()
+			}
+			if !done {
+				t.Fatal("flow did not return after the refusal")
+			}
+			if seedTyped {
+				t.Fatal("a seed was typed on a flow that never had a cosigner set")
+			}
 		})
-		defer quit()
-		// Pick template (wsh, default), n=2 (default), k (default), @S (default),
-		// fp Omit (default) by confirming each picker.
-		if _, ok := pumpUntil(frame, "Template", 16); !ok {
-			t.Fatal("template picker not shown")
-		}
-		click(&ctx.Router, Button3) // template wsh
-		frame()
-		if _, ok := pumpUntil(frame, "Cosigners", 16); !ok {
-			t.Fatal("n picker not shown")
-		}
-		click(&ctx.Router, Button3) // n=2
-		frame()
-		if _, ok := pumpUntil(frame, "Threshold", 16); !ok {
-			t.Fatal("k picker not shown")
-		}
-		click(&ctx.Router, Button3) // k=1
-		frame()
-		if _, ok := pumpUntil(frame, "Your slot", 16); !ok {
-			t.Fatal("self-slot picker not shown")
-		}
-		click(&ctx.Router, Button3) // @0
-		frame()
-		if _, ok := pumpUntil(frame, "Fingerprints", 16); !ok {
-			t.Fatal("fp picker not shown")
-		}
-		click(&ctx.Router, Button3) // Omit
-		// Now the gather runs; with no NFC reader, press Done -> zero cards -> the
-		// gather shows its own "No complete cards yet" error and STAYS (R0 M-b).
-		if _, ok := pumpUntil(frame, "Engrave Bundle", 16); !ok {
-			t.Fatal("gather screen not shown")
-		}
-		click(&ctx.Router, Button3) // Done (zero cards) -> in-gather showError, stays
-		// The empty-Done showError is a dismiss-only ErrorScreen (Button3 dismisses);
-		// dismiss it, then we are back on the gather screen.
-		if _, ok := pumpUntil(frame, "No complete cards", 16); !ok {
-			t.Fatal("empty-Done error not shown")
-		}
-		click(&ctx.Router, Button3) // dismiss the error modal -> back at the gather
-		if _, ok := pumpUntil(frame, "Engrave Bundle", 16); !ok {
-			t.Fatal("did not return to gather after dismissing the empty-Done error")
-		}
-		// Drive Back to LEAVE the gather -> bundleGatherFlow returns ok=false, so
-		// the flow returns without ever typing a seed.
-		click(&ctx.Router, Button1) // Back from gather -> flow returns (ok=false)
-		for i := 0; i < 32 && !done; i++ {
-			frame()
-		}
-		if !done {
-			t.Fatal("flow did not return after gather Back")
-		}
-		if seedTyped {
-			t.Fatal("seed was typed BEFORE the cosigner gather; gather must precede seed entry")
-		}
+	})
+
+	t.Run("with a payload the gather runs, and Back leaves before any seed", func(t *testing.T) {
+		records := cosignerCardRecords(t, 1)
+		synctest.Test(t, func(t *testing.T) {
+			seedTyped := false
+			buildMultisigSeedHook = func(bip39.Mnemonic) { seedTyped = true }
+			defer func() { buildMultisigSeedHook = nil }()
+			ctx := NewContext(newPlatform())
+			ctx.sysw = sessionHolding(records...)
+			done := false
+			frame, quit := runUI(ctx, func() {
+				buildMultisigPolicyFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			buildWalkParamPickers(t, ctx, frame)
+			if _, ok := pumpUntil(frame, "mk1 keys: 1", 16); !ok {
+				t.Fatal("the payload's card never reached the gather tally")
+			}
+			// Back LEAVES the gather -> bundleGatherFlow returns ok=false, so the
+			// flow returns without ever typing a seed.
+			click(&ctx.Router, Button1)
+			for i := 0; i < 32 && !done; i++ {
+				frame()
+			}
+			if !done {
+				t.Fatal("flow did not return after gather Back")
+			}
+			if seedTyped {
+				t.Fatal("seed was typed BEFORE the cosigner gather; gather must precede seed entry")
+			}
+		})
 	})
 }

@@ -123,6 +123,43 @@ func (s *syswSession) take(want sysw.Class) (string, bool) {
 	return "", false
 }
 
+// takeAll returns EVERY record of the wanted class, in payload record order.
+//
+// It exists because a cosigner SET is not the shape `take` serves. `take` is
+// first-match, which is right for a seed or a passphrase — there is one, and a
+// program consumes it once. A multisig policy consumes a set, and S1's whole
+// deliverable is that the payload supplies it.
+//
+// ORDER IS PART OF THE CONTRACT, not a convenience: record order fixes @N
+// assignment in the assembled policy, and @N order is identity-bearing
+// (md/encode_multisig.go's ordering contract — two callers supplying the same
+// keys in different orders mint different, both valid, policies). So this
+// returns the records in the order the payload holds them, and nothing
+// downstream may reorder them.
+//
+// It inherits `take`'s guard verbatim: a record may not be handed to a program
+// until the payload it came from has been authenticated by one of [compared]'s
+// two routes (§12.2). Authentication is stakes, not spelling — with
+// fingerprints omitted by default, a swapped cosigner card is invisible on the
+// review screen that exists to catch it — so this stays a refusal.
+//
+// `ok=false` means REFUSED (unloaded or unauthenticated). A compared payload
+// holding no records of the class returns `(nil, true)`: "none present" and
+// "not allowed to look" are different answers, and the Build path names a
+// different route for each.
+func (s *syswSession) takeAll(want sysw.Class) ([]string, bool) {
+	if !s.loaded || !s.compared {
+		return nil, false
+	}
+	var out []string
+	for _, r := range s.records {
+		if r.class == want {
+			out = append(out, r.body)
+		}
+	}
+	return out, true
+}
+
 // has reports whether a class is present, WITHOUT the compared gate, so a menu
 // can offer "from payload" before the operator has compared anything.
 func (s *syswSession) has(want sysw.Class) bool {

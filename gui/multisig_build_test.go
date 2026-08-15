@@ -373,7 +373,7 @@ func TestBuildReviewLines(t *testing.T) {
 		{Index: 1, FpPresent: false},
 		{Index: 2, FpPresent: false},
 	}
-	lines := buildReviewLines(stub, slotsOmit, false)
+	lines := buildReviewLines(stub, slotsOmit, false, nil)
 	joined := strings.ToLower(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "7b716421") {
 		t.Fatalf("review missing stub 7b716421:\n%s", joined)
@@ -390,7 +390,7 @@ func TestBuildReviewLines(t *testing.T) {
 		{Index: 0, Fingerprint: [4]byte{0x73, 0xc5, 0xda, 0x0a}, FpPresent: true},
 		{Index: 1, Fingerprint: [4]byte{0x01, 0x02, 0x03, 0x04}, FpPresent: true},
 	}
-	linesInc := buildReviewLines([4]byte{0xce, 0xad, 0xba, 0x4d}, slotsInc, true)
+	linesInc := buildReviewLines([4]byte{0xce, 0xad, 0xba, 0x4d}, slotsInc, true, nil)
 	joinedInc := strings.ToLower(strings.Join(linesInc, "\n"))
 	if !strings.Contains(joinedInc, "ceadba4d") {
 		t.Fatalf("include review missing stub ceadba4d:\n%s", joinedInc)

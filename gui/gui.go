@@ -64,15 +64,20 @@ const (
 type Context struct {
 	// sysw is the systemwide payload session, or nil. See sysw_session.go.
 	sysw *syswSession
-	// syswBundleSeed is a first card taken from the payload, consumed by
+	// syswBundleSeeds are cards taken from the payload, consumed by
 	// bundleGatherFlow. Empty when none was offered or taken.
-	syswBundleSeed string
-	Platform       Platform
-	Styles         Styles
-	Wakeup         time.Time
-	Done           bool
-	FrameCallback  func(op.Op)
-	B              op.Buffer
+	//
+	// A SLICE since S1: the supplied-md1 and Engrave Bundle paths still seed a
+	// single "first card" and keep scanning, but the Build path takes the WHOLE
+	// cosigner set from the payload — that is S1's deliverable — and every one
+	// of those records has to reach the same offer() a scanned card takes.
+	syswBundleSeeds []string
+	Platform        Platform
+	Styles          Styles
+	Wakeup          time.Time
+	Done            bool
+	FrameCallback   func(op.Op)
+	B               op.Buffer
 
 	Router EventRouter
 

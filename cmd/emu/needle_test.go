@@ -49,6 +49,13 @@ var buildFlowNeedles = []struct {
 	// The front door, one level above the build flow. A walk uses this to prove
 	// it reached Engrave Multisig at all before choosing "Build policy".
 	{"Supply or build a policy?", "gui/multisig.go"},
+	// S1's bounded-selection surface, reached ONLY when the payload supplied
+	// more cosigner cards than the policy has open slots. It is the first needle
+	// that proves something about the CARDS rather than the parameters: a walk
+	// seeing it has a payload-fed cosigner set that had to be narrowed, which is
+	// the whole `0..n` ruling on screen.
+	{"Payload cards", "gui/multisig_build_payload.go"},
+	{"Use payload card", "gui/multisig_build_payload.go"},
 }
 
 // decoyNeedles are strings a stage author reaches for FIRST and must not use.
@@ -60,9 +67,13 @@ var decoyNeedles = []struct {
 }{
 	// Two sites: the build flow's wallet-policy form picker and singlesig's.
 	{"Which md1?", 2},
-	// Three sites: bundleFlow, supplyMultisigPolicyFlow, buildMultisigPolicyFlow.
-	// This is the one that makes "the walk reached a card gather" meaningless.
-	{"First card from where?", 3},
+	// TWO sites since S1: bundleFlow and supplyMultisigPolicyFlow. It was three
+	// — buildMultisigPolicyFlow had the same picker — and S1 removed that one,
+	// because the Build path now takes the WHOLE cosigner set from the payload
+	// and a source picker with one answer is a tap that teaches nothing. Still a
+	// decoy, and still the reason "the walk reached a card gather" proves
+	// nothing: two flows can draw it.
+	{"First card from where?", 2},
 	// The gather's title comes from the SHARED gatherer, so it reads
 	// "Engrave Bundle" even when the operator arrived via Build policy. A walk
 	// that trusted it would report the wrong flow with total confidence.

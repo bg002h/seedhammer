@@ -23,7 +23,7 @@ func bundleFlow(ctx *Context, th *Colors) {
 	// continues scanning as usual — the bundle is a SET, and a source that
 	// short-circuited the gather would cap it at whatever the payload held.
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeed = body
+		ctx.syswBundleSeeds = []string{body}
 	}
 	for {
 		cards, ok := bundleGatherFlow(ctx, th)
@@ -101,10 +101,17 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 	// so it is deduplicated, chunk-assembled and validated identically. A
 	// separate insertion path would be a second way for a card to become part
 	// of a bundle, and only one of them would have the checks.
-	if seed := ctx.syswBundleSeed; seed != "" {
-		ctx.syswBundleSeed = ""
+	//
+	// Fed in PAYLOAD RECORD ORDER and never reordered: @N assignment downstream
+	// follows the order cards complete in, and @N order is identity-bearing
+	// (md/encode_multisig.go's ordering contract).
+	for _, seed := range ctx.syswBundleSeeds {
+		if seed == "" {
+			continue
+		}
 		scr.g.offer(mdmkText(seed))
 	}
+	ctx.syswBundleSeeds = nil
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
 	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())

@@ -15,7 +15,6 @@ import (
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
-	"seedhammer.com/sysw"
 )
 
 // ─── T6c Phase B: the on-device "Build policy" authoring path ────────────────
@@ -43,26 +42,67 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		return
 	}
 
-	// (2) Gather the n-1 cosigner mk1 cards over NFC (PUBLIC; ms1 refused at
-	// classify). Decode each to an mk.Card.
+	// (2) THE PAYLOAD SUPPLIES THE WHOLE COSIGNER SET (S1). §3.3.2 admits
+	// ClassMDMK to this program; every such record is fed to the gather through
+	// the SAME offer() a scanned card takes, so all of them get identical dedup,
+	// chunk assembly and integrity gating.
 	//
-	// §3.3.2 admits ClassMDMK to this program (plan stage 13c). One card comes
-	// from the payload if the operator wants it, through the SAME offer() a
-	// scanned card takes, and the operator keeps scanning the rest — the set is
-	// n-1 cards and a source that short-circuited the gather would cap it at
-	// whatever the payload held.
-	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeed = body
+	// The count of cards on the payload is INDEPENDENT of n (F-173, `0..n`):
+	// over-supply is normal and is resolved by selection, under-supply is a named
+	// refusal, and the exact-count check stays where it belongs — on the
+	// ASSEMBLED set, in buildCosignerCards, below.
+	open := p.N - 1
+	records, state := buildCosignerSource(ctx)
+	supply, incomplete := buildCosignerSupply(records)
+	if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
+		// Refuse BEFORE the gather. Walking the operator into a gather that
+		// cannot succeed and dead-ending them there is the defect this stage
+		// removes; the message names the only route this hardware has.
+		showError(ctx, th, "Build Policy",
+			buildSupplyRefusal(state, len(supply), open, incomplete))
+		return
 	}
+	ctx.syswBundleSeeds = records
 	cards, ok := bundleGatherFlow(ctx, th)
 	if !ok {
 		return
 	}
-	cosigners, ok := buildCosignerCards(cards, p.N-1)
+	// md1 records ride along on a systemwide payload and must not fail the build
+	// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
+	// here rather than there.
+	mk1s := mk1CosignerCards(cards)
+	// Re-classified over what the GATHER produced, not over what the payload
+	// held: on reader-equipped hardware the operator may have added more.
+	chosen := make([]int, len(mk1s))
+	for i := range chosen {
+		chosen[i] = i
+	}
+	switch classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open) {
+	case cosignerRefuse:
+		showError(ctx, th, "Build Policy",
+			buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
+		return
+	case cosignerSelect:
+		// Bounded selection. On an EQUAL count there is nothing to choose, so
+		// the flow auto-fills and goes straight to the review — the review IS
+		// the announcement, and a picker with one possible answer is a tap that
+		// teaches nothing.
+		chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+		if !ok {
+			return
+		}
+	}
+	picked := make([]bundleCard, 0, len(chosen))
+	for _, i := range chosen {
+		picked = append(picked, mk1s[i])
+	}
+	cosigners, ok := buildCosignerCards(picked, open)
 	if !ok {
-		showError(ctx, th, "Build Policy", fmt.Sprintf("Gather exactly %d cosigner key cards (and no md1).", p.N-1))
+		showError(ctx, th, "Build Policy",
+			buildSupplyRefusal(cosignerSourceLoaded, len(picked), open, false))
 		return
 	}
+	origins := buildCosignerOrigins(p.N, p.SelfSlot, chosen)
 
 	// (3) TYPED-ONLY self seed (I-SCRUB). Scrub on EVERY exit.
 	mnemonic, ok := seedEntryFlow(ctx, th)
@@ -105,8 +145,10 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		return
 	}
 
-	// (6) Review the (stub, slots) ordering handle (I-ORDER). Back -> abort.
-	if !buildReviewFlow(ctx, th, stub, slots, p.IncludeFp) {
+	// (6) Review the (stub, slots) ordering handle (I-ORDER), carrying S1's §0.1
+	// announcement of which payload cards filled which slots. Back -> abort.
+	if !buildReviewFlow(ctx, th, stub, slots, p.IncludeFp,
+		buildProvenanceLines(origins, len(mk1s))) {
 		return
 	}
 
@@ -510,11 +552,18 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 // under the homogeneous Omit choice), and the M1 note that the fp-presence
 // choice changes the WalletPolicyId — so the operator records/matches the right
 // id against their coordinator BEFORE funding.
-func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool) []string {
-	lines := []string{
+// `provenance` carries S1's §0.1 announcement (which payload cards filled which
+// slots) and is placed FIRST, above the stub: it is the one line on this screen
+// whose subject is an assumption the device made rather than a parameter the
+// operator picked, and §0.1 clause 3 puts such an announcement on the
+// confirmation surface itself, not below the fold. Empty for a set that reached
+// here by some other route.
+func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) []string {
+	lines := append([]string{}, provenance...)
+	lines = append(lines,
 		fmt.Sprintf("Policy stub: %x", stub),
 		"Slots:",
-	}
+	)
 	for _, s := range slots {
 		if s.FpPresent {
 			lines = append(lines, fmt.Sprintf("@%d  fp %x", s.Index, s.Fingerprint))
@@ -534,8 +583,8 @@ func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool) []strin
 // buildReviewFlow displays the read-only (stub, slots) review and lets the
 // operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
 // paged read-only restore-doc screen idiom.
-func buildReviewFlow(ctx *Context, th *Colors, stub [4]byte, slots []md.SlotInfo, includeFp bool) bool {
-	lines := buildReviewLines(stub, slots, includeFp)
+func buildReviewFlow(ctx *Context, th *Colors, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) bool {
+	lines := buildReviewLines(stub, slots, includeFp, provenance)
 	return confirmReviewScreen(ctx, th, "Policy Review", lines)
 }
 

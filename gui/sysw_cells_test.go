@@ -150,8 +150,17 @@ func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
 // identically.
 //
 // The needle is the gather screen's own TALLY, which counts cards the gatherer
-// accepted. A card set on ctx.syswBundleSeed and dropped would leave the tally
+// accepted. A card set on ctx.syswBundleSeeds and dropped would leave the tally
 // at zero while every structural assertion still passed.
+//
+// S1 SPLIT THE TWO FLOWS' MECHANISM, so this test carries both shapes:
+//
+//   - SUPPLIED policy still offers ONE card and expects the operator to keep
+//     scanning, so it keeps the "First card from where?" picker.
+//   - BUILT policy takes the WHOLE cosigner set from the payload — that is S1's
+//     deliverable — so there is nothing to pick between and the picker is gone.
+//     The seam is not: buildCosignerSource is the one place that answers "where
+//     does a cosigner key come from", with payload as phase 1's only answer.
 func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 	// A complete, non-chunked md1: it decodes on its own, so the gatherer counts
 	// it immediately rather than waiting for chunks that will never be scanned.
@@ -159,45 +168,65 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 	if got := sysw.Classify(md1); got != sysw.ClassMDMK {
 		t.Fatalf("INCONCLUSIVE: the fixture classifies as %v, not ClassMDMK", got)
 	}
+	// The built path refuses before the gather unless the payload can fill its
+	// open slots, so its payload carries one cosigner card alongside the md1
+	// (n defaults to 2 through the pickers, so exactly one slot is open).
+	buildRecords := append([]string{md1}, cosignerCardRecords(t, 1)...)
+
 	for _, tc := range []struct {
-		name string
-		run  func(ctx *Context)
+		name    string
+		records []string
+		picker  bool // does this flow still show the source picker?
+		want    string
+		run     func(ctx *Context)
 	}{
-		{"supplied policy", func(ctx *Context) { supplyMultisigPolicyFlow(ctx, &descriptorTheme) }},
-		{"built policy", func(ctx *Context) { buildMultisigPolicyFlow(ctx, &descriptorTheme) }},
+		{"supplied policy", []string{md1}, true, "md1 descriptors: 1",
+			func(ctx *Context) { supplyMultisigPolicyFlow(ctx, &descriptorTheme) }},
+		{"built policy", buildRecords, false, "mk1 keys: 1",
+			func(ctx *Context) { buildMultisigPolicyFlow(ctx, &descriptorTheme) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPlatform()
 			p.display = sh2DisplaySize
 			ctx := NewContext(p)
-			ctx.sysw = sessionHolding(md1)
+			ctx.sysw = sessionHolding(tc.records...)
 
 			frame, drawer, quit := runUITouch(ctx, func() { tc.run(ctx) })
 			defer quit()
 
 			// The built-policy path opens with buildParamPickFlow's pickers, so
-			// the offer is reached by accepting each default in turn. Every
-			// screen before the offer is a ChoiceScreen whose default is choice
-			// 0, so one Button3 per screen walks them.
+			// the gather is reached by accepting each default in turn. Every
+			// screen before it is a ChoiceScreen whose default is choice 0, so
+			// one Button3 per screen walks them.
 			var content string
 			var found bool
+			needle := "First card from where?"
+			if !tc.picker {
+				needle = tc.want
+			}
 			for i := 0; i < 12 && !found; i++ {
-				if content, found = pumpUntil(frame, "First card from where?", 8); found {
+				if content, found = pumpUntil(frame, needle, 8); found {
 					break
 				}
 				click(&ctx.Router, Button3)
 			}
 			if !found {
-				t.Fatalf("no payload offer before the gather; got %q", content)
+				t.Fatalf("never reached %q; got %q", needle, content)
 			}
-			// FROM PAYLOAD is index 0 now (operator ruling 2026-08-12), so no Down.
-			tapNavSlot(t, ctx, drawer(), Button3) // choose
-			if content, found = pumpUntil(frame, "md1 descriptors: 1", 32); !found {
-				t.Fatalf("the payload card never reached the gatherer's tally; got %q", content)
+			if tc.picker {
+				// FROM PAYLOAD is index 0 (operator ruling 2026-08-12), so no Down.
+				tapNavSlot(t, ctx, drawer(), Button3) // choose
+				if content, found = pumpUntil(frame, tc.want, 32); !found {
+					t.Fatalf("the payload card never reached the gatherer's tally; got %q", content)
+				}
+			} else if uiContains(content, "First card from where?") {
+				t.Errorf("the built path still draws a source picker; S1 leaves it "+
+					"exactly one answer, and a one-option Input screen is a tap that "+
+					"teaches nothing: %q", content)
 			}
-			if ctx.syswBundleSeed != "" {
-				t.Errorf("the card was left on ctx.syswBundleSeed after the gather "+
-					"consumed it: %q", ctx.syswBundleSeed)
+			if len(ctx.syswBundleSeeds) != 0 {
+				t.Errorf("cards were left on ctx.syswBundleSeeds after the gather "+
+					"consumed them: %q", ctx.syswBundleSeeds)
 			}
 		})
 	}

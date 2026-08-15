@@ -49,11 +49,11 @@ func TestTheBundleSeedIsBothWrittenAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(src)
-	if !strings.Contains(s, "ctx.syswBundleSeed = body") {
+	if !strings.Contains(s, "ctx.syswBundleSeeds = []string{body}") {
 		t.Error("nothing writes the bundle seed")
 	}
-	if !strings.Contains(s, "seed := ctx.syswBundleSeed") {
-		t.Error("nothing READS the bundle seed — the card would be taken and dropped")
+	if !strings.Contains(s, "range ctx.syswBundleSeeds") {
+		t.Error("nothing READS the bundle seeds — the cards would be taken and dropped")
 	}
 	// The SEED specifically must reach offer(). An earlier version of this
 	// assertion looked for "scr.g.offer(" anywhere in the file — which is

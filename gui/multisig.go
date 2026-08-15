@@ -74,7 +74,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// second way for a card to become part of a bundle, and only one of them
 	// would have the checks.
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeed = body
+		ctx.syswBundleSeeds = []string{body}
 	}
 	cards, ok := bundleGatherFlow(ctx, th)
 	if !ok {

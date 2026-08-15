@@ -57,6 +57,12 @@ export const NEEDLE_FRONT_DOOR = "Supply or build a policy?"; // gui/multisig.go
 export const NEEDLE_TEMPLATE = "Choose policy type"; // gui/multisig_build.go
 export const NEEDLE_N = "How many keys (n)?"; // gui/multisig_build.go
 export const NEEDLE_SLOT = "Which slot is your key?"; // gui/multisig_build.go
+// S1. Single-site in gui/multisig_build_payload.go, and reachable ONLY when the
+// payload supplied more cosigner cards than the policy has open slots — so
+// seeing it is proof of a payload-fed set that had to be narrowed, which is the
+// `0..n` ruling on screen rather than in a comment.
+export const NEEDLE_PICK = "Payload cards"; // gui/multisig_build_payload.go
+export const NEEDLE_PICK_CARD = "Use payload card"; // gui/multisig_build_payload.go
 
 // The gather text, which is deliberately NOT a needle. Named so that a future
 // author who reaches for it finds this comment instead.
@@ -137,23 +143,64 @@ export function assertNoNFC(where) {
  * @param {number}  [opts.k=2]              threshold; row index is k-1.
  * @param {number}  [opts.selfSlot=0]       which slot is the operator's.
  * @param {boolean} [opts.includeFp=false]  fingerprint presence.
+ * @param {number}  [opts.use=2]            how many payload cards to accept in
+ *          the bounded-selection picker. Only consulted on over-supply.
  * @returns {Promise<object>} the needles proven, the gather screen, and the
  *          NFC count — everything a stage gate asserts on.
  *
- * NOT DONE HERE, deliberately: loading the payload first. S0b's job is to prove
- * the flow is reachable and identifiable; the cards still arrive from the
- * reader today, and moving them to the payload IS S1's deliverable. When S1
- * lands, this driver grows a payload leg and the gather assertions change with
- * it — stated in the plan as a known cost rather than discovered later.
+ * THE PAYLOAD LEG IS S1'S (this header used to say it was NOT done here). S0b
+ * proved the flow was reachable and identifiable while the cards still arrived
+ * from the reader; moving them to the payload is S1's deliverable, so the driver
+ * now boots the payload, earns [compared] through route 2 (the operator digest
+ * comparison, gui/sysw_load.go), and lets the Build path feed every ClassMDMK
+ * record to the gather. `assertNoNFC` stays on every stage-gate run and is what
+ * makes that non-circular: four cards in the tally with ZERO records across the
+ * reader can only have come from the payload.
  */
-export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, includeFp = false } = {}) {
+export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, includeFp = false, use = 2 } = {}) {
   const t0 = performance.now();
   assertNoNFC("at entry");
 
   const proven = [];
   window.shSysw(payload);
+
+  // THE PAYLOAD LEG, and the BOOT OFFER IS SKIPPED ON PURPOSE.
+  //
+  // Measured, not reasoned about: `SyswReader()` is resolved ONCE, by the caller
+  // of syswLoadFlow (gui/gui.go:1796 at boot, gui/sysw_unload.go:36,52 from the
+  // carousel). The boot offer is already on screen before any script runs, so
+  // its reader was chosen before `shSysw` could speak — a walk that loaded there
+  // would silently load the RECORDS blob and then refuse at the Build path for
+  // want of cosigner cards. That is what the first run of this leg did, and the
+  // refusal was correct: the machine really did hold no cards.
+  //
+  // So: Back past the boot offer, then load from the `Load Payload` carousel
+  // entry, whose SyswReader() call happens after shSysw has been set.
   await tap(BACK);                       // Back == skip the boot payload offer
   await waitFor("SeedHammer");
+  await goTo("Load Payload");
+  await tap(CONFIRM, 500);               // enter Load Payload -> reads the region
+
+  // The digest screen is [compared] route 2 (gui/sysw_load.go), and confirming
+  // it is what authorises `takeAll` to hand the cards to a program at all.
+  // Declining would UNLOAD, and the Build path would then refuse — correctly —
+  // for want of cards.
+  await waitFor("Payload Digest");
+  await tap(CONFIRM, 400);               // "yes, it matches" -> compared
+
+  // THE WARNINGS LEG, also found by RUNNING this. The cards payload carries a
+  // ClassMnemonic (masterA, for S4's `both` slot), so §3.3.3's F1 flag fires —
+  // "A SECRET is stored unencrypted in flash" — and it is followed by a
+  // KEEP/UNLOAD choice. UNLOAD is choice 1; taking it would drop the session and
+  // the Build path would refuse for want of cards, which is correct behaviour
+  // and a useless walk. KEEP is choice 0 and the default, so CONFIRM alone is
+  // right — but the screen must be WAITED for, because tapping blind through it
+  // lands the tap on whatever came next.
+  await waitFor("Payload Warnings");
+  await tap(CONFIRM, 400);               // acknowledge the flags
+  await waitFor("Keep this payload loaded?");
+  await tap(CONFIRM, 400);               // KEEP
+  await waitFor("Load Payload");          // back at the carousel entry
 
   const hops = await goTo("Engrave Multisig");
   await tap(CONFIRM, 400);
@@ -177,22 +224,64 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   await choose(includeFp ? 1 : 0, 2, GATHER_NOT_A_NEEDLE,
     includeFp ? "include fingerprints" : "omit fingerprints");
 
-  const screen = window.shScreen();
+  // THE GATHER, now fed entirely by the payload. The tally is read rather than
+  // asserted against a hard-coded number: what matters to S1's gate is that the
+  // count is the payload's, not the reader's, and `presented === 0` is what says
+  // so. The count itself is REPORTED so a record can show it.
+  const gatherScreen = window.shScreen();
   const presented = assertNoNFC("at the cosigner gather");
+  const mkTally = /mk1keys:(\d+)/.exec(squash(gatherScreen));
+  const cardsGathered = mkTally ? Number(mkTally[1]) : -1;
+  if (cardsGathered <= 0) {
+    throw new Error(`the gather holds ${cardsGathered} mk1 card(s) with nothing ` +
+      `across the reader; the payload feed did not run. Screen: ${JSON.stringify(gatherScreen)}`);
+  }
+
+  await tap(CONFIRM, 500);               // Done adding cards
+
+  // BOUNDED SELECTION. It appears only on over-supply — the delivered payload
+  // carries four cards and Trace A is a 2-of-3, which is exactly the state the
+  // `0..n` ruling exists for. On an equal count the flow auto-fills and this
+  // whole leg is skipped, so the needle's PRESENCE is the evidence, and it is
+  // reported rather than assumed.
+  const openSlots = n - 1;
+  let selected = false;
+  if (cardsGathered > openSlots) {
+    await waitFor(NEEDLE_PICK);
+    proven.push(NEEDLE_PICK);
+    selected = true;
+    await tap(CONFIRM, 400);             // past the read-only list of what arrived
+    await waitFor(NEEDLE_PICK_CARD);
+    proven.push(NEEDLE_PICK_CARD);
+    for (let taken = 0; taken < use; taken++) {
+      // "USE THIS CARD" is row 0 and the default, so CONFIRM alone takes it.
+      await tap(CONFIRM, 400);
+    }
+  }
+
+  // S1 ENDS AT A SCREEN, NOT AN ENGRAVE (plan §3 preamble, F-175). The seed
+  // entry is the first screen PAST the cosigner set, so reaching it is the
+  // proof that the set resolved — and it is where this walk stops.
+  const screen = await waitFor("Input Seed");
+  const presentedAtEnd = assertNoNFC("after the cosigner set resolved");
 
   return {
     elapsedSec: Math.round((performance.now() - t0) / 1000),
     carouselHops: hops,
-    params: { n, k, selfSlot, includeFp },
+    params: { n, k, selfSlot, includeFp, use },
     // The needles that were actually observed, each single-site by
     // needle_test.go. This list is the proof of WHICH FLOW, and it is the
-    // reason the screen below is reportable rather than misleading.
+    // reason the screens below are reportable rather than misleading.
     needlesProven: proven,
-    presented,
+    presented: presentedAtEnd,
+    cardsGathered,
+    openSlots,
+    selected,
+    gatherScreen,
     screen,
     // Recorded so a reader can see for themselves that the gather text is
     // identical in the sibling flow, and therefore proves nothing alone.
-    gatherTextIsNotEvidence: squash(screen).includes(squash(GATHER_NOT_A_NEEDLE)),
-    ok: proven.length === 4 && presented === 0,
+    gatherTextIsNotEvidence: squash(gatherScreen).includes(squash(GATHER_NOT_A_NEEDLE)),
+    ok: proven.length === 6 && presentedAtEnd === 0 && cardsGathered > 0 && selected,
   };
 }
