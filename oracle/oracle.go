@@ -225,15 +225,9 @@ type InputTuple struct {
 	Seeds     []SeedRef `json:"seeds"`
 }
 
-// GateRecord is what a gate emits: which oracles it trusted, established by
-// commit, and the exact inputs.
-type GateRecord struct {
-	Oracles []Resolved `json:"oracles"`
-	Inputs  InputTuple `json:"inputs"`
-}
-
-// Marshal renders the gate record as indented JSON.
-func (g GateRecord) Marshal() ([]byte, error) { return json.MarshalIndent(g, "", "  ") }
+// GateRecord — and the rest of what a gate emits — lives in record.go. It grew
+// past "oracles plus inputs" once it had to be BOUND to the walk that produced
+// the artifacts, which is the difference between a record and a note.
 
 func reportedVersion(bin string) string {
 	if bin == "" {

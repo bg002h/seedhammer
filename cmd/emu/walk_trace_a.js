@@ -130,9 +130,14 @@ const HANDLERS = [
  *        forgets to set one is still fast. Pass a number only to override --
  *        e.g. 1 to watch a plate cut in real time.
  * @param {number}  [opts.plates=6]     Stop once this many plates are engraved.
- * @param {boolean} [opts.perPlateDigest=false] Record each plate's toolpath
+ * @param {boolean} [opts.perPlateDigest=true] Record each plate's toolpath
  *        digest as it completes. The recording resets per plate, so this is the
  *        only moment a plate's digest can be read.
+ *        DEFAULTS ON since 2026-08-14: cmd/gaterecord refuses a walk with no
+ *        plate digests -- a gate record with none is bound to nothing -- and a
+ *        flag that must be remembered to make a run recordable is a way to
+ *        finish a two-hour walk and find it cannot anchor the gate. The cost is
+ *        one summary() read per completed plate.
  * @param {number}  [opts.pollMs=75]     How often to sample progress.
  * @param {number}  [opts.settleMs=150]  Pause after the redraw tap before reading.
  * @param {number}  [opts.chunkGapMs=150] Gap between queued NFC chunks.
@@ -143,7 +148,7 @@ const HANDLERS = [
  *        guessed at.
  * @returns {Promise<object>} census, digests, acts and elapsed time.
  */
-export async function run({ pace, plates = 6, perPlateDigest = false,
+export async function run({ pace, plates = 6, perPlateDigest = true,
                             pollMs = 75, settleMs = 150, chunkGapMs = 150 } = {}) {
   if (typeof window.shPace !== "function") {
     throw new Error("shPace is missing -- this is a STALE emu.wasm. " +
@@ -254,6 +259,11 @@ export async function run({ pace, plates = 6, perPlateDigest = false,
     pace: pacing,
     paceOverridden: pace !== undefined,
     elapsedSec: Math.round((performance.now() - t0) / 1000),
+    // The digest the DEVICE showed for the payload this walk loaded, asserted
+    // above against CARDS_DIGEST and returned so a gate record can name what it
+    // ran against. Carried, not re-derived: cmd/gaterecord checks it against the
+    // payload the operator says they meant to use, so the two can disagree.
+    payloadDigest: digest,
     census,
     digests,
     gathered,

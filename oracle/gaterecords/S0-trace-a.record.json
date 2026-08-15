@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "stage": "S0",
+  "recorded_at": "2026-08-15T01:52:40Z",
+  "oracles": [
+    {
+      "name": "md",
+      "commit": "5a0a4f41017d71d47f70684c145702d4ca0c3aa9",
+      "method": "binary-sha256",
+      "reported_version": "md 0.13.0",
+      "version_matches_pin": true
+    },
+    {
+      "name": "mk",
+      "commit": "018aca00b4a2da50323e4c83c82d019febf17e14",
+      "method": "binary-sha256",
+      "reported_version": "mk 0.12.1",
+      "version_matches_pin": true
+    },
+    {
+      "name": "ms",
+      "commit": "bf77f89aca8e28601921fca974089d278060cab0",
+      "method": "binary-sha256",
+      "reported_version": "ms 0.14.0",
+      "version_matches_pin": true
+    }
+  ],
+  "inputs": {
+    "template": "bundle-engrave: Load Payload, then Engrave Bundle over three gathered cosigner cards (S0's walk builds no policy; that is S1-S5)",
+    "n": 3,
+    "k": 0,
+    "slot_order": [
+      0,
+      1,
+      2
+    ],
+    "fp_choice": "unset",
+    "origins": [
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h"
+    ],
+    "seeds": [
+      {
+        "label": "payload:masterA (card A@0)",
+        "digest": "c557eec878dfd852"
+      },
+      {
+        "label": "payload:masterB (card B@0)",
+        "digest": "ecb0e7ba498c5920"
+      },
+      {
+        "label": "payload:masterC (card C@0)",
+        "digest": "3a64bcd9cea43c0a"
+      }
+    ]
+  },
+  "payload": {
+    "name": "cmd/emu/sysw_cards_payload.bin",
+    "digest": "2527 1e58 3f3e aa03 ae18 f359 c72b 76e3"
+  },
+  "walk": {
+    "file": "S0-trace-a.walk.json",
+    "sha256": "fb294b52b5d3ec09c524ce542d03275f70aae3116142e8512a7cd056e99841e7",
+    "pace": 2048,
+    "elapsed_sec": 174,
+    "census": {
+      "strings": [
+        "mk1qpd8cwpqqsq4kj90x4eutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5av5muuc0cmfrjw2",
+        "mk1qpd8cwpp806lhaeh6reknylagmwyjycf8044xtt9flsdlkvt6f6cthyl995lpm5zlrp6yv6kc36tw",
+        "mk1qpmm93pqqsq4kj90xkux3r03q5zg3vs7llvu2xd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emag0zr8gh9upnj5stuxqtzdn4uxkd",
+        "mk1qpmm93ppwyp4dfykwfkgg6fxyxetdcmythf4hsqzd3v879jprztejzs7rl0vk8mlv7lzva7w6nage",
+        "mk1qp073xpqqsq4kj90x55xg5qxq5zg3vs7yxvkgrq39p0l68ewgkud5t4n95k8j84204m9xvr7cunrjqfurja893lkxup4zlyyf7spk75exfku",
+        "mk1qp073xpp09hdq9zxg25mzsetnyhhc2j7yvnr37vchl8xc05vf2pnnz46ffl6ymp2sa0x397e56ypk"
+      ],
+      "announced": 18,
+      "unattributed": 0
+    },
+    "plate_digests": [
+      "6ec130299512ae30",
+      "ce88ff4863fdff30",
+      "a2ba7792d7ac9fc0",
+      "55b380890d0b2dff",
+      "c965ef76e4057cbe",
+      "088f93514efd88cb"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "payload": {
+    "name": "cmd/emu/sysw_cards_payload.bin",
+    "digest": "2527 1e58 3f3e aa03 ae18 f359 c72b 76e3"
+  },
+  "inputs": {
+    "template": "bundle-engrave: Load Payload, then Engrave Bundle over three gathered cosigner cards (S0's walk builds no policy; that is S1-S5)",
+    "n": 3,
+    "k": 0,
+    "slot_order": [0, 1, 2],
+    "fp_choice": "unset",
+    "origins": [
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h"
+    ],
+    "seeds": [
+      {
+        "label": "payload:masterA (card A@0)",
+        "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      },
+      {
+        "label": "payload:masterB (card B@0)",
+        "words": "legal winner thank year wave sausage worth useful legal winner thank yellow"
+      },
+      {
+        "label": "payload:masterC (card C@0)",
+        "words": "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
+      }
+    ]
+  }
+}
