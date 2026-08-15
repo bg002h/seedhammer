@@ -64,18 +64,29 @@ func countInk(m *image.RGBA) int {
 
 // assertFrameHasBody fails when a frame carries less ink than a screen with a
 // title and a body must.
+//
+// THE FLOOR IS MEASURED, NOT WRITTEN DOWN (F-183, filed from S3). It used to be
+// `const floor = 4000`, calibrated on the unload result screen: the body that
+// shipped blank drew 2652 px and the fixed one 6688, so 4000 separated them.
+// That was right for its one caller and wrong as a general instrument, which is
+// what the generic name and message invited it to become. A title-only frame
+// with THREE nav buttons draws 5482 px -- the third is StylePrimary and so
+// filled -- and on any such screen the old floor passed a completely blank body.
+// Latent rather than live, since the one caller is a two-button modal; latent is
+// the state in which this class has repeatedly shipped.
+//
+// titleOnlyInk searches 1..3 nav buttons and returns the WORST, so the floor now
+// tracks the chrome rather than a number measured once on one screen.
 func assertFrameHasBody(t *testing.T, ink int, what string) {
 	t.Helper()
-	// CALIBRATED against the real defect rather than guessed. Measured on the
-	// unload result screen: the body that shipped blank drew 2652 px, the fixed
-	// one 6688. A floor of 2000 -- my first guess -- passed the defect. 4000
-	// separates them with room on both sides.
-	const floor = 4000
+	blank := titleOnlyInk(t)
+	floor := blank + bodyInkMargin
 	if ink < floor {
-		t.Errorf("%s drew only %d ink pixels (floor %d) — a screen with a title AND "+
-			"a body draws far more, so this is near-blank whatever its text ops "+
-			"claim. Suspect a body too long to lay out, or glyphs the face lacks.",
-			what, ink, floor)
+		t.Errorf("%s drew only %d ink pixels (floor %d, from a worst-case body-less "+
+			"frame of %d) -- a screen with a title AND a body draws far more, so this "+
+			"is near-blank whatever its text ops claim. Suspect a body too long to "+
+			"lay out, or glyphs the face lacks.",
+			what, ink, floor, blank)
 	}
 }
 

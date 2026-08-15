@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"strings"
 	"testing"
 	"testing/synctest"
 )
@@ -86,102 +85,20 @@ func TestGatherPendingRefusalIsReadableFromBuild(t *testing.T) {
 	})
 }
 
-// blankingGlyphs are the runes measured to defeat the body face. Each blanks the
-// ENTIRE body of the frame it appears in, not merely its own line, and every
-// content-based assertion in this package reports the text as present anyway.
-var blankingGlyphs = []string{"\u2014", "\u2013", "\u00b7", "\u2018", "\u2019", "\u201c", "\u201d"}
-
-// stringLiterals returns the double-quoted literals in a chunk of Go source.
+// The blocklist that used to live here is GONE, and its replacement is
+// gui/font_coverage_test.go (S3b).
 //
-// LITERALS, NOT RAW SOURCE. The first version of this guard scanned the function
-// text and fired on a COMMENT containing an em-dash, which is not a defect and
-// would have taught the next author to delete the guard rather than the glyph.
-// Prose may say what it likes; only what reaches the screen is checked.
-func stringLiterals(src string) []string {
-	var out []string
-	inStr, esc := false, false
-	var cur strings.Builder
-	lines := strings.Split(src, "\n")
-	for _, line := range lines {
-		if i := strings.Index(strings.TrimSpace(line), "//"); i == 0 {
-			continue // whole-line comment
-		}
-		for _, r := range line {
-			switch {
-			case esc:
-				esc = false
-				cur.WriteRune(r)
-			case inStr && r == '\\':
-				esc = true
-			case r == '"':
-				if inStr {
-					out = append(out, cur.String())
-					cur.Reset()
-				}
-				inStr = !inStr
-			case inStr:
-				cur.WriteRune(r)
-			}
-		}
-		inStr, esc = false, false // literals do not span lines in this package
-		cur.Reset()
-	}
-	return out
-}
-
-// TestGatherScreenTextCarriesNoBlankingGlyph is the cheap standing guard over
-// EVERY string the shared gather screen can draw: the three "Done" refusals, the
-// per-scan feedback line and the tally.
+// It was `blankingGlyphs`, seven runes measured one at a time, checked against
+// the string literals of three named functions. Two later inventories built the
+// same way came back 27 and 21 sites and both missed four whole classes -- the
+// checkmark, the ellipsis, the arrow and the keyboard sentinel -- because a list
+// of the runes somebody has already been bitten by cannot catch the next one.
 //
-// The feedback strings matter as much as the refusals and were not in the
-// review's list: they are appended to the GATHER's own body, so one of them
-// would blank the card tally itself rather than a modal. They are set only from
-// a scan, and the SH2 has a working reader (§0.1b), so they reach real hardware.
+// font/bitmap indexes glyphs by rune up to unicode.MaxASCII, so the real
+// predicate is "does any face have this glyph", and asking the face needs no
+// list at all. TestProductionStringsAreDrawable asks it of EVERY production
+// string literal in gui/*.go, so this file's three functions are covered as a
+// consequence rather than by being named.
 //
-// A drive covers the one refusal reachable from a payload-fed Build; this covers
-// the rest, which need a reader or an empty gather to reach.
-func TestGatherScreenTextCarriesNoBlankingGlyph(t *testing.T) {
-	for _, fn := range []string{
-		"func bundleGatherFlow(",
-		"func (s *bundleGatherScreen) feedback(",
-		"func (s *bundleGatherScreen) tally(",
-	} {
-		body := funcBody(t, "bundle_flow.go", fn)
-		lits := stringLiterals(body)
-		if len(lits) == 0 {
-			t.Fatalf("%s yielded no string literals, so this guard checks nothing", fn)
-		}
-		for _, lit := range lits {
-			for _, g := range blankingGlyphs {
-				if strings.Contains(lit, g) {
-					t.Errorf("%s draws %q, which carries %q: the frame renders its "+
-						"title and NOTHING else, and uiContains still reports the text "+
-						"as present", fn, lit, g)
-				}
-			}
-		}
-	}
-}
-
-// TestStringLiteralScannerCanSee is the mutation proof for the scanner itself. A
-// stringLiterals that silently returned nothing would make every guard above
-// vacuous — the false-PASS shape this whole class exists to remove.
-func TestStringLiteralScannerCanSee(t *testing.T) {
-	src := "func f() {\n\t// a comment with \u2014 in it\n\ts := \"clean\"\n\tt := \"dirty \u2014 here\"\n}"
-	got := stringLiterals(src)
-	if len(got) != 2 {
-		t.Fatalf("scanner found %d literal(s), want 2: %q", len(got), got)
-	}
-	if strings.Contains(got[0], "\u2014") {
-		t.Errorf("scanner reported the clean literal as dirty: %q", got[0])
-	}
-	if !strings.Contains(got[1], "\u2014") {
-		t.Errorf("scanner missed the glyph in %q", got[1])
-	}
-	// And the COMMENT must not be reported, or the guard fires on prose.
-	for _, g := range got {
-		if strings.Contains(g, "a comment") {
-			t.Errorf("scanner picked up a comment as a literal: %q", g)
-		}
-	}
-}
+// The drive test above stays: it is the only thing here that proves a REACHED
+// screen draws ink, which a source lookup cannot do.
