@@ -533,12 +533,19 @@ func buildSeedKeyMismatchMessage(e errBuildSeedKeyMismatch, origins []cosignerOr
 			break
 		}
 	}
+	// THE FIRST CAUSE NAMED IS THE ONE THE NEGATIVE CONTROL PRODUCES (review M2).
+	// S4's walk reaches this screen purely by choosing the wrong payload card for
+	// the self slot, and the earlier text named neither that cause nor its remedy
+	// -- it sent the operator to rewrite a payload that was never wrong. A refusal
+	// that misdirects the fix is only marginally better than one that misdirects
+	// the blame, so the cause the flow can actually produce leads.
 	return fmt.Sprintf("You said slot @%d%s holds YOUR key, but that card's key is not "+
 		"what your seed derives at %s. Nothing was engraved.\n\n"+
-		"Likely causes: a mistyped passphrase, one skipped where the card used it, a "+
-		"different seed, or a card from another wallet.\n\n"+
-		"Reassigning this slot SUPPRESSES the check rather than fixing it. Check the "+
-		"passphrase and the seed, or rewrite the payload on the host with `me sysw pack`.",
+		"Likely causes: the wrong card for this slot, a mistyped or skipped "+
+		"passphrase, or another wallet's card.\n\n"+
+		"Reassigning this slot SUPPRESSES the check rather than fixing it. Go back and "+
+		"pick a different card, check the passphrase, or rewrite the payload with "+
+		"`me sysw pack`.",
 		e.Slot, who, e.Declared)
 }
 

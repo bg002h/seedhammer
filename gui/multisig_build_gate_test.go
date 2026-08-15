@@ -519,3 +519,89 @@ func TestGateRefusalsAreDrawnWithoutScrolling(t *testing.T) {
 		})
 	}
 }
+
+// TestGateErrorDispatchRoutesEveryArm closes review finding M1.
+//
+// gui/multisig_build.go's post-gate block has three arms: the seed-key
+// mismatch, the fingerprint contradiction, and a generic fallback. Every other
+// test in this file builds a MESSAGE; none of them exercises the ROUTING that
+// decides which message an operator actually sees. So the arm that says "Card
+// contradicts seed" and the fallback that says "Couldn't check your key against
+// your seed." were executed by no test and no walk.
+//
+// Nothing was wrong with them -- the reviewer replicated the dispatch over real
+// gate errors and found it correct -- which is exactly why this is a REGRESSION
+// guard rather than a fix. An arm no test enters is an arm a later edit can
+// silently re-point, and this one chooses which explanation stands between a
+// wrong key and steel.
+//
+// It mirrors the production dispatch rather than calling it, because the
+// production block is inline in a flow that needs a Context, a payload and a
+// gathered card set. That is a real limitation and is stated rather than
+// hidden: this pins the errors.As LADDER ORDER and the title each arm yields,
+// and it would NOT catch the block being deleted outright. The walk's FAIL arm
+// is what proves the mismatch arm is reached in production.
+func TestGateErrorDispatchRoutesEveryArm(t *testing.T) {
+	origins := []cosignerOrigin{{slot: 1, card: 2}}
+
+	// The same ladder as gui/multisig_build.go, in the same order.
+	route := func(gerr error) (title, body string) {
+		var mm errBuildSeedKeyMismatch
+		if errors.As(gerr, &mm) {
+			return "Key does not match seed", buildSeedKeyMismatchMessage(mm, origins)
+		}
+		var fc errBuildFingerprintContradicts
+		if errors.As(gerr, &fc) {
+			return "Card contradicts seed", buildFingerprintContradictsMessage(fc, origins)
+		}
+		return "Build Policy", "Couldn't check your key against your seed."
+	}
+
+	for _, tc := range []struct {
+		name      string
+		err       error
+		wantTitle string
+		wantIn    string
+	}{
+		{
+			name:      "mismatch arm",
+			err:       errBuildSeedKeyMismatch{Slot: 1, Declared: "m/48'/0'/0'/2'"},
+			wantTitle: "Key does not match seed",
+			wantIn:    "SUPPRESSES",
+		},
+		{
+			name:      "fingerprint arm",
+			err:       errBuildFingerprintContradicts{Slot: 1, Declared: "deadbeef", Derived: "feedface"},
+			wantTitle: "Card contradicts seed",
+			wantIn:    "deadbeef",
+		},
+		{
+			name:      "generic fallback",
+			err:       errors.New("some unmodelled gate failure"),
+			wantTitle: "Build Policy",
+			wantIn:    "Couldn't check your key against your seed.",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			title, body := route(tc.err)
+			if title != tc.wantTitle {
+				t.Errorf("title = %q, want %q -- the dispatch ladder sends this error "+
+					"to the wrong screen", title, tc.wantTitle)
+			}
+			if !strings.Contains(body, tc.wantIn) {
+				t.Errorf("body does not contain %q, so this arm is not the one that ran:\n%s",
+					tc.wantIn, body)
+			}
+		})
+	}
+
+	// LADDER ORDER, not just membership: a fingerprint contradiction must NOT be
+	// swallowed by the mismatch arm. If a future edit made one error type satisfy
+	// both errors.As calls, the first arm would win silently and the operator
+	// would be told to check a passphrase over a fingerprint disagreement.
+	fcTitle, _ := route(errBuildFingerprintContradicts{Slot: 1, Declared: "a", Derived: "b"})
+	mmTitle, _ := route(errBuildSeedKeyMismatch{Slot: 1, Declared: "m/48'/0'/0'/2'"})
+	if fcTitle == mmTitle {
+		t.Fatalf("both error types route to %q, so one arm is unreachable", fcTitle)
+	}
+}
