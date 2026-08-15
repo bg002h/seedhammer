@@ -196,7 +196,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (6) Review the (stub, slots) ordering handle (I-ORDER), carrying S1's §0.1
 	// announcement of which payload cards filled which slots. Back -> abort.
-	if !buildReviewFlow(ctx, th, stub, slots, p.IncludeFp,
+	if !buildReviewFlow(ctx, th, p.Script, stub, slots, p.IncludeFp,
 		buildProvenanceLines(origins, len(mk1s))) {
 		return
 	}
@@ -805,8 +805,13 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 // operator picked, and §0.1 clause 3 puts such an announcement on the
 // confirmation surface itself, not below the fold. Empty for a set that reached
 // here by some other route.
-func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) []string {
+//
+// `script` drives §0.1a's ORIGIN announcement, which is the second assumption on
+// this screen and the one nobody owned until 2026-08-15. It sits with the
+// provenance line, above the stub, for the same clause-3 reason.
+func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) []string {
 	lines := append([]string{}, provenance...)
+	lines = append(lines, buildOriginAnnouncement(script)...)
 	lines = append(lines,
 		fmt.Sprintf("Policy stub: %x", stub),
 		"Slots:",
@@ -823,15 +828,65 @@ func buildReviewLines(stub [4]byte, slots []md.SlotInfo, includeFp bool, provena
 	} else {
 		lines = append(lines, "Fingerprints OMITTED on every slot.")
 	}
-	lines = append(lines, "Fingerprint choice changes the policy id — match your coordinator.")
+	lines = append(lines, "Fingerprint choice changes the policy id, so match your coordinator.")
 	return lines
+}
+
+// buildOriginAnnouncement is §0.1a: the device says WHICH derivation path it
+// stamped on every slot, and by WHOSE authority.
+//
+// The assumption exists because multisigSharedOrigin() is unconditional while
+// BIP-48 is not: it assigns 2' to native segwit, 1' to nested segwit, and
+// NOTHING to legacy P2SH. So the operator picks a script type and the device
+// silently picks a path from it — a default nobody asked for.
+//
+// ANNOUNCE, DO NOT REFUSE, and §0.1 clause 2 is what decides it: the origin is
+// printed with the xpub, carried in every mk1 and shown on the restore doc, so a
+// wrong assumption is detectable by reading the artifacts. That makes it eligible
+// to assume, and having assumed it the device owes the operator the sentence.
+//
+// Three different sentences, because the three cases are genuinely different and
+// a shared one would be false for two of them:
+//
+//   - wsh, the BIP's own recommended default. Cite BIP-48 and stop.
+//   - sh(wsh), where BIP-48 assigns 1' and this build uses 2' until S5's
+//     per-slot origins land. Say both paths; this is the one case where the
+//     device is knowingly off the assignment it is citing.
+//   - sh, where NO BIP assigns anything. There is no authority to cite, so the
+//     device owns the choice out loud. Citing BIP-48 here would be a false claim
+//     of authority, which is worse than saying nothing.
+//
+// NO EM-DASHES. Measured 2026-08-15: a body line containing one rasters at
+// 2652 px against 7419 for the same text with a hyphen — the line does not draw
+// at all, which is F-151's shape and exactly what test 5's raster floor is for.
+func buildOriginAnnouncement(script md.MultisigScript) []string {
+	shared := multisigSharedOrigin().String()
+	switch script {
+	case md.MultisigShWsh:
+		return []string{
+			fmt.Sprintf("Key origins: %s on every slot.", shared),
+			fmt.Sprintf("Note: BIP-48 assigns m/48h/0h/0h/1h to nested segwit. "+
+				"This build uses the shared %s path until per-card origins land.", shared),
+		}
+	case md.MultisigSh:
+		return []string{
+			fmt.Sprintf("Key origins: %s on every slot.", shared),
+			fmt.Sprintf("No BIP assigns a derivation path for legacy P2SH multisig, "+
+				"so this is this device's convention, %s. It is recorded on every "+
+				"artifact.", shared),
+		}
+	default:
+		return []string{
+			fmt.Sprintf("Key origins: %s, the BIP-48 path for native segwit.", shared),
+		}
+	}
 }
 
 // buildReviewFlow displays the read-only (stub, slots) review and lets the
 // operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
 // paged read-only restore-doc screen idiom.
-func buildReviewFlow(ctx *Context, th *Colors, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) bool {
-	lines := buildReviewLines(stub, slots, includeFp, provenance)
+func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) bool {
+	lines := buildReviewLines(script, stub, slots, includeFp, provenance)
 	return confirmReviewScreen(ctx, th, "Policy Review", lines)
 }
 

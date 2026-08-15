@@ -428,7 +428,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 
 	// And the review screen SHOWS it — §0.1 clause 3 puts the announcement on
 	// the confirmation surface, not in scrollback.
-	lines := buildReviewLines([4]byte{1, 2, 3, 4}, slots, true,
+	lines := buildReviewLines(md.MultisigWsh, [4]byte{1, 2, 3, 4}, slots, true,
 		buildProvenanceLines(origins, len(cards)))
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{"@0", "@2", "payload", "1 and 3", "of 3"} {
