@@ -141,9 +141,10 @@ const ENGRAVE_HANDLERS = [
  * hold is wall-clock because gui.confirmDelay is, and a screen the handler list
  * does not recognise stops the walk instead of being tapped past.
  *
- * The plate count is the caller's DERIVED expectation, not a parameter the walk
- * discovers: F-170 is the rule that a walk asserting what it produced asserts
- * nothing.
+ * `plates` here is a LOOP BOUND: how long to keep watching the toolpath before
+ * giving up. It is deliberately not an assertion — F-170 is the rule that a walk
+ * asserting what it produced asserts nothing, and I-1 is the finding that
+ * asserting what its CALLER said it would produce is no better.
  */
 async function runEngraveTail({ plates, pollMs = 75, settleMs = 150 }) {
   const acts = [], digests = [];
@@ -277,9 +278,12 @@ export function assertNoNFC(where) {
  *          carries (master A) with confirm-taps only.
  * @param {boolean} [opts.engrave=false] drive past the review to a completed
  *          engrave and return the toolpath census.
- * @param {number}  [opts.plates=9]      how many plates a completed run cuts:
- *          1 ms1 + 2 mk1 chunks + 6 md1 chunks for a full 2-of-3 wsh build.
- *          DERIVED from the inputs, never from what the walk produced (F-170).
+ * @param {number}  [opts.plates=9]      runEngraveTail's LOOP BOUND — when the
+ *          driver stops watching the toolpath. It appears in no term of `ok`
+ *          (I-1): a caller-supplied count cannot stand in for content, and this
+ *          one was hand-derived in prose, which makes it worse. What the engraved
+ *          strings should BE is settled by the derived expectation committed
+ *          beside the gate record, never here. See the note on `ok` below.
  * @param {string}  [opts.expect="engrave"]  "engrave" or "duplicate". The
  *          refusal arm is a first-class outcome, not a failure.
  * @returns {Promise<object>} the needles proven, the gather screen, and the
@@ -516,19 +520,39 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     // Recorded so a reader can see for themselves that the gather text is
     // identical in the sibling flow, and therefore proves nothing alone.
     gatherTextIsNotEvidence: squash(gatherScreen).includes(squash(GATHER_NOT_A_NEEDLE)),
+    // DATA, not a verdict (I-1). Reported so a reader can see the count; nothing
+    // here compares it to anything.
+    plateCount: census === null ? null : census.strings.length,
     // SEVEN since D-4 gave the gather a needle of its own. The count is spelt
     // out rather than derived from the array so that a needle silently dropped
     // from the walk fails here instead of lowering the bar.
     //
-    // `ok` NAMES ITS OUTCOME. A run that expected the duplicate refusal is green
-    // when it got one, and a run that expected an engrave is green only when the
-    // census holds exactly the DERIVED plate count with nothing unattributed
-    // (F-170: a walk that engraved N wrong strings must not be green).
+    // `ok` NAMES ITS OUTCOME, and CONTAINS ONLY TERMS THE EMULATOR WAS OBSERVED
+    // TO PRODUCE (I-1). A run that expected the duplicate refusal is green when
+    // it got one; a run that expected an engrave is green only when something
+    // was actually cut and everything cut was attributable.
+    //
+    // The term `census.strings.length === plates` USED TO BE HERE, and `plates`
+    // is supplied by the caller — the one term in this expression standing in
+    // for CONTENT that the walk never observed. Its default of 9 was worse than
+    // caller-supplied: it was hand-derived in a doc comment ("1 ms1 + 2 mk1
+    // chunks + 6 md1 chunks"), which is precisely the shape this project's rules
+    // forbid. A run of `w.run({ engrave: true, plates: 9 })` that cut nine WRONG
+    // strings returned ok: true.
+    //
+    // A walk cannot derive, so it no longer claims to. What the strings SHOULD
+    // be is settled by the expectation committed beside the gate record
+    // (oracle/gaterecords/*.expect.json), derived from the primary toolchain,
+    // which cmd/gaterecord refuses to mint a record without and which
+    // oracle.TestEveryGateRecordCensusMatchesItsCommittedExpectation compares on
+    // every machine with no toolchain and no skip path. `plates` survives only
+    // as runEngraveTail's loop bound — when to stop watching, never whether it
+    // was right.
     ok: proven.length === 7 && presentedAtEnd === 0 && cardsGathered > 0 && selected &&
       (seedFrom === null
         || (expect === "duplicate" && refusal !== null)
         || (expect === "engrave" && !engrave && reviewScreen !== null)
         || (expect === "engrave" && engrave && census !== null
-            && census.strings.length === plates && census.unattributed === 0)),
+            && census.strings.length > 0 && census.unattributed === 0)),
   };
 }

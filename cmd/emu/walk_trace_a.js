@@ -130,6 +130,9 @@ const HANDLERS = [
  *        forgets to set one is still fast. Pass a number only to override --
  *        e.g. 1 to watch a plate cut in real time.
  * @param {number}  [opts.plates=6]     Stop once this many plates are engraved.
+ *        A LOOP BOUND ONLY, never a verdict (I-1): it decides when the driver
+ *        stops watching, and appears in no term of `ok`. A caller-supplied count
+ *        cannot stand in for content — see the note on `ok` below.
  * @param {boolean} [opts.perPlateDigest=true] Record each plate's toolpath
  *        digest as it completes. The recording resets per plate, so this is the
  *        only moment a plate's digest can be read.
@@ -265,12 +268,29 @@ export async function run({ pace, plates = 6, perPlateDigest = true,
     // payload the operator says they meant to use, so the two can disagree.
     payloadDigest: digest,
     census,
+    // DATA, not a verdict (I-1). The count is reported so a reader and a gate
+    // record can see it; nothing here compares it to anything, because this
+    // walk has no way to know what it SHOULD be.
+    plateCount: census.strings.length,
     digests,
     gathered,
     acts,
     screen: window.shScreen(),
+    // `ok` CONTAINS ONLY TERMS THE EMULATOR WAS OBSERVED TO PRODUCE (I-1).
+    //
+    // It used to read `census.strings.length === plates`, with `plates` a
+    // parameter defaulting to 6 — a number supplied by the caller standing in
+    // for CONTENT. A run that cut six WRONG strings satisfied it. That is
+    // F-170's own defect: it was fixed on the Go side, where the count falls out
+    // of len(DeriveExpected(...)), and left standing here verbatim.
+    //
+    // A walk cannot derive, so it no longer pretends to. What it CAN observe is
+    // that something was engraved and that everything engraved was attributable:
     // unattributed > 0 means something was cut that this census cannot NAME
-    // (F-160). It is a gate failure, not noise.
-    ok: census.strings.length === plates && census.unattributed === 0,
+    // (F-160), and a zero-length census means nothing was cut at all. What the
+    // strings SHOULD be is settled where it can be — by the derived expectation
+    // committed beside the gate record (oracle/gaterecords/*.expect.json), which
+    // cmd/gaterecord refuses to mint without.
+    ok: census.strings.length > 0 && census.unattributed === 0,
   };
 }
