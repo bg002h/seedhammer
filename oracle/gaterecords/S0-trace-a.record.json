@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "stage": "S0",
-  "recorded_at": "2026-08-15T01:52:40Z",
+  "recorded_at": "2026-08-15T05:06:12Z",
   "oracles": [
     {
       "name": "md",
@@ -12,9 +12,9 @@
     },
     {
       "name": "mk",
-      "commit": "018aca00b4a2da50323e4c83c82d019febf17e14",
+      "commit": "a38a908e143c2c4bd6405997d62385b3df01615f",
       "method": "binary-sha256",
-      "reported_version": "mk 0.12.1",
+      "reported_version": "mk 0.13.0",
       "version_matches_pin": true
     },
     {
@@ -61,9 +61,9 @@
   },
   "walk": {
     "file": "S0-trace-a.walk.json",
-    "sha256": "fb294b52b5d3ec09c524ce542d03275f70aae3116142e8512a7cd056e99841e7",
+    "sha256": "2dc9c5252d0ec188c961de56ed3ddbff5a73199cc7889fcc194c2c9453b0b5a3",
     "pace": 2048,
-    "elapsed_sec": 174,
+    "elapsed_sec": 181,
     "census": {
       "strings": [
         "mk1qpd8cwpqqsq4kj90x4eutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5av5muuc0cmfrjw2",

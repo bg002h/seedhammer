@@ -29,9 +29,9 @@
     {
       "name": "mk",
       "repo": "mnemonic-key",
-      "commit": "018aca00b4a2da50323e4c83c82d019febf17e14",
-      "sha256": "54349c6fb046a6f2700d852eaa6b8ecf4b2a65f612285ed6129ad0f7e7224ce9",
-      "version": "mk 0.12.1",
+      "commit": "a38a908e143c2c4bd6405997d62385b3df01615f",
+      "sha256": "030ca21851126964553e18be876e5d6e6edb917f02bd3dec01a5d217b01d3641",
+      "version": "mk 0.13.0",
       "checkout_clean_when_recorded": true
     },
     {
