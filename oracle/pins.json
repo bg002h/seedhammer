@@ -10,10 +10,28 @@
     "",
     "The three oracles come from THREE DIFFERENT repos; do not assume one.",
     "",
-    "Recorded 2026-08-14. Each repo was verified clean at the commit below at",
-    "the moment of recording, EXCEPT mnemonic-secret, which had 3 modified",
-    "files -- so its commit is a weaker attestation than the other two and is",
-    "marked. Re-record with scripts, not by hand, when any oracle is rebuilt:",
+    "md and mk recorded 2026-08-14; both repos were verified clean at the",
+    "commit below at the moment of recording.",
+    "",
+    "ms re-recorded 2026-08-15 at the ms-cli-v0.16.0 RELEASE TAG, whose target",
+    "commit is d49d5c09. F-177's scheduled bump: S5 extends the oracle, so the",
+    "S0 re-anchor happens once rather than twice. Note the tag is the release",
+    "identity and it is one CI-only commit BEHIND mnemonic-secret's master",
+    "(6fdfd36); the tag is what is pinned.",
+    "",
+    "checkout_clean_when_recorded is FALSE for ms, and the previous `true` was",
+    "wrong -- this very comment said the tree was dirty and 'is marked' while",
+    "the flag read true. The flag is recorded conservatively: the reference",
+    "checkout /scratch/code/shibboleth/mnemonic-secret carried 3 untracked",
+    "files and sat at master, not at the pinned tag, when this was recorded.",
+    "The binary itself was built by `cargo install --path crates/ms-cli",
+    "--locked` from a dedicated `git worktree` detached at d49d5c09, whose own",
+    "`git status --porcelain` was empty -- so the bytes came from a clean tree",
+    "AT the pinned commit, and the flag understates rather than overstates. The",
+    "sha256 below was shown to be independent of the build directory: two",
+    "worktrees at different paths produced byte-identical binaries.",
+    "",
+    "Re-record with scripts, not by hand, when any oracle is rebuilt:",
     "  sha256sum ~/.cargo/bin/md",
     "  git -C /scratch/code/shibboleth/descriptor-mnemonic rev-parse HEAD"
   ],
@@ -37,10 +55,10 @@
     {
       "name": "ms",
       "repo": "mnemonic-secret",
-      "commit": "ddfa497090bd945dce9b53453c7eeebf3e8d623d",
-      "sha256": "e63d9cb524c839e94e24bd283620db489d47363a760f6f84541e882ba783cec0",
-      "version": "ms 0.15.0",
-      "checkout_clean_when_recorded": true
+      "commit": "d49d5c099bab89a1738f0d0c3df9306b354d62c3",
+      "sha256": "9727689c5ee049c0135a386d7db1c0b58d45f239aced0ade7f6f288c5b1202e5",
+      "version": "ms 0.16.0",
+      "checkout_clean_when_recorded": false
     }
   ]
 }

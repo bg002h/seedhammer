@@ -3,14 +3,14 @@
   "stage": "S0",
   "record": "S0-trace-a.record.json",
   "inputs": "S0-trace-a.inputs.json",
-  "note": "Re-derived live by `cmd/gaterecord -expect-only` and compared against both the walk and the record already on disk; neither was rewritten. Committed so the comparison runs where no Rust toolchain exists — which is every machine whose verdict gates a merge.",
+  "note": "Derived live by cmd/gaterecord and compared against the walk's census before the record was written. Committed so the comparison runs where no Rust toolchain exists — which is every machine whose verdict gates a merge.",
   "derivation": {
     "oracles": [
       {
         "name": "ms",
-        "commit": "ddfa497090bd945dce9b53453c7eeebf3e8d623d",
-        "sha256": "e63d9cb524c839e94e24bd283620db489d47363a760f6f84541e882ba783cec0",
-        "version": "ms 0.15.0"
+        "commit": "d49d5c099bab89a1738f0d0c3df9306b354d62c3",
+        "sha256": "9727689c5ee049c0135a386d7db1c0b58d45f239aced0ade7f6f288c5b1202e5",
+        "version": "ms 0.16.0"
       },
       {
         "name": "mk",
@@ -23,7 +23,7 @@
       "ms derive --phrase <seed words: see the inputs file> --template bip48-p2wsh --account 0 --network mainnet --json",
       "mk encode --xpub <account xpub from ms derive> --origin-path m/48'/0'/0'/2' --origin-fingerprint <master fp from ms derive> --policy-id-stub 5b48af35 --group-size 0"
     ],
-    "derived_at": "2026-08-15T18:26:59Z"
+    "derived_at": "2026-08-15T23:25:36Z"
   },
   "artifacts": [
     {

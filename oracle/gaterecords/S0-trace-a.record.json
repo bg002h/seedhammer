@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "stage": "S0",
-  "recorded_at": "2026-08-15T06:14:19Z",
+  "recorded_at": "2026-08-15T23:25:36Z",
   "oracles": [
     {
       "name": "md",
@@ -19,9 +19,9 @@
     },
     {
       "name": "ms",
-      "commit": "ddfa497090bd945dce9b53453c7eeebf3e8d623d",
+      "commit": "d49d5c099bab89a1738f0d0c3df9306b354d62c3",
       "method": "binary-sha256",
-      "reported_version": "ms 0.15.0",
+      "reported_version": "ms 0.16.0",
       "version_matches_pin": true
     }
   ],
