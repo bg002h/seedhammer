@@ -193,13 +193,19 @@ func (s *syswSession) has(want sysw.Class) bool {
 // they share no helper at all, which is why the seam covers 4 of 8 programs and
 // the other four are wired individually (plan stage 5d).
 func syswOffer(ctx *Context, th *Colors, want sysw.Class, lead string) (string, bool) {
+	return syswOfferTitled(ctx, th, want, "Input", lead)
+}
+
+// syswOfferTitled is syswOffer under a caller-chosen title, so a per-seed
+// passphrase prompt can say which seed it is for (SPEC 4.1).
+func syswOfferTitled(ctx *Context, th *Colors, want sysw.Class, title, lead string) (string, bool) {
 	if ctx.sysw == nil || !ctx.sysw.has(want) {
 		return "", false
 	}
 	// PAYLOAD FIRST: this screen is only reached when a payload HOLDS the wanted
 	// class (the guard above), so the loaded record is the expected answer and
 	// ChoiceScreen opens on index 0. Back still declines, as everywhere else.
-	cs := &ChoiceScreen{Title: "Input", Lead: lead, Choices: []string{"FROM PAYLOAD", "ENTER IT"}}
+	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: []string{"FROM PAYLOAD", "ENTER IT"}}
 	choice, ok := cs.Choose(ctx, th)
 	if !ok || choice == 1 {
 		return "", false

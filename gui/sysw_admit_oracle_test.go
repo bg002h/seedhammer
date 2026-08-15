@@ -46,11 +46,14 @@ var syswConsumers = []syswConsumer{
 		"Engrave Text"},
 	{"passphrase_flow.go", "engravePassphraseFlowFrom", []syswProgram{progPassword},
 		"BIP-39 Password"},
-	{"derive_xpub.go", "syswSeedPicker", []syswProgram{
+	// S4 renamed the site to the ...Titled variant: the label a per-seed entry
+	// needs (SPEC 4.1) rides the screen TITLE, so the take() moved with it and
+	// syswSeedPicker is now a one-line wrapper that consumes nothing.
+	{"derive_xpub.go", "syswSeedPickerTitled", []syswProgram{
 		progXpub, progSingleSig, progMultisig, progBip85},
 		"§3.1's shared seam: seedEntryFlow's four programs. NOT the two verify " +
 			"re-entries, which call seedEntryFlowTypedOnly (test 16)"},
-	{"sysw_source.go", "syswPassphraseFlow", []syswProgram{
+	{"sysw_source.go", "syswPassphraseFlowTitled", []syswProgram{
 		progXpub, progSingleSig, progMultisig, progBip85},
 		"the four seam programs' optional-passphrase step (plan stage 13b). NOT " +
 			"Backup Wallet, which refuses ClassPassphrase, and NOT the two verify " +
@@ -113,10 +116,15 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 				if !ok {
 					return true
 				}
+				// PREFIX, not equality. S4 added ...Titled wrappers so a per-seed
+				// entry can name its slot on screen, and matching the exact name
+				// would have let the take() slide into a variant this oracle
+				// cannot see -- a consumption site nobody mapped, which is the one
+				// thing this test exists to prevent.
 				var isOffer, isTake bool
 				switch fun := call.Fun.(type) {
 				case *ast.Ident:
-					isOffer = fun.Name == "syswOffer"
+					isOffer = strings.HasPrefix(fun.Name, "syswOffer")
 				case *ast.SelectorExpr:
 					isTake = fun.Sel.Name == "take"
 				}
@@ -218,7 +226,10 @@ func TestTheSeamPassphraseOfferReachesOnlyProgramsThatAdmitIt(t *testing.T) {
 			t.Fatalf("parsing %s: %v", name, err)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && id.Name == "syswPassphraseFlow" {
+			// PREFIX again, for the reason the site scanner gives: a verify flow
+			// calling syswPassphraseFlowTitled reaches the payload exactly as far
+			// as one calling syswPassphraseFlow, and an exact match would let it.
+			if id, ok := n.(*ast.Ident); ok && strings.HasPrefix(id.Name, "syswPassphraseFlow") {
 				got[name]++
 			}
 			return true

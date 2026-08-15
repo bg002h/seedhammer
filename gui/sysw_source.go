@@ -82,7 +82,23 @@ func syswSourceName(src syswSource) string {
 // engraveTextFlowFrom both decode; this is the third site and the trap is the
 // same at all three.
 func syswPassphraseFlow(ctx *Context, th *Colors) (string, bool) {
-	if body, ok := syswOffer(ctx, th, sysw.ClassPassphrase, "Password from where?"); ok {
+	return syswPassphraseFlowTitled(ctx, th, "")
+}
+
+// syswPassphraseFlowTitled is syswPassphraseFlow with the SEED it belongs to
+// named on both of its screens. Empty title keeps the shipped wording exactly,
+// so the four other callers are unaffected by construction.
+//
+// SPEC 4.1 makes the passphrase prompt PER SEED, and the plan's own reason is
+// the one that matters: unlabelled, the operator cannot tell the second prompt
+// from a repeat of the first, and a passphrase entered against the wrong slot
+// mints a key no SPEC 4.3 row can catch.
+func syswPassphraseFlowTitled(ctx *Context, th *Colors, title string) (string, bool) {
+	offerTitle, kbdTitle := "Input", "Enter Passphrase"
+	if title != "" {
+		offerTitle, kbdTitle = title, title
+	}
+	if body, ok := syswOfferTitled(ctx, th, sysw.ClassPassphrase, offerTitle, "Password from where?"); ok {
 		if raw, err := sysw.DecodeBody(body); err == nil {
 			return string(raw), true
 		}
@@ -91,7 +107,7 @@ func syswPassphraseFlow(ctx *Context, th *Colors) (string, bool) {
 		// through to the keyboard rather than returning the raw record is the
 		// arm that keeps that true if it ever stops being.
 	}
-	return passphraseFlow(ctx, th)
+	return passphraseFlowTitled(ctx, th, kbdTitle)
 }
 
 func syswSourceAccept(ctx *Context, th *Colors, title string, c sysw.Class, src syswSource) bool {

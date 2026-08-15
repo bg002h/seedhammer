@@ -86,8 +86,24 @@ func pathPickerFlow(ctx *Context, th *Colors) (bip32.Path, *chaincfg.Params, str
 // **Verify flows must NOT call this** — they call seedEntryFlowTypedOnly. See
 // its comment for why the distinction is two functions rather than a parameter.
 func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
+	return seedEntryFlowTitled(ctx, th, seedEntryTitle, "")
+}
+
+// seedEntryTitle is what every seed entry outside the multisig BUILD path calls
+// itself. One constant, so the labelled variant below cannot drift from it.
+const seedEntryTitle = "Input Seed"
+
+// seedEntryFlowTitled is seedEntryFlow with the title the caller chooses, so a
+// flow entering SEVERAL seeds can say which one each screen is for.
+//
+// SPEC 4.1's per-seed passphrase makes several seeds in one flow the normal case
+// from S4 on, and an unlabelled second prompt is indistinguishable from a repeat
+// of the first. The label rides the TITLE rather than the leads because the leads
+// are what the other flows and the walks anchor on; a title is the one part of
+// this screen that is already per-caller everywhere else in the package.
+func seedEntryFlowTitled(ctx *Context, th *Colors, title, wordPrefix string) (bip39.Mnemonic, bool) {
 	for {
-		m, src, ok := syswSeedPicker(ctx, th)
+		m, src, ok := syswSeedPickerTitled(ctx, th, title)
 		if !ok {
 			// Back at the SOURCE picker leaves seed entry entirely. It used to
 			// fall through to the word-count picker, which was invisible while
@@ -98,7 +114,7 @@ func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 			return nil, false
 		}
 		if src == srcTyped {
-			return seedEntryFlowTypedOnly(ctx, th)
+			return seedEntryFlowTypedOnlyTitled(ctx, th, title, wordPrefix)
 		}
 		if m != nil {
 			return m, true
@@ -122,14 +138,23 @@ func seedEntryFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 // any argument, which makes the test structural — no verify flow mentions
 // seedEntryFlow — instead of behavioural.
 func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
-	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Choose number of words", Choices: []string{"12 WORDS", "24 WORDS"}}
+	return seedEntryFlowTypedOnlyTitled(ctx, th, seedEntryTitle, "")
+}
+
+// seedEntryFlowTypedOnlyTitled is the keyboard-only entry under a caller-chosen
+// title. `wordPrefix` names the slot on the WORD screen, which is the long one
+// and therefore the one an operator is most likely to be looking at when they
+// lose track of which seed they are typing. It is short on purpose ("@0", not
+// the whole title): that line also carries the word counter.
+func seedEntryFlowTypedOnlyTitled(ctx *Context, th *Colors, title, wordPrefix string) (bip39.Mnemonic, bool) {
+	cs := &ChoiceScreen{Title: title, Lead: "Choose number of words", Choices: []string{"12 WORDS", "24 WORDS"}}
 	for {
 		choice, ok := cs.Choose(ctx, th)
 		if !ok {
 			return nil, false
 		}
 		mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-		inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true})
+		inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true, titlePrefix: wordPrefix})
 		if !isEmptyMnemonic(mnemonic) {
 			return mnemonic, true
 		}
@@ -159,6 +184,12 @@ func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 // operator's tag before they had chosen anything. FeatureNFC (gui.go) exists to
 // answer the same question for free.
 func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool) {
+	return syswSeedPickerTitled(ctx, th, seedEntryTitle)
+}
+
+// syswSeedPickerTitled is syswSeedPicker under a caller-chosen title; see
+// seedEntryFlowTitled for why the label rides the title.
+func syswSeedPickerTitled(ctx *Context, th *Colors, title string) (bip39.Mnemonic, syswSource, bool) {
 	type seedSource struct {
 		label string
 		src   syswSource
@@ -184,7 +215,7 @@ func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool)
 	for i, r := range rows {
 		choices[i] = r.label
 	}
-	cs := &ChoiceScreen{Title: "Input Seed", Lead: "Where from?", Choices: choices}
+	cs := &ChoiceScreen{Title: title, Lead: "Where from?", Choices: choices}
 	choice, ok := cs.Choose(ctx, th)
 	if !ok {
 		return nil, srcTyped, false
@@ -197,7 +228,7 @@ func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool)
 		if !ok {
 			return nil, srcNFC, true
 		}
-		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcNFC) {
+		if !syswSourceAccept(ctx, th, title, sysw.ClassMnemonic, srcNFC) {
 			return nil, srcNFC, true
 		}
 		return m, srcNFC, true
@@ -210,7 +241,7 @@ func syswSeedPicker(ctx *Context, th *Colors) (bip39.Mnemonic, syswSource, bool)
 		if err != nil {
 			return nil, srcPayload, true
 		}
-		if !syswSourceAccept(ctx, th, "Input Seed", sysw.ClassMnemonic, srcPayload) {
+		if !syswSourceAccept(ctx, th, title, sysw.ClassMnemonic, srcPayload) {
 			return nil, srcPayload, true
 		}
 		return m, srcPayload, true

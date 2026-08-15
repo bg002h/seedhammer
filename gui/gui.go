@@ -683,6 +683,15 @@ func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password s
 // passphraseFlow lets the user enter a BIP-39 passphrase on the PassphraseKeyboard.
 // Returns (passphrase, true) on accept (possibly ""), or ("", false) on Back.
 func passphraseFlow(ctx *Context, th *Colors) (string, bool) {
+	return passphraseFlowTitled(ctx, th, "Enter Passphrase")
+}
+
+// passphraseFlowTitled is passphraseFlow under a caller-chosen title, so a flow
+// asking for SEVERAL per-seed passphrases (SPEC 4.1) can say which seed each one
+// belongs to. A passphrase entered against the wrong seed mints a key no row of
+// SPEC 4.3 can catch, because there is no card to cross-check a new-seed slot
+// against.
+func passphraseFlowTitled(ctx *Context, th *Colors, title string) (string, bool) {
 	kbd := NewPassphraseKeyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
@@ -705,8 +714,8 @@ func passphraseFlow(ctx *Context, th *Colors) (string, bool) {
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
 			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark},
 		}...)
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Enter Passphrase")
-		ctx.Frame(op.Layer(kbdOp, nav, title, op.Color(&ctx.B, th.Background)))
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
+		ctx.Frame(op.Layer(kbdOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return "", false
 }
@@ -790,6 +799,17 @@ type wordEntryOpts struct {
 	// arrows, Center and runes, so a nav-slot button structurally cannot reach
 	// Fragment.
 	terminator bool
+	// titlePrefix names WHOSE words these are, keeping the "Word N of M" counter
+	// rather than replacing it the way the `title` parameter does.
+	//
+	// It exists for SPEC 4.1's per-seed entry: from S4 a flow can ask for several
+	// seeds, and the word screen is the long one, so it is where an operator is
+	// most likely to lose track of which seed they are typing. `title` could not
+	// serve, because it takes the counter with it -- and on a 24-word entry the
+	// counter is the only progress the screen shows.
+	//
+	// THE ZERO VALUE IS BYTE-IDENTICAL to before, like `title`'s own contract.
+	titlePrefix string
 }
 
 // inputWordsFlow returns how many words were actually entered, and whether
@@ -976,7 +996,12 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		// XOR "Part i of n") replaces it, like inputSLIP39Flow.
 		var titleOp op.Op
 		if title == "" {
-			titleOp, _ = layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+			if opt.titlePrefix != "" {
+				titleOp, _ = layoutTitlef(ctx, dims.X, th.Text, "%s word %d of %d",
+					opt.titlePrefix, selected+1, len(mnemonic))
+			} else {
+				titleOp, _ = layoutTitlef(ctx, dims.X, th.Text, "Word %d of %d", selected+1, len(mnemonic))
+			}
 		} else {
 			titleOp, _ = layoutTitle(ctx, dims.X, th.Text, title)
 		}

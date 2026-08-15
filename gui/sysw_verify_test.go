@@ -41,11 +41,18 @@ func TestNoVerifyFlowCanReachAPayloadSecret(t *testing.T) {
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			id, ok := n.(*ast.Ident)
-			if ok && id.Name == "seedEntryFlow" {
-				t.Errorf("%s calls seedEntryFlow, which offers the PAYLOAD as a source. "+
+			// The two payload-offering entry points, named exactly. S4 added
+			// seedEntryFlowTitled so a per-seed entry can name its slot, and it
+			// reaches the payload exactly as far as seedEntryFlow does; leaving it
+			// off this list would have reopened the door §7.4 closes. The
+			// ...TypedOnly variants are the SAFE ones and must not be matched,
+			// which is why this is an identifier set and never a substring (R1-N1).
+			if ok && (id.Name == "seedEntryFlow" || id.Name == "seedEntryFlowTitled" ||
+				id.Name == "syswSeedPicker" || id.Name == "syswSeedPickerTitled") {
+				t.Errorf("%s calls %s, which offers the PAYLOAD as a source. "+
 					"A verify that accepts the engrave's own secret compares it against "+
 					"itself and passes unconditionally. Use seedEntryFlowTypedOnly.",
-					filepath.Base(name))
+					filepath.Base(name), id.Name)
 			}
 			return true
 		})
@@ -64,7 +71,11 @@ func TestTheChecksumGateIsOnForSeedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), "wordEntryOpts{checksumGate: true}") {
+	// The FIELD, not the whole literal: S4 added titlePrefix to the same struct
+	// so a per-seed entry can name its slot on the word screen, and a test keyed
+	// to the exact literal would report the gate missing because a sibling field
+	// appeared beside it.
+	if !strings.Contains(string(src), "wordEntryOpts{checksumGate: true") {
 		t.Error("seed entry must keep the checksum gate: it catches a mistyped last word " +
 			"before anything is derived")
 	}
