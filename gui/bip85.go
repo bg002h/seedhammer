@@ -253,21 +253,26 @@ var bip85SeedHook func(master, child bip39.Mnemonic)
 // (M4). nil in production. Mirrors bip85SeedHook (the sanctioned in-file seam).
 var bip85PkeyHook func(pkey *btcec.PrivateKey)
 
-// bip85DeriveFlow is the bip85Derive program: a hand-typed BIP-39 MASTER seed
-// (SECRET, typed-only — NEVER a scan) + optional passphrase ON THE MASTER -> pick
+// bip85DeriveFlow is the bip85Derive program: a BIP-39 MASTER seed (SECRET, from
+// the ONE seed seam) + optional passphrase ON THE MASTER -> pick
 // the child params (app fixed BIP-39, word count {12,18,24}, typed index 0..2^31-1)
 // -> derive the child BIP-39 mnemonic via BIP-85 -> unskippable child-seed warning
 // -> engrave the child (words + standard SeedQR) via the engraveSeed primitive,
 // stamping the CHILD's own bare fingerprint.
 //
 // SECURITY SPINE (mirror gui/singlesig.go):
-//   - TYPED-ONLY master (I-3): from seedEntryFlow ONLY; never an NFC scan.
+//   - ONE SEED SEAM (I-3): the master comes from seedEntryFlow ONLY, and nothing
+//     in this flow reads a secret by another route. seedEntryFlow is the SOURCE
+//     PICKER (systemwide payload / keyboard / scan, gui/derive_xpub.go:88), so
+//     "typed-only, never a scan" was retired here on 2026-08-15; see
+//     gui/singlesig.go's spine for the whole argument and for where the typed-only
+//     property still lives (seedEntryFlowTypedOnly, the verify flows).
 //   - TWO secrets scrubbed (I-3): the master AND the derived child mnemonic, both
 //     []Word zeroed on EVERY exit (derive/abort/warning-abort/engrave-abort/error).
 //     The privkey serialization + HMAC output are wiped inside deriveBip85Child.
 //   - Mainnet-only; child engraved onto owner-held steel only, never NFC.
 func bip85DeriveFlow(ctx *Context, th *Colors) {
-	// TYPED-ONLY master (never a scan).
+	// The master, through the ONE seam (I-3). Not keyboard-only.
 	master, ok := seedEntryFlow(ctx, th)
 	if !ok {
 		return

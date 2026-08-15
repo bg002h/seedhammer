@@ -10,9 +10,14 @@ import (
 )
 
 // TestEngraveSingleSigFlowTypedOnly_Structural (D12): engraveSingleSigFlow's
-// source references seedEntryFlow (the typed-only seed entry) and NEVER routes a
-// scanned object (act.scan / assembleScan / the scanner) into derivation. The
-// seed is SECRET → typed-only, never NFC.
+// source references seedEntryFlow (the ONE seed seam) and NEVER routes a scanned
+// object (act.scan / assembleScan / the scanner) into derivation ITSELF.
+//
+// WHAT IT STILL PROVES, now that seedEntryFlow is no longer keyboard-only: this
+// file has no seed path of its own. Every source lives behind the one seam, where
+// it is picked deliberately and acknowledged, instead of in a second route only
+// this flow would have. The test NAME is kept so its history stays greppable; the
+// property it asserts has not changed.
 func TestEngraveSingleSigFlowTypedOnly_Structural(t *testing.T) {
 	src, err := os.ReadFile("singlesig.go")
 	if err != nil {

@@ -137,7 +137,13 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 	origins := buildCosignerOrigins(p.N, p.SelfSlot, chosen)
 
-	// (3) TYPED-ONLY self seed (I-SCRUB). Scrub on EVERY exit.
+	// (3) The self seed, through the ONE seam. Scrub on EVERY exit (I-SCRUB).
+	//
+	// It is NOT keyboard-only, and on this flow that is not a theoretical point:
+	// seedEntryFlow is the source picker, and cmd/emu/walk_build_policy.js takes
+	// the self seed FROM THE PAYLOAD (the cards blob carries a ClassMnemonic for
+	// master A). A comment here claiming "typed-only, never a scan" was already
+	// contradicted by a shipped walk when S3 deleted it on 2026-08-15.
 	mnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
 		return

@@ -14,16 +14,24 @@ import (
 //
 // engraveMultisigFlow is the engraveMultisig program: gather a SUPPLIED
 // multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a full
-// policy (every slot xpub-present) -> hand-type the seed (TYPED-ONLY, never a
-// scan) -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
+// policy (every slot xpub-present) -> take the seed through the ONE seed seam
+// -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
 // leg (ms1 + policy-bound mk1; the supplied md1 engraved VERBATIM) -> engrave
 // (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder) -> offer
 // verify-bundle -> show the multisig restore doc.
 //
 // SECURITY SPINE (mirror gui/singlesig.go):
-//   - TYPED-ONLY seed (I-7): the seed comes from seedEntryFlow ONLY; this flow
-//     NEVER routes an NFC-scanned object into derivation. ms1 is engraved onto
-//     owner-held steel only, never NFC.
+//   - ONE SEED SEAM (I-7): the seed comes from seedEntryFlow ONLY, and nothing
+//     in this flow reads a secret by another route. The single seam IS the rule;
+//     "typed-only" is retired and was deleted here on 2026-08-15, because
+//     seedEntryFlow is the SOURCE PICKER (systemwide payload / keyboard / scan,
+//     gui/derive_xpub.go:88) and §0.1b rules the payload and the keyboard this
+//     phase's PRIMARY data entries. A payload-borne ClassMnemonic reaches
+//     derivation on purpose, and cmd/emu/walk_build_policy.js drives exactly
+//     that. What survives is the split that is load-bearing:
+//     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
+//     call so a payload-sourced secret is never compared against itself (§7.4).
+//     ms1 is engraved onto owner-held steel only, never NFC.
 //   - PER-LEG SCRUB (I-7): the entropy is gated + wiped inside deriveMultisigLeg;
 //     the seed/master/intermediates are scrubbed inside deriveAccountXpub (called
 //     once per slot in the cross-match loop); the mnemonic []Word is zeroed when
@@ -57,8 +65,8 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 
 // supplyMultisigPolicyFlow is the UNCHANGED T6b body: gather a SUPPLIED
 // multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a full
-// policy (every slot xpub-present) -> hand-type the seed (TYPED-ONLY, never a
-// scan) -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
+// policy (every slot xpub-present) -> take the seed through the ONE seed seam
+// -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
 // leg (ms1 + policy-bound mk1; the supplied md1 engraved VERBATIM) -> engrave
 // (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder) -> offer
 // verify-bundle -> show the multisig restore doc.
@@ -99,7 +107,8 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// tpl/keys are threaded into the restore doc below (t6b-M2) so the policy is
 	// decoded exactly once.
 
-	// (3) TYPED-ONLY seed (I-7). Never a scan.
+	// (3) The seed, through the ONE seam (I-7). seedEntryFlow offers every source
+	// this machine has; it is not keyboard-only.
 	mnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
 		return

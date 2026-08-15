@@ -9,8 +9,11 @@ package main
 // That protects the blobs somebody remembered to add. It does not protect the
 // next one, and the plan this test belongs to requires a SECOND systemwide
 // payload carrying cosigner cards — which the name-keyed guard would not see at
-// all. A hand-maintained list is the same construct as the "four TYPED-ONLY
-// comments" that turned out to be nine.
+// all. A hand-maintained list is the same construct as the four stale seed-entry
+// comments SPEC §2.2 D-5 enumerated, which a grep found NINE of in gui/ when S3
+// came to delete them (2026-08-15). The phrase they all carried is gone now, so
+// it is not quoted here: a citation that resurrects a retired literal is the
+// same stale-list defect one level up.
 //
 // So this derives its protected set from the tree: find every `//go:embed`
 // under cmd/emu, take the file it embeds and the identifier declared beneath

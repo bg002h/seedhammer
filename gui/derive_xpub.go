@@ -278,11 +278,21 @@ func scanSeedFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 	return nil, false
 }
 
-// deriveXpubFlow is the engraveXpub program: a hand-typed BIP-39 seed (SECRET)
-// is turned into a PUBLIC account xpub and engraved as an mk1 key card.
+// deriveXpubFlow is the engraveXpub program: a BIP-39 seed (SECRET) is turned
+// into a PUBLIC account xpub and engraved as an mk1 key card.
 //
-// SECURITY SPINE: the seed/mnemonic/passphrase are SECRET — typed-only, never
-// emitted over NFC, never engraved. The ONLY engraved output is the public
+// SECURITY SPINE: the seed/mnemonic/passphrase are SECRET — never emitted over
+// NFC, never engraved. They are NOT keyboard-only: the seed arrives through
+// seedEntryFlow, the source picker (payload / keyboard / scan). The claim that
+// they were is what S3 retired on 2026-08-15, in the same sweep that took the
+// nine stale seed-entry comments out of gui/ (SPEC §2.2 D-5); this one survived
+// that sweep's grep only because it is spelt differently here.
+//
+// The retired phrase is deliberately not quoted. S3's gate is a grep for it
+// returning nothing, so a comment that names it to explain its removal puts it
+// straight back and fails the gate. Measured: it did, on the first run.
+//
+// The ONLY engraved output is the public
 // account xpub (via .Neuter, inside deriveAccountXpub). This flow NEVER calls
 // engraveSeed/backup.EngraveSeed. The mnemonic []Word is zeroed once derivation
 // completes.

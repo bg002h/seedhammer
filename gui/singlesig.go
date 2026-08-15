@@ -8,16 +8,23 @@ import (
 
 // ─── T6a-2: the single-sig flagship orchestrator ─────────────────────────────
 //
-// engraveSingleSigFlow is the engraveSingleSig program: ONE hand-typed BIP-39
-// seed → wallet-type pick (BIP-84 default + Advanced) → optional passphrase →
+// engraveSingleSigFlow is the engraveSingleSig program: ONE BIP-39 seed →
+// wallet-type pick (BIP-84 default + Advanced) → optional passphrase →
 // full-or-watch-only → derive ms1+mk1+md1 (policy-bound) → engrave (full = 3
 // cards incl. the secret ms1; watch-only = 2 cards + the ms1 reminder) → offer
 // verify-bundle → watch-only restore doc.
 //
 // SECURITY SPINE:
-//   - TYPED-ONLY seed (D12): the seed comes from seedEntryFlow ONLY; this flow
-//     NEVER routes an NFC-scanned object into derivation (the scan.go bip39 /
-//     codex32 footgun). ms1 is engraved onto owner-held steel only, never NFC.
+//   - ONE SEED SEAM (D12): the seed comes from seedEntryFlow ONLY, and nothing
+//     in this flow reads a secret by another route. The single seam IS the rule;
+//     "typed-only" is retired and was deleted here on 2026-08-15, because
+//     seedEntryFlow is the SOURCE PICKER (systemwide payload / keyboard / scan,
+//     gui/derive_xpub.go:88) and §0.1b rules the payload and the keyboard this
+//     phase's PRIMARY data entries. A payload-borne ClassMnemonic reaches
+//     derivation on purpose. What survives is the split that is load-bearing:
+//     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
+//     call so a payload-sourced secret is never compared against itself (§7.4).
+//     ms1 is engraved onto owner-held steel only, never NFC.
 //   - PER-LEG SCRUB (D11): the entropy is gated on mnemonic validity and wiped
 //     inside deriveSingleSigBundle; the seed/master/intermediates are scrubbed
 //     inside deriveAccountXpub; the mnemonic []Word is zeroed when this flow
@@ -29,7 +36,8 @@ import (
 var singleSigSeedHook func(bip39.Mnemonic)
 
 func engraveSingleSigFlow(ctx *Context, th *Colors) {
-	// TYPED-ONLY seed (D12). Never a scan.
+	// The seed, through the ONE seam (D12). seedEntryFlow offers every source this
+	// machine has; it is not keyboard-only.
 	mnemonic, ok := seedEntryFlow(ctx, th)
 	if !ok {
 		return
