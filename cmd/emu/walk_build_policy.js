@@ -254,6 +254,11 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     await waitFor(NEEDLE_PICK_CARD);
     proven.push(NEEDLE_PICK_CARD);
     for (let taken = 0; taken < use; taken++) {
+      // The per-card POST-CONDITION, for choose()'s reason: "a wrong row does
+      // NOT fail loudly on its own". Without it, a card auto-taken by the
+      // remaining-equals-needed short-circuit would leave this loop tapping
+      // CONFIRM on whatever screen came next.
+      await waitFor(`Use payload card ${taken + 1} of`);
       // "USE THIS CARD" is row 0 and the default, so CONFIRM alone takes it.
       await tap(CONFIRM, 400);
     }

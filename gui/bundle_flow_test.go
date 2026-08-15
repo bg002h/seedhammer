@@ -9,7 +9,7 @@ import (
 // explicit and faithful (R0-C1/C2). Critically an ms1 is REFUSED with the
 // hand-type message (never silently dropped) and a single mk1 is REFUSED.
 func TestBundleGatherFeedback(t *testing.T) {
-	s := &bundleGatherScreen{g: &bundleGatherer{}}
+	s := &bundleGatherScreen{g: &bundleGatherer{}, hasReader: true}
 	cases := []struct {
 		status bundleOfferStatus
 		want   string // substring the feedback must contain ("" = no message)
@@ -37,6 +37,54 @@ func TestBundleGatherFeedback(t *testing.T) {
 	if msg := s.feedback(bundleRefusedMs1); !strings.Contains(strings.ToLower(msg), "type") {
 		t.Errorf("ms1 refusal %q must instruct the operator to type it", msg)
 	}
+}
+
+// S1 fold, I2: EVERY operator instruction on the gather screen that names
+// scanning must be conditioned on the machine actually having a reader.
+// Phase-1 hardware has none, so on the machine this stage exists for those
+// strings prescribe an impossible action — the stage's own motivating defect.
+//
+// Asserted as an absence, over every string this screen can produce, rather
+// than string-by-string: a future author adding a fourth "scan the…" message
+// should fail here rather than ship it.
+func TestGatherScreenNeverSaysScanWithoutAReader(t *testing.T) {
+	every := []bundleOfferStatus{
+		bundleDropped, bundleRefusedMs1, bundleRefusedSingleMK1,
+		bundleAddedSingleMD1, bundleChunkProgress, bundleCardComplete,
+		bundleDuplicate,
+	}
+	t.Run("no reader", func(t *testing.T) {
+		s := &bundleGatherScreen{g: &bundleGatherer{}, hasReader: false}
+		lines := append([]string{}, s.tally()...)
+		for _, st := range every {
+			lines = append(lines, s.feedback(st))
+		}
+		saidScan := false
+		for _, ln := range lines {
+			if strings.Contains(strings.ToLower(ln), "scan") {
+				// The ms1 refusal names NFC as a channel it refuses, which is a
+				// different sentence from telling the operator to scan.
+				t.Errorf("a reader-less machine's gather screen says %q; phase-1 "+
+					"hardware has no reader, so this sends the operator looking "+
+					"for one", ln)
+				saidScan = true
+			}
+		}
+		if saidScan {
+			t.Log("the closing tally line and the two Done-gate errors are the " +
+				"three sites; all are keyed on FeatureNFC")
+		}
+	})
+	t.Run("with a reader the instruction is kept", func(t *testing.T) {
+		// The counter-arm, so the test above cannot pass by the strings having
+		// been deleted outright: on a machine that HAS a reader, scanning is
+		// real and saying so is correct.
+		s := &bundleGatherScreen{g: &bundleGatherer{}, hasReader: true}
+		joined := strings.Join(s.tally(), "\n") + "\n" + s.feedback(bundleRefusedSingleMK1)
+		if !strings.Contains(strings.ToLower(joined), "scan") {
+			t.Errorf("a reader-equipped machine no longer offers scanning at all:\n%s", joined)
+		}
+	})
 }
 
 // TestBundleGatherTally: the running tally counts verified cards by type.

@@ -73,22 +73,48 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	mk1s := mk1CosignerCards(cards)
 	// Re-classified over what the GATHER produced, not over what the payload
 	// held: on reader-equipped hardware the operator may have added more.
-	chosen := make([]int, len(mk1s))
-	for i := range chosen {
-		chosen[i] = i
-	}
-	switch classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open) {
+	//
+	// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
+	// is total, but leaving auto-fill as this switch's implicit default made the
+	// CALL SITE non-total: a fourth outcome, or any future disagreement between
+	// the two classify calls, would have taken the all-cards branch in silence.
+	// The ruling that forbids assuming `n-1` deserves a case analysis that says
+	// so at both ends.
+	var chosen []int
+	outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
+	switch outcome {
 	case cosignerRefuse:
 		showError(ctx, th, "Build Policy",
 			buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
 		return
+	case cosignerAutoFill:
+		// Exactly enough: every card fills a slot, in payload record order.
+		chosen = make([]int, len(mk1s))
+		for i := range chosen {
+			chosen[i] = i
+		}
 	case cosignerSelect:
-		// Bounded selection. On an EQUAL count there is nothing to choose, so
-		// the flow auto-fills and goes straight to the review — the review IS
-		// the announcement, and a picker with one possible answer is a tap that
-		// teaches nothing.
+		// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
+		// over-supply is the CHOICE. A picker with one possible answer is a tap
+		// that teaches nothing.
+		if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+			return
+		}
 		chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
 		if !ok {
+			return
+		}
+	default:
+		showError(ctx, th, "Build Policy",
+			"Couldn't work out how the payload's cards fit this policy.")
+		return
+	}
+	if outcome == cosignerAutoFill {
+		// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
+		// of what the payload supplied on this arm too. Before the fold their
+		// only such screen was the shared gather's "Scan a card, or Done." — a
+		// count and an instruction this hardware cannot perform.
+		if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
 			return
 		}
 	}
@@ -98,8 +124,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 	cosigners, ok := buildCosignerCards(picked, open)
 	if !ok {
+		// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
+		// length equals `open` on both arms, so the count arm of
+		// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
+		// with a rewrite-the-payload remedy would be two equal counts and a
+		// wrong instruction. What is left is a card that passed mk.Decode in the
+		// gatherer and failed it here, which is a read failure, so say that.
 		showError(ctx, th, "Build Policy",
-			buildSupplyRefusal(cosignerSourceLoaded, len(picked), open, false))
+			"Couldn't read the cosigner key cards from the payload.")
 		return
 	}
 	origins := buildCosignerOrigins(p.N, p.SelfSlot, chosen)

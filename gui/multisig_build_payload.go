@@ -71,7 +71,69 @@ func buildCosignerSource(ctx *Context) ([]string, cosignerSourceState) {
 	if !ok {
 		return nil, cosignerSourceUncompared
 	}
-	return records, cosignerSourceLoaded
+	return groupRecordsByCard(records), cosignerSourceLoaded
+}
+
+// groupRecordsByCard makes each card's chunks CONTIGUOUS, with the cards in
+// order of where each one FIRST appears in the payload. Chunk order within a
+// card is left alone — the gatherer reassembles a set in any order.
+//
+// THIS IS WHAT MAKES "PAYLOAD RECORD ORDER" TRUE RATHER THAN USUALLY TRUE, and
+// it is a funds-safety fix, not tidying. `bundleGatherer.cards` is
+// "completed + verified, in COMPLETION order" (gui/bundle.go), and a chunked
+// card completes when its LAST chunk arrives. So for an interleaved payload the
+// two orders diverge — measured, records `A1 B1 B2 A2` put card B in the lower
+// slot, because B finished first:
+//
+//	supply[0] = fp b8688df1  (card B)
+//	supply[1] = fp 73c5da0a  (card A)
+//
+// @N order is identity-bearing (md/encode_multisig.go's ordering contract: the
+// same keys in a different order mint a different wallet with a different
+// WalletPolicyId), and spec P0 item 5 rules "slot order is payload record
+// order". Meanwhile the review screen ANNOUNCES "in payload order"
+// unconditionally, and with fingerprints omitted by default every slot renders
+// "(no fp)" — so a wrong order would be invisible in every artifact the
+// operator keeps. That is §0.1 clause 2's refuse side, and announcing it as
+// true instead is the thing that had to be fixed.
+//
+// Fixed by making the BEHAVIOUR match the promise rather than by weakening the
+// promise: group here, once, at the single seam both consumers read
+// (buildCosignerSupply's pre-check and the gather's own feed), so completion
+// order and record order cannot disagree.
+//
+// `me sysw pack` preserves caller order among public records, so whether the
+// chunks interleave depends on the order the operator handed files to `pack`.
+// Uncommon, admitted by the format, and rejected by nothing.
+func groupRecordsByCard(records []string) []string {
+	type group struct{ recs []string }
+	var order []string
+	groups := make(map[string]*group, len(records))
+	for i, r := range records {
+		cls, csid, _ := classify(mdmkText(r))
+		// Only CHUNKED cards can interleave. Everything else — a standalone
+		// md1, a refusal, a drop — is its own group keyed by position, so it
+		// keeps its place exactly.
+		key := fmt.Sprintf("solo:%d", i)
+		switch cls {
+		case clsChunkedMK1:
+			key = fmt.Sprintf("mk:%d", csid)
+		case clsChunkedMD1:
+			key = fmt.Sprintf("md:%d", csid)
+		}
+		g, seen := groups[key]
+		if !seen {
+			g = &group{}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.recs = append(g.recs, r)
+	}
+	out := make([]string, 0, len(records))
+	for _, k := range order {
+		out = append(out, groups[k].recs...)
+	}
+	return out
 }
 
 // buildCosignerSupply assembles payload records into complete cards through
@@ -85,8 +147,12 @@ func buildCosignerSource(ctx *Context) ([]string, cosignerSourceState) {
 // a second insertion path: it is one pure function over one input, run twice,
 // and the gather's result remains the authoritative one. The alternative —
 // letting the operator walk into a gather that cannot possibly succeed and
-// meeting a "scan a card's chunks first" dead end at the far side — is the
-// defect S1 exists to remove.
+// meeting a dead end at the far side — is the defect S1 exists to remove.
+//
+// The returned order is completion order, which equals PAYLOAD RECORD ORDER
+// because groupRecordsByCard has already made each card's chunks contiguous.
+// Both facts are load-bearing together and neither is enough alone; see that
+// function for the interleaved payload that proved it.
 func buildCosignerSupply(records []string) (cards []bundleCard, incomplete bool) {
 	var g bundleGatherer
 	for _, r := range records {
@@ -190,10 +256,12 @@ func cardCount(n int) string {
 	}
 }
 
-// buildPayloadCardsLines lists what the payload supplied, for the read-only
-// screen shown ahead of selection. Numbered in payload record order, because the
-// picker that follows refers to the cards by that number.
-func buildPayloadCardsLines(cards []bundleCard, open int) []string {
+// buildPayloadCardsLines lists what the payload supplied. Numbered in payload
+// record order, because that is the order the cards fill slots in and, on the
+// over-supply arm, the number the picker refers to each card by.
+//
+// `selecting` says whether a picker follows, and only changes the closing line.
+func buildPayloadCardsLines(cards []bundleCard, open int, selecting bool) []string {
 	lines := []string{
 		fmt.Sprintf("The payload supplied %s.", cardCount(len(cards))),
 		fmt.Sprintf("This policy has %d open slot(s).", open),
@@ -201,9 +269,32 @@ func buildPayloadCardsLines(cards []bundleCard, open int) []string {
 	for i, c := range cards {
 		lines = append(lines, fmt.Sprintf("%d. %s", i+1, c.summary))
 	}
-	lines = append(lines, fmt.Sprintf("Choose %d of them next; they fill the "+
-		"slots in this order.", open))
+	if selecting {
+		lines = append(lines, fmt.Sprintf("Choose %d of them next; they fill the "+
+			"slots in this order.", open))
+	} else {
+		lines = append(lines, "All of them fill the open slots, in this order.")
+	}
 	return lines
+}
+
+// buildPayloadReviewFlow is SPEC P0 item 6 — "the gather screen becomes a review
+// of what the payload supplied, not a 'Scan a card' prompt", ruled there, not
+// deferred — and it runs on BOTH arms.
+//
+// It used to live inside buildCosignerPickFlow, which meant it appeared only on
+// OVER-supply. On the auto-fill arm the operator's entire review of what the
+// payload supplied was the shared gather's "md1 descriptors: 0 / mk1 keys: 2 /
+// Scan a card, or Done." — a count and an instruction phase-1 hardware cannot
+// perform, which is this stage's own motivating defect surviving on the arm the
+// stage reaches by default.
+//
+// This does NOT re-introduce selection on the auto-fill arm; the audit's
+// "selection appears only on over-supply" still holds, and `selecting` is what
+// keeps the two apart. A list of what arrived is a review, not a choice.
+func buildPayloadReviewFlow(ctx *Context, th *Colors, cards []bundleCard, open int, selecting bool) bool {
+	return confirmReviewScreen(ctx, th, "Payload cards",
+		buildPayloadCardsLines(cards, open, selecting))
 }
 
 // buildCosignerPickFlow resolves OVER-SUPPLY. It returns the chosen card
@@ -221,9 +312,6 @@ func buildPayloadCardsLines(cards []bundleCard, open int) []string {
 // possible answer is not a choice, and asking it is how an operator skips their
 // way into an under-supply that was never real.
 func buildCosignerPickFlow(ctx *Context, th *Colors, cards []bundleCard, open int) ([]int, bool) {
-	if !confirmReviewScreen(ctx, th, "Payload cards", buildPayloadCardsLines(cards, open)) {
-		return nil, false
-	}
 	chosen := make([]int, 0, open)
 	for i := 0; i < len(cards) && len(chosen) < open; i++ {
 		if len(cards)-i == open-len(chosen) {
@@ -239,7 +327,12 @@ func buildCosignerPickFlow(ctx *Context, th *Colors, cards []bundleCard, open in
 		}
 		sel, ok := cs.Choose(ctx, th)
 		if !ok {
-			return nil, false // Back abandons, as it does on every other picker.
+			// Back ABANDONS the Build flow, discarding the five picked
+			// parameters — the same thing Back at the gather does, and NOT what
+			// buildParamPickFlow does (that steps back exactly one stage). Said
+			// plainly because the earlier comment claimed the parameter
+			// pickers' behaviour, which is the opposite one.
+			return nil, false
 		}
 		if sel == 0 {
 			chosen = append(chosen, i)

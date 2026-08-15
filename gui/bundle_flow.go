@@ -49,6 +49,9 @@ func bundleFlow(ctx *Context, th *Colors) {
 type bundleGatherScreen struct {
 	g   *bundleGatherer
 	msg string
+	// hasReader is FeatureNFC for this machine. Every operator instruction on
+	// this screen that names scanning is conditioned on it — see tally().
+	hasReader bool
 }
 
 // feedback maps a per-offer status to the operator message (R0-C1/C2). The ms1
@@ -58,6 +61,9 @@ func (s *bundleGatherScreen) feedback(status bundleOfferStatus) string {
 	case bundleRefusedMs1:
 		return "Type the ms1 share on-device — never over NFC."
 	case bundleRefusedSingleMK1:
+		if !s.hasReader {
+			return "Incomplete key card — the payload is missing some of its chunks."
+		}
 		return "Incomplete key card — scan all its chunks."
 	case bundleCardComplete:
 		return "Card added."
@@ -73,6 +79,17 @@ func (s *bundleGatherScreen) feedback(status bundleOfferStatus) string {
 }
 
 // tally returns the running on-screen tally of verified cards by type.
+//
+// THE CLOSING LINE IS READER-AWARE (S1 fold, I2). It read "Scan a card, or
+// Done." unconditionally, and phase-1 hardware has no reader — so on the machine
+// this stage exists for, the gather instructed an action the operator could not
+// perform. That is S1's own motivating defect wearing a different hat, and it is
+// the prompt text, which spec P0 item 6 rules here; only the TITLE is S2's D-4
+// work.
+//
+// Keyed on FeatureNFC rather than on which flow is calling, because the property
+// is about the MACHINE: on a reader-equipped unit (the emulator is one) scanning
+// really is available and saying so is correct.
 func (s *bundleGatherScreen) tally() []string {
 	var nMD, nMK int
 	for _, c := range s.g.cards {
@@ -83,10 +100,14 @@ func (s *bundleGatherScreen) tally() []string {
 			nMK++
 		}
 	}
+	closing := "Scan a card, or Done."
+	if !s.hasReader {
+		closing = "Done when you have reviewed these."
+	}
 	return []string{
 		fmt.Sprintf("md1 descriptors: %d", nMD),
 		fmt.Sprintf("mk1 keys: %d", nMK),
-		"Scan a card, or Done.",
+		closing,
 	}
 }
 
@@ -96,15 +117,23 @@ func (s *bundleGatherScreen) tally() []string {
 // testPlatform.NFCReader()==nil the goroutine doesn't run; the gatherer +
 // review flow are driven directly in tests.
 func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
-	scr := &bundleGatherScreen{g: &bundleGatherer{}}
+	scr := &bundleGatherScreen{
+		g:         &bundleGatherer{},
+		hasReader: ctx.Platform.Features().Has(FeatureNFC),
+	}
 	// A payload card enters through the SAME offer() every scanned card does,
 	// so it is deduplicated, chunk-assembled and validated identically. A
 	// separate insertion path would be a second way for a card to become part
 	// of a bundle, and only one of them would have the checks.
 	//
-	// Fed in PAYLOAD RECORD ORDER and never reordered: @N assignment downstream
-	// follows the order cards complete in, and @N order is identity-bearing
-	// (md/encode_multisig.go's ordering contract).
+	// Fed in the order the caller supplies, and this loop reorders nothing. That
+	// alone does NOT give record order downstream: a chunked card completes on
+	// its LAST chunk, so `g.cards` is completion order and an interleaved
+	// payload diverges. The Build path buys the guarantee upstream instead, by
+	// grouping each card's chunks contiguously before setting syswBundleSeeds
+	// (groupRecordsByCard, gui/multisig_build_payload.go). @N order is
+	// identity-bearing (md/encode_multisig.go's ordering contract), so which
+	// side of this seam owns the guarantee is worth being exact about.
 	for _, seed := range ctx.syswBundleSeeds {
 		if seed == "" {
 			continue
@@ -126,13 +155,30 @@ func bundleGatherFlow(ctx *Context, th *Colors) ([]bundleCard, bool) {
 		if doneBtn.Clicked(ctx) {
 			switch bundleDoneDecision(scr.g) {
 			case bundleDoneEmpty:
-				showError(ctx, th, "Engrave Bundle", "No complete cards yet — scan a card's chunks first.")
+				// Reader-aware for tally()'s reason: on a machine with no reader
+				// "scan a card's chunks first" is a dead end dressed as advice.
+				msg := "No complete cards yet — scan a card's chunks first."
+				if !scr.hasReader {
+					msg = "No complete cards. Pack them on the host with `me sysw pack` " +
+						"and load the payload again."
+				}
+				showError(ctx, th, "Engrave Bundle", msg)
 			case bundleDonePending:
 				// A card is mid-chunk-set: warn it's incomplete and drop it so the
 				// operator never engraves a partial. Then proceed with the complete
 				// cards (if any) — or fall back to the gather screen if none.
+				//
+				// REACHABLE FROM BUILD (fold, I2): a payload holding enough complete
+				// cards PLUS a half chunk set classifies as auto-fill/select, so the
+				// pre-gather refusal does not fire and this message is what the
+				// operator reads. It said "scan all its chunks".
 				scr.g.dropPending()
-				showError(ctx, th, "Engrave Bundle", "Dropped an incomplete card — scan all its chunks to include it.")
+				pendingMsg := "Dropped an incomplete card — scan all its chunks to include it."
+				if !scr.hasReader {
+					pendingMsg = "Dropped an incomplete card — the payload does not carry " +
+						"all of its chunks. Rewrite it on the host with `me sysw pack` to include it."
+				}
+				showError(ctx, th, "Engrave Bundle", pendingMsg)
 				if len(scr.g.cards) > 0 {
 					return scr.g.cards, true
 				}

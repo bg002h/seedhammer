@@ -134,8 +134,16 @@ func (s *syswSession) take(want sysw.Class) (string, bool) {
 // assignment in the assembled policy, and @N order is identity-bearing
 // (md/encode_multisig.go's ordering contract — two callers supplying the same
 // keys in different orders mint different, both valid, policies). So this
-// returns the records in the order the payload holds them, and nothing
-// downstream may reorder them.
+// returns the records in the order the payload holds them.
+//
+// What it does NOT promise, because it cannot from here: that the CARDS those
+// records assemble into come out in the same order. A chunked card completes on
+// its LAST chunk, so an interleaved payload completes its cards in a different
+// order than it lists them. Closing that gap is groupRecordsByCard's job
+// (gui/multisig_build_payload.go), and the Build path calls it on this output
+// before anything consumes it. Stating the guarantee here without naming where
+// it is actually obtained is how the claim outlived its mechanism the first
+// time.
 //
 // It inherits `take`'s guard verbatim: a record may not be handed to a program
 // until the payload it came from has been authenticated by one of [compared]'s
