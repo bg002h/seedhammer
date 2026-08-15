@@ -215,9 +215,13 @@ func buildWalkParamPickers(t *testing.T, ctx *Context, frame func() (string, boo
 // S1 CHANGED THE NO-PAYLOAD ARM and this test changed with it. It used to drive
 // a reader-less machine into the gather, press Done on zero cards, and read the
 // gather's own "No complete cards yet — scan a card's chunks first". That is
-// exactly the refusal S1 exists to remove: phase-1 hardware has no reader, so it
-// prescribed an impossible action and dead-ended the operator. The Build path
-// now refuses BEFORE the gather and names the host route. The property under
+// exactly the refusal S1 exists to remove: this phase's data entry is the
+// payload and the keyboard, so "scan a card's chunks first" prescribed a route
+// the flow does not take and dead-ended the operator. (The SH2 does HAVE a
+// reader — a soldered ST25R3916 — so the defect was never absent hardware; it
+// was a prompt pointing away from the only route the flow offers. Operator,
+// 2026-08-15.) The Build path now refuses BEFORE the gather and names the host
+// route. The property under
 // test is unchanged — no seed is typed — so both arms assert it.
 func TestBuildFlow_GatherBeforeSeed(t *testing.T) {
 	t.Run("no payload refuses before the gather, naming the host route", func(t *testing.T) {

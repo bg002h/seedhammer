@@ -9,9 +9,13 @@ package main
 // cards, so the gather finished, so the walk passed. That makes every
 // stage-gate walk from S1 on able to report success for the wrong reason.
 //
-// Phase-1 hardware has no reader at all. So a stage-gate walk must be able to
-// assert that NOTHING crossed the reader: the cards came from the payload or
-// they came from nowhere.
+// The SH2 HAS a reader — a soldered ST25R3916, defeatable only physically, with
+// a knife. What phase 1 changes is SCOPE: the payload and the keyboard are the
+// primary data entries, and NFC is a later pass (operator, 2026-08-15).
+//
+// So a stage-gate walk must be able to assert that NOTHING crossed the reader —
+// and the fact that the reader WORKS is what makes that assertion load-bearing
+// rather than decorative.
 //
 // The counter is CUMULATIVE for the session and has no reset, deliberately —
 // the same discipline the engraved census keeps (engraved.go). A resettable

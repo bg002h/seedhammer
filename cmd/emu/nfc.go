@@ -58,8 +58,20 @@ type nfcSource struct {
 	//
 	// It exists for F-174. A stage-gate walk of the Build-policy flow must be
 	// able to assert that the cosigner cards came from the payload and NOT from
-	// the reader, because a gather completed over the emulated reader is green
-	// whether or not that feature exists — and phase-1 hardware has no reader.
+	// the reader, because a gather completed over a reader is green whether or
+	// not that feature exists.
+	//
+	// THE REASON IS SCOPE, NOT ABSENT HARDWARE (corrected 2026-08-15, operator).
+	// The SH2 HAS an NFC reader — the ST25R3916 is soldered to every board, and
+	// an operator who wants it gone disables it physically, with a knife. This
+	// comment used to say "phase-1 hardware has no reader", which was simply
+	// false. This phase's PRIMARY data entry is the payload and the keyboard;
+	// NFC is a later pass.
+	//
+	// That correction STRENGTHENS this counter rather than weakening it. Because
+	// a working reader really is present, a walk CAN complete a gather by
+	// scanning and report success for the wrong reason. Asserting zero is what
+	// makes payload-sourcing provable at all.
 	//
 	// There is deliberately NO reset, for engraved.go's reason: a counter a
 	// driver can zero just before asserting is a gate that always passes.

@@ -16,7 +16,12 @@ import "syscall/js"
 // cosigner gather that completed over the emulated reader is green whether or
 // not the payload-supplied-cards feature exists, so "the gather finished" is
 // not evidence for the feature; "the gather finished AND nothing crossed the
-// reader" is. Phase-1 hardware has no reader at all.
+// reader" is.
+//
+// The justification is SCOPE, not absent hardware (corrected 2026-08-15): the
+// SH2 has a soldered ST25R3916, and this phase simply takes its cards from the
+// payload and the keyboard instead. Because the reader works, a walk could pass
+// by scanning — which is exactly why zero has to be asserted.
 //
 // It is cumulative for the session and there is NO reset, deliberately — see
 // nfc.go. A counter a driver can zero just before asserting is a gate that

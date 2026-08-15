@@ -116,8 +116,12 @@ async function choose(i, n, expect, label) {
  * Assert nothing has crossed the emulated NFC reader.
  *
  * F-174: a cosigner gather completed over the reader is green whether or not
- * the payload-supplied-cards feature exists, and phase-1 hardware has no reader
- * at all. So a stage gate asserts the cards did NOT come from a tag.
+ * the payload-supplied-cards feature exists. So a stage gate asserts the cards
+ * did NOT come from a tag.
+ *
+ * The SH2 HAS a working reader (soldered ST25R3916); phase 1 takes its cards
+ * from the payload and the keyboard by SCOPE, not by hardware absence. Because
+ * the reader works, this assertion is what makes payload-sourcing provable.
  *
  * Exported so the mutation proof can call it directly after presenting one.
  */
@@ -129,7 +133,9 @@ export function assertNoNFC(where) {
   const n = window.shNFC.presented();
   if (n !== 0) {
     throw new Error(`${where}: ${n} record(s) crossed the NFC reader; a stage-gate run must ` +
-      `present ZERO — the cards come from the payload, and phase-1 hardware has no reader`);
+      `present ZERO — the cards must come from the payload, which is this phase's ` +
+      `primary data entry alongside the keyboard (the reader exists and works, ` +
+      `which is why this is asserted rather than assumed)`);
   }
   return n;
 }

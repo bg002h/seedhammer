@@ -64,9 +64,12 @@ func TestGatherScreenNeverSaysScanWithoutAReader(t *testing.T) {
 			if strings.Contains(strings.ToLower(ln), "scan") {
 				// The ms1 refusal names NFC as a channel it refuses, which is a
 				// different sentence from telling the operator to scan.
-				t.Errorf("a reader-less machine's gather screen says %q; phase-1 "+
-					"hardware has no reader, so this sends the operator looking "+
-					"for one", ln)
+				t.Errorf("a machine reporting NO reader shows a gather line saying "+
+					"%q, which sends the operator looking for a scan this machine "+
+					"cannot offer. (The SH2 itself HAS a soldered reader — this "+
+					"arm is the reader-less platform, e.g. one an operator "+
+					"physically disabled; phase 1's routes are the payload and "+
+					"the keyboard.)", ln)
 				saidScan = true
 			}
 		}

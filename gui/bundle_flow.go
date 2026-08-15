@@ -81,15 +81,26 @@ func (s *bundleGatherScreen) feedback(status bundleOfferStatus) string {
 // tally returns the running on-screen tally of verified cards by type.
 //
 // THE CLOSING LINE IS READER-AWARE (S1 fold, I2). It read "Scan a card, or
-// Done." unconditionally, and phase-1 hardware has no reader — so on the machine
-// this stage exists for, the gather instructed an action the operator could not
-// perform. That is S1's own motivating defect wearing a different hat, and it is
-// the prompt text, which spec P0 item 6 rules here; only the TITLE is S2's D-4
-// work.
+// Done." unconditionally, which is the prompt text spec P0 item 6 rules here;
+// only the TITLE is S2's D-4 work.
 //
 // Keyed on FeatureNFC rather than on which flow is calling, because the property
-// is about the MACHINE: on a reader-equipped unit (the emulator is one) scanning
-// really is available and saying so is correct.
+// is about the MACHINE: on a reader-equipped unit scanning really is available
+// and saying so is correct.
+//
+// CORRECTED 2026-08-15 (operator). This comment used to justify itself with
+// "phase-1 hardware has no reader", and that was false: the SH2's ST25R3916 is
+// soldered to every board (platform_sh2.go), so Features() reports FeatureNFC
+// unconditionally and the reader-less wording reaches no machine an operator
+// holds. What phase 1 actually changes is SCOPE — the payload and the keyboard
+// are the primary data entries, and NFC is a later pass.
+//
+// The predicate is left keyed on FeatureNFC deliberately: it is TRUE of the
+// hardware, it is the honest question to ask about a machine, and an operator
+// who removes NFC does it with a knife — at which point a platform that learns
+// to report the change gets the right wording for free. Scanning stays
+// AVAILABLE and simply stops being the headline; the payload review that spec
+// P0 item 6 requires is the primary surface, and it lands on both arms.
 func (s *bundleGatherScreen) tally() []string {
 	var nMD, nMK int
 	for _, c := range s.g.cards {
