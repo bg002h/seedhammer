@@ -143,10 +143,15 @@ func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
 	all := cosignerCardFixtures(t, 4)
 	records := all[3]
 	synctest.Test(t, func(t *testing.T) {
-		ctx := NewContext(newPlatform())
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
 		ctx.sysw = sessionHolding(records...)
 		done := false
-		frame, quit := runUI(ctx, func() {
+		// RASTERED, for TestBuildFlowRefusesDuplicateBeforeReview's reason: a
+		// refusal nobody can read is a refusal that did not happen, and content
+		// assertions cannot see that.
+		frame, _, ink, quit := runUITouchRaster(ctx, func() {
 			buildMultisigPolicyFlow(ctx, &descriptorTheme)
 			done = true
 		})
@@ -176,6 +181,12 @@ func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
 		if !ok {
 			t.Fatalf("a card declaring a foreign origin did not refuse; got %q", content)
 		}
+		if ink() < buildWalkRasterFloor {
+			t.Errorf("the Key origin mismatch refusal drew only %d ink pixels (floor %d); "+
+				"its body is 362 chars, the longest refusal this flow draws",
+				ink(), buildWalkRasterFloor)
+		}
+		t.Logf("Key origin mismatch refusal: ink = %d px", ink())
 		click(&ctx.Router, Button3)
 		for i := 0; i < 64 && !done; i++ {
 			frame()

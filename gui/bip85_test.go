@@ -11,7 +11,7 @@ import (
 )
 
 // canonicalBip85Master is the standard BIP-85 spec test-vector master seed.
-func canonicalBip85Master(t *testing.T) bip39.Mnemonic {
+func canonicalBip85Master(t testing.TB) bip39.Mnemonic {
 	t.Helper()
 	m, err := bip39.ParseMnemonic("install scatter logic circle pencil average fall shoe quantum disease suspect usage")
 	if err != nil {

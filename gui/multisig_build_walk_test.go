@@ -69,44 +69,65 @@ import (
 // title-only frame passed it.
 const buildWalkRasterFloor = 6000
 
-// titleOnlyInk measures the WORST-CASE blank frame: a title, three nav buttons
-// (the most any screen on this walk draws, and the most expensive because the
-// third is filled) and no body. The upper bound on "blank", measured rather than
-// asserted from memory, because the floor is only meaningful relative to it.
+// titleOnlyInk measures the WORST-CASE blank frame: a title, no body, and the
+// most expensive navigation the layout can draw.
+//
+// IT SEARCHES RATHER THAN ASSUMES. An earlier version hard-coded three nav
+// buttons and asserted in prose that three was "the most any screen on this walk
+// draws" — an unmeasured claim holding up the whole floor, since a screen with
+// more would understate the blank baseline and shrink the margin silently.
+//
+// THREE IS A STRUCTURAL CEILING, not an observation about this walk: layoutNavigation
+// (gui/gui.go) indexes `ys := [3]int{...}` by `clk.Button - Button1`, so the nav
+// bar has exactly three slots and a fourth is not expressible. Confirmed by
+// trying it — a fourth button panics with index out of range. So the search runs
+// 1..3 and returns the MAXIMUM. Measured 2026-08-15: 2259 / 2693 / 5482 px, the
+// jump at three being the filled StylePrimary button.
 func titleOnlyInk(t *testing.T) int {
 	t.Helper()
-	p := newPlatform()
-	p.display = sh2DisplaySize
-	ctx := NewContext(p)
-	frame, _, ink, quit := runUITouchRaster(ctx, func() {
-		for i := 0; i < 4; i++ {
-			dims := ctx.Platform.DisplaySize()
-			titleOp, _ := layoutTitle(ctx, dims.X, descriptorTheme.Text, "Policy Review")
-			nav, _ := layoutNavigation(&ctx.B, &descriptorTheme, dims,
-				NavButton{Clickable: &Clickable{Button: Button1}, Style: StyleSecondary, Icon: assets.IconBack},
-				NavButton{Clickable: &Clickable{Button: Button2}, Style: StyleSecondary, Icon: assets.IconRight},
-				NavButton{Clickable: &Clickable{Button: Button3}, Style: StylePrimary, Icon: assets.IconCheckmark},
-			)
-			ctx.Frame(op.Layer(nav, titleOp, op.Color(&ctx.B, descriptorTheme.Background)))
+	worst := 0
+	for n := 1; n <= 3; n++ {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		frame, _, ink, quit := runUITouchRaster(ctx, func() {
+			for i := 0; i < 4; i++ {
+				dims := ctx.Platform.DisplaySize()
+				titleOp, _ := layoutTitle(ctx, dims.X, descriptorTheme.Text, "Policy Review")
+				navs := []NavButton{
+					{Clickable: &Clickable{Button: Button1}, Style: StyleSecondary, Icon: assets.IconBack},
+				}
+				if n >= 2 {
+					navs = append(navs, NavButton{Clickable: &Clickable{Button: Button2}, Style: StyleSecondary, Icon: assets.IconRight})
+				}
+				if n >= 3 {
+					navs = append(navs, NavButton{Clickable: &Clickable{Button: Button3}, Style: StylePrimary, Icon: assets.IconCheckmark})
+				}
+				nav, _ := layoutNavigation(&ctx.B, &descriptorTheme, dims, navs...)
+				ctx.Frame(op.Layer(nav, titleOp, op.Color(&ctx.B, descriptorTheme.Background)))
+			}
+		})
+		// PUMP, or ink() is the zero it was initialised with and every comparison
+		// against it is vacuous. Measured: without this the "floor" was being
+		// checked against 0 and passed everything.
+		content, ok := frame()
+		if !ok {
+			t.Fatal("the title-only frame never rendered")
 		}
-	})
-	defer quit()
-	// PUMP, or ink() is the zero it was initialised with and every comparison
-	// against it is vacuous. Measured: without this the "floor" was being checked
-	// against 0.
-	content, ok := frame()
-	if !ok {
-		t.Fatal("the title-only frame never rendered")
+		if !uiContains(content, "Policy Review") {
+			t.Fatalf("the title-only frame drew something else: %q", content)
+		}
+		got := ink()
+		if got <= 0 {
+			t.Fatalf("a title-only frame with %d nav button(s) measured %d px; the "+
+				"harness is not rastering, so the floor separates nothing", n, got)
+		}
+		if got > worst {
+			worst = got
+		}
+		quit()
 	}
-	if !uiContains(content, "Policy Review") {
-		t.Fatalf("the title-only frame drew something else: %q", content)
-	}
-	got := ink()
-	if got <= 0 {
-		t.Fatalf("a title-only frame measured %d px; the harness is not rastering, "+
-			"so the floor below separates nothing", got)
-	}
-	return got
+	return worst
 }
 
 // buildWalkStep is one screen the walk expects, in order.
@@ -192,10 +213,14 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			{needle: "Policy stub", downs: 0},              // Policy Review -> continue
 			{needle: "Which md1?", downs: 0},               // Full policy md1
 		}
+		reviewFrame := ""
 		for _, s := range rest {
 			content, ok := pumpUntil(frame, s.needle, 64)
 			if !ok {
 				t.Fatalf("walk never reached %q; screen reads %q", s.needle, content)
+			}
+			if s.needle == "Policy stub" {
+				reviewFrame = content
 			}
 			t.Logf("INK %-34q %d", s.needle, ink())
 			if ink() < buildWalkRasterFloor {
@@ -206,12 +231,23 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			frame()
 		}
 
-		// THE POLICY REVIEW MUST HAVE SPOKEN. Re-read from the frame the walk
-		// actually saw rather than from buildReviewLines: §0.1a's announcement is
-		// only worth anything if it reaches the display.
+		// THE POLICY REVIEW MUST HAVE SPOKEN (§0.1a), ASSERTED ON THE FRAME THE
+		// WALK ACTUALLY SAW.
 		//
-		// (Captured above by pumpUntil's return; re-asserted here against a fresh
-		// read would race the flow, so the check is on the recorded content.)
+		// A comment used to stand here claiming this check; there was no check.
+		// TestBuildReviewAnnouncesTheBip48Origin inspects buildReviewLines' STRINGS,
+		// and this stage's own headline finding is that a string assertion cannot
+		// see a body that fails to draw — uiContains returns true on a frame with
+		// nothing but a title. So the announcement is asserted here, on rendered
+		// content, and the frame carrying it is under the raster floor above.
+		for _, want := range []string{multisigSharedOrigin().String(), "BIP-48"} {
+			if !uiContains(reviewFrame, want) {
+				t.Errorf("the Policy Review reached the display without §0.1a's origin "+
+					"announcement: no %q in %q. The operator is about to hold-confirm an "+
+					"irreversible engrave without being told which derivation path the "+
+					"device chose for them.", want, reviewFrame)
+			}
+		}
 
 		// The EXPERIMENTAL warning: hold to confirm is the only route past it.
 		content, ok := pumpUntil(frame, "EXPERIMENTAL", 64)
@@ -274,6 +310,11 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 		// policy build then offers the cross-match verify and shows the restore
 		// doc, and a test that stopped at the last plate would call an unfinished
 		// flow finished.
+		// F-182, WALKED PAST DELIBERATELY: between the last plate and this offer,
+		// bundleEngrave shows the ms1 reminder still titled "Engrave Bundle" — a
+		// D-4-class screen on the Build path. It belongs to S5, which owns the
+		// engrave tail, and it is named here so the next reader knows this walk
+		// crossed a known defect rather than missed one.
 		if c, ok := pumpUntil(frame, "Verify the engraved plates?", 96); !ok {
 			t.Fatalf("the verify offer was not reached after %d plate(s); got %q", plates, c)
 		}

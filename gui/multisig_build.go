@@ -751,10 +751,19 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 	}
 
 	// SPEC §4.1, ON THE ASSEMBLED SET AND NOWHERE ELSE. assembleBuildPolicy is
-	// the SOLE md1-bytes producer for this path (I-VERBATIM), so a check here
-	// covers every present and future route into a policy; a check at the card
-	// picker would not, because the self key does not exist until step (4) of
-	// buildMultisigPolicyFlow and the delivered hazard is self-vs-card.
+	// the SOLE md1-bytes producer for the BUILD path (I-VERBATIM), so a check
+	// here covers every present and future route into a DEVICE-AUTHORED policy;
+	// a check at the card picker would not, because the self key does not exist
+	// until step (4) of buildMultisigPolicyFlow and the delivered hazard is
+	// self-vs-card.
+	//
+	// SCOPE, said plainly because "sole md1 producer" reads wider than it is:
+	// this does NOT check an md1 the operator SUPPLIES. supplyMultisigPolicyFlow
+	// engraves a descriptor someone else authored, repeated keys and all, and
+	// that is §4.1's scoping rather than a gap — the device is not the author
+	// there, and refusing another coordinator's policy at engrave time would be
+	// this device overruling a wallet it did not create. Every md1 the DEVICE
+	// mints passes here; not every md1 the device engraves.
 	//
 	// It also runs BEFORE buildReviewFlow, which is the point: a duplicate must
 	// never reach the review screen. With fp-presence Omit (the default) that

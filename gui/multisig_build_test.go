@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/bip32"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
 )
@@ -471,14 +473,49 @@ func FuzzAssembleBuildPolicy(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	otherXpub := selfXpub // any valid mainnet xpub; reuse self for the corpus
+	// A SECOND, DISTINCT MASTER — and this line is load-bearing, not tidying.
+	//
+	// It used to read `otherXpub := selfXpub`, so every generated card carried the
+	// self key. That was harmless until S2 added the duplicate-key refusal, at
+	// which point every case with n >= 2 returned at that check and
+	// md.EncodeMultisig stopped being reached through this target at all. The
+	// target asserts only "does not panic", so it stayed green while fuzzing
+	// almost nothing: a coverage collapse with no red anywhere. Found by the S2
+	// execution review (M2).
+	//
+	// With a distinct master the generated cards differ from the self key, so the
+	// assembler is exercised past both S2 refusals and into the encoder — which
+	// is where a panic would live.
+	//
+	// A POOL, not one key: the generated cards must differ from each other as
+	// well as from self, or two cards collide and the same check swallows the
+	// case. Eight distinct accounts of a second master, derived once. Beyond
+	// eight cards the pool repeats and the refusal fires again — correct
+	// behaviour, and out of the product's range anyway (n is capped at 5).
+	other := canonicalBip85Master(f)
+	var pool []string
+	for acct := 0; acct < 8; acct++ {
+		path, perr := bip32.ParsePath(fmt.Sprintf("m/48h/0h/%dh/2h", acct))
+		if perr != nil {
+			f.Fatal(perr)
+		}
+		x, _, xerr := deriveAccountXpub(other, "", &chaincfg.MainNetParams, path)
+		if xerr != nil {
+			f.Fatal(xerr)
+		}
+		if x == selfXpub {
+			f.Fatalf("pool account %d derives the SELF key, so the duplicate check "+
+				"would swallow every case using it", acct)
+		}
+		pool = append(pool, x)
+	}
 	f.Fuzz(func(t *testing.T, scriptIdx, n, k, selfSlot int, includeFp bool, numCards int) {
 		if n < 0 || n > 64 || numCards < 0 || numCards > 64 || selfSlot < 0 {
 			return
 		}
 		cards := make([]mk.Card, 0, numCards)
 		for i := 0; i < numCards; i++ {
-			c := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: otherXpub, Stubs: [][4]byte{{0, 0, 0, 0}}}
+			c := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: pool[i%len(pool)], Stubs: [][4]byte{{0, 0, 0, 0}}}
 			if includeFp {
 				c.Fingerprint = "73c5da0a"
 			}
@@ -497,6 +534,26 @@ func FuzzAssembleBuildPolicy(f *testing.F) {
 			// the assembler guards via the count check + slot placement, but skip
 			// the assertion for clearly-invalid inputs.
 		}
-		_, _, _, _ = assembleBuildPolicy(p, selfXpub, selfFP, cards)
+		_, _, _, aerr := assembleBuildPolicy(p, selfXpub, selfFP, cards)
+
+		// NON-VACUITY, and this is the assertion M2 was missing. "Does not panic"
+		// stays green even when every case is rejected at the first check, which
+		// is exactly how the coverage collapse went unnoticed: with every card
+		// carrying the SELF key, S2's duplicate refusal returned before
+		// md.EncodeMultisig on every n >= 2 and the target fuzzed nothing while
+		// reporting success.
+		//
+		// So for a well-formed case drawn from the distinct-key pool, the
+		// duplicate refusal must NOT be what came back. If it is, the corpus is
+		// being swallowed again and this target has stopped reaching the encoder.
+		if len(cards) == p.N-1 && numCards <= len(pool) {
+			var dup errBuildDuplicateKey
+			if errors.As(aerr, &dup) {
+				t.Fatalf("n=%d with %d distinct pool card(s) was refused as a duplicate "+
+					"(@%d, @%d): the fuzz corpus is being rejected before the encoder, "+
+					"so this target is fuzzing nothing",
+					p.N, numCards, dup.SlotA, dup.SlotB)
+			}
+		}
 	})
 }

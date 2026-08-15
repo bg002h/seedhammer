@@ -226,10 +226,15 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 func TestBuildFlowRefusesDuplicateBeforeReview(t *testing.T) {
 	records := cosignerCardRecords(t, 1) // card A@0 only
 	synctest.Test(t, func(t *testing.T) {
-		ctx := NewContext(newPlatform())
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
 		ctx.sysw = sessionHolding(records...)
 		done := false
-		frame, quit := runUI(ctx, func() {
+		// RASTERED, not merely read. This stage's own finding is that a body can
+		// fail to draw while every content assertion still reports its text, so
+		// the refusal the stage exists to produce is judged by ink.
+		frame, _, ink, quit := runUITouchRaster(ctx, func() {
 			buildMultisigPolicyFlow(ctx, &descriptorTheme)
 			done = true
 		})
@@ -271,6 +276,13 @@ func TestBuildFlowRefusesDuplicateBeforeReview(t *testing.T) {
 			strings.ToLower(strings.ReplaceAll("your key, from your seed", " ", ""))) {
 			t.Errorf("the refusal did not name the self slot's provenance: %q", content)
 		}
+		if ink() < buildWalkRasterFloor {
+			t.Errorf("the Duplicate key refusal drew only %d ink pixels (floor %d): the "+
+				"operator is stopped by a screen with no body. This body is 335 chars, "+
+				"which is also the 'too long to lay out' hazard, so the check is ink and "+
+				"not text.", ink(), buildWalkRasterFloor)
+		}
+		t.Logf("Duplicate key refusal: ink = %d px", ink())
 		click(&ctx.Router, Button3) // dismiss -> the flow returns
 		for i := 0; i < 64 && !done; i++ {
 			frame()

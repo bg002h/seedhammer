@@ -59,12 +59,12 @@ type bundleGatherScreen struct {
 func (s *bundleGatherScreen) feedback(status bundleOfferStatus) string {
 	switch status {
 	case bundleRefusedMs1:
-		return "Type the ms1 share on-device — never over NFC."
+		return "Type the ms1 share on-device, never over NFC."
 	case bundleRefusedSingleMK1:
 		if !s.hasReader {
-			return "Incomplete key card — the payload is missing some of its chunks."
+			return "Incomplete key card: the payload is missing some of its chunks."
 		}
-		return "Incomplete key card — scan all its chunks."
+		return "Incomplete key card: scan all its chunks."
 	case bundleCardComplete:
 		return "Card added."
 	case bundleAddedSingleMD1:
@@ -181,7 +181,7 @@ func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, boo
 			case bundleDoneEmpty:
 				// Reader-aware for tally()'s reason: on a machine with no reader
 				// "scan a card's chunks first" is a dead end dressed as advice.
-				msg := "No complete cards yet — scan a card's chunks first."
+				msg := "No complete cards yet. Scan a card's chunks first."
 				if !scr.hasReader {
 					msg = "No complete cards. Pack them on the host with `me sysw pack` " +
 						"and load the payload again."
@@ -190,16 +190,16 @@ func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, boo
 			case bundleDonePending:
 				// A card is mid-chunk-set: warn it's incomplete and drop it so the
 				// operator never engraves a partial. Then proceed with the complete
-				// cards (if any) — or fall back to the gather screen if none.
+				// cards (if any), or fall back to the gather screen if none.
 				//
 				// REACHABLE FROM BUILD (fold, I2): a payload holding enough complete
 				// cards PLUS a half chunk set classifies as auto-fill/select, so the
 				// pre-gather refusal does not fire and this message is what the
 				// operator reads. It said "scan all its chunks".
 				scr.g.dropPending()
-				pendingMsg := "Dropped an incomplete card — scan all its chunks to include it."
+				pendingMsg := "Dropped an incomplete card. Scan all its chunks to include it."
 				if !scr.hasReader {
-					pendingMsg = "Dropped an incomplete card — the payload does not carry " +
+					pendingMsg = "Dropped an incomplete card: the payload does not carry " +
 						"all of its chunks. Rewrite it on the host with `me sysw pack` to include it."
 				}
 				showError(ctx, th, title, pendingMsg)

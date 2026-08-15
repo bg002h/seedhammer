@@ -92,6 +92,114 @@ async function waitFor(needle, timeoutMs = 10000) {
 
 const tap = async ([x, y], settle = 250) => { window.shTap(x, y); await sleep(settle); };
 
+/**
+ * Wait until ONE of several needles appears, and say which.
+ *
+ * A fork in the flow needs a fork in the driver. Waiting for one needle and
+ * treating a timeout as "the other one happened" would report the wrong arm
+ * confidently whenever the flow simply hung — which is the failure a walk exists
+ * to catch.
+ */
+async function raceFor(needles, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const text = squash(window.shScreen());
+    for (const n of needles) {
+      if (text.includes(squash(n))) return n;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`none of ${JSON.stringify(needles)} appeared within ${timeoutMs}ms; ` +
+        `screen reads ${JSON.stringify(window.shScreen())}`);
+    }
+    await sleep(50);
+  }
+}
+
+// HOLD_MS is the one wait here that cannot be replaced by a condition:
+// gui.confirmDelay is ONE SECOND of wall clock and releasing early aborts the
+// gesture, so this is that second plus margin. Carried over from
+// walk_trace_a.js, where it was measured.
+const HOLD_MS = 1300;
+// Ticks of no motion that mean "idle, not cutting" rather than "between
+// batches".
+const STALL_TICKS = 3;
+
+// The screens the engrave tail knows how to answer. Anything else STOPS the
+// walk — a driver that taps past what it does not recognise manufactures a pass.
+const ENGRAVE_HANDLERS = [
+  { name: "engrave-prompt", match: "Holdbuttontostarttheengravingprocess", act: "hold" },
+  { name: "engrave-done", match: "Engravingcompletedsuccessfully", act: "confirm" },
+  { name: "choose-variant", match: "Chooseengraving", act: "confirm" },
+];
+
+/**
+ * Drive the engrave tail from the policy review to a completed bundle.
+ *
+ * The machinery is walk_trace_a.js's, and it is reused rather than rewritten
+ * because every constant in it was measured there: progress comes from
+ * shToolpath and never from the screen (the display lags during a cut), the
+ * hold is wall-clock because gui.confirmDelay is, and a screen the handler list
+ * does not recognise stops the walk instead of being tapped past.
+ *
+ * The plate count is the caller's DERIVED expectation, not a parameter the walk
+ * discovers: F-170 is the rule that a walk asserting what it produced asserts
+ * nothing.
+ */
+async function runEngraveTail({ plates, pollMs = 75, settleMs = 150 }) {
+  const acts = [], digests = [];
+  const NOWHERE = [5, 5];
+  await tap(CONFIRM, 400);               // past the Policy Review
+  await waitFor("Which md1?");
+  await tap(CONFIRM, 400);               // Full policy md1 (row 0)
+  await waitFor("EXPERIMENTAL");
+  window.shPress(...CONFIRM);
+  await sleep(HOLD_MS);                  // > gui.confirmDelay, which is 1s
+  window.shRelease(...CONFIRM);
+  await waitFor("What to engrave?");
+  await tap(CONFIRM, 400);               // Full (seed + keys), row 0
+  await waitFor("Chooseengraving");
+
+  let stall = 0, lastSteps = -1;
+  for (let guard = 0; guard < 20000; guard++) {
+    const c = JSON.parse(window.shToolpath.strings());
+    if (c.strings.length >= plates) break;
+    const steps = JSON.parse(window.shToolpath.summary()).steps;
+    if (steps === lastSteps) stall++; else { stall = 0; lastSteps = steps; }
+    if (stall < STALL_TICKS) { await sleep(pollMs); continue; }
+
+    await tap(NOWHERE, settleMs);        // force a redraw before reading
+    const screen = squash(window.shScreen());
+    const h = ENGRAVE_HANDLERS.find((h) => screen.includes(h.match));
+    if (!h) {
+      acts.push({ act: "STALLED", screen: screen.slice(0, 90) });
+      break;
+    }
+    if (h.name === "engrave-done") {
+      digests.push(JSON.parse(window.shToolpath.summary()).digest);
+    }
+    acts.push({ act: h.act, screen: h.name });
+    if (h.act === "hold") {
+      window.shPress(...CONFIRM);
+      await sleep(HOLD_MS);
+      window.shRelease(...CONFIRM);
+      const before = JSON.parse(window.shToolpath.summary()).steps;
+      for (let i = 0; i < 100; i++) {
+        if (JSON.parse(window.shToolpath.summary()).steps !== before) break;
+        await sleep(pollMs);
+      }
+    } else {
+      window.shTap(...CONFIRM);
+      for (let i = 0; i < 100; i++) {
+        window.shTap(...NOWHERE);
+        await sleep(pollMs);
+        if (!squash(window.shScreen()).includes(h.match)) break;
+      }
+    }
+    stall = 0; lastSteps = -1;
+  }
+  return { census: JSON.parse(window.shToolpath.strings()), digests, acts };
+}
+
 async function goTo(program, max = 14) {
   const want = squash(program);
   for (let i = 0; i < max; i++) {
@@ -158,6 +266,22 @@ export function assertNoNFC(where) {
  * @param {boolean} [opts.includeFp=false]  fingerprint presence.
  * @param {number}  [opts.use=2]            how many payload cards to accept in
  *          the bounded-selection picker. Only consulted on over-supply.
+ * @param {string[]} [opts.picks]        per-card decisions, "use" or "skip", in
+ *          payload order. Defaults to `use` copies of "use", which is what every
+ *          pre-S2 caller meant. THE PICKER STOPS ASKING once the remaining cards
+ *          equal the remaining slots (gui/multisig_build_payload.go:317-321), so
+ *          this list is applied only while the picker is actually on screen.
+ * @param {string}  [opts.seedFrom=null]  where the SELF seed comes from.
+ *          null stops at "Input Seed", which is S1's gate and this walk's
+ *          original end. "payload" takes the ClassMnemonic the cards blob
+ *          carries (master A) with confirm-taps only.
+ * @param {boolean} [opts.engrave=false] drive past the review to a completed
+ *          engrave and return the toolpath census.
+ * @param {number}  [opts.plates=9]      how many plates a completed run cuts:
+ *          1 ms1 + 2 mk1 chunks + 6 md1 chunks for a full 2-of-3 wsh build.
+ *          DERIVED from the inputs, never from what the walk produced (F-170).
+ * @param {string}  [opts.expect="engrave"]  "engrave" or "duplicate". The
+ *          refusal arm is a first-class outcome, not a failure.
  * @returns {Promise<object>} the needles proven, the gather screen, and the
  *          NFC count — everything a stage gate asserts on.
  *
@@ -170,9 +294,16 @@ export function assertNoNFC(where) {
  * makes that non-circular: four cards in the tally with ZERO records across the
  * reader can only have come from the payload.
  */
-export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, includeFp = false, use = 2 } = {}) {
+export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, includeFp = false,
+                            use = 2, picks = null, seedFrom = null, engrave = false,
+                            plates = 9, expect = "engrave",
+                            pollMs = 75, settleMs = 150 } = {}) {
   const t0 = performance.now();
   assertNoNFC("at entry");
+  if (engrave && typeof window.shToolpath !== "object") {
+    throw new Error("shToolpath is missing — this is a STALE emu.wasm. The browser " +
+      "caches it and a cache-buster on index.html does not help; serve on a fresh port.");
+  }
 
   const proven = [];
   window.shSysw(payload);
@@ -264,6 +395,7 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   // reported rather than assumed.
   const openSlots = n - 1;
   let selected = false;
+  const decisions = [];
   if (cardsGathered > openSlots) {
     await waitFor(NEEDLE_PICK);
     proven.push(NEEDLE_PICK);
@@ -271,27 +403,106 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     await tap(CONFIRM, 400);             // past the read-only list of what arrived
     await waitFor(NEEDLE_PICK_CARD);
     proven.push(NEEDLE_PICK_CARD);
-    for (let taken = 0; taken < use; taken++) {
+    // PER-CARD DECISIONS, and the loop is driven by what is ON SCREEN rather
+    // than by a count. The picker STOPS ASKING once the cards that remain equal
+    // the slots that remain (gui/multisig_build_payload.go:317-321), so a loop
+    // that counted its own taps would carry on tapping CONFIRM into whatever
+    // screen came next. That short-circuit is exactly what the clean arm relies
+    // on: SKIP, SKIP and the last two cards are taken without a third question.
+    const plan = picks || Array(use).fill("use");
+    for (let i = 0; i < plan.length; i++) {
+      const want = `Use payload card ${i + 1} of`;
+      if (!squash(window.shScreen()).includes(squash(want))) break; // short-circuited
       // The per-card POST-CONDITION, for choose()'s reason: "a wrong row does
-      // NOT fail loudly on its own". Without it, a card auto-taken by the
-      // remaining-equals-needed short-circuit would leave this loop tapping
-      // CONFIRM on whatever screen came next.
-      await waitFor(`Use payload card ${taken + 1} of`);
-      // "USE THIS CARD" is row 0 and the default, so CONFIRM alone takes it.
+      // NOT fail loudly on its own".
+      await waitFor(want);
+      // "USE THIS CARD" is row 0 and the default; "SKIP IT" is row 1.
+      if (plan[i] === "skip") {
+        await tap([240, rowY(1, 2)], 300);
+        decisions.push(`skip:${i + 1}`);
+      } else {
+        decisions.push(`use:${i + 1}`);
+      }
       await tap(CONFIRM, 400);
     }
   }
 
-  // S1 ENDS AT A SCREEN, NOT AN ENGRAVE (plan §3 preamble, F-175). The seed
-  // entry is the first screen PAST the cosigner set, so reaching it is the
-  // proof that the set resolved — and it is where this walk stops.
+  // THE SEED ENTRY is the first screen PAST the cosigner set, so reaching it is
+  // the proof that the set resolved. With `seedFrom` unset the walk STOPS here,
+  // which is S1's gate (plan §3 preamble, F-175) and what this driver did before
+  // S2.
   const screen = await waitFor("Input Seed");
   const presentedAtEnd = assertNoNFC("after the cosigner set resolved");
+
+  // ─── S2: past the seed, to a refusal or to a completed engrave ─────────────
+  //
+  // TAP-ONLY, AND THAT IS THE POINT. S2's first attempt at this leg assumed the
+  // self seed had to be TYPED, and stopped on the cost of driving the on-device
+  // keyboard by coordinate (F-181). The assumption was false: the cards payload
+  // carries a ClassMnemonic — master A, `cmd/emu/sysw_cards_payload.go` — so
+  // "FROM PAYLOAD" is row 0 of the source picker and the whole leg is confirms.
+  // The plan's own wording said so all along: "default taps + PAYLOAD SEED".
+  //
+  // It is also the only route by which the self-seed-from-payload path gets
+  // exercised at all: every Go test on this flow seeds mk1 chunks only, so
+  // syswSeedPicker is "a menu of one and is skipped" and this screen never
+  // appears. That is one of §0.1b's two ruled primary data entries.
+  let refusal = null, census = null, digests = [], acts = [], reviewScreen = null;
+  if (seedFrom === "payload") {
+    // "FROM PAYLOAD" is row 0 of three (FROM PAYLOAD / TYPE IT / SCAN) and is
+    // the default, so CONFIRM alone takes it — but the ROW IS TAPPED anyway,
+    // because a default that silently moves is how a walk ends up driving the
+    // keyboard while reporting it drove the payload.
+    await tap([240, rowY(0, 3)], 300);
+    await tap(CONFIRM, 400);
+    // The acceptance screen syswSourceAccept draws for a payload-sourced secret.
+    await waitFor("systemwide payload");
+    await tap(CONFIRM, 400);
+    await waitFor("Add a BIP-39 passphrase?");
+    await tap(CONFIRM, 500);            // Skip is row 0
+
+    // THE FORK. Both outcomes are legitimate results of THIS payload: the
+    // default taps take cards A@0 and A@1, and A@0 is master A's own account-0
+    // key, so the assembled set repeats the self key. SKIP, SKIP reaches Trace
+    // A's B@0 + C@0 instead.
+    const dupSeen = await raceFor(["Duplicate key", "Policy stub"], 15000);
+    if (dupSeen === "Duplicate key") {
+      refusal = window.shScreen();
+      if (expect !== "duplicate") {
+        throw new Error(`the build was refused as a duplicate, but this run expected ` +
+          `${JSON.stringify(expect)}. Screen: ${JSON.stringify(refusal)}`);
+      }
+    } else {
+      reviewScreen = window.shScreen();
+      if (expect !== "engrave") {
+        throw new Error(`the build reached the policy review, but this run expected a ` +
+          `${JSON.stringify(expect)} refusal. Screen: ${JSON.stringify(reviewScreen)}`);
+      }
+      // §0.1a: the origin announcement must be ON the confirmation surface.
+      for (const want of ["m/48h/0h/0h/2h", "BIP-48"]) {
+        if (!squash(reviewScreen).includes(squash(want))) {
+          throw new Error(`the Policy Review reached the display without §0.1a's ` +
+            `origin announcement: no ${JSON.stringify(want)} in ` +
+            `${JSON.stringify(reviewScreen)}`);
+        }
+      }
+      if (engrave) {
+        const r = await runEngraveTail({ plates, pollMs, settleMs });
+        census = r.census; digests = r.digests; acts = r.acts;
+      }
+    }
+  }
 
   return {
     elapsedSec: Math.round((performance.now() - t0) / 1000),
     carouselHops: hops,
-    params: { n, k, selfSlot, includeFp, use },
+    params: { n, k, selfSlot, includeFp, use, picks, seedFrom, engrave, expect, plates },
+    decisions,
+    refusal,
+    reviewScreen,
+    census,
+    digests,
+    acts,
     // The needles that were actually observed, each single-site by
     // needle_test.go. This list is the proof of WHICH FLOW, and it is the
     // reason the screens below are reportable rather than misleading.
@@ -308,6 +519,16 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     // SEVEN since D-4 gave the gather a needle of its own. The count is spelt
     // out rather than derived from the array so that a needle silently dropped
     // from the walk fails here instead of lowering the bar.
-    ok: proven.length === 7 && presentedAtEnd === 0 && cardsGathered > 0 && selected,
+    //
+    // `ok` NAMES ITS OUTCOME. A run that expected the duplicate refusal is green
+    // when it got one, and a run that expected an engrave is green only when the
+    // census holds exactly the DERIVED plate count with nothing unattributed
+    // (F-170: a walk that engraved N wrong strings must not be green).
+    ok: proven.length === 7 && presentedAtEnd === 0 && cardsGathered > 0 && selected &&
+      (seedFrom === null
+        || (expect === "duplicate" && refusal !== null)
+        || (expect === "engrave" && !engrave && reviewScreen !== null)
+        || (expect === "engrave" && engrave && census !== null
+            && census.strings.length === plates && census.unattributed === 0)),
   };
 }
