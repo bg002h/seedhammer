@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -173,6 +174,16 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (5) Assemble via the SOLE md1 producer md.EncodeMultisig.
 	assembledMd1, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, cosigners)
 	if err != nil {
+		// SPEC §4.1's refusal is NAMED, not folded into the generic failure. The
+		// generic text ("Couldn't assemble the wallet policy.") describes a device
+		// problem; a duplicate key is the operator's INPUT and there are two
+		// things they can do about it, so both are said.
+		var dup errBuildDuplicateKey
+		if errors.As(err, &dup) {
+			showError(ctx, th, "Duplicate key",
+				buildDuplicateKeyMessage(dup, p.SelfSlot, origins))
+			return
+		}
 		showError(ctx, th, "Build Policy", "Couldn't assemble the wallet policy.")
 		return
 	}
@@ -489,6 +500,87 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 
 var errBuildSlotCount = errors.New("multisig build: cosigner count != n-1")
 
+// errBuildDuplicateKey is SPEC §4.1's refusal: two slots of the assembled policy
+// hold the same key. It carries BOTH slot indices so the flow can name them with
+// the provenance it already holds — "your key" vs "payload card N" — instead of
+// printing a generic failure the operator cannot act on.
+type errBuildDuplicateKey struct{ SlotA, SlotB int }
+
+func (e errBuildDuplicateKey) Error() string {
+	return fmt.Sprintf("multisig build: slots @%d and @%d hold the same key", e.SlotA, e.SlotB)
+}
+
+// duplicateSlotPair reports the first pair of slots carrying an IDENTICAL 65-byte
+// chain code ‖ compressed pubkey, which is SPEC §4.1's comparison verbatim.
+//
+// THE BASIS IS THE PART MOST EASILY GOT WRONG, so it is written down. Both
+// rejected alternatives are worse in opposite directions:
+//
+//   - MASTER FINGERPRINT identifies a MASTER, not a key. It would refuse the
+//     legitimate multi-account wallet — one master contributing account 0 and
+//     account 1 as two distinct cosigners, which is exactly the shape the
+//     delivered payload carries as cards A@0 and A@1. It is also absent by
+//     default (fp-presence Omit is index 0), so it would usually not be there
+//     to compare.
+//   - BASE58 XPUB carries parent-fingerprint/depth metadata that legitimately
+//     differs between two sources of the SAME key, and md/expand.go drops it
+//     anyway. Comparing it would miss a real duplicate that arrived by two
+//     routes.
+//
+// cc‖pk is exact in both directions: identical xpubs derive identical child keys
+// at every address index, and differing chain codes derive differing children
+// even under an equal parent pubkey. No missed duplicate, no refused legitimate
+// setup. Machine-checked both ways in multisig_build_dupkey_test.go.
+//
+// [32]byte and [33]byte are comparable, so `==` here IS the byte comparison.
+func duplicateSlotPair(all []md.MultisigCosigner) (int, int, bool) {
+	for i := range all {
+		for j := i + 1; j < len(all); j++ {
+			if all[i].ChainCode == all[j].ChainCode &&
+				all[i].CompressedPubkey == all[j].CompressedPubkey {
+				return i, j, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// buildSlotProvenance names one slot for a refusal, using what the flow already
+// knows: the self-slot the operator picked and the card→slot map
+// buildCosignerOrigins built. A refusal that says "slots @0 and @1" and stops
+// leaves the operator to work out which of their inputs to change.
+func buildSlotProvenance(slot, selfSlot int, origins []cosignerOrigin) string {
+	if slot == selfSlot {
+		return fmt.Sprintf("slot @%d (your key, from your seed)", slot)
+	}
+	for _, o := range origins {
+		if o.slot == slot {
+			return fmt.Sprintf("slot @%d (payload card %d)", slot, o.card)
+		}
+	}
+	// Unreachable while every non-self slot comes from a payload card; kept so a
+	// future source that forgets to register provenance degrades to a slot
+	// number rather than to a wrong claim about where the key came from.
+	return fmt.Sprintf("slot @%d", slot)
+}
+
+// buildDuplicateKeyMessage is the operator-facing refusal. Every sentence is
+// load-bearing: WHICH slots, WHY it is harm, that NOTHING was cut, and both
+// routes that exist on this hardware (§0.1b — the payload and the keyboard, never
+// "scan a card").
+//
+// No em-dash: it is a zero-pixel glyph in poppins.Regular16, the body face (F-78,
+// re-measured for this text). The "Duplicate key" heading is the modal TITLE.
+func buildDuplicateKeyMessage(e errBuildDuplicateKey, selfSlot int, origins []cosignerOrigin) string {
+	a := buildSlotProvenance(e.SlotA, selfSlot, origins)
+	b := buildSlotProvenance(e.SlotB, selfSlot, origins)
+	return fmt.Sprintf("%s and %s hold the SAME key. A policy that repeats a key can be "+
+		"spent by fewer different keys than its k-of-n says. Nothing was engraved. "+
+		"Build again and choose different cards, or use a different seed; if the "+
+		"payload has no other cards, rewrite it on the host with `me sysw pack`.",
+		strings.ToUpper(a[:1])+a[1:], b)
+}
+
 // multisigSharedOrigin is the LOCKED shared origin for OriginShared mode: the
 // BIP-48 P2WSH multisig account path m/48'/0'/0'/2' (matches T6b / pathPickerFlow
 // BIP-48). Self and every cosigner declare this single shared origin.
@@ -567,6 +659,20 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 		}
 		all[slot] = c
 		gi++
+	}
+
+	// SPEC §4.1, ON THE ASSEMBLED SET AND NOWHERE ELSE. assembleBuildPolicy is
+	// the SOLE md1-bytes producer for this path (I-VERBATIM), so a check here
+	// covers every present and future route into a policy; a check at the card
+	// picker would not, because the self key does not exist until step (4) of
+	// buildMultisigPolicyFlow and the delivered hazard is self-vs-card.
+	//
+	// It also runs BEFORE buildReviewFlow, which is the point: a duplicate must
+	// never reach the review screen. With fp-presence Omit (the default) that
+	// screen renders every slot "(no fp)", so a wallet one master can spend alone
+	// looks exactly like a wallet three masters share.
+	if a, b, dup := duplicateSlotPair(all); dup {
+		return nil, [4]byte{}, nil, errBuildDuplicateKey{SlotA: a, SlotB: b}
 	}
 
 	req := md.EncodeMultisigRequest{
