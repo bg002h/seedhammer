@@ -5,19 +5,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// The two halves of the vendoring pin (C-4), and they are deliberately NOT the
-// same kind of check.
+// The vendoring pin (C-4).
 //
-//	TestVendoredVectorsMatchTheirProvenancePin   a GATE. No sibling checkout, no
-//	                                             network, no skip path.
-//	TestVendoredVectorsAreInSyncWithThePrimary   an AUDIT of freshness. It needs
-//	                                             the sibling repo and may skip.
+// TestVendoredVectorsMatchTheirProvenancePin below is a GATE: no sibling
+// checkout, no network, no toolchain, no skip path. It runs everywhere.
+//
+// Its counterpart — is the vendored copy STALE relative to the primary? — needs
+// a checkout of mnemonic-engrave that no CI runner has, so it is not a test that
+// decides for itself whether to run. It lives in vendored_vectors_live_test.go
+// behind the `oraclelive` build tag, and in a normal build it does not exist.
+// Operator directive, 2026-08-15: "Don't skip jobs unless I ask."
 //
 // Saying which is which matters more than either one: the reason the old
 // arrangement failed is that a freshness audit was doing a gate's job, and
@@ -90,59 +91,4 @@ func TestVendoredVectorsMatchTheirProvenancePin(t *testing.T) {
 	}
 	t.Logf("%d vector(s), %d bytes, %s — from %s @ %s (file last changed in %s)",
 		len(vs), len(raw), p.SHA256[:16], p.Repo, p.Commit[:8], p.FileCommit[:8])
-}
-
-// THE FRESHNESS AUDIT, and it may skip — say so plainly rather than letting a
-// reader mistake it for the gate.
-//
-// The primary is where these vectors are generated, and this fork is strictly
-// downstream: a vector added there must reach here. Nothing in this repository
-// can observe that on its own, so this compares the vendored copy against a
-// sibling checkout WHEN ONE IS PRESENT. On a machine without the sibling repo
-// there is no fact to check, and a skip is the honest report of that — which is
-// only acceptable because the property this test audits (are we current?) is a
-// different property from the one the suite ENFORCES (do we agree with what we
-// vendored?), and the latter is checked above with no skip path at all.
-func TestVendoredVectorsAreInSyncWithThePrimary(t *testing.T) {
-	p := loadVectorPin(t)
-	sibling := filepath.Join("..", "..", "mnemonic-engrave", filepath.FromSlash(p.Path))
-	upstream, err := os.ReadFile(sibling)
-	if err != nil {
-		abs, _ := filepath.Abs(sibling)
-		t.Skipf("AUDIT ONLY, and it has no input here: no primary checkout at %s (%v). "+
-			"The gate — TestVendoredVectorsMatchTheirProvenancePin and the whole "+
-			"conformance suite — ran regardless; this test only asks whether the vendored "+
-			"copy is STALE, which needs the primary to compare against.", abs, err)
-	}
-	vendored, err := os.ReadFile(defaultVectors)
-	if err != nil {
-		t.Fatalf("%s: %v", defaultVectors, err)
-	}
-	if string(vendored) != string(upstream) {
-		us := sha256.Sum256(upstream)
-		vs := sha256.Sum256(vendored)
-		t.Errorf("the vendored vectors are STALE: the primary's copy hashes to %s, ours to %s.\n"+
-			"Re-sync it — the Go port is strictly downstream, so a vector added in the primary "+
-			"is a case this port is currently untested against. From the REPO ROOT:\n"+
-			"  cp ../%s/%s sysw/testdata/sysw_vectors.json\n"+
-			"then update sysw/%s (commit, file_commit, sha256, bytes, vectors).",
-			hex.EncodeToString(us[:]), hex.EncodeToString(vs[:]), p.Repo, p.Path, vectorProvenance)
-		return
-	}
-	// The copy is identical, so the recorded commit is the last claim left that
-	// could be wrong. Check it where git is available; this is best-effort by
-	// design — a wrong commit with identical bytes is a bookkeeping error, not a
-	// conformance one.
-	repo := filepath.Join("..", "..", "mnemonic-engrave")
-	out, err := exec.Command("git", "-C", repo, "log", "-1", "--format=%H", "--",
-		filepath.ToSlash(p.Path)).Output()
-	if err != nil {
-		t.Logf("could not read the primary's history (%v); bytes are identical, so the "+
-			"vectors are current even if the recorded commit cannot be confirmed", err)
-		return
-	}
-	if got := strings.TrimSpace(string(out)); got != "" && got != p.FileCommit {
-		t.Errorf("bytes are identical but the pin's file_commit is wrong: the primary says "+
-			"%s last changed in %s, %s records %s", p.Path, got, vectorProvenance, p.FileCommit)
-	}
 }

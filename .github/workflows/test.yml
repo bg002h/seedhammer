@@ -10,15 +10,20 @@ jobs:
     - uses: actions/setup-go@v6
       with:
         go-version: '1.26'
-    # SH_ORACLES_OPTIONAL=1: this runner has no Rust toolchain, so the LIVE
-    # re-derivation against the pinned md/mk/ms binaries cannot run here. It is
-    # not merely absent — it is unachievable: oracle/pins.json binds each oracle
-    # to the SHA-256 of a binary built on the maintainer's machine, so a
-    # `cargo install` here would produce a different binary, a different hash,
-    # and a hard resolution failure.
+    # NOTHING HERE SKIPS, and nothing here is turned off by an environment
+    # variable. Operator directive, 2026-08-15: "Don't skip jobs unless I ask."
     #
-    # WHAT STILL ENFORCES BYTE-IDENTITY ON THIS MACHINE, in full, because a line
-    # that relaxes a gate has to say what is left:
+    # Every gate that checks this Go firmware against the Rust primary — the
+    # derived-census comparison, S2's md1 byte-identity gate, the pin-resolution
+    # test, the whole sysw conformance suite — used to skip on THIS runner, on
+    # every push, while the step below printed `ok` and exit 0. Measured: run
+    # 31898063163, on 4b8488e, concluded success with all of it unexecuted
+    # (C-1..C-4).
+    #
+    # The repair is not an opt-out and not a Rust install. It is that the thing
+    # compared against is COMMITTED: the primary's own output, minted only by a
+    # live derivation, carrying the oracle identity it was minted from. So the
+    # comparison needs no toolchain and has no branch that could decline it:
     #
     #   oracle  TestEveryGateRecordCensusMatchesItsCommittedExpectation
     #             every gate record's engraved census vs the primary's own
@@ -30,18 +35,37 @@ jobs:
     #   sysw    TestConformance + TestVendoredVectorsMatchTheirProvenancePin
     #             this port vs the Rust primary's generated vector set
     #
-    # NONE of those has a skip path. They need no toolchain, they run on every
-    # push, and their package's `ok` therefore IMPLIES they executed — which is
-    # the whole repair (C-1..C-4). Until 2026-08-15 all of it skipped here in
-    # silence and the workflow still went green: run 31898063163, on 4b8488e,
-    # concluded success with the derived-census gate, S2's byte-identity gate,
-    # the pin-resolution test and the entire sysw conformance suite unexecuted.
+    # Their package's `ok` therefore IMPLIES they executed.
     #
-    # This variable may only ever RELAX a check. Nothing in this repo is armed by
-    # setting an environment variable — the sysw pair already shipped that shape
-    # (SYSW_REQUIRE_VECTORS=1 -> t.Fatalf) and it failed because no workflow ever
-    # set it. An escalation nobody sets is a skip with paperwork.
-    - run: CGO_ENABLED=0 SH_ORACLES_OPTIONAL=1 go test ./...
+    # Installing the oracles here is not an alternative that was skipped over:
+    # oracle/pins.json binds each to the SHA-256 of a binary built on the
+    # maintainer's machine, so a `cargo install` here produces a different
+    # binary, a different hash, and a hard resolution failure.
+    - run: CGO_ENABLED=0 go test ./...
+    # A COMPILE CHECK, and deliberately only that. The live re-derivation against
+    # the pinned md/mk/ms is not a test that skips here — under the `oraclelive`
+    # tag it does not exist in this build at all, and a maintainer runs it by
+    # name (./scripts/oracle-live.sh). But a check behind a build tag is an
+    # excellent place for code to rot uncompiled, so the tagged files are BUILT
+    # on every push, for the same reason the GOOS=js step below gives: a gate
+    # whose instrument does not compile is not a gate.
+    #
+    # `-run '^$'` compiles the tagged test binaries and runs no test, because the
+    # tests inside need Rust binaries this runner cannot have (see the step
+    # above). This is not a skipped check — it is a build, and it reports "[no
+    # tests to run]" rather than pretending anything was verified.
+    #
+    # PROVEN TO BITE: a deliberate type error in oracle/live_test.go makes this
+    # step exit 1 with "too many arguments in call to resolveBins" while the
+    # untagged `go test ./...` above stays green — which is exactly the rot this
+    # exists to catch.
+    #
+    # `go test` rather than `go vet`: vet reports 40 pre-existing findings in
+    # _test.go files across this tree (33 bezier.Point unkeyed literals, 7
+    # testing.ArtifactDir), so a vet step here would fail on day one for reasons
+    # unrelated to this build. `go test` runs its own narrower vet subset, which
+    # this tree already passes.
+    - run: CGO_ENABLED=0 go test -tags oraclelive -run '^$' ./oracle/ ./gui/ ./sysw/
     # F-142: `int` is 64 bits here and 32 bits on the device, so a uint32 read
     # off the wire and widened to `int` behaves differently on the machine than
     # in CI. It already did: ParseHeader compared the section cap as

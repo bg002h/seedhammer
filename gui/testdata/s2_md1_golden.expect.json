@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "stage": "S2",
-  "note": "Trace A's 2-of-3 wsh policy as the PINNED PRIMARY encodes it: self = masterA at the shared origin, cosigners B@0 and C@0, self slot @0, fingerprints omitted. Minted only by `go test ./gui -run TestAssembledMd1MatchesThePrimaryByteForByte -update`, which cannot run without the pinned md binary. The device's own assembly is compared against this on every machine, with no toolchain, by TestAssembledMd1MatchesTheCommittedGolden.",
+  "note": "Trace A's 2-of-3 wsh policy as the PINNED PRIMARY encodes it: self = masterA at the shared origin, cosigners B@0 and C@0, self slot @0, fingerprints omitted. Minted only by `./scripts/oracle-live.sh -update`, which cannot run without the pinned md binary. The device's own assembly is compared against this on every machine, with no toolchain, by TestAssembledMd1MatchesTheCommittedGolden.",
   "derivation": {
     "oracles": [
       {
@@ -14,7 +14,7 @@
     "args": [
       "md encode wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*)) --key @0=xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf --key @1=xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX --key @2=xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6 --path m/48h/0h/0h/2h --network mainnet --group-size 0 --force-chunked"
     ],
-    "derived_at": "2026-08-15T18:29:03Z"
+    "derived_at": "2026-08-15T19:27:27Z"
   },
   "artifacts": [
     {

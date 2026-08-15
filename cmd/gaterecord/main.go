@@ -24,10 +24,11 @@
 // Now a record cannot come into existence except as something the primary
 // toolchain agreed with, and the agreement is written down beside it.
 //
-// SH_ORACLES_OPTIONAL is deliberately NOT honoured here. It relaxes the
-// freshness checks in the test suite for a contributor with no Rust toolchain;
-// minting is the one operation that has no meaning without one, and the safety
-// of that opt-out rests on this refusal being unconditional.
+// THERE IS NO WAY TO TURN THIS OFF, by flag or by environment. Minting is the
+// one operation that has no meaning without the primary toolchain, and the
+// safety of every toolchain-free check downstream rests on this refusal being
+// unconditional: it is what makes "a committed expectation" mean "something the
+// primary produced" rather than "something somebody wrote down".
 //
 // # Running it
 //

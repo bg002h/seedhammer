@@ -1,21 +1,28 @@
 package oracle
 
-// The byte-identity gate, in two layers.
-//
-// LAYER 1 (this file's first half) is THE GATE. It compares every gate record's
-// engraved census against the expectation committed beside it, needs no
-// toolchain, and HAS NO SKIP PATH — absent, empty or unparseable is a fatal
-// INCONCLUSIVE. It runs on the machine whose verdict gates a merge, which is the
+// THE BYTE-IDENTITY GATE. It compares every gate record's engraved census
+// against the expectation committed beside it, needs no toolchain, and HAS NO
+// SKIP PATH — absent, empty or unparseable is a fatal INCONCLUSIVE. It runs on
+// every machine, including the one whose verdict gates a merge, which is the
 // entire repair C-1 through C-4 called for.
 //
-// LAYER 2 (the second half) is the FRESHNESS check: wherever the pinned oracles
-// exist, re-derive live and require the committed bytes to reproduce exactly.
-// TIER 2 (§4.6) — it shells out to the pinned md/mk/ms binaries, so keep it out
-// of the inner loop.
+// # There is no test in this package that decides for itself whether to run
 //
-// Absence of the oracles now FAILS by default (C-1). SH_ORACLES_OPTIONAL=1 is
-// the one opt-out for the whole class; see optout.go for why enforcement is
-// never spelled by an environment variable.
+// Operator directive, 2026-08-15: "Don't skip jobs unless I ask." So the live
+// re-derivation against the pinned md/mk/ms binaries is NOT a test that skips
+// when they are absent, and it is not a test gated on an environment variable
+// either — an escalation nobody sets and an opt-out everybody sets are the same
+// failure. It lives in live_test.go behind the `oraclelive` build tag, so in a
+// normal build it DOES NOT EXIST rather than reporting that it declined to run,
+// and a human turns it on by name:
+//
+//	./scripts/oracle-live.sh          # or: go test -tags oraclelive ./...
+//
+// What makes that safe is that live derivation is enforced where it actually
+// matters — at MINT time, unconditionally, in cmd/gaterecord, which refuses to
+// write a record whose census is not what it just derived. An expectation
+// cannot exist except as the output of a live run, and CheckProvenance below
+// binds every one of them to pins.json with no toolchain at all.
 
 import (
 	"os"
@@ -335,116 +342,5 @@ func TestDeriveRefusesAnOriginItCannotName(t *testing.T) {
 		if tmpl != wantTmpl || acct != 0 || net != "mainnet" {
 			t.Errorf("origin %q -> (%d, %q, %q), want (0, %q, mainnet)", path, acct, tmpl, net, wantTmpl)
 		}
-	}
-}
-
-// ─── LAYER 2: live re-derivation, the FRESHNESS check ───────────────────────
-
-// resolveBins locates the pinned oracles the way cmd/gaterecord does.
-//
-// ABSENCE FAILS (C-1). It used to t.Skipf, which took out the gate and all
-// three of its mutation proofs on every machine without a Rust toolchain —
-// including, permanently, the one whose verdict gates a merge. The old
-// justification in this comment claimed "the gate that makes absence fail is
-// TestS0GateHasARecord"; that was false — TestS0GateHasARecord checks only that
-// a record FILE exists for stage S0 and never touches CompareCensus.
-//
-// The skip is now available only by an explicit human declaration, and what it
-// relaxes is the freshness check, never the gate.
-func resolveBins(t *testing.T) Bins {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		if OraclesOptional() {
-			t.Skipf("no home directory (%v) and %s=1", err, OraclesOptionalEnv)
-		}
-		t.Fatalf("no home directory: %v", err)
-	}
-	dir := filepath.Join(home, ".cargo", "bin")
-	pf, err := LoadPins("pins.json")
-	if err != nil {
-		t.Fatalf("loading pins: %v", err)
-	}
-	for _, fp := range pf.Pins {
-		if _, err := os.Stat(filepath.Join(dir, fp.Name)); err != nil {
-			if OraclesOptional() {
-				t.Skipf("%s=1: %s is not installed at %s; the committed expectations "+
-					"still ran", OraclesOptionalEnv, fp.Name, dir)
-			}
-			t.Fatalf("%s", MissingOracleMessage(fp.Name, dir))
-		}
-	}
-	// Resolve for real, so a SUBSTITUTED binary fails here rather than being
-	// used to derive an expectation nobody checked. Never opt-out-able: a binary
-	// that is PRESENT and WRONG is not the contributor case.
-	if _, err := ResolveAll(pf, func(name string) (string, string) {
-		return filepath.Join(dir, name), ""
-	}); err != nil {
-		t.Fatalf("the pinned oracles do not resolve, so nothing derived from them can be trusted: %v", err)
-	}
-	return Bins{
-		MD: filepath.Join(dir, "md"),
-		MK: filepath.Join(dir, "mk"),
-		MS: filepath.Join(dir, "ms"),
-	}
-}
-
-// THE FRESHNESS CHECK. Where the pinned oracles exist, re-derive every
-// committed expectation and require it to reproduce byte for byte — string,
-// origin and fingerprint.
-//
-// This is what stops a vendored vector from being a cached wrong answer: it runs
-// on every machine that could MINT one, which is exactly the population that
-// could mint a wrong one.
-func TestLiveDerivationReproducesEveryCommittedExpectation(t *testing.T) {
-	bins := resolveBins(t)
-	for _, c := range loadExpectations(t) {
-		if c.Expect.Inputs == "" {
-			t.Errorf("%s: the expectation names no inputs file, so it cannot be re-derived", c.Name)
-			continue
-		}
-		inf, err := LoadInputsFile(filepath.Join(GateRecordsDir, c.Expect.Inputs))
-		if err != nil {
-			t.Errorf("%s: loading %s: %v", c.Name, c.Expect.Inputs, err)
-			continue
-		}
-		if inf.Expect == nil {
-			t.Errorf("%s: %s carries no expect block, so no census can be derived from it",
-				c.Name, c.Expect.Inputs)
-			continue
-		}
-		seeds, err := inf.SeedWords()
-		if err != nil {
-			t.Errorf("%s: %v", c.Name, err)
-			continue
-		}
-		got, err := DeriveExpected(*inf.Expect, c.Record.Inputs, seeds, bins)
-		if err != nil {
-			t.Errorf("%s: deriving: %v", c.Name, err)
-			continue
-		}
-		if len(got.Artifacts) != len(c.Expect.Artifacts) {
-			t.Errorf("%s: the live toolchain derives %d artifact(s); the committed expectation "+
-				"holds %d — re-mint it", c.Name, len(got.Artifacts), len(c.Expect.Artifacts))
-			continue
-		}
-		for i := range got.Artifacts {
-			a, b := got.Artifacts[i], c.Expect.Artifacts[i]
-			// In full, both sides, always.
-			if a.String != b.String {
-				t.Errorf("%s: artifact %d (%s) drifted:\n  live      %s\n  committed %s",
-					c.Name, i, b.Label, a.String, b.String)
-			}
-			if a.Fingerprint != b.Fingerprint {
-				t.Errorf("%s: artifact %d (%s) fingerprint drifted: live %s, committed %s",
-					c.Name, i, b.Label, a.Fingerprint, b.Fingerprint)
-			}
-			if a.Origin != b.Origin {
-				t.Errorf("%s: artifact %d (%s) origin drifted: live %s, committed %s",
-					c.Name, i, b.Label, a.Origin, b.Origin)
-			}
-		}
-		t.Logf("%s: %d artifact(s) re-derived live and identical to the committed expectation "+
-			"(oracles invoked: %v)", c.Name, len(got.Artifacts), got.Oracles)
 	}
 }
