@@ -79,6 +79,24 @@ var buildFlowNeedles = []struct {
 	// does NOT quote it in a comment, because this counter matches source bytes
 	// and a quoted literal would cost the needle its uniqueness.
 	{"P2SH-P2WSH", "gui/md1_inspect.go"},
+	// S4. The three screens that make the slot-assignment model and its gate
+	// observable from outside, each measured single-site.
+	//
+	// The slot-source QUESTION. Spelt as the fragment after the slot number,
+	// because the production string is a format ("Is your @%d key on a card?")
+	// and a needle has to be a substring that literally occurs in the source.
+	{"key on a card?", "gui/multisig_build_slots.go"},
+	// The pre-assembly REVIEW's opening line. It proves the operator was shown
+	// where every key came from before anything was assembled.
+	{"Where each key comes from:", "gui/multisig_build_slots.go"},
+	// The gate's FAIL screen title. This is the needle that separates a walk
+	// that DROVE the gate from one that merely passed through the flow: the
+	// title exists nowhere else, and no honest build can draw it.
+	{"Key does not match seed", "gui/multisig_build.go"},
+	// The plate census, before the tail. The TITLE, not the body: "This
+	// engraves" also occurs in gui/bip85.go (measured, 2 sites), which is
+	// exactly the ambiguity this list exists to catch.
+	{"Plate Count", "gui/multisig_build.go"},
 }
 
 // decoyNeedles are strings a stage author reaches for FIRST and must not use.
