@@ -533,15 +533,12 @@ func buildSeedKeyMismatchMessage(e errBuildSeedKeyMismatch, origins []cosignerOr
 			break
 		}
 	}
-	return fmt.Sprintf("You said slot @%d%s holds YOUR key, but the key on that card "+
-		"is not the key your seed derives at %s. Nothing was engraved.\n\n"+
-		"Likely causes: a passphrase that was mistyped, or skipped when this card "+
-		"was made with one; a different seed than the card came from; or a card "+
-		"from another wallet.\n\n"+
-		"Setting this slot back to your seed alone SUPPRESSES this check instead of "+
-		"fixing it: the card is dropped and the disagreement stays. Check the "+
-		"passphrase and the seed first. If the card really belongs to another "+
-		"wallet, rewrite the payload on the host with `me sysw pack` and leave it out.",
+	return fmt.Sprintf("You said slot @%d%s holds YOUR key, but that card's key is not "+
+		"what your seed derives at %s. Nothing was engraved.\n\n"+
+		"Likely causes: a mistyped passphrase, one skipped where the card used it, a "+
+		"different seed, or a card from another wallet.\n\n"+
+		"Reassigning this slot SUPPRESSES the check rather than fixing it. Check the "+
+		"passphrase and the seed, or rewrite the payload on the host with `me sysw pack`.",
 		e.Slot, who, e.Declared)
 }
 
@@ -562,12 +559,10 @@ func buildFingerprintContradictsMessage(e errBuildFingerprintContradicts, origin
 	}
 	return fmt.Sprintf("Slot @%d%s carries the key your seed derives, but the card says "+
 		"its master fingerprint is %s and this seed's is %s. Nothing was engraved.\n\n"+
-		"A card's fingerprint is written on it by whoever made it and is not bound to "+
-		"the key, so the two can disagree. Most often the card was made from this seed "+
-		"WITHOUT the passphrase you just entered, or with a different one.\n\n"+
-		"Re-enter the seed with the passphrase this card was made under. Do not simply "+
-		"reassign the slot: that stops this check running rather than settling which "+
-		"of the two is right. If the card is stale, rewrite the payload on the host "+
-		"with `me sysw pack`.",
+		"A fingerprint is written on a card by whoever made it and is not bound to the "+
+		"key, so the two can disagree. Most often the card was made under a different "+
+		"passphrase.\n\n"+
+		"Re-enter the seed with that passphrase. Reassigning the slot only stops the "+
+		"check. If the card is stale, rewrite the payload with `me sysw pack`.",
 		e.Slot, who, e.Declared, e.Derived)
 }

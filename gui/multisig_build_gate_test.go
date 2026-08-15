@@ -454,3 +454,68 @@ func TestDerivedSlotAccountIsTheBip48AccountComponent(t *testing.T) {
 			multisigSharedOrigin(), derivedSlotOrigin(0))
 	}
 }
+
+// TestGateRefusalsAreDRAWN, not merely composed.
+//
+// FOUND BY THE WALK, not by a test, and that is the point of it existing. The
+// gate's FAIL screen must name the likely causes, say that reassigning the slot
+// SUPPRESSES the check rather than fixing it, and name the host route. Every one
+// of those was in the string. The emulator's first frame ended
+//
+//	"...rewrite the payload on the host with `"
+//
+// because ErrorScreen's body SCROLLS (gui.go, Warning.Layout binds Up/Down) and
+// the text ran past the fold. There is no scroll affordance on that screen, so a
+// route below the fold is a route the operator is not told about -- which is
+// plan 0.1 clause 3's rule for the confirmation surface, one screen earlier.
+//
+// So the assertion is on the FIRST frame, deliberately: pumpUntil would advance
+// past it, and scrolling would prove only that the text exists somewhere. A
+// refusal whose remedy needs a button nobody suggested is the shape of "a safety
+// gate whose obvious next action disables it", arrived at from the other side.
+func TestGateRefusalsAreDrawnWithoutScrolling(t *testing.T) {
+	origins := []cosignerOrigin{{slot: 0, card: 3}}
+	for _, tc := range []struct {
+		name string
+		msg  string
+		want []string
+	}{
+		{
+			"seed-key mismatch",
+			buildSeedKeyMismatchMessage(errBuildSeedKeyMismatch{
+				Slot: 0, Declared: multisigSharedOrigin().String()}, origins),
+			[]string{"slot @0", "Nothing was engraved", "SUPPRESSES", "me sysw pack"},
+		},
+		{
+			"fingerprint contradiction",
+			buildFingerprintContradictsMessage(errBuildFingerprintContradicts{
+				Slot: 0, Declared: "deadbeef", Derived: "73c5da0a"}, origins),
+			[]string{"@0", "Nothing was engraved", "me sysw pack"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, _, ink, quit := runUITouchRaster(ctx, func() {
+				showError(ctx, &descriptorTheme, "Key check", tc.msg)
+			})
+			defer quit()
+			first, ok := frame()
+			if !ok {
+				t.Fatal("the refusal never rendered a frame")
+			}
+			t.Logf("%s: %d chars, ink %d px", tc.name, len(tc.msg), ink())
+			if ink() < buildWalkRasterFloor {
+				t.Errorf("the refusal drew only %d ink pixels (floor %d)", ink(), buildWalkRasterFloor)
+			}
+			for _, w := range tc.want {
+				if !uiContains(first, w) {
+					t.Errorf("the FIRST frame does not carry %q, so the operator has to "+
+						"scroll a screen that offers no scroll affordance to find it.\n"+
+						"drawn: %q", w, first)
+				}
+			}
+		})
+	}
+}
