@@ -65,7 +65,24 @@ var (
 	ErrVendoredTestdata = errors.New("oracle: refusing fork-vendored testdata as a comparison source")
 	// ErrIncompletePin refuses a pin that cannot identify anything.
 	ErrIncompletePin = errors.New("oracle: pin names neither a commit nor a binary hash")
+	// ErrBinaryOutsideCheckout refuses the unsound pairing described below.
+	ErrBinaryOutsideCheckout = errors.New("oracle: binary is not inside the pinned checkout, so the checkout's HEAD does not identify it")
 )
+
+// Why ByCheckout requires the binary to live INSIDE the checkout.
+//
+// This was nearly a hole. `git rev-parse HEAD` reports what a source tree says
+// about itself RIGHT NOW; it proves nothing about what produced some other
+// file. Pairing `~/.cargo/bin/md` with a path to descriptor-mnemonic and
+// recording that commit would be an attestation dressed as a measurement — the
+// same shape as trusting `--version`, which is the thing this package exists to
+// refuse. Anyone who swapped the binary on PATH would sail through.
+//
+// So the pairing is made structurally impossible: ByCheckout requires Bin to
+// resolve inside Checkout — i.e. the oracle was built there, in this run. To
+// use an already-installed binary, pin its SHA-256 instead and accept that the
+// commit in that pin is an attestation by whoever recorded the pair, bounded by
+// the hash.
 
 // Method is how an oracle's identity was established.
 type Method string
@@ -122,6 +139,14 @@ func Resolve(r Request) (Resolved, error) {
 
 	switch {
 	case r.Checkout != "":
+		inside, err := binInsideCheckout(r.Bin, r.Checkout)
+		if err != nil {
+			return Resolved{}, fmt.Errorf("%s: %w", r.Pin.Name, err)
+		}
+		if !inside {
+			return Resolved{}, fmt.Errorf("%s: %s not under %s: %w",
+				r.Pin.Name, r.Bin, r.Checkout, ErrBinaryOutsideCheckout)
+		}
 		clean, head, err := gitState(r.Checkout)
 		if err != nil {
 			return Resolved{}, fmt.Errorf("%s: %w", r.Pin.Name, err)
@@ -131,7 +156,7 @@ func Resolve(r Request) (Resolved, error) {
 		}
 		if !commitEqual(head, r.Pin.Commit) {
 			return Resolved{}, fmt.Errorf("%s: have %s, pinned %s: %w",
-				r.Pin.Name, short(head), short(r.Pin.Commit), ErrCommitMismatch)
+				r.Pin.Name, head, r.Pin.Commit, ErrCommitMismatch)
 		}
 		out.Commit, out.Method = head, ByCheckout
 
@@ -142,7 +167,7 @@ func Resolve(r Request) (Resolved, error) {
 		}
 		if !strings.EqualFold(sum, r.Pin.SHA256) {
 			return Resolved{}, fmt.Errorf("%s: have %s, pinned %s: %w",
-				r.Pin.Name, short(sum), short(r.Pin.SHA256), ErrBinaryHashMismatch)
+				r.Pin.Name, sum, r.Pin.SHA256, ErrBinaryHashMismatch)
 		}
 		// The pin binds this hash to a commit; that binding is the identity.
 		out.Commit, out.Method = r.Pin.Commit, ByBinaryHash
@@ -221,6 +246,28 @@ func reportedVersion(bin string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// binInsideCheckout reports whether bin resolves to a path inside checkout.
+// Both sides are resolved through symlinks first, so a symlink on PATH cannot
+// launder a binary into a checkout it did not come from.
+func binInsideCheckout(bin, checkout string) (bool, error) {
+	if bin == "" {
+		return false, fmt.Errorf("no binary path given")
+	}
+	rb, err := filepath.EvalSymlinks(bin)
+	if err != nil {
+		return false, err
+	}
+	rc, err := filepath.EvalSymlinks(checkout)
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(rc, rb)
+	if err != nil {
+		return false, err
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
+}
+
 // gitState reports whether dir is a clean checkout, and its HEAD.
 func gitState(dir string) (clean bool, head string, err error) {
 	if _, err := os.Stat(dir); err != nil {
@@ -259,9 +306,56 @@ func commitEqual(a, b string) bool {
 	return len(a) >= 7 && strings.HasPrefix(b, a)
 }
 
-func short(s string) string {
-	if len(s) > 12 {
-		return s[:12]
+// PinFile is the on-disk pin set, e.g. oracle/pins.json.
+type PinFile struct {
+	Pins []FilePin `json:"pins"`
+}
+
+// FilePin is a Pin plus the recording context a reader needs to judge how much
+// the attestation is worth.
+type FilePin struct {
+	Pin
+	Repo string `json:"repo"`
+	// CheckoutCleanWhenRecorded is false when the source tree had uncommitted
+	// changes at the moment the pair was recorded, which makes the commit a
+	// weaker claim about what produced the binary. Recorded rather than
+	// silently dropped.
+	CheckoutCleanWhenRecorded bool `json:"checkout_clean_when_recorded"`
+}
+
+// LoadPins reads a pin file.
+func LoadPins(path string) (PinFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return PinFile{}, err
 	}
-	return s
+	var pf PinFile
+	if err := json.Unmarshal(b, &pf); err != nil {
+		return PinFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(pf.Pins) == 0 {
+		return PinFile{}, fmt.Errorf("%s: no pins", path)
+	}
+	return pf, nil
+}
+
+// ResolveAll resolves every pin against the binary found for it by locate, and
+// returns the results in pin-file order. It resolves ALL pins before returning
+// an error, so a gate reports every problem at once rather than one per run.
+func ResolveAll(pf PinFile, locate func(name string) (bin, checkout string)) ([]Resolved, error) {
+	var out []Resolved
+	var errs []error
+	for _, fp := range pf.Pins {
+		bin, checkout := locate(fp.Name)
+		r, err := Resolve(Request{Pin: fp.Pin, Bin: bin, Checkout: checkout})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		out = append(out, r)
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return out, nil
 }

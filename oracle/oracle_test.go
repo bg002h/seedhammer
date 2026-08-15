@@ -25,8 +25,13 @@ func fakeOracle(t *testing.T, dir, name, version string) string {
 	return p
 }
 
-// scratchRepo makes a one-commit git repo and returns its dir and HEAD.
-func scratchRepo(t *testing.T) (dir, head string) {
+// scratchRepo makes a one-commit git repo containing a fake oracle, and
+// returns the repo dir, the path to the oracle INSIDE it, and HEAD.
+//
+// The oracle has to live inside the repo: ByCheckout refuses a binary that is
+// not under the checkout, because a checkout's HEAD says nothing about a file
+// built somewhere else.
+func scratchRepo(t *testing.T, version string) (dir, bin, head string) {
 	t.Helper()
 	dir = t.TempDir()
 	run := func(args ...string) {
@@ -43,13 +48,14 @@ func scratchRepo(t *testing.T) (dir, head string) {
 	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run("add", "f")
+	bin = fakeOracle(t, dir, "md", version)
+	run("add", "f", "md")
 	run("commit", "-qm", "one")
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dir, strings.TrimSpace(string(out))
+	return dir, bin, strings.TrimSpace(string(out))
 }
 
 // TestOracleHarnessPinsBySourceCommit is the deliverable's central property: a
@@ -62,8 +68,7 @@ func scratchRepo(t *testing.T) (dir, head string) {
 // checked "it failed" would also pass if the harness refused on version, which
 // is the behaviour this deliverable exists to prevent.
 func TestOracleHarnessPinsBySourceCommit(t *testing.T) {
-	dir, head := scratchRepo(t)
-	bin := fakeOracle(t, t.TempDir(), "md", "md 0.42.0")
+	dir, bin, head := scratchRepo(t, "md 0.42.0")
 
 	const wrongCommit = "0000000000000000000000000000000000000000"
 	if wrongCommit == head {
@@ -95,8 +100,8 @@ func TestOracleHarnessPinsBySourceCommit(t *testing.T) {
 	// The converse, and it is the other half of "pins by commit, NOT version":
 	// a MISMATCHED version at the CORRECT commit must still resolve. Refusing
 	// here would make the harness version-sensitive after all.
-	stale := fakeOracle(t, t.TempDir(), "md", "md 0.1.0-stale")
-	got, err = Resolve(Request{Pin: Pin{Name: "md", Commit: head, Version: "md 0.42.0"}, Bin: stale, Checkout: dir})
+	staleDir, staleBin, staleHead := scratchRepo(t, "md 0.1.0-stale")
+	got, err = Resolve(Request{Pin: Pin{Name: "md", Commit: staleHead, Version: "md 0.42.0"}, Bin: staleBin, Checkout: staleDir})
 	if err != nil {
 		t.Fatalf("a version mismatch at the correct commit was refused: %v", err)
 	}
@@ -143,11 +148,10 @@ func TestOracleHarnessRefusesVendoredTestdata(t *testing.T) {
 // Measured 2026-08-14, this is not hypothetical — mnemonic-toolkit had 38
 // modified files.
 func TestResolveRefusesADirtyCheckout(t *testing.T) {
-	dir, head := scratchRepo(t)
+	dir, bin, head := scratchRepo(t, "md 0.42.0")
 	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("changed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bin := fakeOracle(t, t.TempDir(), "md", "md 0.42.0")
 	_, err := Resolve(Request{Pin: Pin{Name: "md", Commit: head}, Bin: bin, Checkout: dir})
 	if !errors.Is(err, ErrDirtyCheckout) {
 		t.Fatalf("dirty checkout resolved or failed wrongly: %v", err)
@@ -203,8 +207,7 @@ func TestResolveRefusesAPinThatIdentifiesNothing(t *testing.T) {
 // The gate record must carry COMMITS. A record naming only versions is exactly
 // the spoofable artifact this deliverable replaces.
 func TestGateRecordCarriesCommitsAndTheInputTuple(t *testing.T) {
-	dir, head := scratchRepo(t)
-	bin := fakeOracle(t, t.TempDir(), "md", "md 0.42.0")
+	dir, bin, head := scratchRepo(t, "md 0.42.0")
 	res, err := Resolve(Request{Pin: Pin{Name: "md", Commit: head, Version: "md 0.42.0"}, Bin: bin, Checkout: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -239,5 +242,90 @@ func TestGateRecordCarriesCommitsAndTheInputTuple(t *testing.T) {
 	// Same words, same digest; different words, different digest.
 	if NewSeedRef("a", "one two").Digest == NewSeedRef("a", "one three").Digest {
 		t.Error("seed digests collide across different seeds")
+	}
+}
+
+// TestResolveRefusesABinaryOutsideTheCheckout guards the soundness hole that
+// surfaced only when this package was wired to real oracles: the installed
+// binaries live in ~/.cargo/bin while their sources live in three different
+// repos, and pairing the two would record a commit that proves nothing about
+// the binary. That is an attestation dressed as a measurement — the same shape
+// as trusting --version.
+func TestResolveRefusesABinaryOutsideTheCheckout(t *testing.T) {
+	dir, _, head := scratchRepo(t, "md 0.42.0")
+	outside := fakeOracle(t, t.TempDir(), "md", "md 0.42.0") // right version, wrong provenance
+
+	_, err := Resolve(Request{Pin: Pin{Name: "md", Commit: head, Version: "md 0.42.0"}, Bin: outside, Checkout: dir})
+	if !errors.Is(err, ErrBinaryOutsideCheckout) {
+		t.Fatalf("paired an out-of-tree binary with a checkout HEAD: %v", err)
+	}
+
+	// A symlink into the checkout must not launder it either — both sides are
+	// resolved through symlinks before the containment test.
+	link := filepath.Join(dir, "md-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Resolve(Request{Pin: Pin{Name: "md", Commit: head}, Bin: link, Checkout: dir}); !errors.Is(err, ErrBinaryOutsideCheckout) {
+		t.Fatalf("a symlink laundered an out-of-tree binary into the checkout: %v", err)
+	}
+}
+
+// TestRealPinsResolveTheInstalledOracles is the one test here that leaves the
+// hermetic world: it resolves the REAL md/mk/ms against the committed pin file.
+// Tier 2 per the plan ("the harness shells out to primary binaries... keep it
+// out of the inner loop"), so it skips under -short and when the binaries are
+// absent.
+//
+// It is the test that would have caught a stale pin file, which is the way this
+// deliverable most plausibly rots: the pins are recorded by hand and the
+// binaries get rebuilt.
+func TestRealPinsResolveTheInstalledOracles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("tier 2: shells out to the primary toolchain")
+	}
+	pf, err := LoadPins("pins.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Pins) != 3 {
+		t.Fatalf("pins.json has %d pins, want md/mk/ms", len(pf.Pins))
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	locate := func(name string) (string, string) {
+		// Binary-hash mode: these are installed binaries, NOT built inside a
+		// checkout in this run, so pairing them with a source tree would be
+		// refused by design (see ErrBinaryOutsideCheckout).
+		return filepath.Join(home, ".cargo", "bin", name), ""
+	}
+	for _, fp := range pf.Pins {
+		if _, err := os.Stat(filepath.Join(home, ".cargo", "bin", fp.Name)); err != nil {
+			t.Skipf("%s not installed: %v", fp.Name, err)
+		}
+	}
+
+	got, err := ResolveAll(pf, locate)
+	if err != nil {
+		t.Fatalf("the committed pins do not match the installed oracles — "+
+			"re-record them, do not weaken the check: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("resolved %d oracles, want 3", len(got))
+	}
+	for _, r := range got {
+		if r.Method != ByBinaryHash {
+			t.Errorf("%s resolved via %s, want %s", r.Name, r.Method, ByBinaryHash)
+		}
+		if len(r.Commit) != 40 {
+			t.Errorf("%s resolved to %q, which is not a full commit id", r.Name, r.Commit)
+		}
+		if !r.VersionMatchesPin {
+			t.Logf("NOTE: %s reports %q, pin says otherwise — not a failure, "+
+				"but the pin's version field is stale", r.Name, r.ReportedVersion)
+		}
 	}
 }

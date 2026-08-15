@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Recorded identities of the primary constellation toolchain, for S0 D5.",
+    "",
+    "Each entry binds a NAME to a source COMMIT and the SHA-256 of the binary",
+    "attested to have been built from it. The commit is the identity; sha256 is",
+    "what makes the attestation checkable afterwards, so a binary swapped on",
+    "PATH later is caught. `version` is recorded ONLY so a gate record can show",
+    "what the binary claims about itself -- it never accepts or refuses.",
+    "",
+    "The three oracles come from THREE DIFFERENT repos; do not assume one.",
+    "",
+    "Recorded 2026-08-14. Each repo was verified clean at the commit below at",
+    "the moment of recording, EXCEPT mnemonic-secret, which had 3 modified",
+    "files -- so its commit is a weaker attestation than the other two and is",
+    "marked. Re-record with scripts, not by hand, when any oracle is rebuilt:",
+    "  sha256sum ~/.cargo/bin/md",
+    "  git -C /scratch/code/shibboleth/descriptor-mnemonic rev-parse HEAD"
+  ],
+  "pins": [
+    {
+      "name": "md",
+      "repo": "descriptor-mnemonic",
+      "commit": "5a0a4f41017d71d47f70684c145702d4ca0c3aa9",
+      "sha256": "9ef480ad1f1ecfd2e5241579a2f16a1b691d6e394981f6e654a4f3cbcc3729e9",
+      "version": "md 0.13.0",
+      "checkout_clean_when_recorded": true
+    },
+    {
+      "name": "mk",
+      "repo": "mnemonic-key",
+      "commit": "018aca00b4a2da50323e4c83c82d019febf17e14",
+      "sha256": "54349c6fb046a6f2700d852eaa6b8ecf4b2a65f612285ed6129ad0f7e7224ce9",
+      "version": "mk 0.12.1",
+      "checkout_clean_when_recorded": true
+    },
+    {
+      "name": "ms",
+      "repo": "mnemonic-secret",
+      "commit": "bf77f89aca8e28601921fca974089d278060cab0",
+      "sha256": "1fd749e441cf511c6ce1d52a4e8008ccc5b853450c93b0c0ce9933807ea5104d",
+      "version": "ms 0.14.0",
+      "checkout_clean_when_recorded": false
+    }
+  ]
+}
