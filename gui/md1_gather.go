@@ -102,7 +102,7 @@ func md1GatherFlow(ctx *Context, th *Colors, first string) bool {
 						return true
 					}
 				case gatherForeign:
-					msg = "Different descriptor — rescan the right chunks."
+					msg = "Different descriptor - rescan the right chunks."
 				case gatherDup:
 					msg = "Already captured that chunk."
 				case gatherIgnored:
@@ -152,7 +152,7 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 	if err != nil {
 		switch {
 		case errors.Is(err, md.ErrChunkSetIDMismatch):
-			showError(ctx, th, "Inspect descriptor", "Chunks don't match — mixed or tampered set.")
+			showError(ctx, th, "Inspect descriptor", "Chunks don't match - mixed or tampered set.")
 		default:
 			showError(ctx, th, "Inspect descriptor", "Can't decode this descriptor set.")
 		}
@@ -165,7 +165,7 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 	case expandTemplateOnly:
 		md1DisplayFlow(ctx, th, tpl)
 	default: // expandUnsupported
-		showError(ctx, th, "Inspect descriptor", "Complex policy — display only.")
+		showError(ctx, th, "Inspect descriptor", "Complex policy - display only.")
 		md1DisplayFlow(ctx, th, tpl)
 	}
 }

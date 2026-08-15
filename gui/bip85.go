@@ -225,7 +225,7 @@ func childSeedWarning(ctx *Context, th *Colors) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "Child Seed",
 		Body: "This engraves a NEW CHILD SEED derived from your master. Anyone holding " +
-			"these words controls the child wallet — engrave onto your OWN steel only.\n\n" +
+			"these words controls the child wallet - engrave onto your OWN steel only.\n\n" +
 			"Hold button to confirm.",
 		Icon: assets.IconHammer,
 	}

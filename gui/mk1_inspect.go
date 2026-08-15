@@ -199,7 +199,7 @@ func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
 						return decodeGathered(ctx, th, g)
 					}
 				case gatherForeign:
-					msg = "Different key — rescan the right card."
+					msg = "Different key - rescan the right card."
 				case gatherDup:
 					msg = "Already captured that chunk."
 				case gatherIgnored:

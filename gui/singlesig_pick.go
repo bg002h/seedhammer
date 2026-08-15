@@ -51,7 +51,7 @@ func singleSigPickFlow(ctx *Context, th *Colors) (purpose int, script md.ScriptK
 		first := &ChoiceScreen{
 			Title:   "Wallet Type",
 			Lead:    "Choose address type",
-			Choices: []string{singleSigDefault.label, "Advanced…"},
+			Choices: []string{singleSigDefault.label, "Advanced..."},
 		}
 		sel, ok := first.Choose(ctx, th)
 		if !ok {

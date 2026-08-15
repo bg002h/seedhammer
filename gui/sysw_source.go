@@ -111,7 +111,7 @@ func syswSourceAccept(ctx *Context, th *Colors, title string, c sysw.Class, src 
 			lines = append(lines, "Source: "+syswSourceName(src))
 		case flagNFCNoIntegrity:
 			lines = append(lines,
-				"This secret arrived with NO integrity check at all — nothing "+
+				"This secret arrived with NO integrity check at all - nothing "+
 					"stands behind a tag's contents, and there is nothing to compare.")
 		}
 	}

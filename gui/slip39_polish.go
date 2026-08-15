@@ -296,7 +296,7 @@ func recoverSLIP39Flow(ctx *Context, th *Colors, first slip39words.Share) (bip39
 	}
 
 	// Brief progress frame before the blocking decrypt.
-	showSLIP39Message(ctx, th, "Recovering", "Reconstructing the seed…")
+	showSLIP39Message(ctx, th, "Recovering", "Reconstructing the seed...")
 
 	secret, err := slip39words.Combine(sel, []byte(pass))
 	if err != nil {

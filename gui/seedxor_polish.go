@@ -82,7 +82,7 @@ func combineSeedXORFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 func confirmSeedXORFingerprint(ctx *Context, th *Colors, mfp uint32) bool {
 	lines := []string{
 		fmt.Sprintf("Fingerprint %.8X", mfp),
-		"Seed XOR has no built-in check — any wrong part still makes a valid wallet. Confirm this matches your records before engraving.",
+		"Seed XOR has no built-in check - any wrong part still makes a valid wallet. Confirm this matches your records before engraving.",
 	}
 	backBtn := &Clickable{Button: Button1}
 	drainBtn := &Clickable{Button: Button2}

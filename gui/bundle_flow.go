@@ -272,7 +272,7 @@ func bundleDoneDecision(g *bundleGatherer) bundleDoneOutcome {
 func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 	lines := []string{fmt.Sprintf("%d cards verified:", len(cards))}
 	for i, c := range cards {
-		lines = append(lines, fmt.Sprintf("%d. %s ✓", i+1, c.label))
+		lines = append(lines, fmt.Sprintf("%d. %s OK", i+1, c.label))
 		if c.summary != "" {
 			lines = append(lines, chunkString(c.summary, 24)...)
 		}
@@ -427,7 +427,7 @@ func bundleShowMs1Reminder(cards []bundleCard) bool {
 // partial, unusable backup; it records NO completed state (I-5). Dismiss-only.
 func bundleAbortWarning(ctx *Context, th *Colors, p bundlePlate) {
 	showError(ctx, th, "Bundle Incomplete",
-		fmt.Sprintf("Stopped at card %d of %d (%s). A partial bundle can't be used — "+
+		fmt.Sprintf("Stopped at card %d of %d (%s). A partial bundle can't be used - "+
 			"discard the engraved plate(s) and start the bundle over.",
 			p.cardIdx, p.cardTotal, p.label))
 }
@@ -435,5 +435,5 @@ func bundleAbortWarning(ctx *Context, th *Colors, p bundlePlate) {
 // bundleMs1ReminderText is the end-of-bundle reminder that the SECRET ms1
 // share(s) must be hand-engraved separately (mirror host bundle.rs:296-306).
 func bundleMs1ReminderText() string {
-	return "Bundle engraved. Also hand-engrave your ms1 share(s) — they are never sent over NFC."
+	return "Bundle engraved. Also hand-engrave your ms1 share(s) - they are never sent over NFC."
 }

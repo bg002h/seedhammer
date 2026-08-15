@@ -1017,7 +1017,7 @@ func inputCodex32Flow(ctx *Context, th *Colors, title string) (any, bool) {
 		if !valid && inWin && clicked3 {
 			res, ok := codex32.Correct(frag)
 			if !ok {
-				showError(ctx, th, "No correction", "No fix within 4 changes — check your typing")
+				showError(ctx, th, "No correction", "No fix within 4 changes - check your typing")
 			} else if confirmCorrectionFlow(ctx, th, res, strings.ToLower(parsed.HRP)) {
 				kbd.Fragment = res.Corrected // accept; next frame re-validates → OK
 			}

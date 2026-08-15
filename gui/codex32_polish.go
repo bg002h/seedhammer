@@ -25,7 +25,7 @@ func codex32StatusLine(n int) string {
 	case n <= codex32.ShortCodeMaxLength:
 		return fmt.Sprintf("short | %d chars", n)
 	case n < codex32.LongCodeMinLength:
-		return fmt.Sprintf("%d chars — keep typing", n)
+		return fmt.Sprintf("%d chars - keep typing", n)
 	case n <= codex32.LongCodeMaxLength:
 		return fmt.Sprintf("long | %d chars", n)
 	default:
@@ -189,7 +189,7 @@ func recoverCodex32Flow(ctx *Context, th *Colors, first codex32.String) (codex32
 		}
 		cand, isCodex32 := obj.(codex32.String)
 		if !isCodex32 {
-			showCodex32Error(ctx, th, "enter a codex32 share (ms1…)")
+			showCodex32Error(ctx, th, "enter a codex32 share (ms1...)")
 			continue
 		}
 		pf, _ := codex32.ParsePrefix(cand.String())
@@ -322,7 +322,7 @@ func confirmCorrectionFlow(ctx *Context, th *Colors, res codex32.CorrectionResul
 	for _, e := range res.Edits {
 		// e.Pos is a full-string rune index (HRP + the '1' separator included);
 		// +1 makes it 1-based for the human comparing against their source card.
-		lines = append(lines, fmt.Sprintf("pos %d: %c → %c", e.Pos+1, rune(e.Was), rune(e.Now)))
+		lines = append(lines, fmt.Sprintf("pos %d: %c -> %c", e.Pos+1, rune(e.Was), rune(e.Now)))
 	}
 	if hrp == "ms" {
 		if f, err := codex32.ParsePrefix(res.Corrected); err == nil {

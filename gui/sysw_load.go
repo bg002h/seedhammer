@@ -125,7 +125,7 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			}
 			cs := &ChoiceScreen{
 				Title:   "Passphrase",
-				Lead:    fmt.Sprintf("%d %s — unlock?", n, map[bool]string{true: "word", false: "words"}[n == 1]),
+				Lead:    fmt.Sprintf("%d %s - unlock?", n, map[bool]string{true: "word", false: "words"}[n == 1]),
 				Choices: []string{"BACK", "UNLOCK"},
 			}
 			// BACK is choice 0 and therefore the DEFAULT: the confirmation exists
@@ -271,13 +271,13 @@ func syswLoadWarnings(s *syswSession) []string {
 			seen[k] = true
 			switch {
 			case f == flagSecretInPlaintext && r.unconfirmed:
-				out = append(out, "An md1/mk1 the device could not confirm — treated as a "+
-					"secret — is stored unencrypted in flash.")
+				out = append(out, "An md1/mk1 the device could not confirm - treated as a "+
+					"secret - is stored unencrypted in flash.")
 			case f == flagSecretInPlaintext:
 				out = append(out, "A SECRET is stored unencrypted in flash.")
 			case f == flagWeakPassphrase && r.unconfirmed:
-				out = append(out, "An md1/mk1 the device could not confirm — treated as a "+
-					"secret — is protected by a passphrase below the word-count floor.")
+				out = append(out, "An md1/mk1 the device could not confirm - treated as a "+
+					"secret - is protected by a passphrase below the word-count floor.")
 			case f == flagWeakPassphrase:
 				out = append(out, "The passphrase is below the word-count floor.")
 			}

@@ -86,12 +86,12 @@ func md1Summary(tpl md.Template) []string {
 	if tpl.Renderable {
 		lines = append(lines, "Type: "+scriptName(tpl)+" "+policyLine(tpl))
 	} else {
-		lines = append(lines, "Complex policy — cannot display safely.", fmt.Sprintf("Keys: %d", tpl.N))
+		lines = append(lines, "Complex policy - cannot display safely.", fmt.Sprintf("Keys: %d", tpl.N))
 	}
 	for _, k := range tpl.Keys {
 		fp := k.Fingerprint
 		if fp == "" {
-			fp = "—"
+			fp = "-"
 		}
 		lines = append(lines, fmt.Sprintf("@%d %s %s %s", k.Index, fp, k.OriginPath, k.UseSite))
 	}

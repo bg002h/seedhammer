@@ -92,7 +92,7 @@ func scanAddressFlow(ctx *Context, th *Colors) (string, bool) {
 			case scanUnknownFormat:
 				msg = "Not a recognized address."
 			case scanFailed:
-				msg = "Scan failed — try again."
+				msg = "Scan failed - try again."
 			}
 		default:
 		}
@@ -127,7 +127,7 @@ func scanAddressFlow(ctx *Context, th *Colors) (string, bool) {
 func runVerify(ctx *Context, th *Colors, desc *bip380.Descriptor, candidate string) {
 	dims := ctx.Platform.DisplaySize()
 	{ // one-shot progress frame, then compute
-		title, _ := layoutTitle(ctx, dims.X, th.Text, "Verifying…")
+		title, _ := layoutTitle(ctx, dims.X, th.Text, "Verifying...")
 		ctx.Frame(op.Layer(title, op.Color(&ctx.B, th.Background)))
 	}
 	chain, index, found, err := address.Find(desc, candidate, 20)

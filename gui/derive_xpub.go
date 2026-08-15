@@ -251,7 +251,7 @@ func scanSeedFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 			case scan.Status == scanUnknownFormat:
 				msg = "Unrecognized tag."
 			case scan.Status == scanFailed:
-				msg = "Scan failed — try again."
+				msg = "Scan failed - try again."
 			}
 		default:
 		}
@@ -494,5 +494,5 @@ func multiPlateEngrave(ctx *Context, th *Colors, strs []string) {
 func abortWarning(ctx *Context, th *Colors, done, total int) {
 	showError(ctx, th, "Incomplete Backup",
 		fmt.Sprintf("Engraved %d of %d plates. This key card set can't be restored from a "+
-			"partial set — discard the partial plate(s) and start over.", done, total))
+			"partial set - discard the partial plate(s) and start over.", done, total))
 }
