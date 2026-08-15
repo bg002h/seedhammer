@@ -70,6 +70,37 @@ const (
 	KindCosignerCards ExpectKind = "cosigner-cards"
 )
 
+// KnownExpectKind reports whether DeriveExpected can actually derive this kind,
+// and ArtifactKindFor names the artifact kind it produces.
+//
+// These exist so the UNTAGGED tests can ask the same question DeriveExpected
+// asks, without a toolchain. Re-review finding I-1: a hand-authored expectation
+// naming a kind nothing derives, carrying artifacts of a kind that kind never
+// produces, passed the whole untagged suite green — because the only check that
+// would have caught it lived behind the `oraclelive` build tag, which nothing
+// routinely runs. A check that exists only where it is never run is the same
+// defect as the skip this stage was built to remove.
+//
+// Keep this switch and DeriveExpected's in agreement: DeriveExpected now calls
+// KnownExpectKind rather than repeating the comparison, so there is one source
+// of truth and a new kind cannot be half-added.
+func KnownExpectKind(k ExpectKind) bool {
+	return ArtifactKindFor(k) != ""
+}
+
+// ArtifactKindFor returns the Artifact.Kind ("md1"/"mk1"/"ms1") that the given
+// ExpectKind produces, or "" if the kind is not derivable. A kind that engraves
+// several artifact kinds needs a richer answer than this; add it when a stage
+// actually has that shape rather than guessing now.
+func ArtifactKindFor(k ExpectKind) string {
+	switch k {
+	case KindCosignerCards:
+		return "mk1"
+	default:
+		return ""
+	}
+}
+
 // Expect is the part of the derivation that the input TUPLE cannot supply.
 //
 // Kept as small as it can be. Everything derivable from the tuple — origins,
@@ -161,7 +192,7 @@ type Seed struct {
 // invoked, so a provenance block records what ran rather than what a table says
 // ought to have run.
 func DeriveExpected(e Expect, in InputTuple, seeds []Seed, bins Bins) (DerivedSet, error) {
-	if e.Kind != KindCosignerCards {
+	if !KnownExpectKind(e.Kind) {
 		return DerivedSet{}, fmt.Errorf("%w: unknown expectation kind %q; refusing to derive nothing "+
 			"and report it as a match. Every gate record must carry an expectation this "+
 			"package can DERIVE — a stage engraving a shape no ExpectKind names needs a new "+

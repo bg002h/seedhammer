@@ -130,6 +130,57 @@ func TestEveryCommittedExpectationBelongsToARecord(t *testing.T) {
 			t.Errorf("%s: the record is stage %q, its expectation says %q",
 				c.Name, c.Record.Stage, c.Expect.Stage)
 		}
+
+		// RE-REVIEW I-1. Naming a record is not enough: a hand-authored
+		// expectation that names a real record, with a provenance block copied
+		// from an honest one, passed this whole suite green while logging
+		// "6 committed artifact(s) matched the engraved census byte for byte"
+		// about six invented strings. The only check that caught it was behind
+		// the `oraclelive` tag, which nothing routinely runs.
+		//
+		// Nothing toolchain-free can make hand-authoring IMPOSSIBLE. What it can
+		// do is force a committed expectation to be SELF-DESCRIBING and
+		// one-command re-derivable: it must name the inputs it came from, that
+		// file must exist and parse, and it must declare a kind this package can
+		// actually derive, producing the artifact kind it claims. A fabricator
+		// then has to forge an inputs file that the live arm will contradict the
+		// moment anyone runs it, instead of forging six strings nothing reads.
+		if c.Expect.Inputs == "" {
+			t.Errorf("%s's expectation names no inputs file, so nothing can ever "+
+				"re-derive it and the committed strings vouch only for themselves",
+				c.Name)
+			continue
+		}
+		inf, err := LoadInputsFile(filepath.Join(GateRecordsDir, c.Expect.Inputs))
+		if err != nil {
+			t.Errorf("%s's expectation names inputs %q, which does not load: %v",
+				c.Name, c.Expect.Inputs, err)
+			continue
+		}
+		if inf.Expect == nil {
+			t.Errorf("%s: inputs %q carries no expect block, so the expectation "+
+				"beside it describes a derivation nobody specified",
+				c.Name, c.Expect.Inputs)
+			continue
+		}
+		if !KnownExpectKind(inf.Expect.Kind) {
+			t.Errorf("%s: inputs %q declares expectation kind %q, which "+
+				"DeriveExpected cannot derive — a committed expectation for a "+
+				"kind nothing derives can never be checked against anything",
+				c.Name, c.Expect.Inputs, inf.Expect.Kind)
+			continue
+		}
+		// The artifacts must be the kind that kind produces. The fabrication
+		// that motivated this set md1 artifacts against a cosigner-cards inputs
+		// block, and nothing noticed.
+		want := ArtifactKindFor(inf.Expect.Kind)
+		for i, a := range c.Expect.Artifacts {
+			if a.Kind != want {
+				t.Errorf("%s: artifact %d is kind %q, but inputs %q declares %q, "+
+					"which produces %q",
+					c.Name, i, a.Kind, c.Expect.Inputs, inf.Expect.Kind, want)
+			}
+		}
 	}
 }
 
