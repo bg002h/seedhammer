@@ -10,6 +10,17 @@ import "syscall/js"
 //	shNFC.clear()               drop every queued record
 //	shNFC.detach()              emulate a machine with NO reader
 //	shNFC.attach()              give it a reader again (the default)
+//	shNFC.presented()           how many records have crossed the reader
+//
+// presented() is what lets a Build-policy stage gate assert ZERO (F-174). A
+// cosigner gather that completed over the emulated reader is green whether or
+// not the payload-supplied-cards feature exists, so "the gather finished" is
+// not evidence for the feature; "the gather finished AND nothing crossed the
+// reader" is. Phase-1 hardware has no reader at all.
+//
+// It is cumulative for the session and there is NO reset, deliberately — see
+// nfc.go. A counter a driver can zero just before asserting is a gate that
+// always passes.
 //
 // A function rather than a bare string so the page cannot leave a tag
 // permanently present by assignment, which no physical setup does.
@@ -43,6 +54,9 @@ func installNFCAPI(n *nfcSource) {
 		"attach": js.FuncOf(func(js.Value, []js.Value) any {
 			n.detach(false)
 			return nil
+		}),
+		"presented": js.FuncOf(func(js.Value, []js.Value) any {
+			return n.presented()
 		}),
 	}
 	js.Global().Set("shNFC", js.ValueOf(api))

@@ -52,6 +52,19 @@ type nfcSource struct {
 	// delivered over several Reads, which gui/scan.go reports as progress.
 	cur []byte
 	off int
+	// presentedCount is how many records the PAGE has offered this reader for
+	// the life of the session. It only ever goes up: clear() drops the queue
+	// and Read drains it, but neither un-presents a tag that already crossed.
+	//
+	// It exists for F-174. A stage-gate walk of the Build-policy flow must be
+	// able to assert that the cosigner cards came from the payload and NOT from
+	// the reader, because a gather completed over the emulated reader is green
+	// whether or not that feature exists — and phase-1 hardware has no reader.
+	//
+	// There is deliberately NO reset, for engraved.go's reason: a counter a
+	// driver can zero just before asserting is a gate that always passes.
+	// Reload the page for a fresh walk.
+	presentedCount int
 	// detached emulates a machine with NO READER AT ALL, which is a distinct
 	// state from "a reader with no tag on it" and one gui treats differently:
 	// nil is a supported value and the flows offer Back-only where a scan row
@@ -73,6 +86,17 @@ func (n *nfcSource) set(rec string) {
 		return
 	}
 	n.queue = append(n.queue, []byte(rec))
+	n.presentedCount++
+}
+
+// presented reports how many records have crossed this reader this session.
+//
+// Zero is the assertion a Build-policy stage gate makes: the cosigner set came
+// from the payload, not from a tag the driver waved at the machine.
+func (n *nfcSource) presented() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.presentedCount
 }
 
 // detach and attach switch between a machine with no reader and one with a
