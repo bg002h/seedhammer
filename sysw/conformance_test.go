@@ -12,10 +12,22 @@ import (
 // to each other, only to this file -- so a case the file omits is one both
 // implementations can be wrong about identically and neither will notice.
 //
-// The file lives in the primary repo because that is where it is generated.
-// SYSW_VECTORS overrides the path; the default assumes the usual side-by-side
-// checkout.
-const defaultVectors = "../../mnemonic-engrave/crates/me-cli/testdata/sysw_vectors.json"
+// VENDORED, since 2026-08-15 (C-4). The file is GENERATED in the primary repo
+// and stays strictly downstream of it, but the path used to point into a SIBLING
+// CHECKOUT (../../mnemonic-engrave/...) that the fork's workflow never checks
+// out -- so every test in this file skipped on the machine whose verdict gates a
+// merge, on every push, and the suite still reported ok and exit 0. The vendored
+// copy carries a provenance pin (sysw_vectors.provenance.json) recording the
+// primary commit and the file's SHA-256, exactly as every other Go port here
+// pins the Rust crate it tracks.
+//
+// SYSW_VECTORS still overrides the path, for a developer testing against an
+// unreleased vector set. There is no longer anything to skip: absent, empty or
+// unparseable is INCONCLUSIVE and fatal.
+const defaultVectors = "testdata/sysw_vectors.json"
+
+// vectorProvenance is the pin beside the vendored copy.
+const vectorProvenance = "testdata/sysw_vectors.provenance.json"
 
 type vector struct {
 	Name       string   `json:"name"`
@@ -39,12 +51,15 @@ type vector struct {
 	Unconfirmed []int `json:"mdmk_unconfirmed"`
 }
 
-// loadVectors resolves the file, and FAILS rather than skipping when
-// SYSW_REQUIRE_VECTORS=1.
+// loadVectors resolves the file. IT CANNOT SKIP.
 //
-// The fork's own cross-language harness already learned this: a differential
-// oracle that silently no-ops reads exactly like one that passes. CI sets the
-// variable; a local checkout without the sibling repo skips with a note.
+// The fork's own cross-language harness already learned this once: a
+// differential oracle that silently no-ops reads exactly like one that passes.
+// The lesson was written down and then implemented as an ESCALATION
+// (SYSW_REQUIRE_VECTORS=1 -> t.Fatalf) that nothing ever set, which is the same
+// failure with a paper trail. Enforcement is not something an environment
+// variable turns on: the vectors are in the repo, so absence here means the
+// checkout is broken, and that is a failure everywhere including CI.
 func loadVectors(t *testing.T) []vector {
 	t.Helper()
 	path := os.Getenv("SYSW_VECTORS")
@@ -54,10 +69,10 @@ func loadVectors(t *testing.T) []vector {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		abs, _ := filepath.Abs(path)
-		if os.Getenv("SYSW_REQUIRE_VECTORS") == "1" {
-			t.Fatalf("SYSW_REQUIRE_VECTORS=1 and the vectors are unreadable at %s: %v", abs, err)
-		}
-		t.Skipf("vectors not found at %s (%v); set SYSW_VECTORS or SYSW_REQUIRE_VECTORS=1", abs, err)
+		t.Fatalf("INCONCLUSIVE: the conformance vectors are unreadable at %s: %v\n"+
+			"They are vendored into this repo at %s and are not optional — without them "+
+			"this package's agreement with the Rust primary is asserted by nothing.",
+			abs, err, defaultVectors)
 	}
 	var vs []vector
 	if err := json.Unmarshal(raw, &vs); err != nil {

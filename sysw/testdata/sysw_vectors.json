@@ -1,0 +1,140 @@
+[
+  {
+    "name": "S-A",
+    "note": "plaintext, one text: record — journey (b)",
+    "records": [
+      "text:48656c6c6f2c20576f726c6421"
+    ],
+    "passphrase": null,
+    "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000001f00000000746578743a3438363536633663366632633230353736663732366336343231",
+    "pub_len": 31,
+    "ct_len": 0,
+    "sealed": false,
+    "digest": "40710d0220ed3195a4ad0ba27c07e1c4",
+    "identity": "77701523b783b59e4824180dd991842b8a87c7a50d3aeb572109231d8f44174c",
+    "mdmk_unconfirmed": []
+  },
+  {
+    "name": "S-B",
+    "note": "plaintext carrying a SECRET class — F1 flags it, decision 6 permits it",
+    "records": [
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ],
+    "passphrase": null,
+    "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000005d000000006162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e2061626f7574",
+    "pub_len": 93,
+    "ct_len": 0,
+    "sealed": false,
+    "digest": "f36e9900a2350b1e1c5fc580262332b9",
+    "identity": "07413e737b629b711cb2c00d7629b04340bad2707b004d69d05e0038184dbb36",
+    "mdmk_unconfirmed": []
+  },
+  {
+    "name": "S-C",
+    "note": "sealed with pub_len > 0 — a digest exists and is shown",
+    "records": [
+      "md1fv9wjpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3",
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ],
+    "passphrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "blob": "4d4e454d5359535701010100000186a011111111111111111111111111111111222222222222222222222222000000430000005d6d6431667639776a70717071706d366a7a7a717176717064716e66347a7471713467793939747a797a797a647637786839767064777533743764686865736b32746c334f47794c5ab02815676c755337c9fea91fa0b7ba3cd268f5bb9e4afca5e4067d539fc3dc2cb6334a631ec1ac46d03d8656d1559705cef1c4cb45c77aba45d9c2a35f4d0efcb87363eccc09076be30973b72897442143c329ac6e8599ad0e5f6172ec0f8d90a764ccc3d3382e46",
+    "pub_len": 67,
+    "ct_len": 93,
+    "sealed": true,
+    "digest": "e2e1636dd3d333f1466f669088324064",
+    "identity": "8d0854ef9d1576551aabdaf9044628393466a89cdd4c43e2b1a3131438b5eca3",
+    "mdmk_unconfirmed": [
+      0
+    ]
+  },
+  {
+    "name": "S-D",
+    "note": "sealed, secrets only, pub_len == 0 — NO digest; opening authenticates it",
+    "records": [
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ],
+    "passphrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "blob": "4d4e454d5359535701010100000186a011111111111111111111111111111111222222222222222222222222000000000000005d4f47794c5ab02815676c755337c9fea91fa0b7ba3cd268f5bb9e4afca5e4067d539fc3dc2cb6334a631ec1ac46d03d8656d1559705cef1c4cb45c77aba45d9c2a35f4d0efcb87363eccc09076be30973b72897442143c329ac6e8599adfadb782b28f11aeff1529b206776f53d",
+    "pub_len": 0,
+    "ct_len": 93,
+    "sealed": true,
+    "digest": null,
+    "identity": "c7158bf90863a0f43020537b39af31ef3f9c2d701047f3a764e31c2fb6773462",
+    "mdmk_unconfirmed": []
+  },
+  {
+    "name": "S-E",
+    "note": "sealed under a 2-word passphrase — not [cliff]-above, still opens (§13 D1)",
+    "records": [
+      "md1fv9wjpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3",
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ],
+    "passphrase": "abandon about",
+    "blob": "4d4e454d5359535701010100000186a011111111111111111111111111111111222222222222222222222222000000430000005d6d6431667639776a70717071706d366a7a7a717176717064716e66347a7471713467793939747a797a797a647637786839767064777533743764686865736b32746c33ca7da44aadc17d1c0a74d04b392581fcb0cbc719038dab09d0c916efb1c5b261a96b36f339c228b452059fc22daf199c65c723344611835aee37ea6377aee78f5af65b311470a33eaa9d7b3b3f314e235a0a6332583355197a7feea911c433995808f4f59e48d1b2b51203afb6",
+    "pub_len": 67,
+    "ct_len": 93,
+    "sealed": true,
+    "digest": "e2e1636dd3d333f1466f669088324064",
+    "identity": "d9a1cb18b2b58b44de884090369ec49d8e1819cede487cb94fafe26bc4539268",
+    "mdmk_unconfirmed": [
+      0
+    ]
+  },
+  {
+    "name": "S-G",
+    "note": "a text: body containing a SPACE and the record SEPARATOR — the case §5.3.1 exists for",
+    "records": [
+      "text:48656c6c6f2c20576f726c64210a7365636f6e64206c696e65"
+    ],
+    "passphrase": null,
+    "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000003700000000746578743a3438363536633663366632633230353736663732366336343231306137333635363336663665363432303663363936653635",
+    "pub_len": 55,
+    "ct_len": 0,
+    "sealed": false,
+    "digest": "5acf9dac89ea136578b8c32dc12749be",
+    "identity": "c0c9edd35d77185b433be808b22d38659fc205e958382d96029b5d9f84a01615",
+    "mdmk_unconfirmed": []
+  },
+  {
+    "name": "S-I",
+    "note": "a BCH-valid md1, alone — it packs and classifies ClassMDMK, and that is ALL this vector says; §8.3 test 14 moved to S-J, which asserts confirmation",
+    "records": [
+      "md1fv9wjpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3"
+    ],
+    "passphrase": null,
+    "blob": "4d4e454d5359535701000000000000000000000000000000000000000000000000000000000000000000000000000043000000006d6431667639776a70717071706d366a7a7a717176717064716e66347a7471713467793939747a797a797a647637786839767064777533743764686865736b32746c33",
+    "pub_len": 67,
+    "ct_len": 0,
+    "sealed": false,
+    "digest": "753c5936da81af0f5df0a7324eb4c83a",
+    "identity": "0b8c8535e6b1fd395d0199e7b133be2993ed8cba8e15ccf1a223c4ba94d0bb8b",
+    "mdmk_unconfirmed": [
+      0
+    ]
+  },
+  {
+    "name": "S-J",
+    "note": "`[mdmk-decode]` (§12.6) — both answers in one payload: two complete card sets and a non-chunked card confirm, two lone chunks do not. Unsealed, so the public section is the record list in order and the reported indices are unambiguous",
+    "records": [
+      "md1fv9wjpqpqpm6jzzqqvqpdqnf4ztqq4gy99tzyzyzdv7xh9vpdwu3t7dhhesk2tl3",
+      "md1fv9wjpqg0yq82l0czvx85ae43vtfd26hsmngjecmqy44k2pgttqh74qwxlawq374",
+      "md1fv9wjpqsp2026hh65xpvugtfhd9792zxgunymm0a82pdju6442q0jskj9gzfaqmz",
+      "md1fe4dazspq3m67zzqqvzrs3pstucnf4ztqz4pk6ujgjycfn6zhs79nmzdp9frd6dzth6asfu2za4mwgfkg6",
+      "md1yqpqqxqq8xtwhw4xwn4qh",
+      "mk1qpzg69pqqsq3zg3ngj4thnxaq5zg3vs7zqsrqqdt4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4vp3kx98j76m4mjlwphf",
+      "mk1qpzg69ppsnz4v7cjv3qfjhf76k4t5pt96u0psdrqfqvll8qh7h5athg837pmkf3dpug2mmjtfel6x",
+      "mk1qpykrepqqspjtpuhfqjc096gykrewjy6dgjcqpcy3zepaggqseet8ky6z2jxm56yh04m5mqslrmueekdmecm0js2h978k03jfvkwz2rxj8r8"
+    ],
+    "passphrase": null,
+    "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000026b000000006d6431667639776a70717071706d366a7a7a717176717064716e66347a7471713467793939747a797a797a647637786839767064777533743764686865736b32746c330a6d6431667639776a70716730797138326c30637a767838356165343376746664323668736d6e676a65636d717934346b3270677474716837347177786c6177713337340a6d6431667639776a707173703230323668683635787076756774666864393739327a7867756e796d6d3061383270646a753634343271306a736b6a39677a6661716d7a0a6d643166653464617a737071336d36377a7a7171767a72733370737475636e66347a74717a34706b36756a676a7963666e367a687337396e6d7a64703966726436647a74683661736675327a61346d7767666b67360a6d643179717071717871713878747768773478776e3471680a6d6b3171707a6736397071717371337a67336e676a3474686e786171357a67337673377a71737271716474347734366832617434773436683261743477343668326174347734366832617434773436683261743477343668326174347670336b7839386a37366d346d6a6c777068660a6d6b3171707a6736397070736e7a347637636a763371666a686637366b34743570743936753070736472716671766c6c38716837683561746867383337706d6b663364707567326d6d6a7466656c36780a6d6b317170796b726570717173706a7470756866716a6330393667796b7265776a793664676a6371706379337a65706167677173656574386b79367a326a786d3536796830346d356d71736c726d7565656b646d65636d306a7332683937386b30336a66766b777a3272786a387238",
+    "pub_len": 619,
+    "ct_len": 0,
+    "sealed": false,
+    "digest": "2132506990960fc4897c09c965d1791a",
+    "identity": "01faef20246e8cabd78247f00047de2f66a6822b2dad6a21bd3974b67494041d",
+    "mdmk_unconfirmed": [
+      3,
+      7
+    ]
+  }
+]

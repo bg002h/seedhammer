@@ -26,20 +26,26 @@ import (
 // syswRegionFor writes a vector's blob padded to a full region, exactly as
 // `me sysw pack --region` does, and returns a reader over it. The fixture is
 // therefore the artifact that actually gets flashed, not a hand-built blob.
+//
+// The vectors are VENDORED into this repo (C-4). They used to be read out of a
+// sibling checkout the fork's CI never makes, so every test below skipped on the
+// machine whose verdict gates a merge — five of the seven tests in this file,
+// silently, on every push. There is nothing left to skip: absence is a fatal
+// INCONCLUSIVE, because the file is in the repo and its absence means the
+// checkout is broken. SYSW_VECTORS still overrides for a developer working
+// against an unreleased set. sysw/vendored_vectors_test.go holds the pin.
 func syswRegionFor(t *testing.T, name string) sysw.Reader {
 	t.Helper()
 	path := os.Getenv("SYSW_VECTORS")
 	if path == "" {
-		path = filepath.Join("..", "..", "mnemonic-engrave", "crates", "me-cli",
-			"testdata", "sysw_vectors.json")
+		path = filepath.Join("..", "sysw", "testdata", "sysw_vectors.json")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		abs, _ := filepath.Abs(path)
-		if os.Getenv("SYSW_REQUIRE_VECTORS") == "1" {
-			t.Fatalf("SYSW_REQUIRE_VECTORS=1 and the vectors are unreadable at %s: %v", abs, err)
-		}
-		t.Skipf("vectors not found at %s (%v)", abs, err)
+		t.Fatalf("INCONCLUSIVE: the sysw vectors are unreadable at %s: %v\n"+
+			"They are vendored at sysw/testdata/sysw_vectors.json and are not optional — "+
+			"without them the payload-load flow is exercised by nothing.", abs, err)
 	}
 	var vs []struct {
 		Name string `json:"name"`
