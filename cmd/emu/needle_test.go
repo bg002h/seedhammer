@@ -66,6 +66,19 @@ var buildFlowNeedles = []struct {
 	// the whole `0..n` ruling on screen.
 	{"Payload cards", "gui/multisig_build_payload.go"},
 	{"Use payload card", "gui/multisig_build_payload.go"},
+	// S3. The two needles that let a walk prove it built NESTED SEGWIT, which a
+	// tap on the template picker cannot prove for itself: row 1 and row 0 are the
+	// same gesture, and nothing downstream said which landed until §0.1a made the
+	// origin announcement template-dependent.
+	//
+	// The NOTE is emitted only by buildOriginAnnouncement's md.MultisigShWsh arm,
+	// so it cannot appear on a wsh or legacy-sh build.
+	{"BIP-48 assigns m/48h/0h/0h/1h to nested segwit", "gui/multisig_build.go"},
+	// The NAME is S3's whole subject: scriptName's nested arm. It reaches the
+	// restore doc through desc4Display, and gui/multisig_restore.go deliberately
+	// does NOT quote it in a comment, because this counter matches source bytes
+	// and a quoted literal would cost the needle its uniqueness.
+	{"P2SH-P2WSH", "gui/md1_inspect.go"},
 }
 
 // decoyNeedles are strings a stage author reaches for FIRST and must not use.
