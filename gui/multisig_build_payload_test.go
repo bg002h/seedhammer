@@ -229,8 +229,29 @@ func TestInterleavedPayloadStillAssemblesInRecordOrder(t *testing.T) {
 			rawFirst.Fingerprint, cardB.Fingerprint)
 	}
 
-	// THE FIX: grouped, card A leads because its first chunk appeared first.
-	got, incomplete := buildCosignerSupply(groupRecordsByCard(interleaved))
+	// THE FIX, driven through the SEAM rather than the helper.
+	//
+	// This used to call groupRecordsByCard(interleaved) directly, and that made
+	// the guard worthless in the one way that mattered: deleting the CALL at
+	// buildCosignerSource left the whole suite green (`go test ./...` exit 0),
+	// because nothing routed records through the production path. Mutating the
+	// function's BODY died; removing its only caller did not — so the fix was
+	// bound to the flow by a single unasserted line.
+	//
+	// That is the same shape as the wiring gap this fold exists to close,
+	// reproduced inside the fold itself, and its consequence is not cosmetic:
+	// dropping the call restores completion order, the review still announces
+	// "in payload order", and with fingerprints omitted (the default) every slot
+	// renders "(no fp)" — invisible in every artifact. buildCosignerSource is
+	// also documented as the seam the later NFC plan reopens, i.e. the likeliest
+	// future edit site in this file.
+	ctx := NewContext(newPlatform())
+	ctx.sysw = sessionHolding(interleaved...)
+	sourced, state := buildCosignerSource(ctx)
+	if state != cosignerSourceLoaded {
+		t.Fatalf("buildCosignerSource returned state %v, want cosignerSourceLoaded", state)
+	}
+	got, incomplete := buildCosignerSupply(sourced)
 	if len(got) != 2 || incomplete {
 		t.Fatalf("grouped feed assembled %d card(s), incomplete=%v; want 2, false",
 			len(got), incomplete)
