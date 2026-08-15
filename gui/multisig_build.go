@@ -184,6 +184,12 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 				buildDuplicateKeyMessage(dup, p.SelfSlot, origins))
 			return
 		}
+		var fo errBuildForeignOrigin
+		if errors.As(err, &fo) {
+			showError(ctx, th, "Key origin mismatch",
+				buildForeignOriginMessage(fo, origins))
+			return
+		}
 		showError(ctx, th, "Build Policy", "Couldn't assemble the wallet policy.")
 		return
 	}
@@ -559,6 +565,70 @@ func duplicateSlotPair(all []md.MultisigCosigner) (int, int, bool) {
 	return 0, 0, false
 }
 
+// errBuildForeignOrigin is spec M-E's INTERIM refusal: a gathered card declares
+// an origin the shared-origin policy cannot honour. It carries the slot and the
+// card's own spelling of its origin, so the refusal can quote the operator's
+// input back rather than paraphrase it.
+//
+// INTERIM, and scheduled: S5 gives each slot its own origin, at which point this
+// shape is accepted and this error is deleted. Until then the alternative is not
+// "permit" but "stamp m/48'/0'/0'/2' over a card that says otherwise", which is
+// the device overruling an answer the operator already gave.
+type errBuildForeignOrigin struct {
+	Slot     int
+	Declared string
+}
+
+func (e errBuildForeignOrigin) Error() string {
+	return fmt.Sprintf("multisig build: slot @%d declares origin %q, not the shared origin",
+		e.Slot, e.Declared)
+}
+
+// originIsShared reports whether a card's DECLARED origin is the policy's shared
+// origin.
+//
+// PERMISSIVE ON SPELLING, STRICT ON VALUE (§0.1). The comparison is over parsed
+// path COMPONENTS, not over the two strings: mk.Decode normalises to the `h`
+// form but a card can reach here spelt with apostrophes, and m/48'/0'/0'/2' and
+// m/48h/0h/0h/2h are the same path. Refusing one of them would be a refusal over
+// notation, which is the exact opposite of the rule.
+//
+// A path that does not PARSE is not shared. An origin the device cannot read is
+// one it cannot honour, and the alternative is stamping the shared origin over
+// something nobody managed to interpret.
+func originIsShared(declared string, shared bip32.Path) bool {
+	p, err := bip32.ParsePath(declared)
+	if err != nil || len(p) != len(shared) {
+		return false
+	}
+	for i := range p {
+		if p[i] != shared[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// buildForeignOriginMessage is the operator-facing refusal. It quotes BOTH
+// origins, because the whole harm is that they differ and the operator is the
+// only one who knows which is right.
+func buildForeignOriginMessage(e errBuildForeignOrigin, origins []cosignerOrigin) string {
+	who := ""
+	for _, o := range origins {
+		if o.slot == e.Slot {
+			who = fmt.Sprintf(" (payload card %d)", o.card)
+			break
+		}
+	}
+	return fmt.Sprintf("The key card for slot @%d%s says its key was derived at %s, "+
+		"but this build declares one shared origin, %s, for every slot. Stamping the "+
+		"shared origin on it would put a derivation path on your steel that the card "+
+		"itself disagrees with. Nothing was engraved. Use a card derived at %s, or "+
+		"wait for per-slot origins.",
+		e.Slot, who, e.Declared, multisigSharedOrigin().String(),
+		multisigSharedOrigin().String())
+}
+
 // buildSlotProvenance names one slot for a refusal, using what the flow already
 // knows: the self-slot the operator picked and the card→slot map
 // buildCosignerOrigins built. A refusal that says "slots @0 and @1" and stops
@@ -687,6 +757,31 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 	// looks exactly like a wallet three masters share.
 	if a, b, dup := duplicateSlotPair(all); dup {
 		return nil, [4]byte{}, nil, errBuildDuplicateKey{SlotA: a, SlotB: b}
+	}
+
+	// SPEC M-E, and it runs AFTER the duplicate check on purpose. The delivered
+	// payload can trigger both on one build (self = masterA, cards A@0 + A@1), and
+	// the duplicate is the graver harm — a repeated key degrades the quorum
+	// invisibly, where a foreign origin mis-states a path that is printed on every
+	// artifact and is therefore detectable by reading the output. It is also the
+	// check that OUTLIVES this stage: the origin refusal disappears at S5, §4.1's
+	// never does. Asserted, not left to the reading order.
+	//
+	// This loop mirrors the slot-fill loop above rather than folding into it,
+	// because folding would put the origin check BEFORE the duplicate check and
+	// silently reverse that ruling.
+	shared := multisigSharedOrigin()
+	gi = 0
+	for slot := 0; slot < p.N; slot++ {
+		if slot == p.SelfSlot {
+			continue
+		}
+		if !originIsShared(cosigners[gi].Path, shared) {
+			return nil, [4]byte{}, nil, errBuildForeignOrigin{
+				Slot: slot, Declared: cosigners[gi].Path,
+			}
+		}
+		gi++
 	}
 
 	req := md.EncodeMultisigRequest{
