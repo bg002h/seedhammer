@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "stage": "S0",
+  "record": "S0-trace-a.record.json",
+  "inputs": "S0-trace-a.inputs.json",
+  "note": "Re-derived live by `cmd/gaterecord -expect-only` and compared against both the walk and the record already on disk; neither was rewritten. Committed so the comparison runs where no Rust toolchain exists — which is every machine whose verdict gates a merge.",
+  "derivation": {
+    "oracles": [
+      {
+        "name": "ms",
+        "commit": "ddfa497090bd945dce9b53453c7eeebf3e8d623d",
+        "sha256": "e63d9cb524c839e94e24bd283620db489d47363a760f6f84541e882ba783cec0",
+        "version": "ms 0.15.0"
+      },
+      {
+        "name": "mk",
+        "commit": "a38a908e143c2c4bd6405997d62385b3df01615f",
+        "sha256": "030ca21851126964553e18be876e5d6e6edb917f02bd3dec01a5d217b01d3641",
+        "version": "mk 0.13.0"
+      }
+    ],
+    "args": [
+      "ms derive --phrase <seed words: see the inputs file> --template bip48-p2wsh --account 0 --network mainnet --json",
+      "mk encode --xpub <account xpub from ms derive> --origin-path m/48'/0'/0'/2' --origin-fingerprint <master fp from ms derive> --policy-id-stub 5b48af35 --group-size 0"
+    ],
+    "derived_at": "2026-08-15T18:26:59Z"
+  },
+  "artifacts": [
+    {
+      "kind": "mk1",
+      "label": "payload:masterA (card A@0)",
+      "string": "mk1qpd8cwpqqsq4kj90x4eutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5av5muuc0cmfrjw2",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "payload:masterA (card A@0)",
+      "string": "mk1qpd8cwpp806lhaeh6reknylagmwyjycf8044xtt9flsdlkvt6f6cthyl995lpm5zlrp6yv6kc36tw",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "payload:masterB (card B@0)",
+      "string": "mk1qpmm93pqqsq4kj90xkux3r03q5zg3vs7llvu2xd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emag0zr8gh9upnj5stuxqtzdn4uxkd",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "b8688df1"
+    },
+    {
+      "kind": "mk1",
+      "label": "payload:masterB (card B@0)",
+      "string": "mk1qpmm93ppwyp4dfykwfkgg6fxyxetdcmythf4hsqzd3v879jprztejzs7rl0vk8mlv7lzva7w6nage",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "b8688df1"
+    },
+    {
+      "kind": "mk1",
+      "label": "payload:masterC (card C@0)",
+      "string": "mk1qp073xpqqsq4kj90x55xg5qxq5zg3vs7yxvkgrq39p0l68ewgkud5t4n95k8j84204m9xvr7cunrjqfurja893lkxup4zlyyf7spk75exfku",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "28645006"
+    },
+    {
+      "kind": "mk1",
+      "label": "payload:masterC (card C@0)",
+      "string": "mk1qp073xpp09hdq9zxg25mzsetnyhhc2j7yvnr37vchl8xc05vf2pnnz46ffl6ymp2sa0x397e56ypk",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "28645006"
+    }
+  ]
+}

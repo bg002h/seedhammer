@@ -274,12 +274,19 @@ func TestResolveRefusesABinaryOutsideTheCheckout(t *testing.T) {
 // TestRealPinsResolveTheInstalledOracles is the one test here that leaves the
 // hermetic world: it resolves the REAL md/mk/ms against the committed pin file.
 // Tier 2 per the plan ("the harness shells out to primary binaries... keep it
-// out of the inner loop"), so it skips under -short and when the binaries are
-// absent.
+// out of the inner loop"), so it skips under -short. CI does not pass -short.
 //
 // It is the test that would have caught a stale pin file, which is the way this
 // deliverable most plausibly rots: the pins are recorded by hand and the
 // binaries get rebuilt.
+//
+// ABSENCE FAILS (C-1's third site). Until this fold it skipped whenever a binary
+// was missing — so the backstop against a stale pin file was itself behind the
+// same door as everything it was backing up, and had never run on the machine
+// that decides a merge. SH_ORACLES_OPTIONAL=1 is the one declared opt-out; what
+// still enforces pin freshness there is
+// TestVendoredExpectationsWereDerivedFromThePinnedToolchain, which compares the
+// committed expectations' provenance against pins.json with no toolchain at all.
 func TestRealPinsResolveTheInstalledOracles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("tier 2: shells out to the primary toolchain")
@@ -294,7 +301,10 @@ func TestRealPinsResolveTheInstalledOracles(t *testing.T) {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skipf("no home dir: %v", err)
+		if OraclesOptional() {
+			t.Skipf("no home dir (%v) and %s=1", err, OraclesOptionalEnv)
+		}
+		t.Fatalf("no home dir: %v", err)
 	}
 	locate := func(name string) (string, string) {
 		// Binary-hash mode: these are installed binaries, NOT built inside a
@@ -302,9 +312,13 @@ func TestRealPinsResolveTheInstalledOracles(t *testing.T) {
 		// refused by design (see ErrBinaryOutsideCheckout).
 		return filepath.Join(home, ".cargo", "bin", name), ""
 	}
+	dir := filepath.Join(home, ".cargo", "bin")
 	for _, fp := range pf.Pins {
-		if _, err := os.Stat(filepath.Join(home, ".cargo", "bin", fp.Name)); err != nil {
-			t.Skipf("%s not installed: %v", fp.Name, err)
+		if _, err := os.Stat(filepath.Join(dir, fp.Name)); err != nil {
+			if OraclesOptional() {
+				t.Skipf("%s=1: %s is not installed at %s", OraclesOptionalEnv, fp.Name, dir)
+			}
+			t.Fatalf("%s", MissingOracleMessage(fp.Name, dir))
 		}
 	}
 

@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -95,18 +96,53 @@ type Bins struct {
 }
 
 // Artifact is one expected engraved string and the invocation that produced it.
+//
+// JSON-tagged because these are what a committed expectation holds
+// (expectfile.go); the tags are the on-disk shape, so renaming a field is a
+// schema change.
 type Artifact struct {
 	// Kind is "md1", "mk1" or "ms1".
-	Kind string
+	Kind string `json:"kind"`
 	// Label names which input produced it, e.g. "payload:masterA (card A@0)".
-	Label string
+	Label string `json:"label"`
 	// String is the expected engraved string, byte for byte.
-	String string
+	String string `json:"string"`
 	// Origin is the derivation path the oracle CONFIRMED for this artifact.
-	Origin string
+	Origin string `json:"origin,omitempty"`
 	// Fingerprint is the master fingerprint the oracle derived from the seed.
 	// Recorded because it binds the seed to the card independently of the xpub.
-	Fingerprint string
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// DerivedSet is what one live derivation produced, plus enough about HOW to
+// mint a provenance block that is measured rather than declared.
+//
+// Oracles and Args are collected by DeriveExpected as it invokes each binary —
+// never from a table listing which oracles a kind "uses", because such a table
+// is a claim that decays the first time a kind grows a step.
+type DerivedSet struct {
+	// Artifacts is the expected engraved set, in order.
+	Artifacts []Artifact
+	// Oracles names the binaries actually invoked, in first-use order.
+	Oracles []string
+	// Args records each distinct invocation FORM, with key material redacted.
+	// A committed expectation carries these so a human can redo the derivation;
+	// nothing parses them.
+	//
+	// Redacted deliberately: seed words on a recorded argv would put key
+	// material in a committed file and in CI logs, which is the same refusal
+	// SeedRef exists for.
+	Args []string
+}
+
+// note records an oracle invocation on a DerivedSet, deduplicating both lists.
+func (d *DerivedSet) note(oracle, argForm string) {
+	if !slices.Contains(d.Oracles, oracle) {
+		d.Oracles = append(d.Oracles, oracle)
+	}
+	if !slices.Contains(d.Args, argForm) {
+		d.Args = append(d.Args, argForm)
+	}
 }
 
 // Seed is one recorded seed's words, supplied alongside the tuple.
@@ -121,53 +157,62 @@ type Seed struct {
 }
 
 // DeriveExpected computes the artifacts a walk's inputs require, in engrave
-// order, by invoking the primary toolchain.
-func DeriveExpected(e Expect, in InputTuple, seeds []Seed, bins Bins) ([]Artifact, error) {
+// order, by invoking the primary toolchain. It also reports which oracles it
+// invoked, so a provenance block records what ran rather than what a table says
+// ought to have run.
+func DeriveExpected(e Expect, in InputTuple, seeds []Seed, bins Bins) (DerivedSet, error) {
 	if e.Kind != KindCosignerCards {
-		return nil, fmt.Errorf("%w: unknown expectation kind %q; refusing to derive nothing "+
-			"and report it as a match", ErrBadRecord, e.Kind)
+		return DerivedSet{}, fmt.Errorf("%w: unknown expectation kind %q; refusing to derive nothing "+
+			"and report it as a match. Every gate record must carry an expectation this "+
+			"package can DERIVE — a stage engraving a shape no ExpectKind names needs a new "+
+			"kind here first, not a record minted without one", ErrBadRecord, e.Kind)
 	}
 	if err := checkStub(e.PolicyIDStub); err != nil {
-		return nil, err
+		return DerivedSet{}, err
 	}
 	if len(seeds) == 0 {
-		return nil, fmt.Errorf("%w: no seeds supplied, so nothing can be derived", ErrIncompleteInputs)
+		return DerivedSet{}, fmt.Errorf("%w: no seeds supplied, so nothing can be derived", ErrIncompleteInputs)
 	}
 	if len(in.Origins) != len(seeds) {
-		return nil, fmt.Errorf("%w: %d origin(s) for %d seed(s) — the tuple cannot say which "+
+		return DerivedSet{}, fmt.Errorf("%w: %d origin(s) for %d seed(s) — the tuple cannot say which "+
 			"key sits at which path", ErrIncompleteInputs, len(in.Origins), len(seeds))
 	}
 
-	var out []Artifact
+	var d DerivedSet
 	for i, s := range seeds {
 		origin := in.Origins[i]
 		acct, tmpl, network, err := templateForOrigin(origin)
 		if err != nil {
-			return nil, fmt.Errorf("seed %q: %w", s.Label, err)
+			return DerivedSet{}, fmt.Errorf("seed %q: %w", s.Label, err)
 		}
 		fp, xpub, gotPath, err := msDerive(bins.MS, s.Words, tmpl, acct, network)
 		if err != nil {
-			return nil, fmt.Errorf("seed %q: %w", s.Label, err)
+			return DerivedSet{}, fmt.Errorf("seed %q: %w", s.Label, err)
 		}
+		d.note("ms", fmt.Sprintf("ms derive --phrase <seed words: see the inputs file> "+
+			"--template %s --account %d --network %s --json", tmpl, acct, network))
 		// The recorded origin is a CLAIM. The oracle just derived the path its
 		// own template implies; if they differ, the record describes a
 		// different key than the one engraved.
 		if !samePath(gotPath, origin) {
-			return nil, fmt.Errorf("seed %q: the tuple records origin %q but %s derives %q "+
+			return DerivedSet{}, fmt.Errorf("seed %q: the tuple records origin %q but %s derives %q "+
 				"for that template — the record and the key material disagree",
 				s.Label, origin, tmpl, gotPath)
 		}
 		chunks, err := mkEncode(bins.MK, xpub, gotPath, fp, e.PolicyIDStub)
 		if err != nil {
-			return nil, fmt.Errorf("seed %q: %w", s.Label, err)
+			return DerivedSet{}, fmt.Errorf("seed %q: %w", s.Label, err)
 		}
+		d.note("mk", fmt.Sprintf("mk encode --xpub <account xpub from ms derive> "+
+			"--origin-path %s --origin-fingerprint <master fp from ms derive> "+
+			"--policy-id-stub %s --group-size 0", gotPath, e.PolicyIDStub))
 		for _, c := range chunks {
-			out = append(out, Artifact{
+			d.Artifacts = append(d.Artifacts, Artifact{
 				Kind: "mk1", Label: s.Label, String: c, Origin: gotPath, Fingerprint: fp,
 			})
 		}
 	}
-	return out, nil
+	return d, nil
 }
 
 // CompareCensus checks a census against derived artifacts, byte for byte and in

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "stage": "S2",
+  "note": "Trace A's 2-of-3 wsh policy as the PINNED PRIMARY encodes it: self = masterA at the shared origin, cosigners B@0 and C@0, self slot @0, fingerprints omitted. Minted only by `go test ./gui -run TestAssembledMd1MatchesThePrimaryByteForByte -update`, which cannot run without the pinned md binary. The device's own assembly is compared against this on every machine, with no toolchain, by TestAssembledMd1MatchesTheCommittedGolden.",
+  "derivation": {
+    "oracles": [
+      {
+        "name": "md",
+        "commit": "5a0a4f41017d71d47f70684c145702d4ca0c3aa9",
+        "sha256": "9ef480ad1f1ecfd2e5241579a2f16a1b691d6e394981f6e654a4f3cbcc3729e9",
+        "version": "md 0.13.0"
+      }
+    ],
+    "args": [
+      "md encode wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*)) --key @0=xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf --key @1=xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX --key @2=xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6 --path m/48h/0h/0h/2h --network mainnet --group-size 0 --force-chunked"
+    ],
+    "derived_at": "2026-08-15T18:29:03Z"
+  },
+  "artifacts": [
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 0",
+      "string": "md1fxrvxzspqjtvyyy4qqxppcgsc27rchwsv0jskp2rsal4egz4ep5859p875x67p5s5tk09nzz08lv4"
+    },
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 1",
+      "string": "md1fxrvxzsg3wem7sgluxl3d2a3syx3m7halwd7s7d5e8l2xm3y3xzfmadfj6e20urgnf9h0eap9ujpc"
+    },
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 2",
+      "string": "md1fxrvxzshanz7jwkzae8efd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emcwp309kt3p7qjm"
+    },
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 3",
+      "string": "md1fxrvxzsag0zr8gh9upnjugr26jfvunvs35jvgdjkm3kghwnt0qqymzc0utyzxyhs535vcd9tq33dm"
+    },
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 4",
+      "string": "md1fxrvxz3ry9pu8uyfgtl737tj9hrdzaved93u3a2nawefnqlk8ycusz0quhfev0as4ure80muhz6hz"
+    },
+    {
+      "kind": "md1",
+      "label": "Trace A 2-of-3 wsh policy, chunk 5",
+      "string": "md1fxrvxz3fhqdghjmksz3ry92d3gv4ejtmu9f0zxf3clxvtlnnv86xy4qee32ay5yaf3qfqktd9h9"
+    }
+  ]
+}

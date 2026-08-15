@@ -10,7 +10,38 @@ jobs:
     - uses: actions/setup-go@v6
       with:
         go-version: '1.26'
-    - run: CGO_ENABLED=0 go test ./...
+    # SH_ORACLES_OPTIONAL=1: this runner has no Rust toolchain, so the LIVE
+    # re-derivation against the pinned md/mk/ms binaries cannot run here. It is
+    # not merely absent — it is unachievable: oracle/pins.json binds each oracle
+    # to the SHA-256 of a binary built on the maintainer's machine, so a
+    # `cargo install` here would produce a different binary, a different hash,
+    # and a hard resolution failure.
+    #
+    # WHAT STILL ENFORCES BYTE-IDENTITY ON THIS MACHINE, in full, because a line
+    # that relaxes a gate has to say what is left:
+    #
+    #   oracle  TestEveryGateRecordCensusMatchesItsCommittedExpectation
+    #             every gate record's engraved census vs the primary's own
+    #             output committed beside it, byte for byte, in order
+    #           TestVendoredExpectationsWereDerivedFromThePinnedToolchain
+    #             every committed expectation's oracle identity vs pins.json
+    #   gui     TestAssembledMd1MatchesTheCommittedGolden
+    #             S2's md1 assembly vs the primary's committed output
+    #   sysw    TestConformance + TestVendoredVectorsMatchTheirProvenancePin
+    #             this port vs the Rust primary's generated vector set
+    #
+    # NONE of those has a skip path. They need no toolchain, they run on every
+    # push, and their package's `ok` therefore IMPLIES they executed — which is
+    # the whole repair (C-1..C-4). Until 2026-08-15 all of it skipped here in
+    # silence and the workflow still went green: run 31898063163, on 4b8488e,
+    # concluded success with the derived-census gate, S2's byte-identity gate,
+    # the pin-resolution test and the entire sysw conformance suite unexecuted.
+    #
+    # This variable may only ever RELAX a check. Nothing in this repo is armed by
+    # setting an environment variable — the sysw pair already shipped that shape
+    # (SYSW_REQUIRE_VECTORS=1 -> t.Fatalf) and it failed because no workflow ever
+    # set it. An escalation nobody sets is a skip with paperwork.
+    - run: CGO_ENABLED=0 SH_ORACLES_OPTIONAL=1 go test ./...
     # F-142: `int` is 64 bits here and 32 bits on the device, so a uint32 read
     # off the wire and widened to `int` behaves differently on the machine than
     # in CI. It already did: ParseHeader compared the section cap as
