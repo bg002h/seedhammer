@@ -16,6 +16,15 @@ cap — R0-I1), so `.md1.txt` has one chunk per line (3 chunks each).
   `75b1bfb71335d439e10bcf5c1e6dacdd25da5eddd3c0051b4c6c6abf628804d6`).
 - Generator: `mnemonic-toolkit` (binary v0.58.1), git `4e21d94`, linking
   md-codec 0.36.0 + ms-codec 0.4.4 (verified in its Cargo.lock — the pinned SHAs).
+- **Re-pin note (S0 D8, 2026-08-14):** the current primary pin is
+  descriptor-mnemonic @ `5a0a4f41` (md-codec v0.42.0). The generation lineage
+  above (toolkit v0.58.1 @ `4e21d94`, md-codec 0.36.0) is a historical record
+  of how these specific bytes were produced and is left unchanged — the
+  toolkit run has NOT been repeated at the new pin. The primary's
+  `encode_payload` wire format is confirmed byte-identical 0.36.0 → 0.42.0
+  across the 10-vector MANIFEST these sets build on (see `../README.md`), so
+  these goldens are not known to be stale, but they remain a 0.36.0-era
+  artifact rather than a fresh 0.42.0 regeneration.
 - Test seed: the standard BIP-39 "abandon" 12-word seed
   (`abandon abandon abandon abandon abandon abandon abandon abandon abandon
   abandon abandon about`). Its BIP-39 entropy is 16 zero bytes; its ms1 is

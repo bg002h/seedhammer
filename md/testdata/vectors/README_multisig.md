@@ -7,8 +7,13 @@ against the depth-4 xpub the Rust `md` CLI accepts for multisig:
 
     xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf  (abandon-seed @ m/48'/0'/0'/2')
 
-Rust CLI cross-check (descriptor-mnemonic @ c85cd49; depth-4 xpub required for
-ScriptCtx::MultiSig, md-cli/src/parse/keys.rs:67-77):
+Rust CLI cross-check (descriptor-mnemonic @ c85cd49, md-codec v0.36.0; depth-4
+xpub required for ScriptCtx::MultiSig, md-cli/src/parse/keys.rs:67-77). Not
+re-run against the current pin (S0 D8, descriptor-mnemonic @ `5a0a4f41`,
+md-codec v0.42.0): the encode_payload wire format the cross-check exercises
+is confirmed byte-identical 0.36.0 → 0.42.0 (see `../README.md`), so the
+conclusion stands, but the literal command outputs below were captured at
+c85cd49 and have not been re-executed:
 
     md encode 'wsh(sortedmulti(2,@0,@1,@2))' --key @0=<xpub> --key @1=<xpub> --key @2=<xpub> --force-chunked --json   # 0x36d1b
     md encode 'sh(wsh(sortedmulti(2,@0,@1,@2)))' --key @0=<xpub> --key @1=<xpub> --key @2=<xpub> --force-chunked --json # 0x58624

@@ -23,12 +23,36 @@ var singleStringVectorNames = []string{
 	"sh_wsh_multi",
 	"wsh_divergent_paths",
 	"wsh_with_fingerprints",
+	// The primary's Part-3 additions, vendored 2026-08-14 with the 0.42.0
+	// re-pin (S0 D8). D8 is a COVERAGE catch-up: the point is that the
+	// vendored set was an older and SMALLER sample, so re-pinning the
+	// provenance strings without picking these up would have delivered none
+	// of it. This list is hand-maintained and is itself the kind of thing
+	// that goes stale — compare it against the primary's MANIFEST on re-pin.
+	//
+	// sh_wpkh is VENDORED BUT NOT LISTED HERE, deliberately. Its descriptor
+	// carries a pathless shared origin (`"path_decl":{"tag":"Shared","data":"m"}`)
+	// and this package refuses it — errMissingExplicitOrigin, md.go:893. The
+	// primary gained pathless decode in the release this re-pin points at
+	// (5a0a4f41, "md-codec 0.42.0 — pathless/dead-card partial-decode"), so
+	// this is the Go port lagging the Rust primary, not a defect in the
+	// vector. Convergence work with its own scope; see FOLLOWUPS F-166. The
+	// data is vendored so the gap is reproducible in one line: add the name
+	// back and watch it fail.
+	"tr_with_leaf",
+	"nums_taproot",
+	"single_string_boundary",
 }
 
 // byteParityVectorNames are all vectors with a .bytes.hex golden equal to the
 // pre-chunk encodePayload output — the single-string set PLUS the force-chunked
 // wsh_multi_chunked (whose .bytes.hex is the pre-chunk payload, R0-M3).
-var byteParityVectorNames = append(append([]string(nil), singleStringVectorNames...), "wsh_multi_chunked")
+// wsh_sortedmulti_2chunk joins wsh_multi_chunked here rather than above: its
+// .phrase.txt is a 3-line chunk-format string with a `chunk-set-id:` header,
+// so it has no single-string parity to assert, but its .bytes.hex is still the
+// pre-chunk encodePayload output (R0-M3).
+var byteParityVectorNames = append(append([]string(nil), singleStringVectorNames...),
+	"wsh_multi_chunked", "wsh_sortedmulti_2chunk")
 
 func vectorPath(name, ext string) string {
 	return filepath.Join("testdata", "vectors", name+"."+ext)

@@ -74,7 +74,7 @@ func TestDecodeChunkedRefused(t *testing.T) {
 // ─── FOLD C — IMPORTANT-1 (spec §6): negative + Renderable classification ─────
 //
 // Provenance of the bit-packed payloads below: each is built white-box from
-// the verified md-codec 0.36.0 wire layout (the same layout this package
+// the verified md-codec 0.42.0 wire layout (the same layout this package
 // ports), via the local testBitWriter, and fed directly to
 // decodePayloadValidated(bytes, bitLen). The intent is documented per case.
 // Round-trip vectors (the md1 strings in TestDecodeRenderableClassification)
@@ -324,7 +324,7 @@ func TestDecodeNegative(t *testing.T) {
 
 // TestDecodeRenderableClassification exercises the decode-side Renderable
 // classification (NOT a hand-built Template literal) over real md-codec-encoded
-// md1 strings. All strings below were produced by the md-codec 0.36.0 encoder
+// md1 strings. All strings below were produced by the md-codec 0.42.0 encoder
 // (`md encode` CLI for the first two, a one-off encode_md1_string harness for
 // the tr(NUMS,…) case which the CLI's string parser can't express) and copied
 // verbatim. Their bytecodes are recorded for provenance in the comments.

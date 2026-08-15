@@ -1,6 +1,6 @@
 // Package md decodes single-string md1 (descriptor) constellation strings into
 // a human-readable BIP-388 template. md1 is PUBLIC; no secret handling. Wire
-// format: descriptor-mnemonic/crates/md-codec @ 0.36.0 (decode_md1_string path).
+// format: descriptor-mnemonic/crates/md-codec @ 0.42.0 (decode_md1_string path).
 // Chunked md1 is detected and refused (ErrChunkedUnsupported); reassembly +
 // wallet-policy xpub-expansion are out of scope (ledger #10).
 package md
