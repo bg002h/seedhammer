@@ -7,7 +7,11 @@
     "template": "bundle-engrave: Load Payload, then Engrave Bundle over three gathered cosigner cards (S0's walk builds no policy; that is S1-S5)",
     "n": 3,
     "k": 0,
-    "slot_order": [0, 1, 2],
+    "slot_order": [
+      0,
+      1,
+      2
+    ],
     "fp_choice": "unset",
     "origins": [
       "m/48h/0h/0h/2h",
@@ -28,5 +32,9 @@
         "words": "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
       }
     ]
+  },
+  "expect": {
+    "kind": "cosigner-cards",
+    "policy_id_stub": "5b48af35"
   }
 }

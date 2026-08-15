@@ -37,10 +37,10 @@
     {
       "name": "ms",
       "repo": "mnemonic-secret",
-      "commit": "bf77f89aca8e28601921fca974089d278060cab0",
-      "sha256": "1fd749e441cf511c6ce1d52a4e8008ccc5b853450c93b0c0ce9933807ea5104d",
-      "version": "ms 0.14.0",
-      "checkout_clean_when_recorded": false
+      "commit": "ddfa497090bd945dce9b53453c7eeebf3e8d623d",
+      "sha256": "e63d9cb524c839e94e24bd283620db489d47363a760f6f84541e882ba783cec0",
+      "version": "ms 0.15.0",
+      "checkout_clean_when_recorded": true
     }
   ]
 }

@@ -61,8 +61,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -71,26 +69,6 @@ import (
 
 	"seedhammer.com/oracle"
 )
-
-// inputsFile is what -inputs holds. Seeds accept words OR a pre-computed
-// digest, never both, so a caller cannot half-supply one and get a record that
-// silently identifies nothing.
-type inputsFile struct {
-	Payload oracle.Payload `json:"payload"`
-	Inputs  struct {
-		Template  string   `json:"template"`
-		N         int      `json:"n"`
-		K         int      `json:"k"`
-		SlotOrder []int    `json:"slot_order"`
-		FPChoice  string   `json:"fp_choice"`
-		Origins   []string `json:"origins"`
-		Seeds     []struct {
-			Label  string `json:"label"`
-			Words  string `json:"words,omitempty"`
-			Digest string `json:"digest,omitempty"`
-		} `json:"seeds"`
-	} `json:"inputs"`
-}
 
 func main() {
 	var (
@@ -127,11 +105,14 @@ func run(stage, walkPath, inputsPath, base, outDir, pinsPath, binDir string, for
 		return fmt.Errorf("%w: %v", oracle.ErrNoWalk, err)
 	}
 
-	inf, err := loadInputs(inputsPath)
+	// The inputs-file shape lives in package oracle: the expectation deriver
+	// reads the same file for the seed WORDS and the expect block, and two
+	// declarations of one on-disk shape drift.
+	inf, err := oracle.LoadInputsFile(inputsPath)
 	if err != nil {
 		return err
 	}
-	tuple, err := toTuple(inf)
+	tuple, err := inf.Tuple()
 	if err != nil {
 		return err
 	}
@@ -183,45 +164,4 @@ func run(stage, walkPath, inputsPath, base, outDir, pinsPath, binDir string, for
 	fmt.Println(string(b))
 	fmt.Fprintf(os.Stderr, "\nwrote %s\n      %s\n", recPath, walkOut)
 	return nil
-}
-
-func loadInputs(path string) (inputsFile, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return inputsFile{}, err
-	}
-	var inf inputsFile
-	dec := json.NewDecoder(bytes.NewReader(b))
-	// Unknown fields are an error here: an inputs file with a misspelt key
-	// would otherwise produce a record missing that input, which is the exact
-	// class of silence this deliverable exists to remove.
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&inf); err != nil {
-		return inputsFile{}, fmt.Errorf("%s: %w", path, err)
-	}
-	return inf, nil
-}
-
-func toTuple(inf inputsFile) (oracle.InputTuple, error) {
-	t := oracle.InputTuple{
-		Template:  inf.Inputs.Template,
-		N:         inf.Inputs.N,
-		K:         inf.Inputs.K,
-		SlotOrder: inf.Inputs.SlotOrder,
-		FPChoice:  inf.Inputs.FPChoice,
-		Origins:   inf.Inputs.Origins,
-	}
-	for _, s := range inf.Inputs.Seeds {
-		switch {
-		case s.Words != "" && s.Digest != "":
-			return oracle.InputTuple{}, fmt.Errorf("seed %q gives both words and a digest; give one", s.Label)
-		case s.Words != "":
-			t.Seeds = append(t.Seeds, oracle.NewSeedRef(s.Label, s.Words))
-		case s.Digest != "":
-			t.Seeds = append(t.Seeds, oracle.SeedRef{Label: s.Label, Digest: s.Digest})
-		default:
-			return oracle.InputTuple{}, fmt.Errorf("seed %q identifies nothing: give words or a digest", s.Label)
-		}
-	}
-	return t, nil
 }
