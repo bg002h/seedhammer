@@ -324,11 +324,25 @@ func mkEncode(bin, xpub, path, fp, stub string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mk encode: %w", runErr(err))
 	}
+	// REFUSE any stdout line that is not an mk1 string, rather than collecting
+	// it as one. `mk encode` emits only the strings today — but its sibling
+	// `md encode` prints `chunk-set-id: 0x…` on STDOUT ahead of them, so a
+	// line-splitter that trusts every line would silently adopt that header as
+	// an expected artifact the moment this is extended to md1. An expectation
+	// built from a header line compares garbage and reports a mismatch nobody
+	// can read; worse, a count that happens to match would pass.
 	var chunks []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			chunks = append(chunks, line)
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
+		if !strings.HasPrefix(line, "mk1") {
+			return nil, fmt.Errorf("mk encode emitted a non-mk1 line on stdout, which this "+
+				"gate will not treat as an artifact: %q (use --json if the CLI has grown a "+
+				"header)", line)
+		}
+		chunks = append(chunks, line)
 	}
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("mk encode produced no strings")
