@@ -358,10 +358,19 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// distinct origins with distinct keys. Handing over the tail's own held-slot
 	// indices is what keeps "every leg must find its plate" a statement about
 	// this run's steel instead of about the policy.
+	//
+	// engraveMd1 IS THE OTHER HALF OF IT. Slot indices alone are re-based onto
+	// whatever policy the readback supplies, so a byte-valid plate set from a
+	// DIFFERENT wallet -- the same cosigners at another threshold, say, from the
+	// generation this run supersedes -- satisfies the same integers and reports
+	// "Verify OK" while this run's steel is never read. This flow has held the
+	// closing datum all along; it hands it over now. It is the md1 that was
+	// ENGRAVED, not assembledMd1, because the plate the operator will present is
+	// the one that came off this machine.
 	if !template && len(legs) > 0 {
 		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-			multisigVerifyFlow(ctx, th, full, engravedSlots)
+			multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)
 		}
 	}
 

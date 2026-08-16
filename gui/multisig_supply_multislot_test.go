@@ -261,14 +261,14 @@ func TestSupplyFlowAnnouncesWhatWillBeCut(t *testing.T) {
 // s5DriveVerify cannot be used for that: it fatals when the gather does not hand
 // off to seed entry, which is precisely the outcome a short readback is allowed
 // to have. What the caller asserts on is the VERDICT, not the route to it.
-func s5DriveVerifyTolerant(t *testing.T, records []string, expected []int, phrase string) string {
+func s5DriveVerifyTolerant(t *testing.T, records []string, expected []int, engravedMd1 []string, phrase string) string {
 	t.Helper()
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
-	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, expected) })
+	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1) })
 	defer quit()
 
 	if c, ok := pumpUntil(frame, "mk1 keys:", 64); !ok {
@@ -333,7 +333,7 @@ func TestVerifyRefusesAPartialReadbackOfAThreePlateBuild(t *testing.T) {
 		records = append(records, plates[s5PlateFor(t, plates, l)]...)
 	}
 
-	last := s5DriveVerifyTolerant(t, records, []int{0, 1, 2}, fixtureMasterA)
+	last := s5DriveVerifyTolerant(t, records, []int{0, 1, 2}, md1, fixtureMasterA)
 	if uiContains(last, "Verify OK") {
 		t.Fatalf("a THREE-plate build verified clean against a TWO-plate readback. Final "+
 			"screen: %q\nMaster B's plate was never presented and master B's seed was never "+
@@ -490,7 +490,7 @@ func TestSupplyEngraveVerifiesItsOwnOutput(t *testing.T) {
 		t.Fatalf("the tail minted %d key plate(s), want 2", plates)
 	}
 
-	last, _ := s5DriveVerify(t, records, engraved, fixtureMasterA)
+	last, _ := s5DriveVerify(t, records, engraved, md1, fixtureMasterA)
 	if !uiContains(last, "Verify OK") {
 		t.Fatalf("the supply path's own COMPLETE output did not verify. Final screen: %q\n"+
 			"It engraved a plate for each of slots %v and the operator presented both; a "+

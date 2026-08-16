@@ -19,6 +19,14 @@ import (
 // string is the supplied input compared to a clone of itself, and foreign
 // cosigners' xpubs have no source of truth — so we do NOT claim a full-bundle
 // guarantee.
+//
+// STILL TRUE OF THE COMPARATOR, NO LONGER THE WHOLE STORY OF THE FLOW.
+// bundle.Verify's md1 leg does compare the readback against a clone of itself.
+// What changed is upstream: multisigVerifyFlow now requires the readback md1 to
+// EQUAL the md1 THIS RUN ENGRAVED before anything reaches the comparator, so
+// "which wallet is this" is answered outside that self-comparison. The success
+// copy is unchanged, because what it scopes — foreign cosigners' xpubs having no
+// source of truth — is untouched by that.
 const (
 	multisigVerifyOKTitle = "Verify OK"
 	multisigVerifyOKBody  = "Operator key and secret verified. Other cosigners' keys are taken as supplied."
@@ -26,6 +34,22 @@ const (
 	// STRING, TWO SITES (the entry guard and the derive loop's refusal), so the two
 	// cannot drift into telling the operator two different things about one state.
 	multisigVerifyNoExpectationBody = "This run engraved no key plate, so there is nothing to verify."
+	// multisigVerifyNoPolicyBody is what a caller that lost the ENGRAVED md1 says.
+	// It is a different state from an empty slot set and gets its own words: the
+	// run cut plates, and the one fact that says WHICH WALLET they belong to did
+	// not arrive, so nothing can be proved about them.
+	multisigVerifyNoPolicyBody = "This run's wallet policy did not reach the verify, so there is nothing to check the plates against."
+	// multisigVerifyForeignPolicyBody is the POLICY-IDENTITY refusal.
+	//
+	// It says the one thing the operator can act on. A generic "Verify Failed"
+	// sends them to re-cut plates that are perfectly good; what actually happened
+	// is that the steel in their hands belongs to a different wallet, and no
+	// amount of re-presenting THESE plates will ever satisfy this run.
+	//
+	// NO EM-DASH: it is a zero-pixel glyph in the body face and a line carrying one
+	// does not draw at all (F-78/F-151).
+	multisigVerifyForeignPolicyBody = "The read-back wallet policy is NOT the wallet policy this run engraved. " +
+		"These plates belong to a different wallet. Present the md1 and the key plates this run cut."
 )
 
 // ─── T6b: verify-bundle for a SUPPLIED multisig bundle (user's slot only) ────
@@ -305,7 +329,35 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // build flow's seedRegistry uses and for the same reason: every exit below (a
 // Back, a refusal modal, a ctx.Done unwind, a panic) is covered by construction
 // rather than by an implementer remembering to add a wipe to a new return.
-func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int) {
+//
+// `engravedMd1` IS THE OTHER HALF OF THE OBLIGATION, and without it the slot set
+// proves less than its own screens claim.
+//
+// The slot set binds this verify to the run's slot INDICES. It does not bind it
+// to the run's POLICY, and the policy is re-read from the evidence being judged:
+// the readback md1 supplies `keys`, allUserSlots runs against those keys, every
+// leg derives at those origins over that md1, and bundle.Verify's md1 leg is (by
+// this file's own header admission) the supplied input compared against a clone
+// of itself. So the integers in expectedSlots get re-based onto whatever wallet
+// the operator presents.
+//
+// EXECUTED, and it is exactly the false GREEN the design gate killed the
+// plate-COUNT design with, moved up one level from slot identity to policy
+// identity: engrave wallet P (3-of-4, expectation [2]), present wallet P' -- the
+// SAME four cosigners at 2-of-4, byte-valid, with its own policy-id stub binding
+// its own plates -- and every check passes, because each one compares P' against
+// P'. Final screen: "Verify OK", over a plate this run did not cut, while the
+// plate and md1 this run DID cut were never read. The realistic reach is the
+// operator this verify exists for: a re-cut after changing k, with the
+// superseded generation's steel on the same bench.
+//
+// Both callers already held the datum that closes it (gui/multisig.go's
+// suppliedMd1, gui/multisig_build.go's engraveMd1) and neither passed it. It
+// arrives with the obligation now, and the readback must EQUAL it. §7.4 is not
+// implicated: the EVIDENCE still comes from the plates, and every leg is still
+// re-derived from a RE-TYPED seed. What gained the policy identity is the
+// OBLIGATION, which is the half only the engraver ever knew.
+func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string) {
 	// THE ENGRAVER'S OBLIGATION LIST ARRIVES FROM THE CALLER, and an empty one is
 	// refused BEFORE the operator is asked to present anything. A verify with no
 	// slot to prove cannot be satisfied by any readback, so sending them to the
@@ -313,6 +365,16 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// run. errVerifyNoExpectedSlots carries the same refusal for the derive loop.
 	if len(expectedSlots) == 0 {
 		showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
+		return
+	}
+	// AND SO IS A MISSING POLICY, for the same reason one level over. An absent
+	// engraved md1 would make the equality check below vacuous -- every readback
+	// would be "the policy this run engraved" -- which is the shape of a guard
+	// that reports success for a comparison that never ran. Both call sites carry
+	// it today; this fires only if a future one loses it on the way in, which is
+	// exactly when a vacuous pass would be invisible.
+	if len(engravedMd1) == 0 {
+		showError(ctx, th, "Verify Bundle", multisigVerifyNoPolicyBody)
 		return
 	}
 
@@ -331,6 +393,24 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	readbackMd1, readbackMk1s, ok := extractReadbackMd1AndMk1s(cards)
 	if !ok {
 		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card(s) (mk1).")
+		return
+	}
+	// THE POLICY IDENTITY, CHECKED FIRST AND ON THE BYTES.
+	//
+	// It runs before the decode, before the count precheck and before any secret
+	// is asked for, because a readback of ANOTHER wallet is not a mis-count and
+	// not a mis-cut: nothing further this flow does can produce a true answer
+	// about it, and every check downstream would compare that wallet against
+	// itself and agree.
+	//
+	// EXACT CHUNK EQUALITY, not a decoded-policy comparison. The chunk strings are
+	// what went on steel; the encoders are deterministic (plan S5 item 7,
+	// TestReRunMintsByteIdenticalPlates), so an honest re-read of this run's own
+	// md1 reproduces them exactly. Comparing decoded fields instead would accept a
+	// re-chunked or re-encoded descriptor that is not the plate the operator is
+	// holding, which is the one thing this check exists to notice.
+	if !slices.Equal(readbackMd1, engravedMd1) {
+		showError(ctx, th, "Verify Bundle", multisigVerifyForeignPolicyBody)
 		return
 	}
 	_, keys, err := md.ExpandWalletPolicyChunks(readbackMd1)
@@ -417,7 +497,22 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				showError(ctx, th, "Verify Bundle", "That seed's slots have already been "+
 					"checked. The plates still outstanding belong to a different seed.")
 			}
-			return
+			// BREAK, NOT RETURN, for the ms1 entry's reason twenty lines down and
+			// against the same evidence. All three screens above are about the SEED
+			// the operator just typed; none of them is a verdict on the plates
+			// already checked. On the first seed the break reaches the silent
+			// abandon below, which is the shipped behaviour. On the second or later
+			// seed `legs` already holds VERIFIED plates, and returning here walked
+			// out with no verdict at all -- some plates checked, some not, nothing
+			// said, and on the build path the next thing the operator saw was the
+			// restore document. Breaking falls into the "Verify Incomplete" report,
+			// which is what a partial verify is.
+			//
+			// It is placed AFTER the switch rather than inside it because a `break`
+			// in a Go switch breaks the SWITCH, not the loop -- three arms that each
+			// looked like they stopped the verify and did not would be a worse defect
+			// than the one being fixed.
+			break
 		}
 
 		// Hand-type the SECRET ms1 (full mode only; never NFC). ONE PER SEED: a

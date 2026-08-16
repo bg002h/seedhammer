@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -28,6 +29,14 @@ import (
 // and it was rejected twice -- dropping the leg-to-plate rule makes a LOST plate
 // pass, and deduping legs by identical mk1 is inert for the real shape, because
 // the keys are not identical.
+//
+// THAT LAST CLAUSE IS SCOPED TO THE REUSED-SEED SHAPE, and saying so is not
+// pedantry: an mk1-identity dedupe DOES live in the tail below, for a DIFFERENT
+// shape -- a SUPPLIED policy seating the same key at the same origin twice,
+// where the plates really are byte-identical. Read as a blanket verdict this
+// paragraph argues against a mechanism sitting a hundred lines down. It was
+// never a verdict on the mechanism, only on what the mechanism buys for THIS
+// defect, which is nothing.
 //
 // Operator ruling F-188, 2026-08-15 ("Build this"). It changes what goes on
 // STEEL in a flow this plan does not otherwise own, so it was ruled rather than
@@ -65,6 +74,45 @@ var errSupplyNoMatchedSlot = errors.New("multisig supply: the seed matched no sl
 // shape requires those kinds as consecutive runs in that sequence), and a second
 // emitter here would be a second place for it to drift.
 //
+// ONE PLATE PER DISTINCT mk1, keyed on THE ENGRAVED STRING, exactly as the ms1
+// dedupe above and for the same reason one level over.
+//
+// A SUPPLIED policy may seat the SAME (xpub, origin) at two slots -- the supply
+// path engraves a descriptor someone else authored, repeated keys and all
+// (§4.1's scoping, gui/multisig_build.go; duplicateSlotPair guards only the
+// BUILD path). For that shape the per-slot legs mint BYTE-IDENTICAL mk1s, and
+// two byte-identical plates carry identical information.
+//
+// WITHOUT THE DEDUPE THE RUN IS PERMANENTLY UNVERIFIABLE, which is the harm this
+// closes and it is not hypothetical. The gatherer keys mk1 cards on the
+// payload-derived chunk_set_id, so a byte-identical second card is a duplicate
+// and the readback can STRUCTURALLY never yield two. The verify's length
+// precheck then refused every attempt -- "Read back 1 key plate, but this run
+// engraved 2 key plates. Present exactly the plates this run cut." -- while the
+// operator was doing exactly that. An honest, announced, hours-long engrave that
+// the device then disowns forever.
+//
+// RULED under plan §0.1's ladder rather than refused: no standard governs
+// (clause 1); the collapse is DETECTABLE BY READING THE OUTPUT -- the census
+// states the plate count before the tail, the md1 carries the policy showing
+// both slots, the restore doc lists the inventory -- so it is eligible to assume
+// (clause 2, the funds-safety boundary); and it is announced on the census
+// screen, before the first cut (clause 3). Refusing an admitted policy instead
+// would be choosing the refusal arm because it makes a cleaner one-armed test,
+// which §0.1 forbids.
+//
+// THIS IS THE SAME MECHANISM A PREVIOUS BLOCK DELETED AS INERT, AND BOTH ARE
+// RIGHT. It was inert for the REUSED-SEED shape (one seed at several accounts:
+// different origins, so different keys and different mk1s -- nothing to dedupe,
+// and deduping there would have DROPPED a plate the operator needs). It is
+// correct and necessary for THIS shape, where the keys are identical. Same
+// mechanism, different shape; the earlier deletion is not an argument against it
+// here.
+//
+// THE OBLIGATION LIST COLLAPSES WITH THE PLATES, necessarily: `slots` gains an
+// entry only where a plate was appended, so it can never name steel that does
+// not exist.
+//
 // SECURITY: deriveMultisigLeg gates and wipes its own entropy buffer on every
 // call, so deriving several legs from one mnemonic costs no extra seed exposure.
 // The caller still owns the mnemonic and scrubs it on every exit path (I-7).
@@ -77,6 +125,7 @@ func supplyEngraveTail(m bip39.Mnemonic, passphrase string, net *chaincfg.Params
 		mk1s  [][]string
 	)
 	engraved := map[string]bool{}
+	cut := map[string]bool{}
 	for _, s := range matched {
 		// A slot outside the policy is an ERROR, never a skip. Skipping would
 		// engrave a smaller set than the caller asked for and then hand the verify
@@ -97,6 +146,14 @@ func supplyEngraveTail(m bip39.Mnemonic, passphrase string, net *chaincfg.Params
 			engraved[b.MS1] = true
 			ms1s = append(ms1s, b.MS1)
 		}
+		// Same rule for the KEY plate, on the same key -- the minted string. A
+		// distinct key can never be dropped by it, because a distinct key mints a
+		// distinct mk1; only a byte-identical repeat collapses.
+		mk1Key := strings.Join(b.MK1, "|")
+		if cut[mk1Key] {
+			continue
+		}
+		cut[mk1Key] = true
 		mk1s = append(mk1s, b.MK1)
 		slots = append(slots, s)
 	}
@@ -104,4 +161,33 @@ func supplyEngraveTail(m bip39.Mnemonic, passphrase string, net *chaincfg.Params
 		return nil, nil, errSupplyNoMatchedSlot
 	}
 	return slots, multisigEngraveCardsMulti(ms1s, mk1s, suppliedMd1), nil
+}
+
+// multisigSlotsShareAKey reports whether any two of the MATCHED slots declare the
+// same key at the same origin -- the shape whose plates collapse in the tail
+// above.
+//
+// IT DOES NOT DECIDE ANYTHING THE OPERATOR IS SHOWN A NUMBER FOR. The exact
+// plate count comes from the tail's own return, through the census; this only
+// picks WHICH SENTENCE the multi-slot notice says, because that notice is drawn
+// before the engrave mode is chosen and so before any leg exists to be minted.
+// Keeping the count out of it is deliberate: a second predictor of the tail's
+// behaviour is a second thing that can disagree with the tail.
+//
+// (xpub, origin) is the pair, not the xpub alone: an mk1 carries both, so two
+// slots holding one key at DIFFERENT origins mint different plates and nothing
+// collapses.
+func multisigSlotsShareAKey(keys []md.ExpandedKey, matched []int) bool {
+	seen := make(map[string]bool, len(matched))
+	for _, s := range matched {
+		if s < 0 || s >= len(keys) {
+			continue
+		}
+		id := string(keys[s].Xpub[:]) + "@" + keys[s].OriginPath.String()
+		if seen[id] {
+			return true
+		}
+		seen[id] = true
+	}
+	return false
 }

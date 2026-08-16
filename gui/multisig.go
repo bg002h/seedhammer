@@ -169,11 +169,32 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// need, and the reason is a property of the POLICY (it seats them at several
 	// accounts) rather than of their seed. The plate census at (6a) states the
 	// count; this states why it is not one.
+	//
+	// TWO SENTENCES, BECAUSE THE POLICY HAS TWO SHAPES AND ONLY ONE OF THEM WAS
+	// EVER TRUE HERE. "each of those slots holds a DIFFERENT key" is right for the
+	// reused-SEED shape (one seed at several accounts, several origins, several
+	// keys) and FALSE for a supplied policy that seats one key at two slots -- the
+	// same claims-a-shape-the-code-does-not-have defect F-188's own commit message
+	// calls the tell, which is why it is not repeated here in the other direction.
+	//
+	// THE COLLAPSED ARM STATES NO COUNT. It is drawn before the engrave mode is
+	// chosen, so no leg has been minted and any number here would be a second
+	// prediction of the tail's behaviour. The census at (6a) carries the exact
+	// figure and derives it from the tail's own return.
 	if len(slots) >= 2 {
-		showNotice(ctx, th, "Engrave Multisig", fmt.Sprintf(
-			"Your seed is at slots %s of this policy, at a different key path in each, so "+
-				"each of those slots holds a DIFFERENT key. This run engraves %s, one per "+
-				"slot.", formatSlotList(slots), plateWord(len(slots), "key plate", "key plates")))
+		if multisigSlotsShareAKey(keys, slots) {
+			showNotice(ctx, th, "Engrave Multisig", fmt.Sprintf(
+				"Your seed is at slots %s of this policy, and more than one of them holds "+
+					"the SAME key at the SAME key path. Identical plates would carry "+
+					"identical information, so this run cuts one plate per DISTINCT key, "+
+					"not one per slot. The next screen states the exact count.",
+				formatSlotList(slots)))
+		} else {
+			showNotice(ctx, th, "Engrave Multisig", fmt.Sprintf(
+				"Your seed is at slots %s of this policy, at a different key path in each, so "+
+					"each of those slots holds a DIFFERENT key. This run engraves %s, one per "+
+					"slot.", formatSlotList(slots), plateWord(len(slots), "key plate", "key plates")))
+		}
 	}
 
 	// (5) Full vs watch-only.
@@ -222,7 +243,27 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// spell the build path's title either. That is not pedantry: a comment
 	// quoting a needle costs the needle its uniqueness just as effectively as a
 	// second screen does, and it took one test run to find out.
-	if !confirmReviewScreen(ctx, th, "Plates To Cut", buildPlateCensusLines(cardsOut)) {
+	//
+	// AND THE COLLAPSE, FIRST ON THE PAGE (plan §0.1 clause 3). A supplied policy
+	// seating one key at two slots cuts FEWER plates than its matched-slot count
+	// suggests, and clause 3 puts an assumption upstream of steel on the
+	// confirmation surface itself rather than in scrollback. It leads the list
+	// because this screen is confirmable from any page: a note on page three is a
+	// note the operator can commit past without reading.
+	//
+	// THE PREDICATE IS THE TAIL'S OWN RETURN, not a re-derivation of it. The tail
+	// is the one place that decides which slots get a plate, so a note that asked
+	// any other source could claim a collapse that did not happen, or miss one
+	// that did.
+	census := buildPlateCensusLines(cardsOut)
+	if len(engravedSlots) < len(slots) {
+		census = append([]string{fmt.Sprintf(
+			"NOTE: slots %s hold only %s between them, so this run cuts %s, not one per slot.",
+			formatSlotList(slots),
+			plateWord(len(engravedSlots), "distinct key", "distinct keys"),
+			plateWord(len(engravedSlots), "key plate", "key plates"))}, census...)
+	}
+	if !confirmReviewScreen(ctx, th, "Plates To Cut", census) {
 		return
 	}
 
@@ -245,9 +286,15 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (duplicateSlotPair refuses only IDENTICAL keys) and is admitted, so the seed
 	// accounts for a slot the operator never claimed. Dropping the expectation
 	// would reopen that as a false RED.
+	//
+	// suppliedMd1 IS THE OTHER HALF OF THE OBLIGATION, and it is the md1 this run
+	// engraved VERBATIM (I-2), so it is exactly what the operator will present.
+	// Slot indices alone get re-based onto whatever policy the readback supplies,
+	// which is how a byte-valid plate set from a DIFFERENT wallet reports
+	// "Verify OK" while this run's steel is never read.
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, full, engravedSlots)
+		multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)
 	}
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys

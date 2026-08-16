@@ -96,7 +96,11 @@ func s5OneSlotReadback(t *testing.T) (records []string, md1 []string, plate []st
 // It asserts every screen on the way past, for s5DriveToGate's reason: tapping
 // through a screen that did not appear silently answers the NEXT one, and a walk
 // that does that reports a verdict for a verify nobody ran.
-func s5DriveVerify(t *testing.T, records []string, expected []int, phrase string) (last string, done bool) {
+// `engravedMd1` is the OTHER half of the obligation: the policy this run cut, as
+// the callers hold it. It is a parameter rather than a re-read of `records`
+// because the readback is the evidence being judged -- taking the obligation
+// from it is the C1 defect, in miniature, moved into the harness.
+func s5DriveVerify(t *testing.T, records []string, expected []int, engravedMd1 []string, phrase string) (last string, done bool) {
 	t.Helper()
 	p := newPlatform()
 	p.display = sh2DisplaySize
@@ -107,7 +111,7 @@ func s5DriveVerify(t *testing.T, records []string, expected []int, phrase string
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		multisigVerifyFlow(ctx, &descriptorTheme, false, expected)
+		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1)
 		done = true
 	})
 	defer quit()
@@ -158,8 +162,8 @@ func s5DriveVerify(t *testing.T, records []string, expected []int, phrase string
 // the derive loop restricts itself to it. Every plate still has to be read back
 // and matched.
 func TestVerifyOneSlotRunChecksTheONEPlateItEngraved(t *testing.T) {
-	records, _, _, slot := s5OneSlotReadback(t)
-	last, _ := s5DriveVerify(t, records, []int{slot}, fixtureMasterA)
+	records, md1, _, slot := s5OneSlotReadback(t)
+	last, _ := s5DriveVerify(t, records, []int{slot}, md1, fixtureMasterA)
 	if !uiContains(last, "Verify OK") {
 		t.Fatalf("a run that engraved ONE plate did not verify against it. Final screen: %q\n"+
 			"The flow engraved one plate, for @%d; a verify that then demands a plate for "+
@@ -186,7 +190,7 @@ func TestVerifyStillFailsWhenTheENGRAVEDPlateIsWrong(t *testing.T) {
 		t.Fatalf("deriving a foreign mk1: %v", err)
 	}
 	records := append(append([]string(nil), md1...), foreign.MK1...)
-	last, _ := s5DriveVerify(t, records, []int{slot}, fixtureMasterA)
+	last, _ := s5DriveVerify(t, records, []int{slot}, md1, fixtureMasterA)
 	if !uiContains(last, "Verify Failed") {
 		t.Fatalf("a readback whose only key plate belongs to another wallet did not FAIL. "+
 			"Final screen: %q", last)
@@ -203,17 +207,48 @@ func TestVerifyStillFailsWhenTheENGRAVEDPlateIsWrong(t *testing.T) {
 // is a screen saying the plates are fine over a comparison that never ran -- the
 // most expensive false GREEN this flow can produce, and the reason
 // errVerifyNoLegs exists one level down.
+//
+// THE ENGRAVED md1 IS PASSED, and a REAL one: the refusal under test is the
+// empty SLOT SET, so handing an empty policy too would let this pass on the
+// neighbouring guard and the assertion would stop meaning what it says.
 func TestVerifyRefusesAnEmptyExpectation(t *testing.T) {
-	records, _, _, _ := s5OneSlotReadback(t)
+	records, md1, _, _ := s5OneSlotReadback(t)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append([]string(nil), records...)
-	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, nil) })
+	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, nil, md1) })
 	defer quit()
 	c, ok := pumpUntil(frame, "nothing to verify", 16)
 	if !ok {
 		t.Fatalf("a verify handed NO engraved slot did not refuse; got %q", c)
+	}
+	if uiContains(c, "mk1 keys:") {
+		t.Errorf("the refusal came only after the gather ran: %q. Nothing can be proved, "+
+			"so the operator must not be asked to present plates first", c)
+	}
+}
+
+// TestVerifyRefusesAMissingEngravedPolicy is the same guard one level over: a
+// caller that loses the engraved md1 must be refused BEFORE the gather.
+//
+// Without it the equality check that binds this run's policy to the readback is
+// vacuous whenever the obligation arrives empty -- every readback is then "the
+// policy this run engraved" -- and a guard that passes everything on its empty
+// input is the false-GREEN shape errVerifyNoExpectedSlots exists to prevent.
+func TestVerifyRefusesAMissingEngravedPolicy(t *testing.T) {
+	records, _, _, slot := s5OneSlotReadback(t)
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	ctx.syswBundleSeeds = append([]string(nil), records...)
+	frame, quit := runUI(ctx, func() {
+		multisigVerifyFlow(ctx, &descriptorTheme, false, []int{slot}, nil)
+	})
+	defer quit()
+	c, ok := pumpUntil(frame, "nothing to check the plates against", 16)
+	if !ok {
+		t.Fatalf("a verify handed NO engraved policy did not refuse; got %q", c)
 	}
 	if uiContains(c, "mk1 keys:") {
 		t.Errorf("the refusal came only after the gather ran: %q. Nothing can be proved, "+
@@ -238,7 +273,7 @@ func TestVerifyBuildShapeChecksEveryEngravedPlate(t *testing.T) {
 	for _, p := range plates {
 		records = append(records, p...)
 	}
-	last, done := s5DriveVerify(t, records, []int{0, 1, 2}, fixtureMasterA)
+	last, done := s5DriveVerify(t, records, []int{0, 1, 2}, md1, fixtureMasterA)
 	if uiContains(last, "Verify OK") {
 		t.Fatalf("master A alone verified a THREE-plate build. @2 is master B's and no "+
 			"seed proving it was ever typed. Final screen: %q", last)
@@ -320,8 +355,27 @@ func TestBuildPassesTheTailsSlotsToTheVerify(t *testing.T) {
 		t.Fatal("buildMultisigPolicyFlow no longer names the tail's held-slot indices; " +
 			"the verify's obligation list has lost its provenance")
 	}
-	if !strings.Contains(body, "multisigVerifyFlow(ctx, th, full, engravedSlots)") {
-		t.Error("the build path does not hand the tail's own slot indices to the verify. " +
-			"Any other list is an obligation over plates this run did not cut")
+	if !strings.Contains(body, "multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)") {
+		t.Error("the build path does not hand the tail's own slot indices AND the md1 it " +
+			"engraved to the verify. Any other list is an obligation over plates this run " +
+			"did not cut, and slot indices with no policy behind them are satisfied by a " +
+			"byte-valid plate set from a DIFFERENT wallet")
+	}
+}
+
+// TestSupplyPassesTheEngravedPolicyToTheVerify is the same wiring assertion on
+// the OTHER call site, and it exists because C1 was a two-caller defect: both
+// held the closing datum, neither passed it.
+//
+// The verify offer sits after bundleEngrave on this path too, so no behavioural
+// test in this package reaches it. `suppliedMd1` is the right name and not just
+// A name: I-2 engraves the supplied policy VERBATIM, so it is precisely the md1
+// the operator will present at readback.
+func TestSupplyPassesTheEngravedPolicyToTheVerify(t *testing.T) {
+	body := funcBody(t, "multisig.go", "func supplyMultisigPolicyFlow(")
+	if !strings.Contains(body, "multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)") {
+		t.Error("the supply path does not hand the engraved policy to the verify. Slot " +
+			"indices alone are re-based onto whatever policy the readback supplies, which " +
+			"is how another wallet's plates report Verify OK")
 	}
 }
