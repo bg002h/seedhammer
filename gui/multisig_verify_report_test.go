@@ -213,6 +213,292 @@ func TestVerifyIncompleteReportsWhatTheComparatorMatched(t *testing.T) {
 		t.Errorf("the incomplete screen still prescribes a standalone verify that the "+
 			"program table does not contain: %q", last)
 	}
+	// B2, ON THE FRAME THE OPERATOR ACTUALLY READS. The retry carries none of
+	// this pass's coverage, so an instruction to type only what is outstanding
+	// cannot be obeyed to a clean result. Asserted here as well as on the pure
+	// string because a string test cannot see a body that never reaches a screen.
+	if uiContains(last, "type the remaining seed") {
+		t.Errorf("the incomplete screen tells the operator to type only the REMAINING "+
+			"seed on the retry. multisigVerifyFlow starts from empty legs and an empty "+
+			"covered set on every invocation, so obeying that literally reports the "+
+			"plates just checked as NOT verified and re-issues the same instruction "+
+			"forever: %q", last)
+	}
+}
+
+// TestVerifyIncompleteInstructionCanBeObeyed is B2.
+//
+// I-4 gave the incomplete screen a remedy that exists -- both engrave flows now
+// re-offer the verify -- and the screen's closing sentence still described a
+// DIFFERENT remedy: "Choose VERIFY AGAIN on the next screen and type the
+// remaining seed".
+//
+// Driven through the real screens by round 1: Trace B, three engraved slots
+// across two masters, honest readback. Pass 1 types master A and stops, reading
+// "Checked 2 key plates: @0 and @1 ... 1 slot is NOT verified: @2". Press VERIFY
+// AGAIN, type ONLY the remaining seed exactly as instructed, and the next screen
+// reads "Checked 1 key plate: @2 ... 2 slots are NOT verified: @0 and @1.
+// Nothing has been proved about those plates." The verdict is verifyIncomplete,
+// which re-arms the loop, which re-offers the same instruction. The only route
+// to Verify OK is typing EVERY seed inside ONE attempt, which no screen said.
+//
+// THE FIX IS THE WORDING, AND THE STATE-CARRYING FIX IS DELIBERATELY NOT TAKEN.
+// multisigVerifyFlow re-runs bundleGatherFlow on every invocation, so attempt 2
+// may be presented a DIFFERENT plate set than attempt 1. Carrying covered/legs
+// across calls would let a Verify OK be assembled from two readbacks that were
+// never both true at once -- a clean verdict no single readback ever proved.
+// Coverage carry-over would need its own design (re-verifying the retained legs
+// against the new readback), not a hoisted variable.
+func TestVerifyIncompleteInstructionCanBeObeyed(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		checked, outstanding []int
+	}{
+		{"one outstanding", []int{0, 1}, []int{2}},
+		{"two outstanding", []int{0}, []int{1, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := multisigVerifyIncompleteText(tc.checked, tc.outstanding)
+			t.Logf("incomplete body:\n%s", body)
+
+			// IT MUST NOT PRESCRIBE A PARTIAL RETRY. A retry that starts from
+			// nothing cannot be completed by typing what is left over.
+			for _, banned := range []string{"the remaining seed", "the remaining seeds"} {
+				if strings.Contains(body, banned) {
+					t.Errorf("the incomplete report still says %q. The retry keeps NO "+
+						"coverage from this pass, so obeying that literally reports the "+
+						"plates just checked as NOT verified:\n%s", banned, body)
+				}
+			}
+			// IT MUST SAY WHAT THE RETRY ACTUALLY IS: every seed, one pass, nothing
+			// carried over. Each clause is asserted separately because dropping any
+			// one of them leaves an instruction that reads obeyable and is not.
+			for _, want := range []string{
+				"VERIFY AGAIN", // the button they are about to be shown
+				"ALL",          // every seed, not the outstanding ones
+				"one pass",     // inside a single attempt
+				"nothing",      // and the attempt starts from nothing
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("the incomplete report does not say %q, so the operator "+
+						"cannot tell that a second attempt starts over:\n%s", want, body)
+				}
+			}
+			// AND IT STILL SAYS WHAT TO DO MEANWHILE. Deleting the funding warning
+			// would leave a screen that reads like a routine progress note.
+			if !strings.Contains(body, "do not fund this wallet") {
+				t.Errorf("the incomplete report no longer tells the operator not to fund "+
+					"the wallet, which is the only instruction that is safe whatever they "+
+					"do next:\n%s", body)
+			}
+			// AND IT STILL DRAWS. This body grew by the reword, and the SH2's modal
+			// scroller is bound to buttons the device does not have: a body that
+			// overflows is a body whose tail the operator is never told about.
+			assertModalBodyFits(t, "the verify's incomplete report ("+tc.name+")",
+				errorScreenBody, body)
+		})
+	}
+}
+
+// ─── B3: the retry must reach the screens that PRESCRIBE a retry ─────────────
+//
+// Both engrave callers re-offer the verify on verifyIncomplete and verifyFailed
+// only. A FIRST-seed refusal broke out with `legs` still empty and returned
+// verifyAbandoned, so the screens that explicitly tell the operator to change an
+// input and try again were followed by the restore document -- the exact shape
+// I-4 existed to remove, surviving in the one place I-4 did not look.
+//
+// The remedy is inside the flow rather than in the callers' gate, because the
+// distinction is one only the flow can draw: "the operator was shown a
+// CORRECTABLE screen" is not "the operator walked out". Widening the callers to
+// re-offer on verifyAbandoned would also re-offer after a Back at the gather,
+// which is the operator declining to present plates at all.
+
+// s5DriveVerifyFirstSeedRefused drives multisigVerifyFlow to a FIRST-seed
+// refusal, dismisses the refusal modal, and returns that modal's frame plus the
+// flow's verdict.
+//
+// The route is selected by the fields of s5FirstSeedExit: a no-slot refusal in
+// watch-only mode, a FULL-mode run whose seed is good and whose hand-typed ms1 is
+// REJECTED, or a FULL-mode run that BACKS OUT of the ms1 entry. All three are
+// first-seed exits with `legs` empty; the first two are preceded by a screen
+// naming a remedy and the third is not, which is the distinction B3 turns on.
+type s5FirstSeedExit struct {
+	phrase string
+	// badMs1, when set, is typed at "Type ms1" and puts the flow in FULL mode.
+	badMs1 string
+	// backAtMs1 backs out of "Type ms1" instead of typing anything. Also FULL.
+	backAtMs1 bool
+	// needle is text from the refusal modal to wait for and dismiss. Empty means
+	// no modal is expected, which is the Back row.
+	needle string
+}
+
+func s5DriveVerifyFirstSeedRefused(t *testing.T, records []string, expected []int,
+	engravedMd1 []string, x s5FirstSeedExit,
+) (screen string, res multisigVerifyResult, done bool) {
+	t.Helper()
+	full := x.badMs1 != "" || x.backAtMs1
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	ctx.syswBundleSeeds = append([]string(nil), records...)
+
+	frame, quit := runUI(ctx, func() {
+		res = multisigVerifyFlow(ctx, &descriptorTheme, full, expected, engravedMd1)
+		done = true
+	})
+	defer quit()
+
+	if c, ok := pumpUntil(frame, "mk1 keys:", 64); !ok {
+		t.Fatalf("the readback never reached the gatherer's tally; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Done adding cards
+	frame()
+	if c, ok := pumpUntil(frame, "Choose number of words", 64); !ok {
+		t.Fatalf("the gather did not hand off to seed entry; got %q", c)
+	}
+	click(&ctx.Router, Button3) // 12 WORDS
+	frame()
+	driveWords(&ctx.Router, x.phrase)
+	if c, ok := pumpUntil(frame, "passphrase", 240); !ok {
+		t.Fatalf("the passphrase prompt was not reached; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Skip
+	frame()
+
+	if full {
+		if c, ok := pumpUntil(frame, "Type ms1", 96); !ok {
+			t.Fatalf("full mode did not ask for the ms1; got %q.\nThat screen is this "+
+				"route's whole subject: without it the flow is not in full mode and "+
+				"every assertion below is vacuous", c)
+		}
+		if x.backAtMs1 {
+			click(&ctx.Router, Button1) // Back out of the ms1 entry
+			frame()
+		} else {
+			runes(&ctx.Router, strings.ToLower(x.badMs1))
+			click(&ctx.Router, Button3)
+			frame()
+		}
+	}
+
+	if x.needle != "" {
+		c, ok := pumpUntil(frame, x.needle, 128)
+		if !ok {
+			t.Fatalf("the refusal screen carrying %q was not reached; got %q", x.needle, c)
+		}
+		screen = c
+		click(&ctx.Router, Button3) // dismiss the refusal
+	}
+	for i := 0; i < 128 && !done; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		if x.needle == "" {
+			screen = c
+		}
+	}
+	return screen, res, done
+}
+
+// TestVerifyRetriesAfterACorrectableFirstSeed is B3.
+//
+// Two routes, both measured by round 1 as verdict 4 (verifyAbandoned):
+//
+//	(a) the typed seed fills no slot. The screen reads "No slot matches that
+//	    seed. If this wallet was built with a BIP-39 passphrase, add it and try
+//	    again: without it the same words derive a different wallet." -- or, when
+//	    the empty re-derivation clears the seed, "Your plates are fine. Try again
+//	    and skip the passphrase."
+//	(b) full mode, good seed, and the hand-typed ms1 is REJECTED as an object
+//	    (wrong HRP, or a checksum-valid string DecodeMS1 refuses).
+//
+// Both screens tell the operator to change an input and try again. Both were
+// followed by "This backup is N plates ..." and no retry offer at all.
+//
+// A BACK IS NOT A REFUSAL, and the last row is what keeps the fix from being
+// "re-offer on everything": Back at the ms1 entry is the operator leaving, no
+// remedy was shown, and it must still abandon. Without that row, `correctable =
+// true` at the top of the function passes every other row here.
+func TestVerifyRetriesAfterACorrectableFirstSeed(t *testing.T) {
+	md1, plates, ms1s := s5TraceBEngraved(t, true)
+	records := append([]string(nil), md1...)
+	for _, p := range plates {
+		records = append(records, p...)
+	}
+	if len(plates) == 0 || len(plates[0]) == 0 {
+		t.Fatalf("Trace B engraved no key plate; there is nothing to mistype as an ms1")
+	}
+	if len(ms1s) == 0 {
+		t.Fatalf("Trace B engraved no ms1, so full mode cannot be driven")
+	}
+	// THE PREMISE, MEASURED: this string is a valid mk1 and is NOT an ms1, so
+	// multisigVerifyMS1Entry rejects the OBJECT rather than failing a checksum --
+	// which is the arm that has to be told apart from a Back.
+	notAnMs1 := plates[0][0]
+	if strings.HasPrefix(strings.ToLower(notAnMs1), "ms1") {
+		t.Fatalf("the substitute readback %q is an ms1 after all, so it cannot drive "+
+			"the object-rejection arm", notAnMs1)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		exit    s5FirstSeedExit
+		want    multisigVerifyResult
+		because string
+	}{
+		{
+			name: "the first seed fills no slot",
+			exit: s5FirstSeedExit{
+				// BIP-39's all-"zoo" vector: a fourth master, in no slot of this policy.
+				phrase: "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+				needle: "No slot matches that seed",
+			},
+			want: verifyIncomplete,
+			because: "the screen the operator just read says \"add it and try again\", " +
+				"and the next thing they saw was the restore document",
+		},
+		{
+			name: "the first seed's hand-typed ms1 is rejected",
+			exit: s5FirstSeedExit{
+				phrase: fixtureMasterA,
+				badMs1: notAnMs1,
+				needle: "isn't an ms1",
+			},
+			want: verifyIncomplete,
+			because: "the screen names the wrong object, which is an input the operator " +
+				"can correct, and re-typing it is the whole remedy",
+		},
+		{
+			// AND A BACK IS STILL AN ABANDON. Nothing was shown to correct, so there
+			// is nothing to re-offer -- and this row is what stops `correctable =
+			// true` at the top of the function from satisfying the two above.
+			name: "Back at the first seed's ms1 entry still abandons",
+			exit: s5FirstSeedExit{phrase: fixtureMasterA, backAtMs1: true},
+			want: verifyAbandoned,
+			because: "a Back is the operator leaving: no screen prescribed a remedy, " +
+				"nothing was compared, and re-offering would loop them against a choice " +
+				"they just declined",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			screen, res, done := s5DriveVerifyFirstSeedRefused(
+				t, records, []int{0, 1, 2}, md1, tc.exit)
+			t.Logf("last frame: %q\nverdict: %v", screen, res)
+			if !done {
+				t.Fatalf("the verify never returned after the first seed's exit")
+			}
+			if res != tc.want {
+				t.Errorf("a first-seed exit returned %v, want %v.\n%s.\nBoth engrave "+
+					"callers loop on verifyIncomplete and verifyFailed only, so anything "+
+					"else is a dead end: the operator reads a remedy and is handed the "+
+					"restore document, which is headed \"If any of them is missing, this "+
+					"backup is incomplete\"", res, tc.want, tc.because)
+			}
+		})
+	}
 }
 
 // ─── I-2: the FULL half of the flow, which no test drove ─────────────────────

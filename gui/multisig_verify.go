@@ -456,6 +456,24 @@ func multisigVerifyFailureText(err error) string {
 //
 // IT NAMES THE SLOTS in both directions. "2 of 3" leaves the operator to work
 // out WHICH one is outstanding from a policy they are holding on steel.
+//
+// AND THE RETRY IS DESCRIBED AS THE RETRY THE DEVICE ACTUALLY OFFERS (B2). The
+// sentence used to read "Choose VERIFY AGAIN on the next screen and type the
+// remaining seed", which named the right BUTTON and the wrong ACTION: a second
+// attempt is a fresh multisigVerifyFlow with empty `legs` and an empty `covered`
+// set, so an operator who obeyed that literally read "Checked 1 key plate: @2 ...
+// 2 slots are NOT verified: @0 and @1" -- an incomplete verdict, which re-arms
+// the loop, which re-offers the same instruction, forever. The only route to
+// Verify OK is typing EVERY seed inside ONE attempt, and no screen said so.
+//
+// THE FIX IS THE WORDING, NOT THE STATE, and that is a ruling rather than a
+// shortcut. multisigVerifyFlow re-runs bundleGatherFlow on every invocation, so
+// attempt 2 may be presented a DIFFERENT plate set than attempt 1. Carrying
+// coverage across attempts would let a "Verify OK" be assembled from two
+// readbacks that were never both true at once -- a clean verdict no single
+// readback ever proved, which is the false GREEN this whole rewrite exists to
+// remove. Coverage carry-over is a design (re-verify the retained legs against
+// the new readback), not a hoisted variable, and it is not attempted here.
 func multisigVerifyIncompleteText(checked, outstanding []int) string {
 	those := "those plates"
 	if len(outstanding) == 1 {
@@ -463,8 +481,9 @@ func multisigVerifyIncompleteText(checked, outstanding []int) string {
 	}
 	return fmt.Sprintf("Checked %s: %s. Compared against the plates you presented, "+
 		"and they match.\n\n%s NOT verified: %s. Nothing has been proved about "+
-		"%s.\n\nChoose VERIFY AGAIN on the next screen and type the remaining seed, or "+
-		"do not fund this wallet until you have.",
+		"%s.\n\nChoose VERIFY AGAIN on the next screen and type ALL of this wallet's "+
+		"seeds in one pass; a new attempt keeps nothing from this one. Until then, do "+
+		"not fund this wallet.",
 		plateWord(len(checked), "key plate", "key plates"), formatSlotList(checked),
 		plateWord(len(outstanding), "slot is", "slots are"), formatSlotList(outstanding),
 		those)
@@ -704,6 +723,23 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	}()
 
 	var legs []verifyLeg
+	// correctable records that the operator was shown a screen NAMING A REMEDY
+	// they can act on, as opposed to walking out (B3).
+	//
+	// It exists because the verdict alone cannot tell those apart once `legs` is
+	// empty, and the two callers branch their retry loop on the verdict. A
+	// first-seed failure broke out with no legs and returned verifyAbandoned, so
+	// "add the passphrase and try again", "Your plates are fine. Try again and
+	// skip the passphrase." and "That isn't an ms1 secret share." were each
+	// followed by the restore document and no retry offer -- the exact shape I-4
+	// existed to remove, in the three places I-4 did not look.
+	//
+	// IT IS SET INSIDE THE FLOW RATHER THAN WIDENING THE CALLERS' GATE. Making
+	// the callers re-offer on verifyAbandoned would also re-offer after a Back at
+	// the gather, which is the operator declining to present plates at all, and
+	// after a Back at the ms1 entry, which is them declining to type one. Neither
+	// was shown anything to correct.
+	correctable := false
 	covered := make(map[int]bool, len(keys))
 	// ONE LEG PER EXPECTED SLOT IS THE TERMINATION RULE, not one per plate read
 	// back. The obligation is what the engrave cut; the readback is the evidence
@@ -787,6 +823,15 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 			// in a Go switch breaks the SWITCH, not the loop -- three arms that each
 			// looked like they stopped the verify and did not would be a worse defect
 			// than the one being fixed.
+			//
+			// AND ALL THREE ARMS PRESCRIBE A REMEDY (B3), which is why this is set
+			// unconditionally here rather than per arm: "add it and try again",
+			// "Your plates are fine. Try again and skip the passphrase.", "Check the
+			// passphrase before you doubt the plates", and both covered-seed arms
+			// tell the operator to change an input. A screen that says try again and
+			// is followed by the restore document is worse than one that says
+			// nothing.
+			correctable = true
 			break
 		}
 
@@ -795,7 +840,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		// checked against the master it claims.
 		ms1Readback := ""
 		if full {
-			s, ok := multisigVerifyMS1Entry(ctx, th)
+			s, ok, rejected := multisigVerifyMS1Entry(ctx, th)
 			if !ok {
 				// BREAK, NOT RETURN. On the FIRST seed this reaches the silent
 				// abandon below, which is the shipped behaviour. On the SECOND or
@@ -806,6 +851,14 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				// into the "Verify Incomplete" report, which is what a partial
 				// verify is. (len(legs) < len(expectedSlots) necessarily holds here:
 				// the coverage break is tested only after this seed's derive loop.)
+				//
+				// ONLY A REJECTION IS CORRECTABLE (B3), AND A BACK IS NOT. The helper
+				// returns two different failures through one bool: it either SHOWED a
+				// screen naming what was wrong with the object the operator typed --
+				// which they can retype -- or the operator pressed Back at the
+				// keyboard, which is them declining to type an ms1 at all. Re-offering
+				// the verify after a Back loops them against a choice they just made.
+				correctable = correctable || rejected
 				break
 			}
 			ms1Readback = s
@@ -844,7 +897,21 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// tests is genuinely "nothing was verified" rather than "we came from one
 	// particular screen" -- a state, which is checkable, instead of a provenance,
 	// which was not.
+	//
+	// UNLESS A REMEDY WAS PRESCRIBED (B3), in which case this is not an abandon at
+	// all: the operator was told to change an input and try again, and the retry
+	// they were told about is the callers' re-offer. verifyIncomplete is the
+	// verdict that reaches it, and it is TRUE of this state -- not one plate of
+	// the obligation is verified.
+	//
+	// IT SHOWS NO SCREEN OF ITS OWN, deliberately. The remedy screen was drawn a
+	// moment ago and the caller's re-offer leads with multisigVerifyRetryLead
+	// ("Not every plate is verified. Try again?"). A second modal restating what
+	// was just dismissed is how an operator learns to tap past modals.
 	if len(legs) == 0 {
+		if correctable {
+			return verifyIncomplete
+		}
 		return verifyAbandoned
 	}
 
@@ -901,23 +968,32 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 // lines of secret handling repeated inline. The L1 scrub is the codebase
 // convention (gui/ms1_decode.go): DecodeMS1 allocates a fresh entropy slice this
 // probe would otherwise abandon to the GC.
-func multisigVerifyMS1Entry(ctx *Context, th *Colors) (string, bool) {
+//
+// `rejected` SEPARATES THE TWO WAYS ok CAN BE FALSE (B3), which this function
+// has always distinguished internally and never reported. A Back at the keyboard
+// is the operator declining to type an ms1; a wrong OBJECT or an undecodable one
+// is a screen naming what they typed wrongly, which they can retype. Only the
+// second is a state the caller should re-offer the verify for, and returning one
+// bool for both is what made the caller treat a correctable mistake on the first
+// seed as walking out.
+func multisigVerifyMS1Entry(ctx *Context, th *Colors) (canonical string, ok, rejected bool) {
 	obj, ok := inputCodex32Flow(ctx, th, "Type ms1")
 	if !ok {
-		return "", false
+		// Back: no screen was shown, so there is nothing to correct.
+		return "", false, false
 	}
 	s, isStr := obj.(codex32.String)
 	if !isStr {
 		showError(ctx, th, "Verify Bundle", "That isn't an ms1 secret share.")
-		return "", false
+		return "", false, true
 	}
 	_, _, ent, err := codex32.DecodeMS1(s)
 	if err != nil {
 		showError(ctx, th, "Verify Bundle", "That isn't a valid ms1 secret share.")
-		return "", false
+		return "", false, true
 	}
 	wipeBytes(ent)
-	return s.String(), true
+	return s.String(), true, false
 }
 
 // multisigVerifyOKMessage is the success notice, SCOPED TO WHAT WAS CHECKED.
