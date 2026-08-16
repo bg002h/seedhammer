@@ -97,7 +97,7 @@ echo "   mnemonic-key, mnemonic-secret (drift) and mnemonic-engrave (sysw vector
 echo
 
 CGO_ENABLED=0 go test -tags oraclelive -count=1 -v \
-  -run 'TestLiveDerivationReproducesEveryCommittedExpectation|TestRealPinsResolveTheInstalledOracles|TestPinsAreCurrentWithTheirPrimaries|TestBuiltPolicyDerivationMatchesTheS2Golden|TestAssembledMd1MatchesThePrimaryByteForByte|TestVendoredVectorsAreInSyncWithThePrimary' \
+  -run 'TestLiveDerivationReproducesEveryCommittedExpectation|TestRealPinsResolveTheInstalledOracles|TestPinsAreCurrentWithTheirPrimaries|TestBuiltPolicyDerivationMatchesTheS2Golden|TestBuiltPolicyDerivesDivergentOrigins|TestAssembledMd1MatchesThePrimaryByteForByte|TestVendoredVectorsAreInSyncWithThePrimary' \
   ./oracle/ ./gui/ ./sysw/ "$@"
 rc=$?
 

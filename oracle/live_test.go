@@ -77,6 +77,7 @@ package oracle
 // compile is not a gate, and a build tag is an excellent place for one to rot.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -524,4 +525,379 @@ func TestBuiltPolicyDerivationMatchesTheS2Golden(t *testing.T) {
 	for _, a := range full.Args {
 		t.Logf("  arg form: %s", a)
 	}
+}
+
+// ─── S5.0: divergent origins, through md's own encoder ──────────────────────
+
+// mdPathDecl is the part of `md decode --json` this file reads back.
+//
+// `data` is json.RawMessage because md's path_decl is a TAGGED UNION whose
+// payload changes SHAPE with the tag: Shared carries a string, Divergent carries
+// an array of strings. A struct declaring either concrete type would fail to
+// unmarshal the other, and — worse — a `data string` would leave the Divergent
+// case as an empty string that an "is it what I expected" check could read as a
+// benign zero value.
+type mdPathDecl struct {
+	Descriptor struct {
+		PathDecl struct {
+			Tag  string          `json:"tag"`
+			Data json.RawMessage `json:"data"`
+		} `json:"path_decl"`
+	} `json:"descriptor"`
+}
+
+// mdDecodePathDecl asks the PINNED md what origins are actually in a chunk set.
+//
+// This is the assertion that cannot be fooled by the code under test: everything
+// else about the mapping is a claim about the string policyTemplate built, and
+// this reads the origins back out of the ENCODED BYTES, in md's own order. If
+// the template builder and md disagreed about which placeholder a path belongs
+// to, only this would see it.
+//
+// The `note:` lines md prints are on STDERR — measured on md 0.13.0, both for
+// encode ("stdout is watch-only") and decode ("stdout is a keyless descriptor
+// template") — so .Output() yields pure JSON. That is the same trap
+// parseMdStdout exists for, checked rather than assumed.
+func mdDecodePathDecl(t *testing.T, bin string, chunks []string) (tag string, paths []string) {
+	t.Helper()
+	out, err := exec.Command(bin, append(append([]string{"decode"}, chunks...), "--json")...).Output()
+	if err != nil {
+		t.Fatalf("md decode: %v", runErr(err))
+	}
+	var d mdPathDecl
+	if err := json.Unmarshal(out, &d); err != nil {
+		t.Fatalf("md decode --json emitted output this test cannot read (%v):\n%s", err, out)
+	}
+	tag = d.Descriptor.PathDecl.Tag
+	switch tag {
+	case "Divergent":
+		if err := json.Unmarshal(d.Descriptor.PathDecl.Data, &paths); err != nil {
+			t.Fatalf("path_decl is Divergent but its data is not a list of paths: %v", err)
+		}
+	case "Shared":
+		var one string
+		if err := json.Unmarshal(d.Descriptor.PathDecl.Data, &one); err != nil {
+			t.Fatalf("path_decl is Shared but its data is not a path: %v", err)
+		}
+		paths = []string{one}
+	default:
+		t.Fatalf("md decode reported path_decl tag %q, which this test does not know how to read; "+
+			"do NOT widen it to accept an unknown tag — the tag is what says whether the origins "+
+			"are per-slot at all", tag)
+	}
+	return tag, paths
+}
+
+// TestBuiltPolicyDerivesDivergentOrigins is the live half of the 2026-08-15
+// divergent-origin repair, and it asserts FOUR things that are separate
+// failures.
+//
+// # Why it exists
+//
+// Until this change the built-policy kind refused any policy whose slots sat at
+// different accounts, on a premise that was measured in md's DESCRIPTOR syntax
+// (origin in brackets BEFORE the placeholder — genuinely rejected) and wrongly
+// generalised to its TEMPLATE syntax (origin AFTER the placeholder — accepted,
+// and the way a Divergent path declaration is expressed). S5's own md1 is a
+// divergent policy: Trace B is one master at two accounts plus other masters. So
+// the refusal was not conservative, it made S5's byte-identity gate underivable.
+//
+// # The four assertions, and what each one alone would MISS
+//
+// Each was checked against the mutation it is supposed to catch, and two of them
+// were rewritten because the first version did not catch it.
+//
+//  1. IT DERIVES. A divergent-origin expectation produces a full artifact set.
+//     Alone this passes on a silent flatten, which is why 2 and 3 exist.
+//  2. IT DIFFERS, WITH THE XPUBS HELD CONSTANT. The obvious control — the same
+//     masters at UNIFORM origins — is NOT sufficient, and that was measured
+//     rather than reasoned: under a flatten mutation the two derivations still
+//     differ, because each slot's xpub is derived at its own account and carries
+//     it whether the template does or not. So the real control encodes the SAME
+//     three xpubs under the divergent template and under a flattened one and
+//     requires those to differ. That isolates the template.
+//  3. THE MAPPING HOLDS THROUGH THE ENCODER. md decode reports path_decl
+//     Divergent with slot i's origin at index i, read back out of the encoded
+//     bytes rather than off the string this package built. This is the assertion
+//     the adversarial review of md's own support found missing: mutating the
+//     origin vector to `(0..n).rev()` left an entire suite green, because every
+//     check asked whether both origins were PRESENT. It needs a NON-PALINDROMIC
+//     fixture to mean anything — see the origins below.
+//  4. S5's OWN SHAPE derives: one master at two accounts plus another master,
+//     which is the only case where two slots share a fingerprint and differ in
+//     path, and the case the distinct-master ms1 rule exists for.
+func TestBuiltPolicyDerivesDivergentOrigins(t *testing.T) {
+	bins := resolveBins(t)
+
+	// BIP-39's own published vectors, the same three the S0 inputs file commits.
+	seeds := []Seed{
+		{Label: "masterA", Words: "abandon abandon abandon abandon abandon " +
+			"abandon abandon abandon abandon abandon abandon about"},
+		{Label: "masterB", Words: "legal winner thank year wave sausage " +
+			"worth useful legal winner thank yellow"},
+		{Label: "masterC", Words: "letter advice cage absurd amount doctor " +
+			"acoustic avoid letter advice cage above"},
+	}
+	// THREE DISTINCT ACCOUNTS, and the distinctness is load-bearing rather than
+	// decorative. Measured: with the palindromic vector this fixture first used
+	// — (0,1,0), which is S5's Trace B shape — the mutation that reverses the
+	// origin-to-placeholder mapping left this whole test GREEN, because a
+	// palindrome is its own reverse and md's path_decl came back identical. A
+	// fixture that cannot distinguish a permutation cannot assert a mapping.
+	//
+	// Trace B's real (0,1,0) shape is still covered, in section 4 below, where
+	// what is being asserted is the same-master-two-accounts property rather than
+	// the ordering.
+	uniformOrigins := []string{"m/48h/0h/0h/2h", "m/48h/0h/0h/2h", "m/48h/0h/0h/2h"}
+	divergentOrigins := []string{"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/2h/2h"}
+
+	tuple := func(origins []string) InputTuple {
+		return InputTuple{
+			Template:  "built-policy: 2-of-3 wsh",
+			N:         3,
+			K:         2,
+			SlotOrder: []int{0, 1, 2},
+			Origins:   origins,
+		}
+	}
+	md1Of := func(set DerivedSet) []string {
+		var out []string
+		for _, a := range set.Artifacts {
+			if a.Kind == "md1" {
+				out = append(out, a.String)
+			}
+		}
+		return out
+	}
+
+	// ── 1. IT DERIVES ───────────────────────────────────────────────────────
+	div, err := DeriveExpected(
+		Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}}, tuple(divergentOrigins), seeds, bins)
+	if err != nil {
+		t.Fatalf("a divergent-origin policy did not derive. This is the defect the 2026-08-15 "+
+			"repair exists to remove, and S5's md1 needs it:\n%v", err)
+	}
+	if err := CheckArtifactShape(KindBuiltPolicyFull, div.Artifacts); err != nil {
+		t.Errorf("the divergent derivation does not satisfy its own shape rule: %v", err)
+	}
+	if err := CheckFingerprintScope(KindBuiltPolicyFull, div.Artifacts); err != nil {
+		t.Errorf("the divergent derivation does not satisfy its own fingerprint rule: %v", err)
+	}
+	divMD := md1Of(div)
+	if len(divMD) == 0 {
+		t.Fatal("the divergent derivation produced no md1 chunk at all")
+	}
+
+	uni, err := DeriveExpected(
+		Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}}, tuple(uniformOrigins), seeds, bins)
+	if err != nil {
+		t.Fatalf("the UNIFORM control did not derive, so nothing below can be compared: %v", err)
+	}
+	uniMD := md1Of(uni)
+
+	sameChunks := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// ── 2. IT DIFFERS — AND THE COMPARISON THAT PROVES IT IS NOT THE OBVIOUS ONE
+	//
+	// The obvious control is the same masters at UNIFORM origins, and it is NOT
+	// SUFFICIENT. Measured, not assumed: under a mutation that flattens every
+	// slot's origin to slot 0's in policyTemplate, the two derivations STILL
+	// produce different md1, because each slot's XPUB is derived at its own
+	// account and therefore carries that account whether the template does or
+	// not. A difference here proves the two TUPLES are different wallets; it does
+	// not prove the origins reached md.
+	//
+	// So the control that isolates the TEMPLATE holds the xpubs FIXED and varies
+	// only the origins written into it: the same three account xpubs, encoded
+	// once under the divergent template and once under the flattened one. Those
+	// may not be equal. Under the flatten mutation they are, and this is the
+	// assertion that says so.
+	xpubs := make([]string, len(divergentOrigins))
+	for i, o := range divergentOrigins {
+		acct, msTmpl, net, err := templateForOrigin(o)
+		if err != nil {
+			t.Fatalf("slot %d: %v", i, err)
+		}
+		_, xpub, _, err := msDerive(bins.MS, seeds[i].Words, msTmpl, acct, net)
+		if err != nil {
+			t.Fatalf("slot %d: %v", i, err)
+		}
+		xpubs[i] = xpub
+	}
+	flatOrigins := []string{divergentOrigins[0], divergentOrigins[0], divergentOrigins[0]}
+	flatTemplate, err := policyTemplate("bip48-p2wsh", 2, flatOrigins)
+	if err != nil {
+		t.Fatalf("building the flattened control template: %v", err)
+	}
+	flatMD, _, err := mdEncode(bins.MD, flatTemplate, xpubs, "mainnet")
+	if err != nil {
+		t.Fatalf("encoding the flattened control: %v", err)
+	}
+	if sameChunks(divMD, flatMD) {
+		t.Errorf("THE ORIGINS WERE FLATTENED. Encoding the SAME three xpubs under the divergent "+
+			"template and under a template with every slot at %q produced byte-identical md1, so "+
+			"the per-slot accounts never reached md and this expectation describes a different "+
+			"wallet than its own tuple.\n  divergent origins %v\n  flattened to      %v\n"+
+			"  flattened template %q\n  chunks             %q",
+			divergentOrigins[0], divergentOrigins, flatOrigins, flatTemplate, divMD)
+	} else {
+		t.Logf("divergent md1 differs from the SAME xpubs under a flattened template — the " +
+			"per-slot origins reached md")
+	}
+
+	// The weaker statement, kept because it is still true and cheap: a different
+	// tuple is a different wallet. Named for what it proves, so nobody mistakes
+	// it for the anti-flatten check above.
+	if sameChunks(divMD, uniMD) {
+		t.Errorf("the divergent policy's md1 is byte-identical to the same masters at uniform "+
+			"origins %v, which are different wallets", uniformOrigins)
+	}
+	t.Logf("divergent md1 (%d chunk(s)); uniform control (%d chunk(s))", len(divMD), len(uniMD))
+	for i, c := range divMD {
+		t.Logf("  divergent chunk %d: %s", i, c)
+	}
+
+	// ── 3. THE MAPPING, READ BACK OUT OF THE ENCODED BYTES ──────────────────
+	//
+	// THE FIXTURE'S OWN GUARD FIRST. A vector that is its own reverse cannot
+	// detect a permutation, and this test's first version used one: with
+	// (acct0, acct1, acct0) the `(0..n).rev()` mutation left every assertion
+	// below green, because md's path_decl came back byte-identical. If somebody
+	// later "simplifies" these origins back to a palindrome, everything below
+	// still passes and this fails, naming the reason.
+	palindrome := true
+	for i := range divergentOrigins {
+		if !samePath(divergentOrigins[i], divergentOrigins[len(divergentOrigins)-1-i]) {
+			palindrome = false
+			break
+		}
+	}
+	if palindrome {
+		t.Errorf("the divergent fixture %v is its own reverse, so nothing below can distinguish "+
+			"slot i's origin landing on @i from the whole vector being permuted. Measured: with a "+
+			"palindromic vector, reversing the origin-to-placeholder mapping left this entire test "+
+			"GREEN. Use distinct accounts.", divergentOrigins)
+	}
+
+	tag, paths := mdDecodePathDecl(t, bins.MD, divMD)
+	if tag != "Divergent" {
+		t.Fatalf("md decode reports path_decl tag %q for a policy whose slots sit at different "+
+			"accounts, want \"Divergent\". A Shared declaration here means the per-slot origins "+
+			"were collapsed to one path.", tag)
+	}
+	if len(paths) != len(divergentOrigins) {
+		t.Fatalf("md decode reports %d origin(s) for a %d-slot policy: %v",
+			len(paths), len(divergentOrigins), paths)
+	}
+	for i, want := range divergentOrigins {
+		if !samePath(paths[i], want) {
+			t.Errorf("SLOT %d's origin did not land on @%d IN THE ENCODED BYTES.\n"+
+				"  md decode reports path_decl.data[%d] = %q\n"+
+				"  the tuple records slot %d at        %q\n"+
+				"A policy whose origins are permuted is a DIFFERENT WALLET in the same funds "+
+				"class. Every assertion above would still pass — this is the only one that sees it.",
+				i, i, i, paths[i], i, want)
+		}
+	}
+
+	// THE CONTROL FOR ASSERTION 3, so a comparison that could not fail is
+	// visible: the uniform tuple must decode as SHARED. If mdDecodePathDecl or
+	// samePath were vacuous, this would report Divergent-or-anything and pass.
+	uniTag, uniPaths := mdDecodePathDecl(t, bins.MD, uniMD)
+	if uniTag != "Shared" {
+		t.Errorf("the uniform control decodes as path_decl %q, want \"Shared\" — the tag check "+
+			"above cannot distinguish anything if every policy is Divergent", uniTag)
+	}
+	if len(uniPaths) != 1 || !samePath(uniPaths[0], uniformOrigins[0]) {
+		t.Errorf("the uniform control's shared path decodes as %v, want %q", uniPaths, uniformOrigins[0])
+	}
+
+	t.Logf("divergent path_decl: %s %v", tag, paths)
+	t.Logf("uniform   path_decl: %s %v", uniTag, uniPaths)
+	for _, a := range div.Args {
+		t.Logf("  arg form: %s", a)
+	}
+
+	// ── 4. S5's ACTUAL SHAPE: ONE MASTER AT TWO ACCOUNTS ────────────────────
+	//
+	// The three assertions above vary ONE account across three DISTINCT masters,
+	// which is the cleanest isolation of the origin but is not the tuple S5
+	// engraves. Trace B is one master at two accounts plus other masters, and
+	// that shape has a property none of the above reaches: two slots sharing a
+	// FINGERPRINT while sitting at different paths. In full mode it is also the
+	// case the distinct-master rule exists for — two held slots, one seed, and
+	// engraving that seed twice would be a plate of pure risk.
+	traceB := []Seed{seeds[0], seeds[0], seeds[1]} // masterA, masterA, masterB
+	traceBOrigins := []string{"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/0h/2h"}
+	tb, err := DeriveExpected(
+		Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0, 1}}, tuple(traceBOrigins), traceB, bins)
+	if err != nil {
+		t.Fatalf("S5's own shape — one master at two accounts plus another master — did not "+
+			"derive. This is the tuple the removed refusal made underivable:\n%v", err)
+	}
+	if err := CheckArtifactShape(KindBuiltPolicyFull, tb.Artifacts); err != nil {
+		t.Errorf("the Trace B derivation does not satisfy its own shape rule: %v", err)
+	}
+	if err := CheckFingerprintScope(KindBuiltPolicyFull, tb.Artifacts); err != nil {
+		t.Errorf("the Trace B derivation does not satisfy its own fingerprint rule: %v", err)
+	}
+
+	var ms1s, mk1s []Artifact
+	for _, a := range tb.Artifacts {
+		switch a.Kind {
+		case "ms1":
+			ms1s = append(ms1s, a)
+		case "mk1":
+			mk1s = append(mk1s, a)
+		}
+	}
+	// TWO held slots, ONE distinct master, so exactly ONE ms1. Keyed on the
+	// WORDS in deriveBuiltPolicy; this is the live proof that divergent origins
+	// did not defeat that dedup by making the two slots look distinct.
+	if len(ms1s) != 1 {
+		t.Errorf("full mode derived %d ms1(s) for 2 held slots that are the SAME master at two "+
+			"accounts; want 1 — a second secret plate is a seed on steel for no gain", len(ms1s))
+	}
+	if len(mk1s) < 2 {
+		t.Errorf("derived %d mk1 artifact(s) for 2 held slots; each held slot engraves a key card",
+			len(mk1s))
+	}
+	// THE PROPERTY ONLY THIS SHAPE HAS: same fingerprint, different origin. If
+	// the origins had been flattened, both cards would read the same path and
+	// this would be two identical cards for one wallet leg.
+	if len(mk1s) >= 2 {
+		if mk1s[0].Fingerprint != mk1s[len(mk1s)-1].Fingerprint {
+			t.Errorf("the two held slots are the same master, so their key cards must carry one "+
+				"fingerprint; got %q and %q", mk1s[0].Fingerprint, mk1s[len(mk1s)-1].Fingerprint)
+		}
+		if samePath(mk1s[0].Origin, mk1s[len(mk1s)-1].Origin) {
+			t.Errorf("the two held slots sit at DIFFERENT accounts (%q and %q) but their key cards "+
+				"both record %q — the per-slot origins were flattened",
+				traceBOrigins[0], traceBOrigins[1], mk1s[0].Origin)
+		}
+	}
+
+	tbTag, tbPaths := mdDecodePathDecl(t, bins.MD, md1Of(tb))
+	if tbTag != "Divergent" {
+		t.Errorf("Trace B's md1 decodes as path_decl %q, want \"Divergent\"", tbTag)
+	}
+	for i, want := range traceBOrigins {
+		if i < len(tbPaths) && !samePath(tbPaths[i], want) {
+			t.Errorf("Trace B slot %d: md1 encodes %q, tuple records %q", i, tbPaths[i], want)
+		}
+	}
+	t.Logf("Trace B (one master at two accounts + another master): %d ms1 + %d mk1 + %d md1; "+
+		"path_decl %s %v", len(ms1s), len(mk1s), len(md1Of(tb)), tbTag, tbPaths)
+	t.Logf("  slot 0 card: fp %s at %s", mk1s[0].Fingerprint, mk1s[0].Origin)
+	t.Logf("  slot 1 card: fp %s at %s", mk1s[len(mk1s)-1].Fingerprint, mk1s[len(mk1s)-1].Origin)
 }

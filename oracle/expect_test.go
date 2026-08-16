@@ -677,33 +677,159 @@ func TestParseMsStdoutRefusesASeparatedString(t *testing.T) {
 	}
 }
 
-// TestPolicyTemplateMatchesTheDevicesOwnS2Template binds the generated template
-// to the one the device is already compared against.
+// s2SharedOrigin is the origin every slot of S2's Trace A policy sits at, in the
+// notation the gate RECORDS it in; s2SharedOriginInline is the same path in the
+// only notation md's TEMPLATE parser accepts. Both forms are needed and they are
+// not interchangeable — see inlineOrigin, where the `h` form is a hard parse
+// error that names the multipath rather than the notation.
+const (
+	s2SharedOrigin       = "m/48h/0h/0h/2h"
+	s2SharedOriginInline = "48'/0'/0'/2'"
+)
+
+// TestPolicyTemplateEncodesTheDevicesOwnS2Wallet binds the generated template to
+// the one the device is already compared against.
 //
-// The literal is s2WantTemplate from gui/multisig_build_oracle_test.go:87 — the
-// string S2's committed md1 golden was minted with. Restating it here would be a
-// second source of truth, so this test exists to make the two provably equal:
-// if either side changes, the gate compares two different wallets, and this goes
-// red instead.
-func TestPolicyTemplateMatchesTheDevicesOwnS2Template(t *testing.T) {
+// The DEVICE writes the shared origin OUT of the template and into a flag
+// (gui/multisig_build_oracle_test.go, s2WantTemplate + s2MDArgs):
+//
+//	wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*))   --path m/48'/0'/0'/2'
+//
+// The ORACLE writes it INLINE, per placeholder, and passes no --path:
+//
+//	wsh(sortedmulti(2,@0/48'/0'/0'/2'/<0;1>/*,@1/...,@2/...))
+//
+// So since 2026-08-15 the binding is a RELATION rather than a string equality:
+// the two say the same thing in two different forms. That they are byte-
+// identical to md — same six chunks, same chunk-set-id, same policy id — is
+// MEASURED rather than claimed here, by the live
+// TestBuiltPolicyDerivationMatchesTheS2Golden, which compares this derivation's
+// md1 against S2's committed golden and where the golden can only be minted by
+// the device's own invocation. That is the real binding, and it needs a
+// toolchain.
+//
+// What THIS test buys, on every machine and with no toolchain, is that the
+// oracle's form is exactly the device's with each placeholder's origin spliced
+// in and NOTHING ELSE changed — so a drift in the root, the threshold, the slot
+// count, the multipath or the wildcard is caught here rather than by a byte
+// comparison that can only say "different".
+func TestPolicyTemplateEncodesTheDevicesOwnS2Wallet(t *testing.T) {
+	// The device's literal, mirrored. It is a copy; package oracle cannot import
+	// package gui's test constant, because gui imports oracle and that is a
+	// cycle. The byte-level binding to the real thing is the live golden
+	// comparison named above.
 	const s2WantTemplate = "wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*))"
-	got, err := policyTemplate("bip48-p2wsh", 2, 3)
+
+	// The relation applied to the device's OWN string, rather than restated as a
+	// third literal: put the --path origin back onto each placeholder.
+	want := strings.NewReplacer(
+		"@0/", "@0/"+s2SharedOriginInline+"/",
+		"@1/", "@1/"+s2SharedOriginInline+"/",
+		"@2/", "@2/"+s2SharedOriginInline+"/",
+	).Replace(s2WantTemplate)
+
+	shared := []string{s2SharedOrigin, s2SharedOrigin, s2SharedOrigin}
+	got, err := policyTemplate("bip48-p2wsh", 2, shared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != s2WantTemplate {
-		t.Errorf("policyTemplate(bip48-p2wsh, 2, 3) = %q\nS2 encodes                       %q\n"+
-			"These must be identical or the oracle derives a different wallet than the device", got, s2WantTemplate)
+	if got != want {
+		t.Errorf("policyTemplate(bip48-p2wsh, 2, %v) = %q\n"+
+			"the device's template with its --path spliced in = %q\n"+
+			"These must be identical or the oracle derives a different wallet than the device",
+			shared, got, want)
 	}
-	sh, err := policyTemplate("bip48-p2sh-p2wsh", 2, 3)
+	sh, err := policyTemplate("bip48-p2sh-p2wsh", 2, shared)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sh != "sh(wsh(sortedmulti(2,@0/<0;1>/*,@1/<0;1>/*,@2/<0;1>/*)))" {
-		t.Errorf("bip48-p2sh-p2wsh -> %q", sh)
+	wantSh := "sh(wsh(sortedmulti(2," +
+		"@0/" + s2SharedOriginInline + "/<0;1>/*," +
+		"@1/" + s2SharedOriginInline + "/<0;1>/*," +
+		"@2/" + s2SharedOriginInline + "/<0;1>/*)))"
+	if sh != wantSh {
+		t.Errorf("bip48-p2sh-p2wsh ->\n  got  %q\n  want %q", sh, wantSh)
 	}
-	if _, err := policyTemplate("bip84-native-segwit", 2, 3); err == nil {
+	if _, err := policyTemplate("bip84-native-segwit", 2, shared); err == nil {
 		t.Error("a template with no registered md root was accepted")
+	}
+	if _, err := policyTemplate("bip48-p2wsh", 2, nil); err == nil {
+		t.Error("a policy over no slots was accepted")
+	}
+	// An origin the gate cannot name must REFUSE rather than be spliced into a
+	// template raw: what goes in there decides which wallet is encoded.
+	for _, bad := range []string{"", "m/48h/0h/0h", "not a path", "m/48h/0h/0h/2h/0", "@0/<0;1>/*"} {
+		if _, err := policyTemplate("bip48-p2wsh", 2, []string{s2SharedOrigin, bad}); err == nil {
+			t.Errorf("origin %q was spliced into a policy template unvalidated", bad)
+		}
+	}
+}
+
+// TestPolicyTemplateMapsSlotIOriginToPlaceholderI is THE MAPPING ASSERTION.
+//
+// Slot i's origin must land on @i. Two origins swapped is a different wallet in
+// the same funds class, and it is a mistake that looks like nothing: an
+// adversarial review of md's own divergent-origin support mutated its origin
+// vector to `(0..n).rev()` and an entire test suite stayed green, because every
+// assertion checked that both origins were PRESENT and none checked which
+// placeholder each landed on.
+//
+// So nothing here is a Contains. The key list is split and indexed, and each
+// slot is named in its own failure message.
+func TestPolicyTemplateMapsSlotIOriginToPlaceholderI(t *testing.T) {
+	// THREE DISTINCT ACCOUNTS, deliberately. A vector with a repeat is satisfied
+	// by some permutation of itself — (0,1,0) is its own reverse, and that is
+	// exactly the shape S5's Trace B has — so a palindromic fixture would go
+	// green under the one mutation this test exists to catch.
+	origins := []string{"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/2h/2h"}
+	wantKeys := []string{
+		"@0/48'/0'/0'/2'/<0;1>/*",
+		"@1/48'/0'/1'/2'/<0;1>/*",
+		"@2/48'/0'/2'/2'/<0;1>/*",
+	}
+	want := "wsh(sortedmulti(2," + strings.Join(wantKeys, ",") + "))"
+
+	got, err := policyTemplate("bip48-p2wsh", 2, origins)
+	if err != nil {
+		t.Fatalf("a divergent-origin policy was refused: %v", err)
+	}
+	if got != want {
+		t.Errorf("policyTemplate over divergent origins %v:\n  got  %q\n  want %q", origins, got, want)
+	}
+
+	// POSITIONALLY, slot by slot, so a permutation says WHICH slot moved rather
+	// than only that the whole string differs.
+	inner := strings.TrimSuffix(strings.TrimPrefix(got, "wsh(sortedmulti(2,"), "))")
+	keys := strings.Split(inner, ",")
+	if len(keys) != len(origins) {
+		t.Fatalf("the template holds %d key(s) for %d slot(s): %q", len(keys), len(origins), got)
+	}
+	for i := range origins {
+		if keys[i] != wantKeys[i] {
+			t.Errorf("SLOT %d's origin did not land on @%d.\n  placeholder %d holds %q\n"+
+				"  slot %d records  %q, which is %q inline\n"+
+				"A policy whose origins are permuted is a DIFFERENT WALLET in the same funds "+
+				"class, and every other assertion about this template would still pass.",
+				i, i, i, keys[i], i, origins[i], wantKeys[i])
+		}
+	}
+
+	// THE MUTATION AS AN ASSERTION rather than a thing left to a reviewer: the
+	// reversed construction must NOT yield this template. This is what keeps the
+	// fixture honest — if somebody later "simplifies" the origins to a repeated
+	// value, every assertion above still passes and this one fails, naming the
+	// reason.
+	rev := make([]string, len(origins))
+	for i, o := range origins {
+		rev[len(origins)-1-i] = o
+	}
+	revGot, err := policyTemplate("bip48-p2wsh", 2, rev)
+	if err != nil {
+		t.Fatalf("the reversed control was refused, so it proves nothing: %v", err)
+	}
+	if revGot == got {
+		t.Error("reversing the origin vector produced the SAME template, so this fixture cannot " +
+			"detect a permutation and neither can the assertions above — use three distinct accounts")
 	}
 }
 
@@ -765,15 +891,22 @@ func TestBuiltPolicyRefusalsAreReachableWithoutAToolchain(t *testing.T) {
 			seeds: threeSeeds,
 			want:  "k=4 over 3 slot(s)",
 		}, {
-			// THE DIVERGENT-ORIGIN REFUSAL. Measured: the pinned md has no
-			// invocation that encodes a per-slot origin, so deriving anything
-			// here would derive a DIFFERENT wallet's md1.
-			name: "origins diverge",
+			// DIVERGENT ORIGINS ARE NO LONGER HERE, and their absence is the
+			// point. This table used to carry an "origins diverge" case wanting
+			// "the origins DIVERGE"; the refusal it asserted was removed on
+			// 2026-08-15 because it rested on a measurement made in md's
+			// DESCRIPTOR syntax rather than its TEMPLATE syntax, and md encodes a
+			// per-slot origin perfectly well in the latter. The positive case now
+			// lives in TestBuiltPolicyAcceptsDivergentOriginsAndReachesTheOracle,
+			// so deleting the refusal did not merely delete its coverage.
+			//
+			// An origin the gate cannot NAME is still refused, per slot.
+			name: "an origin that is not an account path",
 			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
 			in: InputTuple{Template: "t", N: 3, K: 2, Origins: []string{
-				"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/0h/2h"}},
+				"m/48h/0h/0h/2h", "m/48h/0h/0h", "m/48h/0h/0h/2h"}},
 			seeds: threeSeeds,
-			want:  "the origins DIVERGE",
+			want:  "names no script_type level",
 		}, {
 			name: "script types mixed",
 			e:    Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
@@ -826,6 +959,53 @@ func TestBuiltPolicyReachesTheOracleOnHonestInputs(t *testing.T) {
 	if !strings.Contains(err.Error(), "no ms binary resolved") {
 		t.Fatalf("honest inputs were refused before reaching the oracle, so the refusal table "+
 			"above proves nothing: %v", err)
+	}
+}
+
+// TestBuiltPolicyAcceptsDivergentOriginsAndReachesTheOracle is what replaced the
+// divergence REFUSAL, and it is the untagged half of that repair.
+//
+// Until 2026-08-15 a policy whose slots sat at different accounts was refused
+// outright, on a premise that turned out to be false, and S5's own md1 — Trace B
+// is one master at two accounts plus other masters — was therefore underivable.
+// This asserts the whole pure pass now lets such a tuple THROUGH: it must get
+// past uniformScriptAndNetwork and policyTemplate and fail only at the missing
+// binary, exactly like the uniform control above.
+//
+// Bins{} is passed on purpose. A case that reached an oracle would fail with "no
+// ms binary resolved", and that specific message is what distinguishes "the pure
+// pass accepted it" from "it was refused for some other reason" — asserting
+// merely that err != nil would pass on the refusal this test exists to prove
+// gone.
+func TestBuiltPolicyAcceptsDivergentOriginsAndReachesTheOracle(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		origins []string
+	}{
+		// S5's Trace B shape: slot 1 is the SAME master as slot 0, one account
+		// along. This is the tuple the old refusal made underivable.
+		{"one master at two accounts", []string{"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/0h/2h"}},
+		// Every slot at its own account.
+		{"three distinct accounts", []string{"m/48h/0h/0h/2h", "m/48h/0h/1h/2h", "m/48h/0h/2h/2h"}},
+		// Divergence expressed across the two notations at once, which is also a
+		// check that samePath's old normalisation is not silently required here.
+		{"mixed notation", []string{"m/48'/0'/0'/2'", "m/48h/0h/1h/2h", "m/48h/0h/0h/2h"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DeriveExpected(
+				Expect{Kind: KindBuiltPolicyFull, HeldSlots: []int{0}},
+				InputTuple{Template: "t", N: 3, K: 2, Origins: tc.origins},
+				[]Seed{{Label: "A", Words: "a"}, {Label: "B", Words: "b"}, {Label: "C", Words: "c"}},
+				Bins{})
+			if err == nil {
+				t.Fatal("derived a census with no oracle binaries at all")
+			}
+			if !strings.Contains(err.Error(), "no ms binary resolved") {
+				t.Fatalf("a divergent-origin policy was refused before reaching the oracle. The "+
+					"refusal that used to live here was WRONG — md's template syntax encodes a "+
+					"per-slot origin, and S5's md1 needs it:\n%v", err)
+			}
+		})
 	}
 }
 

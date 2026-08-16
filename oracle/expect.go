@@ -488,11 +488,18 @@ func deriveBuiltPolicy(e Expect, in InputTuple, seeds []Seed, bins Bins, full bo
 	// property of the recorded origins alone, so it refuses in a couple of
 	// microseconds on a machine with no toolchain at all — and, more usefully,
 	// its refusals are reachable by an untagged test.
-	tmpl, network, sharedPath, err := uniformOrigins(in.Origins)
+	tmpl, network, err := uniformScriptAndNetwork(in.Origins)
 	if err != nil {
 		return DerivedSet{}, err
 	}
-	policy, err := policyTemplate(tmpl, in.K, n)
+	// THE ORIGINS GO INTO THE TEMPLATE, POSITIONALLY: slot i's origin lands on
+	// @i. That mapping is the whole correctness of a divergent-origin policy —
+	// two origins swapped is a different wallet in the same funds class — so it
+	// is asserted by TestPolicyTemplateMapsSlotIOriginToPlaceholderI with three
+	// distinct accounts, and proved through md's own encoder by the live
+	// TestBuiltPolicyDerivesDivergentOrigins, which decodes the md1 back and
+	// reads path_decl off it.
+	policy, err := policyTemplate(tmpl, in.K, in.Origins)
 	if err != nil {
 		return DerivedSet{}, err
 	}
@@ -524,13 +531,18 @@ func deriveBuiltPolicy(e Expect, in InputTuple, seeds []Seed, bins Bins, full bo
 	}
 
 	// THE POLICY, and with it the policy id every mk1 card must carry.
-	chunks, stub, err := mdEncode(bins.MD, policy, xpubs, sharedPath, network)
+	chunks, stub, err := mdEncode(bins.MD, policy, xpubs, network)
 	if err != nil {
 		return DerivedSet{}, err
 	}
+	// EXACTLY RUNNABLE, because this is what a future reader reproduces from.
+	// No --path: every origin is inline in the template above, so the flag would
+	// not merely be redundant, it would FLATTEN a divergent policy to shared and
+	// silently encode a different wallet. %q's double-quoted form is what a
+	// shell needs here — the template contains `'`, `<`, `;` and `*`.
 	d.note("md", fmt.Sprintf("md encode %q --key @i=<account xpub i from ms derive, i=0..%d> "+
-		"--path %s --network %s --group-size 0 --force-chunked --policy-id-fingerprint",
-		policy, n-1, sharedPath, network))
+		"--network %s --group-size 0 --force-chunked --policy-id-fingerprint",
+		policy, n-1, network))
 	if e.PolicyIDStub != "" {
 		if err := checkStub(e.PolicyIDStub); err != nil {
 			return DerivedSet{}, err
@@ -601,12 +613,24 @@ func deriveBuiltPolicy(e Expect, in InputTuple, seeds []Seed, bins Bins, full bo
 			// The template goes in the label deliberately: it is the one thing a
 			// human reading the committed expectation needs in order to say WHICH
 			// wallet these chunks describe, and it is measured rather than
-			// restated — policyTemplate built it and md accepted it.
+			// restated — policyTemplate built it and md accepted it. Since the
+			// origins became inline it carries EVERY slot's origin, in slot
+			// order, which is strictly more than the single path it replaced.
 			Label:  fmt.Sprintf("%s (md1 policy, chunk %d)", policy, j),
 			String: c,
-			Origin: sharedPath,
-			// NO FINGERPRINT, and CheckFingerprintScope refuses one. A descriptor
-			// spans every slot and belongs to no single master.
+			// NO ORIGIN, for the same reason CheckFingerprintScope refuses a
+			// FINGERPRINT here: a policy descriptor spans every slot, and once
+			// the origins may diverge there is no single path it sits at. The
+			// field used to hold the shared path, which was only ever right
+			// because divergence was refused; leaving it populated with slot 0's
+			// origin would state that a 2-account policy sits at one account.
+			// The information is not lost — it is in the label, per slot.
+			//
+			// S2's committed golden already carries no origin on its md1
+			// artifacts, so this converges on what the primary's own output
+			// records rather than diverging from it.
+			//
+			// NO FINGERPRINT either. Same argument, already enforced.
 		})
 	}
 	return d, nil
@@ -633,66 +657,142 @@ func checkHeldSlots(held []int, n int) ([]int, error) {
 	return held, nil
 }
 
-// uniformOrigins reduces the recorded origins to the ONE template, network and
-// path a single md1 can encode, or refuses.
+// uniformScriptAndNetwork reduces the recorded origins to the ONE script type
+// and network a single md1 can encode, or refuses.
 //
-// DIVERGENT ORIGINS ARE REFUSED, AND THE REFUSAL WAS MEASURED RATHER THAN
-// ASSUMED. md's `--path` is documented as flattening divergent mode to shared,
-// so it cannot express a per-slot origin; and the bracketed form the descriptor
-// itself uses is rejected by the pinned md — verified 2026-08-15 against
-// md 0.13.0:
+// # DIVERGENT ORIGINS ARE NOT REFUSED, and the refusal that used to live here
+// was WRONG (removed 2026-08-15)
 //
-//	md encode 'wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]@0/<0;1>/*,...))' --key @0=xpub…
-//	md: template parse error: internal: synthetic key [73c5da0a not found in key map
+// This function used to demand that every slot sit at the SAME path. Its stated
+// justification was a measurement, and the measurement was made in the wrong
+// SYNTAX. md has two of them:
 //
-// So there is no invocation this gate could make that would derive the RIGHT
-// md1 for a divergent-origin policy. Deriving a shared-origin one anyway and
-// comparing it against a divergent-origin engraving would fail at the bytes with
-// no explanation of why; refusing names the reason. Divergent support means
-// finding md's own form for it and proving that form against a real walk —
-// which is work, not a flag, and it does not belong in a gate written before the
-// stage it judges.
-func uniformOrigins(origins []string) (template, network, path string, err error) {
+//	DESCRIPTOR form  puts the origin in brackets BEFORE the placeholder. The
+//	                 pinned md does reject it, exactly as recorded:
+//
+//	  md encode 'wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]@0/<0;1>/*,...))' --key @0=xpub...
+//	  md: template parse error: internal: synthetic key [73c5da0a not found in key map
+//
+//	TEMPLATE form    puts the origin AFTER the placeholder, and there the
+//	                 per-key paths MAY DIFFER. This is the form md encode takes.
+//
+// Re-measured against md 0.13.0 on 2026-08-15, in the template form:
+//
+//	md encode "wsh(sortedmulti(2,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*))" \
+//	  --key @0=xpub... --key @1=xpub... --group-size 0 --force-chunked
+//	-> encodes, and `md decode --json` on the chunks reports
+//	   descriptor.path_decl = {"tag":"Divergent",
+//	                           "data":["m/48'/0'/0'/2'","m/48'/0'/1'/2'"]}
+//
+// So a divergent-origin policy is not merely derivable, it is what md's
+// Divergent path declaration IS. Refusing it made S5's own md1 underivable —
+// Trace B is one master at two accounts plus other masters — which is the
+// difference between S5's byte-identity gate having a mechanism and not.
+//
+// policyTemplate now emits the inline per-slot form UNIVERSALLY, divergent and
+// uniform alike. For uniform origins that is byte-identical to the old `--path`
+// invocation, measured on the S2 3-key policy: same six md1 chunks, same
+// chunk-set-id 0x30d86, same policy-id-fingerprint 0x06215ac0. That is why
+// dropping `--path` staled nothing — not S0's committed expectation, not S2's
+// committed md1 golden — and the existing gates are what prove it rather than
+// this comment.
+//
+// # THE TWO REFUSALS THAT REMAIN, and why they are still true
+//
+// Neither is a path question, so neither was touched by the above:
+//
+//   - MIXED SCRIPT TYPES. One md1 carries ONE root tag (Wsh or ShWsh), not a
+//     per-slot choice, so a policy mixing bip48-p2wsh and bip48-p2sh-p2wsh legs
+//     is not a policy this gate can encode at all.
+//   - MIXED NETWORKS. One policy is on one network; md validates the xpubs
+//     against a single --network.
+func uniformScriptAndNetwork(origins []string) (template, network string, err error) {
 	for i, o := range origins {
 		_, tmpl, net, err := templateForOrigin(o)
 		if err != nil {
-			return "", "", "", fmt.Errorf("slot %d: %w", i, err)
+			return "", "", fmt.Errorf("slot %d: %w", i, err)
 		}
 		if i == 0 {
-			template, network, path = tmpl, net, strings.TrimSpace(o)
+			template, network = tmpl, net
 			continue
 		}
 		if tmpl != template {
-			return "", "", "", fmt.Errorf("%w: slot 0's origin implies template %s and slot %d's "+
+			return "", "", fmt.Errorf("%w: slot 0's origin implies template %s and slot %d's "+
 				"implies %s; one md1 encodes ONE script type, so a policy mixing them is not a "+
 				"policy this gate can derive", ErrIncompleteInputs, template, i, tmpl)
 		}
 		if net != network {
-			return "", "", "", fmt.Errorf("%w: slot 0 is %s and slot %d is %s; one policy is on one "+
+			return "", "", fmt.Errorf("%w: slot 0 is %s and slot %d is %s; one policy is on one "+
 				"network", ErrIncompleteInputs, network, i, net)
-		}
-		if !samePath(o, path) {
-			return "", "", "", fmt.Errorf("%w: the origins DIVERGE — slot 0 at %q, slot %d at %q. "+
-				"The pinned md offers no invocation that encodes a per-slot origin (`--path` "+
-				"flattens divergent mode to shared, and the bracketed [fp/path]@i form is a "+
-				"template parse error), so this gate cannot derive the md1 a divergent-origin "+
-				"policy requires and will not derive a DIFFERENT wallet's md1 in its place",
-				ErrIncompleteInputs, path, i, o)
 		}
 	}
 	if template == "" {
-		return "", "", "", fmt.Errorf("%w: no origins", ErrIncompleteInputs)
+		return "", "", fmt.Errorf("%w: no origins", ErrIncompleteInputs)
 	}
-	return template, network, path, nil
+	return template, network, nil
+}
+
+// inlineOrigin renders a recorded origin in the form md's TEMPLATE parser
+// accepts after a placeholder: no leading "m/", and hardened levels marked with
+// an apostrophe.
+//
+// BOTH normalisations are load-bearing, and both were MEASURED against md 0.13.0
+// on 2026-08-15 rather than assumed. The `h` form is what every committed tuple
+// RECORDS (`m/48h/0h/0h/2h`), and md's template parser does not read it:
+//
+//	@0/48h/0h/0h/2h/<0;1>/*     md: template parse error: @0: derivation steps
+//	                            after the multipath group are not representable
+//	                            in md1; the multipath `<...>` must be the final
+//	                            derivation step before the wildcard
+//	@0/m/48'/0'/0'/2'/<0;1>/*   the same refusal
+//	@0/48'/0'/0'/2'/<0;1>/*     encodes
+//
+// Note the diagnostic names the multipath rather than the notation, so a reader
+// debugging it from the message alone would look in the wrong place. md's
+// `--path` FLAG accepts both notations, which is why the shared-path invocation
+// this replaced never needed any of this.
+//
+// It VALIDATES THROUGH templateForOrigin rather than re-reading pathRe, and the
+// difference is not stylistic: pathRe makes the BIP-48 script_type level
+// OPTIONAL, so `m/48h/0h/0h` matches it and templateForOrigin still refuses that
+// path ("is BIP-48 but names no script_type level"). A second, laxer reading
+// here would have spliced a script-type-less origin straight into a policy
+// template — caught by this function's own test. templateForOrigin is the gate's
+// single authority on what an origin may be; everything else asks it.
+func inlineOrigin(origin string) (string, error) {
+	if _, _, _, err := templateForOrigin(origin); err != nil {
+		return "", fmt.Errorf("%w, so it will not be spliced into a policy template", err)
+	}
+	return strings.ReplaceAll(strings.TrimPrefix(strings.TrimSpace(origin), "m/"), "h", "'"), nil
 }
 
 // policyTemplate builds the BIP-388 template md encodes, from the script type
-// the origins imply and the recorded threshold.
+// the origins imply, the recorded threshold, and EACH SLOT'S OWN ORIGIN inline.
 //
-// It is generated rather than stated so that k, n and the script type cannot
-// disagree with the tuple they came from. The generated form is pinned against
-// the DEVICE's own S2 template by TestPolicyTemplateMatchesTheDevicesOwnS2Template.
-func policyTemplate(msTemplate string, k, n int) (string, error) {
+// It is generated rather than stated so that k, n, the script type and the
+// per-slot paths cannot disagree with the tuple they came from.
+//
+// # SLOT i's ORIGIN LANDS ON @i, AND THAT IS THE POINT
+//
+// The mapping is the correctness of the whole thing: two origins swapped is a
+// different wallet in the same funds class, and it is a mistake that looks like
+// nothing. An adversarial review of md's own divergent-origin support mutated
+// its origin vector to `(0..n).rev()` and an entire test suite stayed green,
+// because every assertion checked that both origins were PRESENT and none
+// checked which placeholder each landed on.
+//
+// So the assertions here are POSITIONAL by construction:
+//
+//   - TestPolicyTemplateMapsSlotIOriginToPlaceholderI pins the exact string for
+//     three DISTINCT accounts, which no permutation can satisfy, and checks each
+//     slot by name so a failure says which one moved.
+//   - The live TestBuiltPolicyDerivesDivergentOrigins proves it survives md's
+//     ENCODER, not just this string builder, by decoding the derived md1 and
+//     requiring path_decl.data[i] to equal slot i's origin.
+//
+// The generated form is pinned against the DEVICE's own S2 template by
+// TestPolicyTemplateEncodesTheDevicesOwnS2Wallet.
+func policyTemplate(msTemplate string, k int, origins []string) (string, error) {
 	var open, close string
 	switch msTemplate {
 	case "bip48-p2wsh":
@@ -703,9 +803,16 @@ func policyTemplate(msTemplate string, k, n int) (string, error) {
 		return "", fmt.Errorf("%w: no md template is registered for ms template %q",
 			ErrIncompleteInputs, msTemplate)
 	}
-	keys := make([]string, n)
-	for i := range keys {
-		keys[i] = fmt.Sprintf("@%d/<0;1>/*", i)
+	if len(origins) == 0 {
+		return "", fmt.Errorf("%w: a policy over no slots has no keys to encode", ErrIncompleteInputs)
+	}
+	keys := make([]string, len(origins))
+	for i, o := range origins {
+		inline, err := inlineOrigin(o)
+		if err != nil {
+			return "", fmt.Errorf("%w: slot %d: %v", ErrIncompleteInputs, i, err)
+		}
+		keys[i] = fmt.Sprintf("@%d/%s/<0;1>/*", i, inline)
 	}
 	return fmt.Sprintf("%ssortedmulti(%d,%s)%s", open, k, strings.Join(keys, ","), close), nil
 }
@@ -922,7 +1029,21 @@ const (
 // --policy-id-fingerprint is what makes the policy id DERIVED rather than
 // declared. Without it the caller would have to be told the stub, and a told
 // stub is a second source of truth about which wallet this is.
-func mdEncode(bin, policy string, xpubs []string, path, network string) (chunks []string, stub string, err error) {
+//
+// --path IS DELIBERATELY ABSENT, and adding it back would be a funds defect
+// rather than a redundancy. The origins arrive INLINE in the template
+// policyTemplate built, one per placeholder; md documents --path as "Override
+// the inferred origin path with a single shared path (flattens Divergent mode
+// to Shared)", so passing it would overwrite a divergent policy's per-slot paths
+// with one path and encode a DIFFERENT wallet without erroring. For uniform
+// origins the two forms are byte-identical — measured, see
+// uniformScriptAndNetwork — so there is nothing the flag would buy either.
+//
+// The xpub for @i is taken from xpubs[i], positionally, matching the origin
+// policyTemplate put on @i. Both come from in.Origins[i] and deriveBuiltPolicy
+// refuses when ms derives a path other than the one slot i recorded, so the
+// three agree by construction rather than by coincidence.
+func mdEncode(bin, policy string, xpubs []string, network string) (chunks []string, stub string, err error) {
 	if bin == "" {
 		return nil, "", fmt.Errorf("no md binary resolved")
 	}
@@ -931,7 +1052,6 @@ func mdEncode(bin, policy string, xpubs []string, path, network string) (chunks 
 		args = append(args, "--key", fmt.Sprintf("@%d=%s", i, x))
 	}
 	args = append(args,
-		"--path", path,
 		"--network", network,
 		"--group-size", "0",
 		"--force-chunked",
