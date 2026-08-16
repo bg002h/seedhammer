@@ -282,15 +282,13 @@ func s5DriveVerifyFullTwoSeeds(t *testing.T, records []string, expected []int,
 	}
 
 	typeSeed(first, firstMs1, false)
-	if !backAtSecondMs1 || true {
-		// The next-seed offer only appears while slots remain, which is the shape
-		// both arms of this driver are in after the first seed.
-		if c, ok := pumpUntil(frame, "not checked yet", 96); !ok {
-			t.Fatalf("the flow did not offer the next seed after the first one; got %q", c)
-		}
-		click(&ctx.Router, Button3) // TYPE THE NEXT SEED
-		frame()
+	// The next-seed offer appears on BOTH arms: master A covers 2 of Trace B's 3
+	// engraved slots, so one remains whichever way the second seed goes.
+	if c, ok := pumpUntil(frame, "not checked yet", 96); !ok {
+		t.Fatalf("the flow did not offer the next seed after the first one; got %q", c)
 	}
+	click(&ctx.Router, Button3) // TYPE THE NEXT SEED
+	frame()
 	typeSeed(second, secondMs1, backAtSecondMs1)
 
 	for i := 0; i < 128; i++ {
