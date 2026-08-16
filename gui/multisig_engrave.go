@@ -11,10 +11,17 @@ import "fmt"
 // The ms1 is a single-string, single-plate SECRET card, engraved onto
 // owner-held steel only — never NFC.
 //
-// It is now a one-of-each adapter over multisigEngraveCardsMulti, so the SUPPLY
-// path (gui/multisig.go) keeps byte-identical behaviour while the BUILD path
-// gets S5's several mk1s and several ms1s. `full` is the presence of an ms1,
-// which is what the old signature encoded in a separate bool.
+// It is a one-of-each adapter over multisigEngraveCardsMulti. `full` is the
+// presence of an ms1, which is what the old signature encoded in a separate
+// bool.
+//
+// IT HAS NO PRODUCTION CALLER SINCE F-188. It was retained for the SUPPLY path,
+// which kept byte-identical behaviour through it; that path now derives a leg
+// per matched slot and emits through multisigEngraveCardsMulti directly
+// (supplyEngraveTail). What is left is the one-of-each shape and its test.
+// Filed rather than deleted here: gui/multisig_engrave.go belongs to the build
+// tail's block, and removing a still-tested emitter is a change that wants its
+// own review rather than a ride on an operator-ruled output change.
 func multisigEngraveCards(ms1 string, mk1, md1 []string, full bool) []bundleCard {
 	var ms1s []string
 	if full {

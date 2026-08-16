@@ -136,9 +136,10 @@ var errVerifyNoLegs = errors.New("verify: no leg was re-derived, so nothing was 
 // list is satisfied by every readback, so a verify that accepted one would put
 // "Verify OK" on screen over a comparison that never ran. Both call sites carry
 // at least one slot today (errBuildNoHeldSlot refuses a build that holds none;
-// the supply path passes the slot findUserSlot matched), so this fires only when
-// a future caller loses the expectation on the way in -- which is exactly the
-// case where a vacuous pass would be invisible.
+// the supply path refuses a seed matching no slot, and otherwise passes every
+// slot it cut a plate for), so this fires only when a future caller loses the
+// expectation on the way in -- which is exactly the case where a vacuous pass
+// would be invisible.
 var errVerifyNoExpectedSlots = errors.New("verify: the engrave named no slot, so this readback has nothing to prove")
 
 // verifyFreshSlots is the derive loop's obligation rule: the slots THIS seed
@@ -149,17 +150,28 @@ var errVerifyNoExpectedSlots = errors.New("verify: the engrave named no slot, so
 //
 //   - `expected` is what the ENGRAVER cut a plate for, passed in by the caller.
 //     Only the engraver knows it: the BUILD path cuts one plate per HELD slot
-//     (buildEngraveTail returns those indices), and the SUPPLY path cuts exactly
-//     ONE, for the first slot the seed matched (gui/multisig.go:141-149).
+//     (buildEngraveTail returns those indices) and the SUPPLY path one per
+//     MATCHED slot (supplyEngraveTail returns those).
 //   - `filled` is allUserSlots -- every slot the seed accounts for AT THAT
 //     SLOT'S OWN ORIGIN. It is a different question with a different answer: one
 //     seed fills several slots of a policy that puts it at several accounts, and
 //     those slots carry DIFFERENT keys.
 //
-// Deriving a leg per FILLED slot is what made the supply path's own complete,
-// correct output verify as "Verify Failed: no read-back key plate carries slot
-// @1's key" -- a manufactured leg for a plate the flow had just announced it was
-// not cutting, and an honest operator told their good plates are bad.
+// Deriving a leg per FILLED slot is what made the supply path's one-plate
+// engrave verify as "Verify Failed: no read-back key plate carries slot @1's
+// key" -- a manufactured leg for a plate the flow had just announced it was not
+// cutting, and an honest operator told their good plates are bad.
+//
+// F-188 REMOVED THAT PARTICULAR DISAGREEMENT AT ITS SOURCE (the supply path now
+// cuts a plate for every matched slot, so `expected` and `filled` coincide for a
+// supply run's own seed) AND THE INTERSECTION IS STILL LOAD-BEARING. On the
+// BUILD path `filled` can still exceed what was engraved: a payload cosigner
+// card carrying a DIFFERENT key derived from the same seed at another origin is
+// not a duplicate -- duplicateSlotPair refuses only IDENTICAL keys -- and is
+// admitted, so the seed accounts for a slot the operator never claimed. It also
+// still separates a seed that is a cosigner of the read-back policy but whose
+// slots this run did not engrave, which is the third message in the derive
+// loop's refusal switch.
 //
 // NOTHING IS RELAXED HERE. The legs this returns are still re-derived from a
 // RE-TYPED seed (§7.4) and still have to find their own plate in
@@ -257,19 +269,22 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // other candidates are both wrong, and one of them shipped:
 //
 //   - THE SEED cannot say what was engraved. allUserSlots answers "which slots
-//     does this seed fill", and a policy holding one seed at several accounts
-//     makes that a strictly larger set than the plates the SUPPLY path cuts for
-//     it (one). Deriving a leg per filled slot reported "Verify Failed" over
-//     this machine's own complete, correct output.
+//     does this seed fill", which is a different question. On the BUILD path it
+//     is still strictly larger than what was cut whenever a payload cosigner
+//     card carries a DIFFERENT key from the operator's own seed at another
+//     origin: duplicateSlotPair refuses only IDENTICAL keys, so that card is
+//     admitted and the seed accounts for a slot nobody claimed. Before F-188 it
+//     was larger on the SUPPLY path too, and deriving a leg per filled slot
+//     reported "Verify Failed" over that path's own complete, correct output.
 //   - THE READBACK cannot say it either. It is the evidence being judged; a
 //     verify that takes its target from the evidence stops asking for the seed
 //     that proves the plate nobody presented.
 //
 // So the caller passes what it cut — buildEngraveTail's held-slot indices on the
-// build path, findUserSlot's matched slot on the supply path — and this flow
-// proves those and nothing else. It is not a relaxation: every leg still has to
-// find its own plate, and every plate still has to be claimed by a leg
-// (verifyMultisigLegs, unchanged).
+// build path, supplyEngraveTail's matched-slot indices on the supply path — and
+// this flow proves those and nothing else. It is not a relaxation: every leg
+// still has to find its own plate, and every plate still has to be claimed by a
+// leg (verifyMultisigLegs, unchanged).
 //
 // TWO THINGS CHANGED AT S5, and both are consequences of a build holding several
 // slots.

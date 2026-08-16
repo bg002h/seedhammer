@@ -23,10 +23,22 @@ import (
 //   - zero matches       -> (_, _, _, false): REFUSE (the seed is not a cosigner;
 //     never engrave a backup for a wallet you are not in)
 //   - >=2 matches        -> the SAME seed legitimately appears at >=2 cosigner
-//     slots under DISTINCT origins. Return the FIRST-by-index
-//     slot (deterministic; policy+stub identical across
-//     slots, only the mk1 Path differs) + every matched
-//     index in `reused` so the caller can show a notice.
+//     slots under DISTINCT origins, holding a DIFFERENT key
+//     at each. Return the FIRST-by-index slot
+//     (deterministic) + every matched index in `reused`.
+//
+// USE allUserSlots WHEN THE QUESTION IS "WHICH SLOTS", NOT "WHICH SLOT". This
+// function answers the membership question -- is this seed in the policy at all,
+// and where does the first match live -- which is what the build path's slot gate
+// asks (gui/multisig_build_slots.go). It is the WRONG question for anything that
+// engraves or verifies: F-188's supply path cuts a plate per matched slot and
+// takes its list from allUserSlots, because "the first match" is what made the
+// engrave and the verify disagree in the first place.
+//
+// `reused` HAS NO PRODUCTION CONSUMER since F-188. It fed the "This key is
+// reused at slots ..." notice, which was false -- the keys at those slots are
+// different keys at different origins -- and the flow that showed it now
+// engraves all of them instead.
 //
 // SECURITY: deriveAccountXpub scrubs its own seed/master/intermediates on every
 // call; the caller scrubs the mnemonic []Word after the LAST derive here (the

@@ -23,17 +23,23 @@ import (
 // passphrase, derive, compare, screen -- and the screen is the assertion. A
 // change to the derive loop that breaks the operator's verify breaks this test.
 
-// s5SupplyReadback is the SUPPLY path's shipped shape, taken from Trace B.
+// s5OneSlotReadback is a run that engraved ONE plate for a seed filling TWO
+// slots: the policy md1 plus @0's key plate, with {@0} as the expectation.
+//
+// UNTIL F-188 THIS WAS THE SUPPLY PATH'S OWN SHIPPED SHAPE. It is not any more
+// -- that path now cuts a plate per matched slot (supplyEngraveTail) -- but the
+// shape is still reachable and still has to verify: the BUILD path engraves the
+// slots the operator DECLARED, and a seed that also accounts for an admitted
+// cosigner card's slot fills more than were cut. So this is the intersection
+// rule's fixture, no longer the supply path's portrait.
 //
 // Master A fills TWO slots of Trace B, @0 and @1, at DIFFERENT origins and so
 // with DIFFERENT keys (asserted below, not assumed -- it is the fact that makes
-// a same-key dedupe inert here). supplyMultisigPolicyFlow matches that seed with
-// findUserSlot, engraves ONE plate, for the first matched slot, and announces
-// it (gui/multisig.go:141-149). So the honest readback of that engrave is the
-// policy md1 plus exactly one key plate: @0's.
+// a same-key dedupe inert here, and the fact that made the old "this key is
+// reused" message false).
 //
 // It returns the readback records in payload order and the plate's slot.
-func s5SupplyReadback(t *testing.T) (records []string, md1 []string, plate []string, slot int) {
+func s5OneSlotReadback(t *testing.T) (records []string, md1 []string, plate []string, slot int) {
 	t.Helper()
 	md1, plates, _ := s5TraceBEngraved(t, false) // watch-only: no ms1 either side
 
@@ -47,8 +53,8 @@ func s5SupplyReadback(t *testing.T) (records []string, md1 []string, plate []str
 	}
 	filled := allUserSlots(m, "", &chaincfg.MainNetParams, keys)
 	if len(filled) < 2 {
-		t.Fatalf("master A fills slots %v of Trace B; this test needs a seed filling at "+
-			"least TWO slots, or it is not the supply shape at all", filled)
+		t.Fatalf("master A fills slots %v of Trace B; this test needs a seed filling MORE "+
+			"slots than the run engraved, or the intersection it exercises is a no-op", filled)
 	}
 	idx, origin, reused, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
@@ -59,20 +65,20 @@ func s5SupplyReadback(t *testing.T) (records []string, md1 []string, plate []str
 	}
 
 	// THE PREMISE, MEASURED. The two slots must carry DIFFERENT keys at
-	// DIFFERENT origins: that is what makes the engrave rule ("one plate") and
-	// the seed's own answer ("I fill two slots") disagree, and it is why
-	// deduplicating legs by key could never have fixed this.
+	// DIFFERENT origins: that is what makes an engrave of one plate and the seed's
+	// own answer ("I fill two slots") disagree, and it is why deduplicating legs
+	// by key could never have fixed this.
 	other := filled[1]
 	if keys[idx].OriginPath.String() == keys[other].OriginPath.String() {
 		t.Fatalf("slots @%d and @%d share the origin %s, so this fixture no longer "+
-			"models the supply defect", idx, other, origin)
+			"models a seed that fills more slots than were cut", idx, other, origin)
 	}
 	if keys[idx].Xpub == keys[other].Xpub {
 		t.Fatalf("slots @%d and @%d declare the SAME key, so a same-key dedupe would "+
 			"cover this fixture and it is not the measured shape", idx, other)
 	}
 
-	// The plate the supply path would have cut: the one carrying @idx's key.
+	// The one plate this run cut: the one carrying @idx's key.
 	b, err := deriveMultisigLeg(m, "", &chaincfg.MainNetParams, origin, md1, false)
 	if err != nil {
 		t.Fatalf("deriveMultisigLeg(@%d): %v", idx, err)
@@ -136,26 +142,29 @@ func s5DriveVerify(t *testing.T, records []string, expected []int, phrase string
 	return last, done
 }
 
-// TestVerifySupplyShapeChecksTheONEPlateItEngraved is the regression.
+// TestVerifyOneSlotRunChecksTheONEPlateItEngraved is the regression.
 //
 // One seed, two slots, one plate. The verify's derive loop asked the SEED which
-// slots it fills and made a leg for each, so the SUPPLY path's own complete and
+// slots it fills and made a leg for each, so a one-plate run's complete and
 // correct output verified as "Verify Failed: no read-back key plate carries slot
-// @1's key" -- an honest operator told their good plates are bad, in exactly the
-// case the device had just announced on screen.
+// @1's key" -- an honest operator told their good plates are bad.
+//
+// F-188 removed this shape from the SUPPLY path by making that path cut both
+// plates. It did not remove the shape: a BUILD holding a subset of the slots its
+// seed accounts for still produces it, so the rule stays pinned here.
 //
 // The fix is not a relaxation of what the comparator demands: only the
 // ENGRAVER knows which slots it cut a plate for, so it passes that set in and
 // the derive loop restricts itself to it. Every plate still has to be read back
 // and matched.
-func TestVerifySupplyShapeChecksTheONEPlateItEngraved(t *testing.T) {
-	records, _, _, slot := s5SupplyReadback(t)
+func TestVerifyOneSlotRunChecksTheONEPlateItEngraved(t *testing.T) {
+	records, _, _, slot := s5OneSlotReadback(t)
 	last, _ := s5DriveVerify(t, records, []int{slot}, fixtureMasterA)
 	if !uiContains(last, "Verify OK") {
-		t.Fatalf("the SUPPLY path's own one-plate engrave did not verify. Final screen: %q\n"+
-			"The flow engraved one plate for @%d and announced it; a verify that then "+
-			"demands a plate for every slot the seed fills is calling this machine's own "+
-			"correct output bad", last, slot)
+		t.Fatalf("a run that engraved ONE plate did not verify against it. Final screen: %q\n"+
+			"The flow engraved one plate, for @%d; a verify that then demands a plate for "+
+			"every slot the seed fills is calling this machine's own correct output bad",
+			last, slot)
 	}
 }
 
@@ -166,7 +175,7 @@ func TestVerifySupplyShapeChecksTheONEPlateItEngraved(t *testing.T) {
 // It must FAIL, and it must NAME the slot -- that is the only thing the operator
 // can act on.
 func TestVerifyStillFailsWhenTheENGRAVEDPlateIsWrong(t *testing.T) {
-	_, md1, _, slot := s5SupplyReadback(t)
+	_, md1, _, slot := s5OneSlotReadback(t)
 	m, err := bip39.ParseMnemonic(fixtureMasterA)
 	if err != nil {
 		t.Fatalf("ParseMnemonic: %v", err)
@@ -188,13 +197,14 @@ func TestVerifyStillFailsWhenTheENGRAVEDPlateIsWrong(t *testing.T) {
 // error, not a vacuous pass.
 //
 // Both call sites guarantee at least one slot today (errBuildNoHeldSlot on the
-// build path, findUserSlot's matched index on the supply path). This pins the
+// build path, supplyEngraveTail's matched-slot indices on the supply path, with
+// a zero-match seed refused before it). This pins the
 // refusal anyway, because the failure mode of an expectation that arrives empty
 // is a screen saying the plates are fine over a comparison that never ran -- the
 // most expensive false GREEN this flow can produce, and the reason
 // errVerifyNoLegs exists one level down.
 func TestVerifyRefusesAnEmptyExpectation(t *testing.T) {
-	records, _, _, _ := s5SupplyReadback(t)
+	records, _, _, _ := s5OneSlotReadback(t)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
