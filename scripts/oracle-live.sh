@@ -91,9 +91,21 @@ if [ "${1:-}" = "-update" ]; then
   echo "   this is the ONLY code path that writes gui/testdata/s2_md1_golden.expect.json,"
   echo "   which is what makes that file trustworthy where no toolchain exists"
   echo
-  CGO_ENABLED=0 go test -tags oraclelive -count=1 -v \
-    -run TestAssembledMd1MatchesThePrimaryByteForByte ./gui/ -update
+  # ANCHORED, and checked for vacuity — this is I-1's exact mechanism on the mint
+  # path (re-review Minor-1). Unanchored, a rename leaves `-run` matching nothing;
+  # `go test` then exits 0 on "no tests to run" and this branch printed
+  # "mint: OK (exit 0)" having written no golden at all. The golden is what makes
+  # the byte-identity gate trustworthy everywhere else, so a silent no-op mint is
+  # the worst outcome here.
+  mint_out=$(CGO_ENABLED=0 go test -tags oraclelive -count=1 -v \
+    -run '^TestAssembledMd1MatchesThePrimaryByteForByte$' ./gui/ -update 2>&1)
   rc=$?
+  printf '%s\n' "$mint_out"
+  if ! printf '%s\n' "$mint_out" | grep -q '^=== RUN   TestAssembledMd1MatchesThePrimaryByteForByte$'; then
+    echo
+    echo "::error::the mint test never executed, so no golden was written"
+    rc=1
+  fi
   echo
   [ $rc -eq 0 ] && echo "mint: OK (exit 0)" || echo "mint: FAILED (exit $rc) — nothing was written"
   exit $rc
@@ -106,12 +118,18 @@ echo "   mnemonic-key, mnemonic-secret (drift) and mnemonic-engrave (sysw vector
 echo
 
 # Discover every test behind the tag, from the tree rather than from memory.
-tagged_files=$(grep -rl 'go:build oraclelive' --include='*.go' ./oracle/ ./gui/ ./sysw/)
+# Match the CONSTRAINT, not a prefix: `//go:build linux && oraclelive` is a
+# tagged file too, and a literal-substring grep cannot see it. Re-review I-2
+# planted exactly that with an unconditional t.Fatal and this script printed
+# PASS while it never ran. \boraclelive\b also rejects `oraclelivex`.
+# (It would match a negated `//go:build !oraclelive`; none exists, and one
+# would show up as a discovered-but-never-run name below rather than silently.)
+tagged_files=$(grep -rlE '^//go:build\b.*\boraclelive\b' --include='*.go' ./oracle/ ./gui/ ./sysw/)
 if [ -z "$tagged_files" ]; then
   echo "::error::no //go:build oraclelive files found; this script would run nothing"
   exit 1
 fi
-tagged_tests=$(grep -h '^func Test' $tagged_files | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | sort -u)
+tagged_tests=$(grep -h '^func Test' $tagged_files | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | grep -v '^TestMain$' | sort -u)
 want=$(printf '%s\n' "$tagged_tests" | grep -c .)
 if [ "$want" -eq 0 ]; then
   echo "::error::tagged files exist but declare no tests; this script would run nothing"
@@ -125,12 +143,24 @@ out=$(CGO_ENABLED=0 go test -tags oraclelive -count=1 -v -run "^($filter)\$" ./o
 rc=$?
 printf '%s\n' "$out"
 
-# VACUITY CHECK. `go test -run <matches nothing>` exits 0, so a green exit code
-# alone proves nothing about whether anything ran.
-ran=$(printf '%s\n' "$out" | grep -c '^=== RUN   Test')
-if [ "$ran" -ne "$want" ]; then
+# VACUITY CHECK, by SET DIFFERENCE rather than by count.
+#
+# `go test -run <matches nothing>` exits 0, so a green exit code alone proves
+# nothing about whether anything ran. Counting `=== RUN` LINES does not fix that
+# either, and re-review I-1 proved it worse than useless: Go emits a RUN line per
+# SUBTEST, so one subtest's line pays for a top-level test that never ran. It was
+# driven to "PASS (exit 0)" with the md1-vs-primary byte-identity proof missing
+# from the output entirely. Counting also went spuriously RED whenever any tagged
+# test grew a subtest.
+#
+# So compare NAMES. The $-anchored sed drops `TestFoo/sub` because it contains a
+# '/', and naming the absentees beats a count at no cost.
+ran_names=$(printf '%s\n' "$out" | sed -n 's/^=== RUN   \(Test[A-Za-z0-9_]*\)$/\1/p' | sort -u)
+missing=$(comm -23 <(printf '%s\n' "$tagged_tests") <(printf '%s\n' "$ran_names"))
+if [ -n "$missing" ]; then
   echo
-  echo "::error::discovered $want tagged test(s) but only $ran executed --"
+  echo "::error::discovered $want tagged test(s); these never executed:"
+  printf '         %s\n' $missing
   echo "         a live check that does not run is the defect this script exists to prevent"
   rc=1
 fi
