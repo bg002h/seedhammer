@@ -373,23 +373,55 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 	type binding struct {
 		slot   int
 		origin string
+		label  string
 	}
-	bound := map[int][]binding{}
-	var order []int
+	// THE GROUPING KEY IS THE MASTER FINGERPRINT, NOT THE SeedID, and the
+	// difference is a Critical this gate shipped once.
+	//
+	// buildMultisigPolicyFlow calls buildSeedForSlot once PER HELD SLOT
+	// (gui/multisig_build.go:196-202) and buildSeedForSlot calls reg.add()
+	// unconditionally (:554), so two slots the operator fills from the SAME words
+	// carry two DIFFERENT SeedIDs. A SeedID-keyed grouping therefore put every
+	// binding in a group of one, `len(bs) < 2` skipped all of them, and SPEC 4.3
+	// row 5's notice -- the ONLY surface that tells an operator two of their slots
+	// share one secret -- could never fire for the shape the product actually
+	// builds. Trace B is that shape. The harm is not cosmetic: the tail correctly
+	// cuts ONE ms1 for the shared master, so losing that plate loses BOTH slots,
+	// and an operator who read two independent-looking key sources believes one of
+	// two keys survives.
+	//
+	// It is the SAME identity mistake the sibling function buildEngraveTail already
+	// shipped and fixed (gui/multisig_build_tail.go:62-84 records the diagnosis);
+	// the fix was applied there and never swept into the gate.
+	//
+	// MasterFP is a fingerprint of the (seed, passphrase) PAIR, which is the right
+	// identity here for SPEC 4.1's reason: the same words under two passphrases are
+	// two different masters holding two different keys, and grouping them would
+	// announce a shared secret that does not exist. It also fails SAFE in the only
+	// direction that matters -- a 4-byte collision emits a SPURIOUS notice about
+	// two unrelated seeds, never suppresses a true one.
+	bound := map[uint32][]binding{}
+	var order []uint32
 	for slot, s := range sources {
 		switch s.Kind {
 		case slotFromCard:
 			// NORMAL, and checked by nothing. See the comment above.
 			continue
 		case slotFromSeed:
-			if _, ok := reg.at(s.SeedID); !ok {
+			// RESOLVED, not merely existence-checked: the grouping reads MasterFP.
+			seed, ok := reg.at(s.SeedID)
+			if !ok {
 				return nil, errBuildSlotAssignment{Slot: slot}
 			}
-			if _, seen := bound[s.SeedID]; !seen {
-				order = append(order, s.SeedID)
+			if _, seen := bound[seed.MasterFP]; !seen {
+				order = append(order, seed.MasterFP)
 			}
-			bound[s.SeedID] = append(bound[s.SeedID],
-				binding{slot: slot, origin: derivedSlotOrigin(script, s.Account).String()})
+			bound[seed.MasterFP] = append(bound[seed.MasterFP],
+				binding{
+					slot:   slot,
+					origin: derivedSlotOrigin(script, s.Account).String(),
+					label:  seed.Label,
+				})
 		case slotFromBoth:
 			seed, ok := reg.at(s.SeedID)
 			if !ok {
@@ -422,15 +454,15 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 					}
 				}
 			}
-			if _, seen := bound[s.SeedID]; !seen {
-				order = append(order, s.SeedID)
+			if _, seen := bound[seed.MasterFP]; !seen {
+				order = append(order, seed.MasterFP)
 			}
 			// The binding key is the PARSED origin, not the card's spelling:
 			// m/48'/0'/1'/2' and m/48h/0h/1h/2h are the same path, and a
 			// distinctness test over the two strings would call them different
 			// origins and emit a multi-account notice for one key twice.
-			bound[s.SeedID] = append(bound[s.SeedID],
-				binding{slot: slot, origin: k.OriginPath.String()})
+			bound[seed.MasterFP] = append(bound[seed.MasterFP],
+				binding{slot: slot, origin: k.OriginPath.String(), label: seed.Label})
 		}
 	}
 
@@ -443,8 +475,8 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 	// is deliberately not re-decided here: two places deciding one thing is how
 	// "the payload carries n-1" grew back last time.
 	var notices []string
-	for _, id := range order {
-		bs := bound[id]
+	for _, fp := range order {
+		bs := bound[fp]
 		if len(bs) < 2 {
 			continue
 		}
@@ -460,14 +492,20 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 		if !distinct {
 			continue
 		}
-		seed, _ := reg.at(id)
 		slots := make([]string, len(bs))
 		for i, b := range bs {
 			slots[i] = fmt.Sprintf("@%d", b.slot)
 		}
+		// THE LABEL TRAVELS WITH THE BINDING rather than being looked up again.
+		// The group is now keyed on a fingerprint, so there is no seedID to look
+		// up -- and several registry entries can share one fingerprint, which is
+		// precisely the shape this notice exists for. Every entry in a group is the
+		// same (seed, passphrase) pair by construction, so the first one's label is
+		// the group's; taking it from the binding keeps the sentence and the
+		// grouping reading the same datum.
 		notices = append(notices, fmt.Sprintf(
 			"Slots %s all come from %s, at different key origins. That is a "+
-				"multi-account wallet and is allowed.", joinAnd(slots), seed.Label))
+				"multi-account wallet and is allowed.", joinAnd(slots), bs[0].label))
 	}
 	return notices, nil
 }

@@ -108,6 +108,129 @@ func s5DriveToGate(t *testing.T, ctx *Context, frame func() (string, bool)) {
 	click(&ctx.Router, Button3) // Skip
 }
 
+// s5PageForNeedle pages a confirmReviewScreen (Button2) looking for `needle`,
+// and returns every page it saw.
+//
+// It exists because a review screen is a PAGER: asserting on one frame proves
+// only that the line is on page 1, and a line the operator has to page to is
+// still a line the flow produced. The loop is bounded and stops when the pager
+// wraps to the top (start == 0 again), so it cannot spin.
+func s5PageForNeedle(t *testing.T, ctx *Context, frame func() (string, bool), needle string, pages int) (string, bool) {
+	t.Helper()
+	var seen []string
+	first := ""
+	for i := 0; i < pages; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		if uiContains(c, needle) {
+			return strings.Join(append(seen, c), " || "), true
+		}
+		if i == 0 {
+			first = c
+		} else if c == first && i > 1 {
+			break // the pager wrapped
+		}
+		seen = append(seen, c)
+		click(&ctx.Router, Button2)
+	}
+	return strings.Join(seen, " || "), false
+}
+
+// TestBuildFlowAnnouncesTwoSlotsFromOneSeed is C-2's FLOW-level arm, and it is
+// the one that matters: the gate test beside it drives buildSlotGate directly,
+// and the defect was that the flow builds a registry the gate's grouping key
+// could not see. A unit test of the gate cannot observe that.
+//
+// The operator builds a 2-of-3 holding @0 and @1 and types the SAME twelve words
+// for both. That is a legitimate multi-account wallet -- buildSlotSources
+// diverges the accounts off the master fingerprint, so the two slots carry
+// DIFFERENT keys -- and the tail correctly cuts ONE ms1 for the shared master.
+// SPEC 4.3 row 5's notice on the Key-sources review is the only surface anywhere
+// in the flow that tells the operator those two slots share one secret. Without
+// it they read "@0 yours: derived from your seed for @0" and "@1 yours: derived
+// from your seed for @1, account 1" -- two labels that read as two secrets --
+// and a lost ms1 plate takes both keys with it.
+func TestBuildFlowAnnouncesTwoSlotsFromOneSeed(t *testing.T) {
+	records := s5PayloadRecords(t, dupTestCard(t, 1)) // B@0: the one open slot's cosigner
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.sysw = sessionHolding(records...)
+		frame, quit := runUI(ctx, func() { buildMultisigPolicyFlow(ctx, &descriptorTheme) })
+		defer quit()
+
+		// The pickers: wsh (default), n=3, k=2, @0, YES one more, @1, no more, fp Omit.
+		pick := func(stage string, downs int) {
+			t.Helper()
+			if c, ok := pumpUntil(frame, stage, 32); !ok {
+				t.Fatalf("the %q picker was not shown; the flow is on %q", stage, c)
+			}
+			for d := 0; d < downs; d++ {
+				click(&ctx.Router, Down)
+				frame()
+			}
+			click(&ctx.Router, Button3)
+			frame()
+		}
+		pick("Template", 0)
+		pick("Cosigners", 1)                  // n = 3
+		pick("Threshold", 1)                  // k = 2
+		pick("Which slot is your key?", 0)    // @0
+		pick("Do you hold another slot?", 1)  // YES, ONE MORE
+		pick("Which other slot is yours?", 0) // @1
+		pick("Do you hold another slot?", 0)  // NO, THAT IS ALL
+		pick("Fingerprints", 0)
+
+		if c, ok := pumpUntil(frame, "mk1 keys: 1", 32); !ok {
+			t.Fatalf("the payload's cosigner card never reached the gather; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Done adding cards
+		frame()
+		if c, ok := pumpUntil(frame, "Payload cards", 32); !ok {
+			t.Fatalf("the payload review never appeared; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+		frame()
+
+		// ONE MASTER, TYPED TWICE -- once per held slot, which is what the flow
+		// asks for and what mints two registry entries with two different SeedIDs.
+		for _, slot := range []string{"@0", "@1"} {
+			if c, ok := pumpUntil(frame, "Choose number of words", 64); !ok {
+				t.Fatalf("seed entry for %s was not reached; got %q", slot, c)
+			}
+			click(&ctx.Router, Button3) // 12 WORDS
+			frame()
+			driveWords(&ctx.Router, fixtureMasterA)
+			if c, ok := pumpUntil(frame, "passphrase", 240); !ok {
+				t.Fatalf("the passphrase prompt for %s was not reached; got %q", slot, c)
+			}
+			click(&ctx.Router, Button3) // Skip
+			frame()
+		}
+
+		if c, ok := pumpUntil(frame, "Key sources", 64); !ok {
+			t.Fatalf("the gate REFUSED a legitimate two-account build, or the review never "+
+				"appeared; screen reads %q", c)
+		}
+		pagesSeen, found := s5PageForNeedle(t, ctx, frame, "multi-account wallet", 12)
+		if !found {
+			t.Fatalf("the Key-sources review NEVER says the two held slots come from ONE "+
+				"seed.\nPages drawn: %q\n"+
+				"The operator reads two derived-from-your-seed lines and takes them for two "+
+				"independent keys; the run cuts ONE ms1, so losing that plate loses BOTH "+
+				"slots and the wallet is permanently unspendable", pagesSeen)
+		}
+		for _, want := range []string{"@0", "@1"} {
+			if !strings.Contains(pagesSeen, want) {
+				t.Errorf("the notice does not name %s: %q", want, pagesSeen)
+			}
+		}
+	})
+}
+
 // TestGateStillFiresAfterOriginsDiverge is plan test 8.
 func TestGateStillFiresAfterOriginsDiverge(t *testing.T) {
 	a1 := dupTestCard(t, 3) // master A at m/48h/0h/1h/2h -- the HONEST card
