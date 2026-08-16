@@ -211,6 +211,31 @@ func (r *seedRegistry) at(id int) (registeredSeed, bool) {
 // count reports how many seeds are registered.
 func (r *seedRegistry) count() int { return len(r.seeds) }
 
+// usesPassphrase reports whether ANY registered pair carries a passphrase.
+//
+// It is asked because the backup has to say what is NOT in it. A BIP-39
+// passphrase is a REQUIRED SPENDING FACTOR and is NEVER ENGRAVED -- ms1 encodes
+// the WORDS, the passphrase is not in that entropy, and no plate this device cuts
+// can be made to yield it. A set labelled "Full (seed + keys)" that silently
+// omits a spending factor is F-132's shape: a backup that is both wrong and
+// trusted.
+//
+// ANY, not ALL, and SPEC 4.1 is why: the passphrase prompt is PER SEED, so a
+// three-master build can have one passphrased leg and two bare ones. One leg the
+// plates cannot reconstruct is enough to make the whole set incomplete.
+//
+// An EXPLICITLY BOUND EMPTY passphrase is no passphrase. syswPassphraseFlowTitled
+// can return ("", true), and a build that engraves a plain seed must not be
+// labelled as though a factor were missing.
+func (r *seedRegistry) usesPassphrase() bool {
+	for _, s := range r.seeds {
+		if s.Passphrase != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // scrub zeroes every registered mnemonic. THE ONE SCRUB SITE (SPEC 4.2).
 //
 // The Passphrase field is dropped rather than overwritten, and the difference is

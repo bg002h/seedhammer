@@ -32,7 +32,7 @@ func TestBuildReviewAnnouncesTheBip48Origin(t *testing.T) {
 	stub := [4]byte{0x7b, 0x71, 0x64, 0x21}
 	slots := []md.SlotInfo{{Index: 0}, {Index: 1}}
 	joined := func(s md.MultisigScript) string {
-		return strings.Join(buildReviewLines(s, stub, slots, false, nil), "\n")
+		return strings.Join(buildReviewLines(s, stub, slots, nil, false, nil), "\n")
 	}
 
 	// Every script type must state the origin the build is USING. An operator who
@@ -108,7 +108,7 @@ func TestBuildReviewAnnouncesTheBip48Origin(t *testing.T) {
 	// one rasters at 2652 px against 7419 for the same text with a hyphen).
 	t.Run("the announcement can actually be drawn", func(t *testing.T) {
 		for _, s := range []md.MultisigScript{md.MultisigWsh, md.MultisigShWsh, md.MultisigSh} {
-			for _, line := range buildReviewLines(s, stub, slots, false, nil) {
+			for _, line := range buildReviewLines(s, stub, slots, nil, false, nil) {
 				if strings.ContainsAny(line, "\u2014\u2013\u00b7\u2018\u2019\u201c\u201d") {
 					t.Errorf("script %v: review line %q carries a glyph the body face "+
 						"lacks, so the line does not draw", s, line)

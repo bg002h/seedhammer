@@ -61,7 +61,7 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // the shipped flow already held, so an idle limit would buy no reduction in
 // exposure over the state of the tree. S5 multiplies the masters in it; the
 // bound is filed to be re-decided there, when it would actually change something.
-func buildPlateInventoryLines(cards []bundleCard) []string {
+func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
 	plan := bundlePlatePlan(cards)
 	lines := []string{
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
@@ -71,8 +71,75 @@ func buildPlateInventoryLines(cards []bundleCard) []string {
 			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
+	lines = append(lines, buildPassphraseInventoryLines(passphrase)...)
 	lines = append(lines, "Seed handling: this build does not time out. A seed you entered "+
 		"stays in device memory until the build ends, like the rest of the payload "+
 		"surface. Power the device off when you are done.")
 	return lines
+}
+
+// ─── What is NOT on the plates ───────────────────────────────────────────────
+
+// buildPassphraseInventoryLines states, on the restore document, whether a
+// BIP-39 passphrase is part of this wallet and where it is not.
+//
+// THE PASSPHRASE IS A REQUIRED SPENDING FACTOR AND IS NEVER ENGRAVED. ms1 encodes
+// the WORDS; the passphrase is not in that entropy and no plate in the set can be
+// made to yield it. Before S5 neither the engrave-mode label nor this document
+// said so -- measured, gui/multisig_restore.go contained zero occurrences of the
+// word -- so a set labelled "Full (seed + keys)" could be missing the one factor
+// that reaches the money and vouch for itself while doing it. F-132's device
+// sibling exactly: that finding was a hashlock preimage required to spend, absent
+// from the backup and unmentioned by it.
+//
+// BOTH ARMS SPEAK, and the second is not symmetry for its own sake. This document
+// is read years later, alone, often by someone who was not the operator, holding
+// a pile of steel and asking one question: is this everything? "No BIP-39
+// passphrase was used" ANSWERS it. Silence leaves the reader unable to
+// distinguish a complete backup from one whose operator forgot to write the
+// passphrase down, and that is the state in which people give up on a recovery
+// that would have worked.
+//
+// NEITHER ARM ASSUMES A SEED PLATE EXISTS. A watch-only build engraves no ms1 at
+// all, so "the seed plate encodes the words only" and "these plates are the whole
+// backup" -- both in the first draft of this text -- are false there. The claim is
+// about the PASSPHRASE and is phrased to stay true in both modes; what the set
+// does and does not contain is the inventory's job, immediately above.
+func buildPassphraseInventoryLines(passphrase bool) []string {
+	if !passphrase {
+		return []string{
+			"No BIP-39 passphrase was used, so no passphrase is needed to spend from " +
+				"this wallet.",
+		}
+	}
+	return []string{
+		"A BIP-39 passphrase WAS used. It is not on these plates and cannot be " +
+			"recovered from them: nothing this device engraves carries a passphrase.",
+		"Without it, these plates do not reach the money. Keep it somewhere " +
+			"separate, and make sure whoever needs this backup can also get the " +
+			"passphrase.",
+	}
+}
+
+// buildFullModeLabel is the engrave-mode picker's first row.
+//
+// "Full (seed + keys)" is correct for a build with no passphrase and is a LIE for
+// one with a passphrase: what gets cut is the seed and the keys, and the third
+// factor the wallet needs is left in the operator's head. The label is where it
+// has to be said, because the label is what the operator reads before pressing --
+// a note somewhere else is a note read after the decision.
+//
+// It is said ONLY when a passphrase was actually used. A picker that warns about
+// a factor nobody supplied is §0.1's corollary in the other direction: a tool
+// that cries DEFAULT when the operator chose is a tool whose warnings get
+// ignored.
+//
+// The row does NOT wrap (ChoiceScreen.Draw uses widget.Label), so the longer
+// label is measured against the panel rather than judged by eye --
+// assertChoiceLabelFits, gui/multisig_build_prose_test.go.
+func buildFullModeLabel(passphrase bool) string {
+	if passphrase {
+		return "Full (seed + keys, NOT passphrase)"
+	}
+	return "Full (seed + keys)"
 }

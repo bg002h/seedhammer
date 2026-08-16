@@ -75,7 +75,7 @@ func TestBundleEngraveGuidedTitles(t *testing.T) {
 	}
 
 	ctx := NewContext(newPlatform())
-	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, cards) })
+	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards) })
 	defer quit()
 	c, ok := pumpUntil(frame, "Card 1 of 2", 48)
 	if !ok {
@@ -92,21 +92,34 @@ func TestBundleEngraveGuidedTitles(t *testing.T) {
 // TestBundleEngraveSetAbort: backing out of the first plate's variant picker
 // surfaces the SET-LEVEL abort warning (partial bundle unusable) and records no
 // completed state (I-5).
+//
+// IT LAYS OUT AT sh2DisplaySize, and that changed at S5 for a reason worth
+// recording. This test used newPlatform()'s 240x240 default, which is "a fiction
+// that no shipped device has" (gui_test.go's own words at sh2DisplaySize). When
+// S5 rewrote the abort text -- DESTROY instead of discard, plus the re-run
+// recovery -- the longer body was DRAWN IN FULL on the real 480x320 panel and
+// CUT MID-SENTENCE on the 240x240 fiction, at "...so you only cut the ones you
+// are". The failure was therefore a report about a display nobody owns, arriving
+// on a screen whose whole subject is reachability. Asserting on the real panel is
+// what makes it a report about the machine; the F-185 class check
+// (gui/modal_fits_test.go) gates the same body's length there with margin.
 func TestBundleEngraveSetAbort(t *testing.T) {
 	g := &bundleGatherer{}
 	offerAll(t, g, mk1CardA(t))
 	offerAll(t, g, md1CardA(t))
 	cards := g.cards
 
-	ctx := NewContext(newPlatform())
-	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, cards) })
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards) })
 	defer quit()
 	if c, ok := pumpUntil(frame, "Card 1 of 2", 48); !ok {
 		t.Fatalf("guided title not shown; got %q", c)
 	}
 	// Back out of the variant picker → the set-level abort warning.
 	click(&ctx.Router, Button1)
-	if c, ok := pumpUntil(frame, "partial", 32); !ok {
+	if c, ok := pumpUntil(frame, "not a usable backup", 32); !ok {
 		t.Fatalf("set-level abort warning not shown; got %q", c)
 	}
 }

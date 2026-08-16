@@ -52,6 +52,72 @@ const (
 		"These plates belong to a different wallet. Present the md1 and the key plates this run cut."
 )
 
+// ─── F-191: a keystroke must not be reported as a wrong wallet ───────────────
+
+// multisigVerifySeedIsInnocent reports whether a seed that matched NO slot with
+// the passphrase the operator typed matches one WITHOUT it.
+//
+// It is the cheapest question that can clear a seed outright. The engrave accepts
+// a payload-borne passphrase; the verify requires it RE-TYPED (§7.4, so the
+// engrave source is never compared against itself), and one wrong character there
+// derives an entirely different wallet. That produced the flow's most alarming
+// screen -- "That seed is not a cosigner" -- on plates that were perfectly good
+// and a seed that was perfectly right.
+//
+// A passphrase that was never offered is not re-derived: the empty derivation is
+// the one that just failed, and running it again to "clear" the seed would route
+// a genuinely foreign seed to the reassuring arm.
+//
+// Costs one re-derivation, on a path that has already failed and is about to draw
+// a modal.
+func multisigVerifySeedIsInnocent(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, keys []md.ExpandedKey) bool {
+	if passphrase == "" {
+		return false
+	}
+	return len(allUserSlots(m, "", net, keys)) > 0
+}
+
+// multisigVerifyNoSlotBody is what the operator reads when their seed filled no
+// slot of the read-back policy. THREE STATES, because the device is in three
+// genuinely different epistemic positions and the shipped text asserted the
+// strongest conclusion in all of them:
+//
+//	"That seed is not a cosigner of the read-back policy, so it cannot prove any
+//	 of these plates."
+//
+// That sentence is only true when a passphrase cannot be the cause, and it never
+// cannot. What it actually did was tell an operator holding the right seed and
+// good steel that their money lives in a wallet they are not part of -- over one
+// keystroke.
+//
+//   - PROVED INNOCENT: a passphrase was typed and the seed fills a slot without
+//     it. The device can say outright that the seed IS a cosigner, which turns
+//     the scariest screen it draws into a typo report.
+//   - PASSPHRASE TYPED, still nothing: it cannot tell a wrong seed from a wrong
+//     passphrase, and says so rather than picking the frightening one.
+//   - NO PASSPHRASE TYPED: still not certain. The wallet may have been built with
+//     one and the operator pressed Skip, so the action offered is "add it and try
+//     again" rather than "distrust your plates".
+//
+// None of the three re-cuts steel, and none of them says the seed is foreign as a
+// fact. NO EM-DASH: a zero-pixel glyph in this face takes its whole line with it.
+func multisigVerifyNoSlotBody(passphraseTyped, provedInnocent bool) string {
+	switch {
+	case provedInnocent:
+		return "That seed IS a cosigner of this policy, but not with the passphrase you " +
+			"typed: this wallet's keys come from the seed with no passphrase. Your " +
+			"plates are fine. Try again and skip the passphrase."
+	case passphraseTyped:
+		return "No slot matches that seed with the passphrase you typed. Check the " +
+			"passphrase before you doubt the plates: one wrong character derives a " +
+			"different wallet."
+	default:
+		return "No slot matches that seed. If this wallet was built with a BIP-39 " +
+			"passphrase, add it and try again: without it the same words derive a " +
+			"different wallet."
+	}
+}
+
 // ─── T6b: verify-bundle for a SUPPLIED multisig bundle (user's slot only) ────
 //
 // verifyMultisig assembles the read-back bundle and runs the deterministic
@@ -484,11 +550,20 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 			//
 			// The distinction is drawn with the SAME rule, run against an empty covered
 			// set, rather than with a second hand-rolled intersection.
+			//
+			// AND THE FIRST ARM ASKS ABOUT THE PASSPHRASE BEFORE IT CONDEMNS THE SEED
+			// (F-191). "No slot matched" is produced just as readily by one wrong
+			// character in a re-typed passphrase as by a foreign seed, and the two have
+			// opposite remedies -- retype, or stop trusting your plates. The flow knows
+			// which passphrase it was handed, so it asks the question it can afford:
+			// does this seed fill a slot with the EMPTY passphrase? One re-derivation,
+			// on a path that has already failed and is about to show a screen.
 			everOwed, _ := verifyFreshSlots(expectedSlots, slots, nil)
 			switch {
 			case len(slots) == 0:
-				showError(ctx, th, "Verify Bundle", "That seed is not a cosigner of the "+
-					"read-back policy, so it cannot prove any of these plates.")
+				innocent := multisigVerifySeedIsInnocent(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
+				showError(ctx, th, "Verify Bundle",
+					multisigVerifyNoSlotBody(passphrase != "", innocent))
 			case len(everOwed) == 0:
 				showError(ctx, th, "Verify Bundle", "That seed is a cosigner, but none of "+
 					"its slots were engraved in this run. The plates still outstanding "+

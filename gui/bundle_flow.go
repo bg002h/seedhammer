@@ -36,7 +36,7 @@ func bundleFlow(ctx *Context, th *Colors) {
 			// which also don't persist a half-built set across Back).
 			continue
 		}
-		bundleEngrave(ctx, th, cards)
+		bundleEngrave(ctx, th, "Engrave Bundle", cards)
 		return
 	}
 }
@@ -369,14 +369,23 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 // titling each plate "Card X of Y | Plate P of Q"; a set-level Back records no
 // completed state and warns the partial bundle is unusable (I-5). At the end it
 // shows the ms1 reminder (mirror host bundle.rs:296-306).
-func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
+//
+// `title` NAMES THE PROGRAM THE OPERATOR CHOSE (F-182). The end-of-engrave ms1
+// reminder used to be hard-coded "Engrave Bundle", and that modal is shown at the
+// end of a Build-policy engrave too -- measured: S2's walk cuts 9 plates and
+// reaches it -- so an operator who picked "Build policy" off the menu was told,
+// by a screen with no other context, that they were somewhere else. It is a
+// PARAMETER and not a rename because bundleEngrave is shared by the bundle flow,
+// single-sig, the supplied-md1 path and Build alike; the same judgement S2 made
+// for bundleGatherFlow's title, applied to the screen at the other end.
+func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) {
 	plan := bundlePlatePlan(cards)
 	for _, p := range plan {
 		labels, plates, err := validateMdmk(ctx.Platform, p.str)
 		if err != nil || len(plates) == 0 {
 			// A verified card whose string can't fit a plate is unexpected; abort
 			// the whole set rather than engrave a partial bundle.
-			bundleAbortWarning(ctx, th, p)
+			bundleAbortWarning(ctx, th, cards, p)
 			return
 		}
 		cs := &ChoiceScreen{
@@ -389,7 +398,7 @@ func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
 			idx, ok := cs.Choose(ctx, th)
 			if !ok {
 				// Set-level abort: a partial bundle can't be used.
-				bundleAbortWarning(ctx, th, p)
+				bundleAbortWarning(ctx, th, cards, p)
 				return
 			}
 			if NewEngraveScreen(ctx, plates[idx]).Engrave(ctx, &engraveTheme) {
@@ -406,7 +415,7 @@ func bundleEngrave(ctx *Context, th *Colors, cards []bundleCard) {
 	// from the cards slice — no signature/param change (T5's call site is
 	// byte-unchanged).
 	if bundleShowMs1Reminder(cards) {
-		showError(ctx, th, "Engrave Bundle", bundleMs1ReminderText())
+		showError(ctx, th, title, bundleMs1ReminderText())
 	}
 }
 
@@ -425,11 +434,67 @@ func bundleShowMs1Reminder(cards []bundleCard) bool {
 
 // bundleAbortWarning informs the operator that aborting mid-bundle leaves a
 // partial, unusable backup; it records NO completed state (I-5). Dismiss-only.
-func bundleAbortWarning(ctx *Context, th *Colors, p bundlePlate) {
+func bundleAbortWarning(ctx *Context, th *Colors, cards []bundleCard, p bundlePlate) {
 	showError(ctx, th, "Bundle Incomplete",
-		fmt.Sprintf("Stopped at card %d of %d (%s). A partial bundle can't be used - "+
-			"discard the engraved plate(s) and start the bundle over.",
-			p.cardIdx, p.cardTotal, p.label))
+		bundleAbortWarningText(p, bundleSetCarriesASecret(cards)))
+}
+
+// bundleSetCarriesASecret reports whether this engrave set puts a SEED on steel:
+// true when any card is an ms1.
+//
+// It is bundleShowMs1Reminder's exact complement, stated in terms of it rather
+// than as a second hand-written scan, and derived from the cards for the same
+// R0-I2 reason -- the decision comes off the slice, so no other flow's call site
+// changes shape to carry it. The two are one question: an ms1 in the set means
+// the device cut the seed plate, which is simultaneously why no hand-engrave
+// reminder is owed and why an abort must not say "discard".
+func bundleSetCarriesASecret(cards []bundleCard) bool {
+	return !bundleShowMs1Reminder(cards)
+}
+
+// bundleAbortWarningText is what an interrupted operator reads. It replaces
+//
+//	"A partial bundle can't be used - discard the engraved plate(s) and start
+//	 the bundle over."
+//
+// which was wrong in two directions at once.
+//
+// (1) "DISCARD" IS AN INSTRUCTION TO BIN A SECRET. Correct for a public plate;
+// for one carrying a seed it tells the operator to put their key in the rubbish,
+// and nothing in the sentence distinguished them. Full mode cuts the ms1 seed
+// plate FIRST, so at almost any abort in a full build the plate already on the
+// bench is exactly the one that must not be discarded. This is not a new S5
+// requirement -- it corrects text that is WRONG TODAY on a device that engraves
+// seeds. The word is DESTROY and the method is named, because "destroy" on its
+// own is a word an operator satisfies by putting the plate somewhere else. It is
+// said ONLY for a set that carries a seed: a warning that cries DESTROY over an
+// md1 chunk is a warning that gets ignored on the run where it matters.
+//
+// (2) "START THE BUNDLE OVER" THROWS AWAY WORK THAT IS STILL GOOD. The tail cuts
+// 6 to 9 plates over hours, nothing records which were cut, and a power loss
+// loses that state -- but the encoders are DETERMINISTIC (no rand in md/, mk/ or
+// codex32/, and mk's chunk_set_id derives from the bytecode rather than from
+// randomness), so re-running the same inputs mints byte-identical plates and only
+// the missing ones need cutting. TestReRunMintsByteIdenticalPlates pins the
+// property; this is where the operator is told it exists.
+//
+// AND THIS IS WHERE IT HAS TO BE SAID. The restore document carries the set
+// inventory, and it is printed at the end of a SUCCESSFUL run -- an operator
+// whose engrave died never reaches it. This modal is the only screen they get.
+//
+// Its length is gated by the F-185 class check (gui/modal_fits_test.go): the body
+// scrolls, nothing on the frame says so, and this machine has no button that
+// scrolls it.
+func bundleAbortWarningText(p bundlePlate, secret bool) string {
+	msg := fmt.Sprintf("Stopped at card %d of %d (%s). This set is not a usable backup yet.\n"+
+		"To finish it, run this again and give the same answers: it cuts the same "+
+		"plates, byte for byte, so you only cut the ones you are missing.\n",
+		p.cardIdx, p.cardTotal, p.label)
+	if secret {
+		return msg + "If you throw any of it away instead, a plate with your seed on it " +
+			"must be DESTROYED, not binned: cut it up or grind the words off."
+	}
+	return msg + "No plate in this set carries a seed."
 }
 
 // bundleMs1ReminderText is the end-of-bundle reminder that the SECRET ms1

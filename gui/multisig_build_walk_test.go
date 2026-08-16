@@ -222,6 +222,7 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			{needle: "Which md1?", downs: 0},               // Full policy md1
 		}
 		reviewFrame := ""
+		reviewPaged := ""
 		for _, s := range rest {
 			content, ok := pumpUntil(frame, s.needle, 64)
 			if !ok {
@@ -234,6 +235,30 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			if ink() < buildWalkRasterFloor {
 				t.Errorf("%q drew only %d ink pixels (floor %d, title-only %d)",
 					s.needle, ink(), buildWalkRasterFloor, floorFor)
+			}
+			if s.needle == "Policy stub" {
+				// PAGE THE REVIEW THE WAY AN OPERATOR MUST, and this is a fact about
+				// the screen rather than test thoroughness. §0.1 clause 3 puts the
+				// provenance and the origin announcement on the confirmation surface,
+				// which on a screen confirmable from any page means PAGE ONE -- and
+				// that header plus the stub fills it. Measured on this walk: page one
+				// ends at "@0, no fingerprint:", so the first key begins on page two.
+				// The header cannot be moved to make room for the keys without
+				// breaking clause 3, so the keys are below and the FIRST LINE of the
+				// screen is what tells the operator to go and read them.
+				reviewPaged = content
+				for i := 0; i < 12; i++ {
+					click(&ctx.Router, Button2)
+					page, ok := frame()
+					if !ok || strings.Contains(reviewPaged, page) {
+						break
+					}
+					reviewPaged += page
+					if ink() < buildWalkRasterFloor {
+						t.Errorf("policy review page %d drew only %d ink pixels (floor %d)",
+							i+2, ink(), buildWalkRasterFloor)
+					}
+				}
 			}
 			click(&ctx.Router, Button3)
 			frame()
@@ -255,6 +280,27 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 					"irreversible engrave without being told which derivation path the "+
 					"device chose for them.", want, reviewFrame)
 			}
+		}
+
+		// AND IT MUST HAVE SHOWN THE KEYS IT IS ASKING ABOUT (S5). This is the
+		// PRODUCTION proof, and it is here rather than only in
+		// TestBuildReviewShowsTheKeysItIsAskingToConfirm because that test calls
+		// buildReviewLines directly: it would keep passing if the FLOW handed the
+		// screen an empty key set, which is exactly the shipped defect wearing a
+		// new parameter.
+		//
+		// The instruction is asserted on PAGE ONE, because Button3 confirms from
+		// there and a line the operator can commit past is a line that does not
+		// exist. The keys themselves are asserted across the pages the walk
+		// actually turned.
+		if !uiContains(reviewFrame, "Check each key below") {
+			t.Errorf("the Policy Review's FIRST page does not tell the operator to "+
+				"check the keys, and Button3 confirms from that page:\n%q", reviewFrame)
+		}
+		if !uiContains(reviewPaged, "xpub") {
+			t.Errorf("the Policy Review drew no key on ANY of its pages. The operator "+
+				"is being asked to confirm a wallet policy whose contents this screen "+
+				"never states:\n%q", reviewPaged)
 		}
 
 		// The EXPERIMENTAL warning: hold to confirm is the only route past it.

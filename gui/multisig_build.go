@@ -268,7 +268,24 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (6) Review the (stub, slots) ordering handle (I-ORDER), carrying S1's §0.1
 	// announcement of which payload cards filled which slots. Back -> abort.
-	if !buildReviewFlow(ctx, th, p.Script, stub, slots, p.IncludeFp,
+	//
+	// AND THE KEYS, from S5. Before this the screen showed "@0 (no fp)" on the
+	// default path, so the operator confirmed a wallet policy whose contents they
+	// had never seen and the EXPERIMENTAL warning two screens later asked them to
+	// compare it against a coordinator with nothing on the device to compare.
+	//
+	// A policy whose keys cannot be shown is NOT engraved. §0.1 clause 2 is the
+	// rule: permissiveness stops where a wrong assumption would be invisible in
+	// every artifact, and a review screen that silently omits a slot's key is that
+	// invisibility manufactured on purpose.
+	slotKeys, kerr := buildSlotKeyStrings(assembledMd1, self, cosigners)
+	if kerr != nil {
+		showError(ctx, th, "Build Policy",
+			"Couldn't show the keys this policy holds, so it was not engraved. Build "+
+				"again; if it happens twice, rewrite the payload on the host with `me sysw pack`.")
+		return
+	}
+	if !buildReviewFlow(ctx, th, p.Script, stub, slots, slotKeys, p.IncludeFp,
 		buildProvenanceLines(origins, len(mk1s))) {
 		return
 	}
@@ -311,7 +328,16 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 
 	// (8) Full vs watch-only.
-	modeChoice := &ChoiceScreen{Title: "Engrave Mode", Lead: "What to engrave?", Choices: []string{"Full (seed + keys)", "Watch-only (keys)"}}
+	//
+	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT (S5). A BIP-39 passphrase is a
+	// required spending factor and is never engraved, so on a build that used one,
+	// "Full (seed + keys)" tells the operator that a partial backup is a complete
+	// one. The label is ASKED OF THE REGISTRY rather than tracked beside it: SPEC
+	// 4.1 makes the passphrase per-seed, so the honest question is about the set
+	// of pairs this flow actually holds, and one passphrased leg among three is
+	// enough.
+	usedPassphrase := reg.usesPassphrase()
+	modeChoice := &ChoiceScreen{Title: "Engrave Mode", Lead: "What to engrave?", Choices: []string{buildFullModeLabel(usedPassphrase), "Watch-only (keys)"}}
 	modeSel, ok := modeChoice.Choose(ctx, th)
 	if !ok {
 		return
@@ -335,7 +361,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if !confirmReviewScreen(ctx, th, "Plate Count", buildPlateCensusLines(cardsOut)) {
 		return
 	}
-	bundleEngrave(ctx, th, cardsOut)
+	bundleEngrave(ctx, th, "Build Policy", cardsOut)
 
 	// (10) Offer verify-bundle — full policy only. The verify re-derives via the
 	// xpub seed-cross-match (findUserSlot), which a KEYLESS template has no xpub
@@ -386,7 +412,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// (11a) AND WHAT THE SET IS, afterwards. The restore doc is read years
 		// later, alone, often by someone who was not the operator, and a plate
 		// count is the one fact that tells them whether they are holding all of it.
-		multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut))
+		multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut, usedPassphrase))
 	}
 }
 
@@ -581,19 +607,14 @@ func templateConsentFlow(ctx *Context, th *Colors, tmplMd1 []string) bool {
 // the shown stub/per-slot fingerprints against their coordinator BEFORE funding.
 // Hold to confirm; Back/ConfirmNo returns false and the caller ABORTS the
 // engrave. There is no skip/setting path. Mirrors childSeedWarning.
+//
+// The BODY is a separate function so the F-185 class check can render it without
+// driving the whole flow (gui/modal_fits_test.go).
 func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "EXPERIMENTAL",
-		// NO EM-DASH. This body carried one, and S2's whole-walk raster floor
-		// measured what that cost: 4973 ink pixels against a 5482 px title-only
-		// frame, i.e. the BODY DID NOT DRAW AT ALL on the one screen that is the
-		// operator's last chance to stop. F-78's "zero-pixel glyph" understates
-		// it: the glyph takes its whole line with it.
-		Body: "This device-authored multisig policy is NOT validated end-to-end. There is no " +
-			"coordinator or hardware round-trip. You MUST verify the assembled descriptor and the " +
-			"shown policy stub + per-slot fingerprints against your coordinator/wallet BEFORE funding. " +
-			"The fingerprint choice changes the policy id.\n\nHold button to confirm.",
-		Icon: assets.IconHammer,
+		Body:  multisigBuildExperimentalWarningBody(),
+		Icon:  assets.IconHammer,
 	}
 	for !ctx.Done {
 		dims := ctx.Platform.DisplaySize()
@@ -607,6 +628,51 @@ func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
 		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
 	}
 	return false
+}
+
+// multisigBuildExperimentalWarningBody is the warning's text.
+//
+// IT USED TO TEACH A CHECK THAT CANNOT CHECK. The shipped body said "verify the
+// assembled descriptor and the shown policy stub + per-slot fingerprints against
+// your coordinator/wallet BEFORE funding", and the fingerprint half of that is
+// void twice over:
+//
+//   - fingerprints are OMITTED BY DEFAULT. buildFingerprintChoice offers
+//     Omit first, so on the default path every slot on the review screen reads
+//     "no fingerprint" and there is nothing to compare at all.
+//   - present, they are CARD-SELF-DECLARED AND UNBOUND TO THE KEY (mk/mk.go).
+//     cosignerFromCard reads Fingerprint off the card string; nothing derives it
+//     from the xpub beside it. An attacker who substitutes a key writes the
+//     matching fingerprint next to it at no cost, and the operator's comparison
+//     passes on the forged card.
+//
+// A ritual that cannot fail is worse than silence: it spends the operator's
+// attention and hands back a false negative. So this asks for a comparison that
+// CAN fail -- the keys or the descriptor, against a wallet this device did not
+// author -- states that a matching fingerprint is not that comparison and why,
+// and names the check that actually settles it. The fingerprint choice's effect
+// on the policy id has moved to the review screen, which is where the choice is
+// shown and where an operator can still act on it.
+//
+// NO EM-DASH. This body carried one, and S2's whole-walk raster floor measured
+// what that cost: 4973 ink pixels against a 5482 px title-only frame, i.e. the
+// BODY DID NOT DRAW AT ALL on the one screen that is the operator's last chance
+// to stop. F-78's "zero-pixel glyph" understates it: the glyph takes its whole
+// line with it.
+//
+// ITS LENGTH IS GATED, not judged (F-185). A modal's body scrolls and nothing on
+// the frame says so, and this machine has no button that scrolls it, so a
+// sentence past the fold is a sentence the operator is never told exists.
+// gui/modal_fits_test.go renders this body and compares the DRAWN FRAME against
+// this string, with 80 characters of headroom to spare.
+func multisigBuildExperimentalWarningBody() string {
+	return "Nothing outside this device has checked this policy. Before you fund it, " +
+		"compare the keys you just reviewed, or the descriptor on the restore doc, " +
+		"against the same wallet in your coordinator.\n" +
+		"A matching fingerprint is not that check: a card states its own, and nothing " +
+		"binds it to the key.\n" +
+		"What settles it is restoring these plates in your coordinator and seeing your " +
+		"own first receive address.\n\nHold button to confirm."
 }
 
 // buildCosignerCards filters the gathered cards down to EXACTLY `want` cosigner
@@ -1318,19 +1384,52 @@ func emptyOriginSlot(all []md.MultisigCosigner) (int, bool) {
 // `script` drives §0.1a's ORIGIN announcement, which is the second assumption on
 // this screen and the one nobody owned until 2026-08-15. It sits with the
 // provenance line, above the stub, for the same clause-3 reason.
-func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) []string {
-	lines := append([]string{}, provenance...)
+//
+// `slotKeys` IS THE POLICY'S CONTENTS, and until S5 this screen did not show
+// them. It printed "@0 fp xxxxxxxx", or on the DEFAULT path -- fingerprints are
+// omitted by default -- "@0 (no fp)", and nothing else. So the last screen before
+// an irreversible engrave asked the operator to confirm a wallet policy whose
+// keys they had never seen, and the EXPERIMENTAL warning one screen later told
+// them to compare it against their coordinator with nothing on the device to
+// compare. The keys are printed IN FULL, base58, the way an mk1 card and a
+// coordinator both spell them: a truncated or re-encoded form is a comparison
+// the operator cannot finish.
+//
+// THE INSTRUCTION IS PREPENDED, not appended, and that is the census NOTE's
+// precedent rather than a preference. confirmReviewScreen is confirmable from
+// ANY page (Button3 continues wherever the pager is), so a line added at the
+// bottom can be committed past unread; the plate census puts its note first for
+// exactly this reason.
+func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string) []string {
+	lines := []string{
+		"Check each key below against your coordinator, or against the card it came " +
+			"from, before you continue.",
+	}
+	lines = append(lines, provenance...)
 	lines = append(lines, buildOriginAnnouncement(script)...)
 	lines = append(lines,
 		fmt.Sprintf("Policy stub: %x", stub),
 		"Slots:",
 	)
-	for _, s := range slots {
+	for i, s := range slots {
+		label := fmt.Sprintf("@%d, no fingerprint", s.Index)
 		if s.FpPresent {
-			lines = append(lines, fmt.Sprintf("@%d  fp %x", s.Index, s.Fingerprint))
-		} else {
-			lines = append(lines, fmt.Sprintf("@%d  (no fp)", s.Index))
+			label = fmt.Sprintf("@%d, fingerprint %x", s.Index, s.Fingerprint)
 		}
+		key := ""
+		if i < len(slotKeys) {
+			key = slotKeys[i]
+		}
+		if key == "" {
+			// No key to show. The production flow cannot reach this -- it refuses
+			// before the review when buildSlotKeyStrings cannot map a slot -- but a
+			// caller that passes none gets a slot list, not a slot list that looks
+			// like it carried a key and lost it.
+			lines = append(lines, label)
+			continue
+		}
+		lines = append(lines, label+":")
+		lines = append(lines, chunkString(key, 20)...)
 	}
 	if includeFp {
 		lines = append(lines, "Fingerprints INCLUDED on every slot.")
@@ -1339,6 +1438,67 @@ func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInf
 	}
 	lines = append(lines, "Fingerprint choice changes the policy id, so match your coordinator.")
 	return lines
+}
+
+// buildSlotKeyStrings maps every slot of the ASSEMBLED policy back to the base58
+// xpub string the operator holds for it, so the review screen states what the
+// bytes carry rather than what the flow intended to put in them.
+//
+// IT READS THE ASSEMBLED md1, deliberately, rather than re-walking
+// assembleBuildPolicy's slot loop. A second copy of "which key fills which slot"
+// is how a review screen starts describing a different wallet from the one being
+// engraved: the two copies agree until one of them is edited. Here the slot order
+// comes from the md1's own expansion and each key is matched by its 65 bytes
+// (chain code || compressed pubkey), so the screen cannot disagree with the
+// plate unless the plate disagrees with itself.
+//
+// A SLOT IT CANNOT MAP IS AN ERROR, not a blank line. The whole point of the
+// screen is that the operator sees the policy's contents before confirming it; a
+// slot rendered empty would be the original defect with extra steps, so the flow
+// refuses instead.
+func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.Card) ([]string, error) {
+	_, keys, err := md.ExpandWalletPolicyChunks(assembled)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		cc  [32]byte
+		pk  [33]byte
+		str string
+	}
+	cands := make([]candidate, 0, len(self)+len(cosigners))
+	add := func(x string) {
+		cc, pk, _, derr := decodeXpubBytes(x)
+		if derr != nil {
+			return
+		}
+		cands = append(cands, candidate{cc: cc, pk: pk, str: x})
+	}
+	for _, h := range self {
+		add(h.Xpub)
+	}
+	for _, c := range cosigners {
+		add(c.Xpub)
+	}
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		if !k.XpubPresent {
+			return nil, fmt.Errorf("multisig build: slot @%d carries no key to show", i)
+		}
+		found := false
+		for _, c := range cands {
+			if slices.Equal(c.cc[:], k.Xpub[0:32]) && slices.Equal(c.pk[:], k.Xpub[32:65]) {
+				out[i] = c.str
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("multisig build: slot @%d holds a key none of this "+
+				"build's inputs accounts for", i)
+		}
+	}
+	return out, nil
 }
 
 // buildOriginAnnouncement is §0.1a: the device says WHICH derivation path it
@@ -1404,8 +1564,8 @@ func buildOriginAnnouncement(script md.MultisigScript) []string {
 // buildReviewFlow displays the read-only (stub, slots) review and lets the
 // operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
 // paged read-only restore-doc screen idiom.
-func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) bool {
-	lines := buildReviewLines(script, stub, slots, includeFp, provenance)
+func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string) bool {
+	lines := buildReviewLines(script, stub, slots, slotKeys, includeFp, provenance)
 	return confirmReviewScreen(ctx, th, "Policy Review", lines)
 }
 

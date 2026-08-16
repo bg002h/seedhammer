@@ -269,7 +269,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (7) Engrave (full = ms1 + one mk1 per matched slot + md1; watch-only drops
 	// the ms1 and bundleEngrave shows the hand-engrave reminder instead).
-	bundleEngrave(ctx, th, cardsOut)
+	bundleEngrave(ctx, th, "Engrave Multisig", cardsOut)
 
 	// (8) Offer the verify-bundle.
 	//
