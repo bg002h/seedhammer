@@ -68,6 +68,15 @@ export const NEEDLE_PICK_CARD = "Use payload card"; // gui/multisig_build_payloa
 // S2/D-4. The cosigner gather's own title, passed by the Build flow into the
 // shared gatherer. Single-site in gui/multisig_build.go per needle_test.go.
 export const NEEDLE_GATHER = "Cosigner Keys"; // gui/multisig_build.go
+// S4's three screens, none of which this driver answered until 2026-08-16 — see
+// the three "SCREEN THIS DRIVER WALKED PAST" notes below.
+export const NEEDLE_SELF_SOURCE = "key on a card?"; // gui/multisig_build_slots.go
+export const NEEDLE_KEY_SOURCES = "Where each key comes from:"; // gui/multisig_build_slots.go
+export const NEEDLE_GATE_FAIL = "Key does not match seed"; // gui/multisig_build.go
+// The plate census, before the tail starts. The TITLE, not the body: "This
+// engraves" also occurs in gui/bip85.go, which is exactly the ambiguity the
+// pinned-needle list exists to catch.
+export const NEEDLE_CENSUS = "Plate Count"; // gui/multisig_build.go
 
 // The gather's BODY text, which is deliberately NOT a needle: it is drawn by the
 // shared gatherer for every caller and says nothing about which flow drew it.
@@ -158,6 +167,23 @@ async function runEngraveTail({ plates, pollMs = 75, settleMs = 150 }) {
   window.shRelease(...CONFIRM);
   await waitFor("What to engrave?");
   await tap(CONFIRM, 400);               // Full (seed + keys), row 0
+
+  // S4's PLATE CENSUS, the FOURTH screen this driver walked past. It is
+  // unconditional (confirmReviewScreen "Plate Count", gui/multisig_build.go step
+  // 9a) and sits between the mode choice and the first plate, so waiting for
+  // "Choose engraving" could only time out:
+  //
+  //   waitFor("Chooseengraving") timed out; screen reads "PlateCountThis
+  //   engraves9plates.ms1secretshare:1plate..."
+  //
+  // Read, then confirmed. The screen's own claim is compared against the plate
+  // stream the emulator produced, never against a count written in this file.
+  const censusScreen = await waitFor(NEEDLE_CENSUS);
+  const censusClaim = (() => {
+    const m = /Thisengraves(\d+)plates?\./.exec(squash(censusScreen));
+    return m ? Number(m[1]) : -1;
+  })();
+  await tap(CONFIRM, 400);
   await waitFor("Chooseengraving");
 
   let stall = 0, lastSteps = -1;
@@ -198,7 +224,7 @@ async function runEngraveTail({ plates, pollMs = 75, settleMs = 150 }) {
     }
     stall = 0; lastSteps = -1;
   }
-  return { census: JSON.parse(window.shToolpath.strings()), digests, acts };
+  return { census: JSON.parse(window.shToolpath.strings()), censusScreen, censusClaim, digests, acts };
 }
 
 async function goTo(program, max = 14) {
@@ -273,9 +299,10 @@ export function assertNoNFC(where) {
  *          equal the remaining slots (gui/multisig_build_payload.go:317-321), so
  *          this list is applied only while the picker is actually on screen.
  * @param {string}  [opts.seedFrom=null]  where the SELF seed comes from.
- *          null stops at "Input Seed", which is S1's gate and this walk's
- *          original end. "payload" takes the ClassMnemonic the cards blob
- *          carries (master A) with confirm-taps only.
+ *          null stops at the held slot's seed screen ("Seed for @S"), which is
+ *          S1's gate and this walk's original end. "payload" takes the
+ *          ClassMnemonic the cards blob carries (master A) with confirm-taps
+ *          only.
  * @param {boolean} [opts.engrave=false] drive past the review to a completed
  *          engrave and return the toolpath census.
  * @param {number}  [opts.plates=9]      runEngraveTail's LOOP BOUND — when the
@@ -377,8 +404,40 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   // needles. Anchoring on it as one would need a pin there first.)
   await choose(selfSlot, n, "Do you hold another slot?", `self slot @${selfSlot}`);
   await choose(0, 2, "Include key fingerprints?", "no further held slots");
-  await choose(includeFp ? 1 : 0, 2, GATHER_NOT_A_NEEDLE,
-    includeFp ? "include fingerprints" : "omit fingerprints");
+
+  // ─── THE S4 SCREEN THIS DRIVER WALKED PAST, and the reason it was never seen ─
+  //
+  // FOUND 2026-08-16 BY RUNNING THIS FILE, which is the only way it could have
+  // been found. S4 added buildSelfSourceFlow between the fingerprint picker and
+  // the gather; it is drawn whenever the payload can supply n cards
+  // (gui/multisig_build.go), and the delivered payload carries FOUR against this
+  // driver's default n=3. So from S4 onward this walk timed out here:
+  //
+  //   choosing omit fingerprints (row 0 of 2) did not land on "Scan a card, or
+  //   Done": screen reads "Isyour@0keyonacard?NO,JUSTMYSEEDYES,CHECKTHECARD..."
+  //
+  // walk_s4_gate.js answers the screen because S4 wrote it; this file and
+  // walk_s3_nested.js were both EDITED after S4 (they gained the multi-select
+  // taps above) and neither was RUN, so nothing noticed. CI does not run walks —
+  // it runs `GOOS=js go vet` and the static needle checks — which is exactly the
+  // blind spot the plan's §5 names.
+  //
+  // IT IS RACED, NOT ASSUMED. The question exists only on over-supply, so a
+  // caller at n=5 against this four-card payload legitimately never sees it.
+  // Waiting for it unconditionally would swap one hang for another — and racing
+  // is also what turns "the fp choice landed somewhere unexpected" into a named
+  // failure rather than a timeout, which is choose()'s post-condition kept.
+  await tap([240, rowY(includeFp ? 1 : 0, 2)], 300);   // the fp choice itself
+  await tap(CONFIRM, 400);
+  const afterFp = await raceFor([NEEDLE_SELF_SOURCE, GATHER_NOT_A_NEEDLE], 15000);
+  const selfSourceAsked = afterFp === NEEDLE_SELF_SOURCE;
+  if (selfSourceAsked) {
+    proven.push(NEEDLE_SELF_SOURCE);
+    // "NO, JUST MY SEED" is row 0: the operator's slot is DERIVED from their
+    // seed, which is what this driver has always built. Row 1 is S4's `both`
+    // slot and belongs to walk_s4_gate.js.
+    await choose(0, 2, GATHER_NOT_A_NEEDLE, "NO, JUST MY SEED");
+  }
 
   // THE GATHER, now fed entirely by the payload. The tally is read rather than
   // asserted against a hard-coded number: what matters to S1's gate is that the
@@ -443,7 +502,23 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   // the proof that the set resolved. With `seedFrom` unset the walk STOPS here,
   // which is S1's gate (plan §3 preamble, F-175) and what this driver did before
   // S2.
-  const screen = await waitFor("Input Seed");
+  //
+  // THE TITLE IS THE SLOT'S, NOT "Input Seed" — THE SECOND THING RUNNING THIS
+  // FILE FOUND (2026-08-16). `seedEntryTitle = "Input Seed"` is what every seed
+  // entry OUTSIDE the multisig build path uses (gui/derive_xpub.go); the build
+  // path asks per HELD SLOT and titles each screen for its slot,
+  // `seedEntryFlowTitled(ctx, th, "Seed for "+label, label)`
+  // (gui/multisig_build.go's buildSeedForSlot) — because with several seeds in
+  // one flow an unlabelled second prompt is indistinguishable from a repeat of
+  // the first. This driver had been waiting for the wrong title since that
+  // landed, and nothing noticed because nothing ran it:
+  //
+  //   waitFor("Input Seed") timed out; screen reads
+  //   "Wherefrom?FROMPAYLOADTYPEITSCANSeedfor@0"
+  //
+  // Anchoring on the slot title is also strictly stronger: it proves the flow
+  // reached THIS slot's entry rather than any seed screen in the firmware.
+  const screen = await waitFor(`Seed for @${selfSlot}`);
   const presentedAtEnd = assertNoNFC("after the cosigner set resolved");
 
   // ─── S2: past the seed, to a refusal or to a completed engrave ─────────────
@@ -459,7 +534,8 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
   // exercised at all: every Go test on this flow seeds mk1 chunks only, so
   // syswSeedPicker is "a menu of one and is skipped" and this screen never
   // appears. That is one of §0.1b's two ruled primary data entries.
-  let refusal = null, census = null, digests = [], acts = [], reviewScreen = null;
+  let refusal = null, census = null, digests = [], acts = [], reviewScreen = null,
+    keySourcesScreen = null, censusScreen = null, censusClaim = -1;
   if (seedFrom === "payload") {
     // "FROM PAYLOAD" is row 0 of three (FROM PAYLOAD / TYPE IT / SCAN) and is
     // the default, so CONFIRM alone takes it — but the ROW IS TAPPED anyway,
@@ -472,6 +548,30 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     await tap(CONFIRM, 400);
     await waitFor("Add a BIP-39 passphrase?");
     await tap(CONFIRM, 500);            // Skip is row 0
+
+    // ─── S4's KEY-SOURCES REVIEW, THE THIRD SCREEN THIS DRIVER WALKED PAST ───
+    //
+    // FOUND 2026-08-16 BY RUNNING THIS FILE, after the two above were fixed and
+    // it got one screen further each time. S4 added an UNCONDITIONAL review of
+    // the slot assignment between the gate and assembly
+    // (buildSlotSourceReviewFlow, gui/multisig_build.go step 4a), so racing
+    // straight for the policy stub could only ever time out:
+    //
+    //   none of ["Duplicate key","Policy stub"] appeared within 15000ms; screen
+    //   reads "KeysourcesWhereeachkeycomesfrom:@0yours:derivedfromyourseed..."
+    //
+    // Three screens, one cause: this file was edited by S5 and last RUN before
+    // S4. Racing on the gate's refusal too, so a `both`-slot failure arriving
+    // here is named rather than reported as a hang.
+    const beforeAssembly = await raceFor(
+      [NEEDLE_KEY_SOURCES, NEEDLE_GATE_FAIL, "Duplicate key"], 20000);
+    if (beforeAssembly !== NEEDLE_KEY_SOURCES) {
+      throw new Error(`the build did not reach the slot-source review: it reached ` +
+        `${JSON.stringify(beforeAssembly)}. Screen: ${JSON.stringify(window.shScreen())}`);
+    }
+    proven.push(NEEDLE_KEY_SOURCES);
+    keySourcesScreen = window.shScreen();
+    await tap(CONFIRM, 400);
 
     // THE FORK. Both outcomes are legitimate results of THIS payload: the
     // default taps take cards A@0 and A@1, and A@0 is master A's own account-0
@@ -501,6 +601,7 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
       if (engrave) {
         const r = await runEngraveTail({ plates, pollMs, settleMs });
         census = r.census; digests = r.digests; acts = r.acts;
+        censusScreen = r.censusScreen; censusClaim = r.censusClaim;
       }
     }
   }
@@ -528,12 +629,28 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     // Recorded so a reader can see for themselves that the gather text is
     // identical in the sibling flow, and therefore proves nothing alone.
     gatherTextIsNotEvidence: squash(gatherScreen).includes(squash(GATHER_NOT_A_NEEDLE)),
+    // OBSERVED, not configured: whether S4's slot-source question was drawn at
+    // all. It is a property of the payload against n, so it is reported rather
+    // than assumed, and `ok` below counts needles accordingly.
+    selfSourceAsked,
+    keySourcesScreen,
+    // The census SCREEN's own promise, and whether the recorder kept it. Both
+    // terms are the emulator's: one is what it said it would cut, the other is
+    // what it handed back after cutting.
+    censusScreen,
+    censusClaim,
+    censusHeld: census === null ? null : censusClaim === census.strings.length,
     // DATA, not a verdict (I-1). Reported so a reader can see the count; nothing
     // here compares it to anything.
     plateCount: census === null ? null : census.strings.length,
-    // SEVEN since D-4 gave the gather a needle of its own. The count is spelt
-    // out rather than derived from the array so that a needle silently dropped
-    // from the walk fails here instead of lowering the bar.
+    // THE NEEDLE TERMS ARE NAMED, NOT COUNTED, since 2026-08-16. `proven.length
+    // === 7` was the shape before, and it stopped working the moment the walk
+    // had legs of different lengths: S4's slot-source question is drawn only on
+    // over-supply, and the key-sources review is only reached when a seed was
+    // entered at all. A count then needs a term per leg, which is arithmetic
+    // standing in for the fact anybody cares about — WHICH needles were seen.
+    // Naming them keeps the protection (a needle silently dropped fails here)
+    // and says which one went missing.
     //
     // `ok` NAMES ITS OUTCOME, and CONTAINS ONLY TERMS THE EMULATOR WAS OBSERVED
     // TO PRODUCE (I-1). A run that expected the duplicate refusal is green when
@@ -556,7 +673,12 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, inclu
     // every machine with no toolchain and no skip path. `plates` survives only
     // as runEngraveTail's loop bound — when to stop watching, never whether it
     // was right.
-    ok: proven.length === 7 && presentedAtEnd === 0 && cardsGathered > 0 && selected &&
+    ok: [NEEDLE_FRONT_DOOR, NEEDLE_TEMPLATE, NEEDLE_N, NEEDLE_SLOT,
+      NEEDLE_PICK, NEEDLE_PICK_CARD, NEEDLE_GATHER].every((x) => proven.includes(x)) &&
+      (!selfSourceAsked || proven.includes(NEEDLE_SELF_SOURCE)) &&
+      (seedFrom === null || proven.includes(NEEDLE_KEY_SOURCES)) &&
+      !proven.includes(NEEDLE_GATE_FAIL) &&
+      presentedAtEnd === 0 && cardsGathered > 0 && selected &&
       (seedFrom === null
         || (expect === "duplicate" && refusal !== null)
         || (expect === "engrave" && !engrave && reviewScreen !== null)

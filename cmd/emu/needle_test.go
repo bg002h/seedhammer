@@ -47,6 +47,13 @@ var buildFlowNeedles = []struct {
 	{"Choose policy type", "gui/multisig_build.go"},
 	{"How many keys (n)?", "gui/multisig_build.go"},
 	{"Which slot is your key?", "gui/multisig_build.go"},
+	// S5's MULTI-SELECT @S picker, and these two are the only screens in the
+	// firmware that can prove a walk built a policy the operator holds SEVERAL
+	// slots of. Before S5 the picker was single-select and neither existed; the
+	// three earlier drivers tap "NO, THAT IS ALL" on the first of them and so
+	// never reach the second at all.
+	{"Do you hold another slot?", "gui/multisig_build.go"},
+	{"Which other slot is yours?", "gui/multisig_build.go"},
 	// S2/D-4. The cosigner gather's own title, which until D-4 did not exist:
 	// the screen was titled for a DIFFERENT program by the shared gatherer, so
 	// the one screen where the payload's cards become visible could not be
@@ -76,11 +83,6 @@ var buildFlowNeedles = []struct {
 	// (§0.1a made the nested default 1h rather than a warning about 2h), so the
 	// needle moved with it.
 	{"BIP-48 for nested segwit (script type 1h)", "gui/multisig_build.go"},
-	// The NAME is S3's whole subject: scriptName's nested arm. It reaches the
-	// restore doc through desc4Display, and gui/multisig_restore.go deliberately
-	// does NOT quote it in a comment, because this counter matches source bytes
-	// and a quoted literal would cost the needle its uniqueness.
-	{"P2SH-P2WSH", "gui/md1_inspect.go"},
 	// S4. The three screens that make the slot-assignment model and its gate
 	// observable from outside, each measured single-site.
 	//
@@ -88,6 +90,11 @@ var buildFlowNeedles = []struct {
 	// because the production string is a format ("Is your @%d key on a card?")
 	// and a needle has to be a substring that literally occurs in the source.
 	{"key on a card?", "gui/multisig_build_slots.go"},
+	// Its PLURAL arm, which only a multi-slot build can reach. The two arms are
+	// deliberately different substrings — buildSelfSourceLead says so in its own
+	// comment — so "keys on cards?" adds no second site to the singular needle and
+	// each is pinned on its own.
+	{"keys on cards?", "gui/multisig_build_slots.go"},
 	// The pre-assembly REVIEW's opening line. It proves the operator was shown
 	// where every key came from before anything was assembled.
 	{"Where each key comes from:", "gui/multisig_build_slots.go"},
@@ -99,6 +106,31 @@ var buildFlowNeedles = []struct {
 	// engraves" also occurs in gui/bip85.go (measured, 2 sites), which is
 	// exactly the ambiguity this list exists to catch.
 	{"Plate Count", "gui/multisig_build.go"},
+}
+
+// contentNeedles identify WHAT WAS BUILT, never WHICH FLOW built it.
+//
+// RECLASSIFIED BY F-190's COUNTER, not by taste. "P2SH-P2WSH" is spelt in
+// exactly one production file, so the substring counter above calls it unique
+// and it sat in buildFlowNeedles for that reason. The flow counter
+// (needle_flow_test.go) says otherwise: it is drawn by scriptName, which reaches
+// the restore doc, and the restore doc is shown by the BUILD path and the SUPPLY
+// path alike. So it proves a nested-segwit policy was built and proves nothing at
+// all about which flow the walk is in.
+//
+// That is not a demotion of its value. S3's walk needs exactly this string,
+// because a tap on template row 1 is indistinguishable from a tap on row 0 unless
+// something downstream says which landed. The rule is that a content needle may
+// only ever be asserted ALONGSIDE a flow needle, never instead of one — which is
+// what walk_s3_nested.js already does.
+//
+// TestTheTwoCountersDisagreeOnlyWhereRecorded holds both halves: one source site,
+// several drawing flows. If either ever stops being true, the classification is
+// wrong and should move rather than be edited around.
+var contentNeedles = []struct {
+	text string
+}{
+	{"P2SH-P2WSH"},
 }
 
 // decoyNeedles are strings a stage author reaches for FIRST and must not use.
@@ -234,6 +266,12 @@ func TestWalkNeedleLiteralsAreAllPinned(t *testing.T) {
 	}
 	pinned := map[string]bool{}
 	for _, n := range buildFlowNeedles {
+		pinned[n.text] = true
+	}
+	// Content needles are pinned too — a walk may declare one, it just may not
+	// stand alone as proof of WHICH FLOW. What must never happen is a NEEDLE_*
+	// pointing at a string nobody has measured at all.
+	for _, n := range contentNeedles {
 		pinned[n.text] = true
 	}
 

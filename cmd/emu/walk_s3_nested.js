@@ -66,6 +66,13 @@ export const NEEDLE_NESTED_NOTE = "BIP-48 for nested segwit (script type 1h)"; /
 // The NAME is the gate's subject: scriptName's nested-segwit arm, one production
 // site in gui/md1_inspect.go, reaching the screen through desc4Display.
 export const NEEDLE_NESTED_NAME = "P2SH-P2WSH"; // gui/md1_inspect.go
+// S4's screens, neither of which this driver answered until 2026-08-16 — see the
+// two "SCREEN THIS DRIVER WALKED PAST" notes below.
+export const NEEDLE_SELF_SOURCE = "key on a card?"; // gui/multisig_build_slots.go
+export const NEEDLE_KEY_SOURCES = "Where each key comes from:"; // gui/multisig_build_slots.go
+export const NEEDLE_GATE_FAIL = "Key does not match seed"; // gui/multisig_build.go
+// The plate census, before the tail starts.
+export const NEEDLE_CENSUS = "Plate Count"; // gui/multisig_build.go
 
 // NOT needles, and named here so a future author who reaches for one finds out
 // why before trusting it.
@@ -199,6 +206,18 @@ async function runEngraveTail({ pollMs = 75, settleMs = 150 }) {
   window.shRelease(...CONFIRM);
   await waitFor("What to engrave?");
   await tap(CONFIRM, 400);               // Full (seed + keys), row 0
+
+  // S4's PLATE CENSUS, the other screen this driver walked past. Unconditional
+  // (confirmReviewScreen "Plate Count", gui/multisig_build.go step 9a), so
+  // waiting for "Choose engraving" straight after the mode choice could only
+  // time out. Read, then confirmed; the claim is checked against the plate
+  // stream the emulator produced, never against a count written in this file.
+  const censusScreen = await waitFor(NEEDLE_CENSUS);
+  const censusClaim = (() => {
+    const m = /Thisengraves(\d+)plates?\./.exec(squash(censusScreen));
+    return m ? Number(m[1]) : -1;
+  })();
+  await tap(CONFIRM, 400);
   await waitFor("Chooseengraving");
 
   let stall = 0, lastSteps = -1, reachedVerifyOffer = false;
@@ -240,7 +259,8 @@ async function runEngraveTail({ pollMs = 75, settleMs = 150 }) {
     }
     stall = 0; lastSteps = -1;
   }
-  return { census: JSON.parse(window.shToolpath.strings()), digests, acts, reachedVerifyOffer };
+  return { census: JSON.parse(window.shToolpath.strings()), censusScreen, censusClaim,
+    digests, acts, reachedVerifyOffer };
 }
 
 /**
@@ -319,7 +339,34 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0,
   // needles. Anchoring on it as one would need a pin there first.)
   await choose(selfSlot, n, "Do you hold another slot?", `self slot @${selfSlot}`);
   await choose(0, 2, "Include key fingerprints?", "no further held slots");
-  await choose(0, 2, GATHER_BODY_NOT_A_NEEDLE, "omit fingerprints");
+
+  // ─── THE S4 SCREEN THIS DRIVER WALKED PAST ─────────────────────────────────
+  //
+  // FOUND 2026-08-16 BY RUNNING THIS FILE. S4 added buildSelfSourceFlow between
+  // the fingerprint picker and the gather, drawn whenever the payload can supply
+  // n cards (gui/multisig_build.go), and the delivered payload carries FOUR
+  // against this driver's default n=3. So from S4 onward this walk timed out
+  // here with the same message walk_build_policy.js produced:
+  //
+  //   choosing omit fingerprints (row 0 of 2) did not land on "Scan a card, or
+  //   Done": screen reads "Isyour@0keyonacard?NO,JUSTMYSEEDYES,CHECKTHECARD..."
+  //
+  // Both files were EDITED after S4 (they gained the multi-select taps above) and
+  // neither was RUN. CI runs `GOOS=js go vet` and the static needle checks and no
+  // walk at all, which is the blind spot the plan's §5 names.
+  //
+  // RACED, NOT ASSUMED: the question exists only on over-supply, so a caller
+  // whose n exceeded the payload's card count legitimately never sees it.
+  await tap([240, rowY(0, 2)], 300);     // omit fingerprints, row 0
+  await tap(CONFIRM, 400);
+  const afterFp = await raceFor([NEEDLE_SELF_SOURCE, GATHER_BODY_NOT_A_NEEDLE], 15000);
+  const selfSourceAsked = afterFp === NEEDLE_SELF_SOURCE;
+  if (selfSourceAsked) {
+    proven.push(NEEDLE_SELF_SOURCE);
+    // "NO, JUST MY SEED" is row 0: this slot is DERIVED from the operator's seed,
+    // which is what S3's walk has always built. Row 1 is S4's `both` slot.
+    await choose(0, 2, GATHER_BODY_NOT_A_NEEDLE, "NO, JUST MY SEED");
+  }
 
   await waitFor(NEEDLE_GATHER);
   proven.push(NEEDLE_GATHER);
@@ -363,13 +410,31 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0,
   // ClassMnemonic). "FROM PAYLOAD" is row 0 of three and is the default; the row
   // is tapped anyway, because a default that silently moves is how a walk ends up
   // driving the keyboard while reporting it drove the payload.
-  await waitFor("Input Seed");
+  // THE TITLE IS THE SLOT'S, not `seedEntryTitle` ("Input Seed"): the build path
+  // asks per HELD SLOT and titles each screen for its slot (buildSeedForSlot,
+  // gui/multisig_build.go). Same class of drift as the missing S4 screen above,
+  // found the same way -- by running this file on 2026-08-16.
+  await waitFor(`Seed for @${selfSlot}`);
   await tap([240, rowY(0, 3)], 300);
   await tap(CONFIRM, 400);
   await waitFor("systemwide payload");
   await tap(CONFIRM, 400);
   await waitFor("Add a BIP-39 passphrase?");
   await tap(CONFIRM, 500);               // Skip is row 0
+
+  // S4's KEY-SOURCES REVIEW, the other screen this driver walked past. It is
+  // UNCONDITIONAL (buildSlotSourceReviewFlow, step 4a of
+  // gui/multisig_build.go), so racing straight for the policy stub could only
+  // ever time out. Same cause as the two above: edited by S5, last run before S4.
+  const beforeAssembly = await raceFor(
+    [NEEDLE_KEY_SOURCES, NEEDLE_GATE_FAIL, "Duplicate key"], 20000);
+  if (beforeAssembly !== NEEDLE_KEY_SOURCES) {
+    throw new Error(`the build did not reach the slot-source review: it reached ` +
+      `${JSON.stringify(beforeAssembly)}. Screen: ${JSON.stringify(window.shScreen())}`);
+  }
+  proven.push(NEEDLE_KEY_SOURCES);
+  const keySourcesScreen = window.shScreen();
+  await tap(CONFIRM, 400);
 
   // THE FORK. Both are legitimate outcomes of this payload; only one is this
   // walk's, and reaching the other is a FAILURE rather than a silent retry.
@@ -443,12 +508,31 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0,
     namedOnRestoreDoc,
     onRestoreDocScreen,
     claimsLegacyToo,
+    // OBSERVED, not configured: whether S4's slot-source question was drawn. It
+    // is a property of the payload against n.
+    selfSourceAsked,
+    keySourcesScreen,
+    // The census SCREEN's own promise and whether the recorder kept it. Both
+    // terms are the emulator's.
+    censusScreen: tail.censusScreen,
+    censusClaim: tail.censusClaim,
+    censusHeld: tail.censusClaim === tail.census.strings.length,
     // `ok` NAMES ITS OUTCOME and every term is something the EMULATOR produced:
-    // nine needles observed on screen, zero records across the reader, a
+    // the flow anchors observed on screen, zero records across the reader, a
     // payload-fed set that had to be narrowed, the nested-segwit name on the
-    // restore doc, and no unattributed strings in the recorder's own
-    // attribution. The plate COUNT is deliberately absent.
-    ok: proven.length === 9 && cardsGathered > 0 && selected &&
+    // restore doc, and no unattributed strings in the recorder's own attribution.
+    // The plate COUNT is deliberately absent.
+    //
+    // NAMED, NOT COUNTED, since 2026-08-16: S4's slot-source question is drawn
+    // only on over-supply, so a bare `proven.length` needs a term per leg — which
+    // is arithmetic standing in for the fact anybody cares about, WHICH needles
+    // were seen. Naming them keeps the protection and says which went missing.
+    ok: [NEEDLE_FRONT_DOOR, NEEDLE_TEMPLATE, NEEDLE_N, NEEDLE_SLOT, NEEDLE_PICK,
+      NEEDLE_PICK_CARD, NEEDLE_GATHER, NEEDLE_KEY_SOURCES, NEEDLE_NESTED_NOTE,
+      NEEDLE_NESTED_NAME].every((x) => proven.includes(x)) &&
+      (!selfSourceAsked || proven.includes(NEEDLE_SELF_SOURCE)) &&
+      !proven.includes(NEEDLE_GATE_FAIL) &&
+      cardsGathered > 0 && selected && tail.censusClaim === tail.census.strings.length &&
       namedOnRestoreDoc && onRestoreDocScreen && !claimsLegacyToo &&
       tail.reachedVerifyOffer && tail.census.unattributed === 0,
   };
