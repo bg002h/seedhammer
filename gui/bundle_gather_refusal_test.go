@@ -46,11 +46,13 @@ func TestGatherPendingRefusalIsReadableFromBuild(t *testing.T) {
 		})
 		defer quit()
 
-		// template wsh -> n=3 -> k=2 -> @0 -> fp omit.
-		for i, downs := range []int{0, 1, 1, 0, 0} {
+		// template wsh -> n=3 -> k=2 -> @0 -> no further slots -> fp omit.
+		// (S5's @S picker is multi-select; the "another slot?" default row is
+		// "NO, THAT IS ALL", so the held set stays {@0}.)
+		for i, downs := range []int{0, 1, 1, 0, 0, 0} {
 			stage := []string{"Choose policy type", "How many keys (n)?",
 				"Required signatures (k of 3)?", "Which slot is your key?",
-				"Include key fingerprints?"}[i]
+				"Do you hold another slot?", "Include key fingerprints?"}[i]
 			if c, ok := pumpUntil(frame, stage, 64); !ok {
 				t.Fatalf("%s not shown; got %q", stage, c)
 			}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"slices"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -79,7 +80,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// answering a question the device already knew the answer to.
 	selfSource := slotFromSeed
 	if state == cosignerSourceLoaded && len(supply) >= p.N {
-		src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlots[0])
+		src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlots)
 		if !ok {
 			return
 		}
@@ -342,17 +343,17 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// readback, already established at engrave. So a template engrave skips the
 	// cross-match verify offer.
 	//
-	// ONE LEG, NAMED AS A LIMIT RATHER THAN LEFT AS A SURPRISE. multisigVerifyFlow
-	// takes a single bundle and recovers the operator's origin through
-	// findUserSlot, which returns the FIRST slot a seed matches -- so it cannot
-	// today verify the second and third legs of a multi-held-slot build. Every
-	// shape this flow can currently produce has exactly one leg (the @S picker is
-	// single-select), so this is today's behaviour unchanged; the block that lands
-	// the multi-select picker owns making the verify per-leg.
+	// PER LEG, from S5. multisigVerifyFlow reads back EVERY engraved key plate,
+	// re-derives every leg the operator's seeds account for, and requires the
+	// pairing to be a bijection -- so a three-plate build cannot report Verify OK
+	// having compared one. `full` is the mode, which is what says whether an ms1
+	// must be hand-typed; the legs themselves are re-derived from a RE-TYPED seed
+	// rather than handed over from here (§7.4: comparing the engrave source
+	// against itself passes unconditionally).
 	if !template && len(legs) > 0 {
 		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-			multisigVerifyFlow(ctx, th, legs[0], legs[0].MS1 != "")
+			multisigVerifyFlow(ctx, th, full)
 		}
 	}
 
@@ -674,6 +675,102 @@ func multisigSelfSlotChoices(n int) []string {
 	return out
 }
 
+// multisigRemainingSlotChoices lists the slots NOT yet held, with the slot each
+// row maps to. The two slices are index-aligned, so a picker's chosen row can
+// never be read as a slot number directly -- which it is not, once @0 has been
+// taken and the first row means @1.
+func multisigRemainingSlotChoices(n int, held []int) (labels []string, slots []int) {
+	got := make(map[int]bool, len(held))
+	for _, s := range held {
+		got[s] = true
+	}
+	for i := 0; i < n; i++ {
+		if got[i] {
+			continue
+		}
+		labels = append(labels, fmt.Sprintf("@%d", i))
+		slots = append(slots, i)
+	}
+	return labels, slots
+}
+
+// multisigSelfSlotPickFlow is the @S picker as a SET, which is what lets the
+// operator hold SEVERAL of a policy's slots.
+//
+// WHY IT IS COMPOSED OUT OF ChoiceScreens RATHER THAN A NEW WIDGET. There is no
+// multi-select screen in this package -- measured, zero hits for
+// MultiSelect/Checkbox/toggle-list over gui/*.go -- and the shipped idiom for
+// "produce a subset as []int" is buildCosignerPickFlow's loop of bounded
+// ChoiceScreens. A toggle-list would need a selection MARKER, and a marker is
+// one more glyph that can raster to nothing on the one screen that decides
+// which keys are the operator's (F-78/F-151 is that failure twice already). So
+// every screen here is a widget that already ships and is already drawn
+// somewhere else in this flow.
+//
+// THE FIRST SCREEN IS THE SHIPPED ONE, CHARACTER FOR CHARACTER. "Which slot is
+// your key?" is a pinned walk needle with exactly one production site
+// (cmd/emu/needle_test.go), three walk drivers anchor on it, and its default row
+// is @0. So accepting every default produces {@0}: the pre-S5 single-select
+// behaviour unchanged, which is what keeps every existing test and walk meaning
+// what it meant.
+//
+// BACK IS NEVER A WAY TO CONFIRM. Back at any of the three surfaces returns
+// ok=false, which buildParamPickFlow reads as "step back one stage" -- the rule
+// it applies to every stage above the first. An operator who has picked @0, been
+// asked about a second slot and pressed Back has not said "just @0"; the screen
+// has a row that says that.
+//
+// The returned set is ASCENDING and distinct, which is what buildPolicyParams
+// documents and what buildSlotSources' account numbering walks.
+func multisigSelfSlotPickFlow(ctx *Context, th *Colors, n int) ([]int, bool) {
+	first := &ChoiceScreen{
+		Title:   "Your slot",
+		Lead:    "Which slot is your key?",
+		Choices: multisigSelfSlotChoices(n),
+	}
+	idx, ok := first.Choose(ctx, th)
+	if !ok {
+		return nil, false
+	}
+	held := []int{idx}
+	for len(held) < n {
+		more := &ChoiceScreen{
+			Title:   "Your slots",
+			Lead:    "Do you hold another slot?",
+			Choices: []string{"NO, THAT IS ALL", "YES, ONE MORE"},
+		}
+		sel, ok := more.Choose(ctx, th)
+		if !ok {
+			return nil, false
+		}
+		if sel != 1 {
+			break
+		}
+		labels, slots := multisigRemainingSlotChoices(n, held)
+		if len(slots) == 1 {
+			// A PICKER WITH ONE POSSIBLE ANSWER IS A TAP THAT TEACHES NOTHING.
+			// This package's own rule (syswSeedPicker says so in those words;
+			// buildCosignerPickFlow short-circuits on it), and it is not merely
+			// tidying: a screen offering one row invites the operator to believe
+			// they chose between alternatives that were never there.
+			held = append(held, slots[0])
+			continue
+		}
+		pick := &ChoiceScreen{
+			Title:   "Your slots",
+			Lead:    "Which other slot is yours?",
+			Choices: labels,
+		}
+		j, ok := pick.Choose(ctx, th)
+		if !ok {
+			return nil, false
+		}
+		held = append(held, slots[j])
+	}
+	slices.Sort(held)
+	return held, true
+}
+
 // The fp-presence picker (HOMOGENEOUS): Omit (index 0, default) -> no fp TLVs on
 // any slot; Include (index 1) -> every slot's master fp.
 func multisigFpChoices() []string       { return []string{"No (omit)", "Yes (include)"} }
@@ -762,16 +859,17 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 			p.K = multisigKFor(kIdx)
 			stage = stageSelfSlot
 		case stageSelfSlot:
-			sCS := &ChoiceScreen{Title: "Your slot", Lead: "Which slot is your key?", Choices: multisigSelfSlotChoices(p.N)}
-			sIdx, ok := sCS.Choose(ctx, th)
+			// A SET, from S5's multi-select picker. It cannot be empty (the first
+			// screen's pick is mandatory) and it cannot repeat a slot (each round
+			// picks from what is left), so the emptiness guard at the top of
+			// buildMultisigPolicyFlow and assembleBuildPolicy's duplicate-slot
+			// check are both backstops rather than reachable arms.
+			slots, ok := multisigSelfSlotPickFlow(ctx, th, p.N)
 			if !ok {
 				stage = stageK // Back -> re-pick k.
 				continue
 			}
-			// ONE held slot, because the picker offers one. S5 widened the MODEL
-			// (SelfSlots) and the tail; the multi-select screen is a later block's,
-			// so this stays a one-element set rather than pretending otherwise.
-			p.SelfSlots = []int{sIdx}
+			p.SelfSlots = slots
 			stage = stageFp
 		case stageFp:
 			fpCS := &ChoiceScreen{Title: "Fingerprints", Lead: "Include key fingerprints?", Choices: multisigFpChoices()}

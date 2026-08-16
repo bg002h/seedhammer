@@ -172,10 +172,13 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	cardsOut := multisigEngraveCards(b.MS1, b.MK1, b.MD1, full)
 	bundleEngrave(ctx, th, cardsOut)
 
-	// (8) Offer the verify-bundle.
+	// (8) Offer the verify-bundle. The SUPPLY path engraves exactly one leg, so
+	// the per-leg verify runs with one plate and one seed and behaves exactly as
+	// the single-leg verify did -- the generalisation is the same code path, not
+	// a second one.
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, b, full)
+		multisigVerifyFlow(ctx, th, full)
 	}
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys

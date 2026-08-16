@@ -81,12 +81,24 @@ func buildWalkToGather(t *testing.T, ctx *Context, frame func() (string, bool), 
 	}
 	click(&ctx.Router, Button3)
 	frame()
-	if _, ok := pumpUntil(frame, "Your slot", 16); !ok {
+	if _, ok := pumpUntil(frame, "Which slot is your key?", 16); !ok {
 		t.Fatal("self-slot picker not shown")
 	}
 	for i := 0; i < selfSlot; i++ {
 		click(&ctx.Router, Down)
 		frame()
+	}
+	click(&ctx.Router, Button3)
+	frame()
+	// S5's multi-select @S picker asks whether a SECOND slot is held. Row 0 is
+	// "NO, THAT IS ALL", so this helper still produces the one-element set every
+	// caller was written against.
+	//
+	// Matched on the LEAD, not the title: the new screen's title is "Your slots",
+	// which contains "Your slot" as a substring, so the first picker's match above
+	// was widened to its own lead for the same reason.
+	if _, ok := pumpUntil(frame, "Do you hold another slot?", 16); !ok {
+		t.Fatal("the another-slot question was not shown")
 	}
 	click(&ctx.Router, Button3)
 	frame()

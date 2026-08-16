@@ -177,7 +177,10 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			{needle: "How many keys (n)?", downs: 1},            // n = 3
 			{needle: "Required signatures (k of 3)?", downs: 1}, // k = 2
 			{needle: "Which slot is your key?", downs: 0},       // self @0
-			{needle: "Include key fingerprints?", downs: 0},     // omit
+			// S5's multi-select @S picker. Row 0 is "NO, THAT IS ALL", so this
+			// walk's held set stays {@0} and every assertion below is unmoved.
+			{needle: "Do you hold another slot?", downs: 0},
+			{needle: "Include key fingerprints?", downs: 0}, // omit
 			// S4's slot-source question, drawn because this payload carries four
 			// cards against n=3 and could therefore fill @0 too. The default (row
 			// 0, "NO, JUST MY SEED") keeps this walk's subject the TYPED seed.

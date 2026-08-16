@@ -324,7 +324,15 @@ export async function run({ arm = "pass", payload = "cards", n = 2, k = 2,
   await choose(k - 1, n, NEEDLE_SLOT, `k = ${k}`);
   proven.push(NEEDLE_SLOT);
 
-  await choose(selfSlot, n, "Include key fingerprints?", `self slot @${selfSlot}`);
+  // S5's @S picker is MULTI-SELECT: the first screen picks one slot, then a
+  // second screen asks whether another is held. This walk holds exactly one, so
+  // it takes row 0, "NO, THAT IS ALL", and the held set stays {@selfSlot} --
+  // identical to what this driver produced before the picker widened.
+  // (The lead is deliberately not a NEEDLE_ constant: it has never been counted
+  // for production sites, and cmd/emu/needle_test.go binds only declared
+  // needles. Anchoring on it as one would need a pin there first.)
+  await choose(selfSlot, n, "Do you hold another slot?", `self slot @${selfSlot}`);
+  await choose(0, 2, "Include key fingerprints?", "no further held slots");
 
   // S4's SLOT-SOURCE QUESTION. Reaching it is itself an assertion: it is drawn
   // only when the payload holds at least n cards, so a build that could not fill

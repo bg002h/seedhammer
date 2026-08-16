@@ -460,11 +460,48 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 //
 // Returns ok=false on Back, which abandons the build exactly as Back at the
 // gather does.
-func buildSelfSourceFlow(ctx *Context, th *Colors, slot int) (slotSourceKind, bool) {
+//
+// IT TAKES THE WHOLE HELD SET FROM S5, AND IT STILL ASKS ONCE. That is a
+// deliberate, announced assumption rather than an oversight, and §0.1's ladder
+// is what licenses it:
+//
+//   - clause 1 (authority) has nothing to say: no standard rules whether a
+//     held slot's key also sits on a card. What replaces an authority here is
+//     the operator's own answer, and they give exactly one.
+//   - clause 2 (auditability, the binding one) PASSES, and it is the reason
+//     this is allowed at all. The resulting per-slot assignment is printed,
+//     slot by slot, on buildSlotSourceLines' "Key sources" review BEFORE
+//     anything is derived or assembled -- "@1 yours: derived from your seed
+//     for @1" against "@1 yours: payload card 2, checked against ...". A wrong
+//     answer is therefore readable, not invisible. It is readable in the kept
+//     artifacts too: a `derived` slot's key and origin land in that slot's mk1
+//     and on the restore doc.
+//   - clause 3 (reversibility) PASSES because the announcement is the QUESTION
+//     ITSELF. That is what the plural lead below is for: a screen reading "Is
+//     your @0 key on a card?" that silently also answers for @1 and @2 announces
+//     the assumption nowhere, and an operator cannot audit a question they were
+//     not asked.
+//
+// WHAT IT COSTS, said plainly: a genuinely MIXED build -- @0 on a card, @1
+// derived -- is not expressible through the screens. It is expressible in the
+// MODEL (slotSource is per-slot and assembleBuildPolicy reads the mixture off
+// the held-key set), so this is a picker limit, not a model limit. Answering YES
+// when only some held slots are carded fails LOUDLY at the gate, naming the slot
+// whose card does not derive from its seed; answering NO derives every held slot
+// and says so on the review. Neither is silent. Making it per-slot means turning
+// buildPolicyParams.SelfFromCard into a per-slot set, which is a change to the
+// model this block does not own; filed rather than smuggled in.
+func buildSelfSourceFlow(ctx *Context, th *Colors, held []int) (slotSourceKind, bool) {
+	title := "Your key"
+	choices := []string{"NO, JUST MY SEED", "YES, CHECK THE CARD"}
+	if len(held) > 1 {
+		title = "Your keys"
+		choices = []string{"NO, JUST MY SEEDS", "YES, CHECK THE CARDS"}
+	}
 	cs := &ChoiceScreen{
-		Title:   "Your key",
-		Lead:    fmt.Sprintf("Is your @%d key on a card?", slot),
-		Choices: []string{"NO, JUST MY SEED", "YES, CHECK THE CARD"},
+		Title:   title,
+		Lead:    buildSelfSourceLead(held),
+		Choices: choices,
 	}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
@@ -474,6 +511,29 @@ func buildSelfSourceFlow(ctx *Context, th *Colors, slot int) (slotSourceKind, bo
 		return slotFromBoth, true
 	}
 	return slotFromSeed, true
+}
+
+// buildSelfSourceLead is the question, and it NAMES EVERY SLOT THE ANSWER WILL
+// BE APPLIED TO.
+//
+// The one-slot wording is byte-identical to the shipped screen on purpose:
+// "key on a card?" is a pinned walk needle with exactly one production site
+// (cmd/emu/needle_test.go's buildFlowNeedles), and three walk drivers anchor on
+// it. The plural form deliberately does NOT contain that substring, so it adds
+// no second production site for the needle -- it is a different question and it
+// is anchored, if ever, as one.
+//
+// NO EM-DASH: it is a zero-pixel glyph in the body face and a line carrying one
+// does not draw at all (F-78/F-151).
+func buildSelfSourceLead(held []int) string {
+	if len(held) == 1 {
+		return fmt.Sprintf("Is your @%d key on a card?", held[0])
+	}
+	labels := make([]string, len(held))
+	for i, s := range held {
+		labels[i] = fmt.Sprintf("@%d", s)
+	}
+	return fmt.Sprintf("Are your %s keys on cards?", joinAnd(labels))
 }
 
 // buildSlotSourceLines is the review SPEC 4.3 requires before assembly: every

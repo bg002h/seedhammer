@@ -32,6 +32,36 @@ import (
 // call; the caller scrubs the mnemonic []Word after the LAST derive here (the
 // loop may derive at several slots before matching).
 func findUserSlot(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, keys []md.ExpandedKey) (slotIndex int, origin bip32.Path, reused []int, ok bool) {
+	matches := allUserSlots(m, passphrase, net, keys)
+	if len(matches) == 0 {
+		return 0, nil, nil, false
+	}
+	first := matches[0]
+	if len(matches) >= 2 {
+		return first, keys[first].OriginPath, matches, true
+	}
+	return first, keys[first].OriginPath, nil, true
+}
+
+// allUserSlots reports EVERY slot the (seed, passphrase) pair accounts for, in
+// ascending slot order. It is findUserSlot's loop, extracted, and findUserSlot
+// is now a thin wrapper over it -- so the comparison rule that matters
+// (canonical chainCode ‖ compressedPubkey, NEVER base58, NEVER `==` on
+// mismatched array/slice types) has exactly ONE site. Two copies of a
+// funds-safety comparison is how the two come apart.
+//
+// IT EXISTS BECAUSE "THE FIRST MATCH" MADE THE VERIFY STRUCTURALLY SINGLE-LEG.
+// findUserSlot returns matches[0], which is the right answer for the question
+// it was written for ("which slot is the operator in") and the wrong one for
+// S5's ("which slots does this seed have to prove"). Trace B holds master A at
+// @0 AND @1, so a verify built on the first match can never re-derive the
+// second -- it would check one of three engraved plates and report Verify OK.
+//
+// A slot with no xpub is skipped rather than refused: a keyless template has
+// nothing to match against, and that is D1's business rather than this
+// function's. A malformed origin is skipped for the same reason it is in
+// findUserSlot -- a path this device cannot parse is not a path it derived at.
+func allUserSlots(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, keys []md.ExpandedKey) []int {
 	var matches []int
 	for i, k := range keys {
 		if !k.XpubPresent {
@@ -49,12 +79,5 @@ func findUserSlot(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, key
 			matches = append(matches, i)
 		}
 	}
-	if len(matches) == 0 {
-		return 0, nil, nil, false
-	}
-	first := matches[0]
-	if len(matches) >= 2 {
-		return first, keys[first].OriginPath, matches, true
-	}
-	return first, keys[first].OriginPath, nil, true
+	return matches
 }
