@@ -201,7 +201,27 @@ const (
 // (buildCosignerCards), where it is a structural backstop rather than a
 // reachable arm — written on the feed instead, it pins the very behaviour that
 // made Trace A unreachable while every unit test stayed green.
+//
+// A ZERO DEMAND IS SATISFIED BY ANY PAYLOAD, INCLUDING NONE, and that arm is
+// FIRST because the switch below cannot express it. Its first case is a
+// comma-OR (`state != cosignerSourceLoaded, have < open`), so a build needing no
+// cosigner cards at all was refused for want of a cosigner-card payload, and the
+// refusal contradicted itself in one sentence: "No payload is loaded, and this
+// policy needs no cosigner key cards ... pack the cards on the host". showError
+// is dismiss-only and dismissing returns straight out of the build.
+//
+// Pre-S5 it was unreachable, because `open` was always p.N-1 >= 1. S5's
+// multi-select @S picker is what made it reachable: an operator who holds every
+// slot of a 2-of-2 and types both seeds on the keyboard needs no payload for
+// anything.
+//
+// autoFill is the value the three states have to AGREE on, and it is the one
+// `cosignerSourceLoaded` already yielded here, so the other two are brought to
+// it rather than the reverse.
 func classifyCosignerSupply(state cosignerSourceState, have, open int) buildCosignerOutcome {
+	if open == 0 {
+		return cosignerAutoFill
+	}
 	switch {
 	case state != cosignerSourceLoaded, have < open:
 		return cosignerRefuse

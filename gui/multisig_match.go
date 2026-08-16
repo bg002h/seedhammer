@@ -19,13 +19,15 @@ import (
 // index + origin.
 //
 // Outcomes:
-//   - exactly one match  -> (index, origin, nil, true)
-//   - zero matches       -> (_, _, _, false): REFUSE (the seed is not a cosigner;
+//   - exactly one match  -> (index, origin, true)
+//   - zero matches       -> (_, _, false): REFUSE (the seed is not a cosigner;
 //     never engrave a backup for a wallet you are not in)
 //   - >=2 matches        -> the SAME seed legitimately appears at >=2 cosigner
 //     slots under DISTINCT origins, holding a DIFFERENT key
 //     at each. Return the FIRST-by-index slot
-//     (deterministic) + every matched index in `reused`.
+//     (deterministic). WHICH slots is allUserSlots'
+//     question and it is the one every caller that
+//     needs the set already asks.
 //
 // USE allUserSlots WHEN THE QUESTION IS "WHICH SLOTS", NOT "WHICH SLOT". This
 // function answers the membership question -- is this seed in the policy at all,
@@ -35,24 +37,24 @@ import (
 // takes its list from allUserSlots, because "the first match" is what made the
 // engrave and the verify disagree in the first place.
 //
-// `reused` HAS NO PRODUCTION CONSUMER since F-188. It fed the "This key is
-// reused at slots ..." notice, which was false -- the keys at those slots are
-// different keys at different origins -- and the flow that showed it now
-// engraves all of them instead.
+// THE `reused` RETURN IS GONE (F-189). It fed the "This key is reused at slots
+// ..." notice, which was FALSE -- the keys at those slots are different keys at
+// different origins -- and F-188 replaced that flow with one that engraves all
+// of them. Its single production caller then discarded it as `_`, so what was
+// left was a retired return value carrying a retired claim, one edit away from
+// being wired back into a sentence that was never true. allUserSlots answers the
+// same question honestly and IS what the production paths call.
 //
 // SECURITY: deriveAccountXpub scrubs its own seed/master/intermediates on every
 // call; the caller scrubs the mnemonic []Word after the LAST derive here (the
 // loop may derive at several slots before matching).
-func findUserSlot(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, keys []md.ExpandedKey) (slotIndex int, origin bip32.Path, reused []int, ok bool) {
+func findUserSlot(m bip39.Mnemonic, passphrase string, net *chaincfg.Params, keys []md.ExpandedKey) (slotIndex int, origin bip32.Path, ok bool) {
 	matches := allUserSlots(m, passphrase, net, keys)
 	if len(matches) == 0 {
-		return 0, nil, nil, false
+		return 0, nil, false
 	}
 	first := matches[0]
-	if len(matches) >= 2 {
-		return first, keys[first].OriginPath, matches, true
-	}
-	return first, keys[first].OriginPath, nil, true
+	return first, keys[first].OriginPath, true
 }
 
 // allUserSlots reports EVERY slot the (seed, passphrase) pair accounts for, in

@@ -284,7 +284,7 @@ func TestAllUserSlotsFindsEverySlotOneSeedFills(t *testing.T) {
 		}
 	}
 	// findUserSlot's own contract is UNCHANGED by the refactor: first match.
-	first, _, _, ok := findUserSlot(mA, "", &chaincfg.MainNetParams, keys)
+	first, _, ok := findUserSlot(mA, "", &chaincfg.MainNetParams, keys)
 	if !ok || first != want[0] {
 		t.Fatalf("findUserSlot returned (%d, %v), want (%d, true)", first, ok, want[0])
 	}

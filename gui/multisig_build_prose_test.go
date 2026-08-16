@@ -343,6 +343,72 @@ func TestFullModeLabelSaysThePassphraseIsNotInIt(t *testing.T) {
 	assertChoiceLabelFits(t, plain)
 }
 
+// TestSeedResidencyRulingDescribesTheMultiSeedReality is I-8's arm.
+//
+// The comment justifying the absence of an idle/wipe bound rested on a premise
+// this branch falsified -- "The registry today holds exactly one seed ... S5
+// multiplies the masters in it; the bound is filed to be re-decided there" --
+// and S5 IS this branch: buildSeedForSlot runs once per held slot, so the
+// registry holds up to n live bip39.Mnemonic buffers through an engrave that
+// grew from a few plates to a dozen, with ONE deferred scrub at the end.
+//
+// The re-decision was made (operator, 2026-08-16): ACCEPT AND DOCUMENT, no
+// bound. The reasoning is that on a full build the registry is not the marginal
+// copy of the secret -- the same entropy is in the ms1 engrave strings, which
+// are immutable Go strings that cannot be zeroed, and it accumulates on the
+// plates in the tray for the hours the engrave takes. What the walk-away case
+// needs is the truth said to the operator, so THIS is what the decision consists
+// of and this test is what holds it.
+func TestSeedResidencyRulingDescribesTheMultiSeedReality(t *testing.T) {
+	cards := []bundleCard{
+		{kind: cardMS1, label: "ms1 share", summary: "seed", strings: []string{"ms1"}},
+		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1"}},
+	}
+	ruling := strings.Join(buildPlateInventoryLines(cards, false), "\n")
+	low := strings.ToLower(ruling)
+
+	if !strings.Contains(low, "does not time out") {
+		t.Errorf("the non-wiping ruling is gone from the restore doc:\n%s", ruling)
+	}
+	// THE SINGULAR MUST NOT SURVIVE. "A seed you entered stays in device memory"
+	// describes the pre-S5 flow, which held one.
+	if strings.Contains(ruling, "A seed you entered") {
+		t.Errorf("the ruling still describes a registry holding ONE seed. S5's build "+
+			"asks for a seed PER HELD SLOT, so a Trace B run holds three entries across "+
+			"two masters for the length of a nine-plate engrave:\n%s", ruling)
+	}
+	if !strings.Contains(ruling, "Every seed") {
+		t.Errorf("the ruling does not say the machine holds EVERY seed entered:\n%s", ruling)
+	}
+	// And it names the exposure that no scrub can touch, which is the one the
+	// decision turns on: on a full build the words are on the plates.
+	for _, want := range []string{"on the plates", "unattended"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("the ruling does not mention %q. The dominant walk-away exposure is "+
+				"cut seed plates sitting in an open machine, and no registry scrub "+
+				"addresses it:\n%s", want, ruling)
+		}
+	}
+	if strings.ContainsAny(ruling, "—–·‘’“”…") {
+		t.Errorf("the ruling carries a glyph the body face lacks, so its line does not "+
+			"draw:\n%q", ruling)
+	}
+
+	// THE JUSTIFICATION IN THE SOURCE MUST NOT STILL CLAIM ONE SEED. It is the
+	// premise the whole no-bound argument rested on, and a stale premise under a
+	// live decision is how this item came to be open in the first place.
+	src := readGuiFile(t, "multisig_build_census.go")
+	if strings.Contains(src, "holds exactly one seed") {
+		t.Error("gui/multisig_build_census.go still justifies the absent idle bound with " +
+			"\"the registry today holds exactly one seed\", which S5 falsified in this " +
+			"same branch")
+	}
+	if !strings.Contains(src, "re-decision filed to S5 is now made") {
+		t.Error("the re-decision I-8 scheduled TO S5 is not recorded in the source. An " +
+			"item scheduled to a phase is not deferrable past it")
+	}
+}
+
 // TestRestoreDocSaysThePassphraseIsNotOnThePlates.
 //
 // The restore document is the artifact that outlives everybody. It already says

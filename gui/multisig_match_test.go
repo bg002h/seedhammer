@@ -62,7 +62,7 @@ func TestFindUserSlot(t *testing.T) {
 			{Index: 1, OriginPath: origin1, Xpub: abandonSlotXpub(t, origin1), XpubPresent: true},
 			{Index: 2, OriginPath: origin2, Xpub: foreignXpub(), XpubPresent: true},
 		}
-		idx, origin, reused, ok := findUserSlot(m, "", net, keys)
+		idx, origin, ok := findUserSlot(m, "", net, keys)
 		if !ok {
 			t.Fatal("ok=false, want a match at @1")
 		}
@@ -72,8 +72,11 @@ func TestFindUserSlot(t *testing.T) {
 		if origin.String() != origin1.String() {
 			t.Fatalf("origin = %s, want %s", origin.String(), origin1.String())
 		}
-		if len(reused) != 0 {
-			t.Fatalf("reused = %v, want empty (single match)", reused)
+		// The SET is allUserSlots' answer (F-189 removed findUserSlot's `reused`
+		// return, which no production path consumed), so the single-match claim is
+		// asserted where it now lives.
+		if got := allUserSlots(m, "", net, keys); len(got) != 1 || got[0] != 1 {
+			t.Fatalf("allUserSlots = %v, want exactly [1] (single match)", got)
 		}
 	})
 
@@ -82,7 +85,7 @@ func TestFindUserSlot(t *testing.T) {
 			{Index: 0, OriginPath: origin0, Xpub: foreignXpub(), XpubPresent: true},
 			{Index: 1, OriginPath: origin1, Xpub: foreignXpub(), XpubPresent: true},
 		}
-		if _, _, _, ok := findUserSlot(m, "", net, keys); ok {
+		if _, _, ok := findUserSlot(m, "", net, keys); ok {
 			t.Fatal("ok=true for a non-cosigner seed, want false (refuse)")
 		}
 	})
@@ -94,7 +97,7 @@ func TestFindUserSlot(t *testing.T) {
 			{Index: 1, OriginPath: origin1, Xpub: foreignXpub(), XpubPresent: true},
 			{Index: 2, OriginPath: origin2, Xpub: abandonSlotXpub(t, origin2), XpubPresent: true},
 		}
-		idx, origin, reused, ok := findUserSlot(m, "", net, keys)
+		idx, origin, ok := findUserSlot(m, "", net, keys)
 		if !ok {
 			t.Fatal("ok=false, want first-by-index match")
 		}
@@ -104,8 +107,15 @@ func TestFindUserSlot(t *testing.T) {
 		if origin.String() != origin0.String() {
 			t.Fatalf("origin = %s, want @0 origin %s", origin.String(), origin0.String())
 		}
-		if len(reused) != 2 || reused[0] != 0 || reused[1] != 2 {
-			t.Fatalf("reused = %v, want [0 2]", reused)
+		// AND BOTH MATCHES ARE STILL REPORTED, by the function that answers the
+		// "which slots" question in production. F-189 deleted findUserSlot's
+		// `reused` return -- it had zero production consumers and carried F-188's
+		// retired "this key is reused" claim, which was false: the keys at those
+		// slots are DIFFERENT keys at DIFFERENT origins. The property it pinned is
+		// not lost, it is asserted on allUserSlots, which the supply path, the
+		// verify's derive loop and the gate all call.
+		if got := allUserSlots(m, "", net, keys); len(got) != 2 || got[0] != 0 || got[1] != 2 {
+			t.Fatalf("allUserSlots = %v, want [0 2]", got)
 		}
 	})
 
@@ -114,7 +124,7 @@ func TestFindUserSlot(t *testing.T) {
 			{Index: 0, OriginPath: origin1, Xpub: abandonSlotXpub(t, origin1), XpubPresent: false}, // skipped
 			{Index: 1, OriginPath: origin1, Xpub: abandonSlotXpub(t, origin1), XpubPresent: true},  // matches
 		}
-		idx, _, _, ok := findUserSlot(m, "", net, keys)
+		idx, _, ok := findUserSlot(m, "", net, keys)
 		if !ok || idx != 1 {
 			t.Fatalf("idx=%d ok=%v, want match at @1 (the present slot)", idx, ok)
 		}

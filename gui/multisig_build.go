@@ -43,7 +43,12 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if !ok {
 		return
 	}
-	// The @S picker always sets exactly one held slot, so this cannot fire today.
+	// The @S picker's FIRST screen is a mandatory pick, so this cannot fire today.
+	// (It used to read "the @S picker always sets exactly one held slot", which
+	// stopped being true at 4b10319 when the picker became a multi-select in this
+	// same branch -- and that stale premise is exactly what hid I-6: an operator
+	// CAN now hold every slot, so `open` can be 0.)
+	//
 	// It is here because every use of p.SelfSlots below would otherwise index an
 	// empty slice, and a panic partway through a flow that cuts steel is a worse
 	// outcome than a named refusal. buildEngraveTail's errBuildNoHeldSlot is the
@@ -92,87 +97,115 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if p.SelfFromCard {
 		open = p.N
 	}
-	if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
-		// Refuse BEFORE the gather. Walking the operator into a gather that
-		// cannot succeed and dead-ending them there is the defect this stage
-		// removes; the message names the only route this hardware has.
-		showError(ctx, th, "Build Policy",
-			buildSupplyRefusal(state, len(supply), open, incomplete))
-		return
-	}
-	ctx.syswBundleSeeds = records
-	cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
-	if !ok {
-		return
-	}
-	// md1 records ride along on a systemwide payload and must not fail the build
-	// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
-	// here rather than there.
-	mk1s := mk1CosignerCards(cards)
-	// Re-classified over what the GATHER produced, not over what the payload
-	// held: on reader-equipped hardware the operator may have added more.
+
+	// A BUILD THAT DEMANDS NOTHING TALKS TO NO PAYLOAD (I-6). An operator holding
+	// every slot of a 2-of-2 and typing both seeds on the keyboard needs a payload
+	// for nothing, and every screen below this point is about resolving one:
+	// the under-supply refusal, the gather, the payload review, the card picker
+	// and the card decode. Running them for a demand of zero is what produced a
+	// refusal saying "this policy needs no cosigner key cards" and "load the
+	// payload" in one sentence.
 	//
-	// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
-	// is total, but leaving auto-fill as this switch's implicit default made the
-	// CALL SITE non-total: a fourth outcome, or any future disagreement between
-	// the two classify calls, would have taken the all-cards branch in silence.
-	// The ruling that forbids assuming `n-1` deserves a case analysis that says
-	// so at both ends.
-	var chosen []int
-	outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
-	switch outcome {
-	case cosignerRefuse:
-		showError(ctx, th, "Build Policy",
-			buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
-		return
-	case cosignerAutoFill:
-		// Exactly enough: every card fills a slot, in payload record order.
-		chosen = make([]int, len(mk1s))
-		for i := range chosen {
-			chosen[i] = i
-		}
-	case cosignerSelect:
-		// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
-		// over-supply is the CHOICE. A picker with one possible answer is a tap
-		// that teaches nothing.
-		if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+	// SKIPPING THE GATHER IS PART OF THE FIX, NOT A FLOURISH. Letting the flow
+	// through classifyCosignerSupply alone lands it in bundleGatherFlow, which
+	// needs one complete card to proceed and answers Done on zero with "No
+	// complete cards. Pack them on the host with `me sysw pack` and load the
+	// payload again." -- the same dead end, one screen later.
+	//
+	// Pre-S5 this branch was unreachable (`open` was always p.N-1 >= 1); S5's
+	// multi-select @S picker is what made it a shape an operator can build.
+	var (
+		cosigners []mk.Card
+		origins   []cosignerOrigin
+		mk1s      []bundleCard
+		// chosen stays declared out here because buildSlotSources reads it at (4).
+		// A zero-demand build leaves it nil, which that projection already handles:
+		// open == 0 means every slot is held and !p.SelfFromCard (a `both` build
+		// sets open = p.N), so every slot resolves to slotFromSeed with Card = -1.
+		chosen []int
+	)
+	if open > 0 {
+		if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
+			// Refuse BEFORE the gather. Walking the operator into a gather that
+			// cannot succeed and dead-ending them there is the defect this stage
+			// removes; the message names the only route this hardware has.
+			showError(ctx, th, "Build Policy",
+				buildSupplyRefusal(state, len(supply), open, incomplete))
 			return
 		}
-		chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+		ctx.syswBundleSeeds = records
+		cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
 		if !ok {
 			return
 		}
-	default:
-		showError(ctx, th, "Build Policy",
-			"Couldn't work out how the payload's cards fit this policy.")
-		return
-	}
-	if outcome == cosignerAutoFill {
-		// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
-		// of what the payload supplied on this arm too. Before the fold their
-		// only such screen was the shared gather's "Scan a card, or Done." — a
-		// count and an instruction this hardware cannot perform.
-		if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+		// md1 records ride along on a systemwide payload and must not fail the build
+		// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
+		// here rather than there.
+		mk1s = mk1CosignerCards(cards)
+		// Re-classified over what the GATHER produced, not over what the payload
+		// held: on reader-equipped hardware the operator may have added more.
+		//
+		// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
+		// is total, but leaving auto-fill as this switch's implicit default made the
+		// CALL SITE non-total: a fourth outcome, or any future disagreement between
+		// the two classify calls, would have taken the all-cards branch in silence.
+		// The ruling that forbids assuming `n-1` deserves a case analysis that says
+		// so at both ends.
+		outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
+		switch outcome {
+		case cosignerRefuse:
+			showError(ctx, th, "Build Policy",
+				buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
+			return
+		case cosignerAutoFill:
+			// Exactly enough: every card fills a slot, in payload record order.
+			chosen = make([]int, len(mk1s))
+			for i := range chosen {
+				chosen[i] = i
+			}
+		case cosignerSelect:
+			// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
+			// over-supply is the CHOICE. A picker with one possible answer is a tap
+			// that teaches nothing.
+			if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+				return
+			}
+			chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+			if !ok {
+				return
+			}
+		default:
+			showError(ctx, th, "Build Policy",
+				"Couldn't work out how the payload's cards fit this policy.")
 			return
 		}
+		if outcome == cosignerAutoFill {
+			// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
+			// of what the payload supplied on this arm too. Before the fold their
+			// only such screen was the shared gather's "Scan a card, or Done." — a
+			// count and an instruction this hardware cannot perform.
+			if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+				return
+			}
+		}
+		picked := make([]bundleCard, 0, len(chosen))
+		for _, i := range chosen {
+			picked = append(picked, mk1s[i])
+		}
+		cosigners, ok = buildCosignerCards(picked, open)
+		if !ok {
+			// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
+			// length equals `open` on both arms, so the count arm of
+			// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
+			// with a rewrite-the-payload remedy would be two equal counts and a
+			// wrong instruction. What is left is a card that passed mk.Decode in the
+			// gatherer and failed it here, which is a read failure, so say that.
+			showError(ctx, th, "Build Policy",
+				"Couldn't read the cosigner key cards from the payload.")
+			return
+		}
+		origins = buildCosignerOrigins(p, chosen)
 	}
-	picked := make([]bundleCard, 0, len(chosen))
-	for _, i := range chosen {
-		picked = append(picked, mk1s[i])
-	}
-	cosigners, ok := buildCosignerCards(picked, open)
-	if !ok {
-		// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
-		// length equals `open` on both arms, so the count arm of
-		// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
-		// with a rewrite-the-payload remedy would be two equal counts and a
-		// wrong instruction. What is left is a card that passed mk.Decode in the
-		// gatherer and failed it here, which is a read failure, so say that.
-		showError(ctx, th, "Build Policy",
-			"Couldn't read the cosigner key cards from the payload.")
-		return
-	}
-	origins := buildCosignerOrigins(p, chosen)
 
 	// (3) The self seed(s), through the ONE seam, into the REGISTRY -- ONE PER HELD
 	// SLOT, each screen naming its slot (SPEC 4.1: the passphrase prompt is per

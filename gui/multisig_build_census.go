@@ -57,10 +57,21 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 //
 // WHY NOT AN IDLE LIMIT. A timer that scrubs and exits mid-build would fire on
 // the operator reading this very document, and would throw away a build that
-// costs hours to redo. The registry today holds exactly one seed, which is what
-// the shipped flow already held, so an idle limit would buy no reduction in
-// exposure over the state of the tree. S5 multiplies the masters in it; the
-// bound is filed to be re-decided there, when it would actually change something.
+// costs hours to redo. S5 multiplied what the registry holds -- up to one seed
+// per held slot, across distinct masters, for a build that grew to a dozen
+// plates over hours -- and the re-decision filed to S5 is now made: STILL NO
+// BOUND, on the new premise, stated honestly. On a full build the registry is
+// not the marginal copy: the same entropy is in the ms1 engrave strings
+// (immutable Go strings, unscrubbable) for the whole engrave, and it
+// accumulates on the plates in the tray -- whoever reaches an unattended
+// machine reads the steel, not the SRAM. An earlier scrub would protect only
+// watch-only builds, against a live-SRAM-extraction attacker this air-gapped,
+// physically-custodied device does not defend against anyway, and it would
+// break the one-site scrub invariant: BIP-39 derivation is checksum-free
+// PBKDF2, so a future read-after-scrub silently derives the all-"abandon"
+// wallet. The walk-away exposure is answered where it lives: the ruling below
+// tells the operator the machine holds every entered seed, and the plates
+// themselves, until the build ends.
 func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
 	plan := bundlePlatePlan(cards)
 	lines := []string{
@@ -72,9 +83,11 @@ func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
 	lines = append(lines, buildPassphraseInventoryLines(passphrase)...)
-	lines = append(lines, "Seed handling: this build does not time out. A seed you entered "+
-		"stays in device memory until the build ends, like the rest of the payload "+
-		"surface. Power the device off when you are done.")
+	lines = append(lines, "Seed handling: this build does not time out. Every seed "+
+		"you entered -- this build can hold several -- stays in device memory until "+
+		"the build ends, and on a full build the words are also on the plates as "+
+		"they are cut. Do not leave a mid-build machine unattended: the plates are "+
+		"the secret. Power the device off when you are done.")
 	return lines
 }
 

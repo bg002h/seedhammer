@@ -2,34 +2,19 @@ package gui
 
 import "fmt"
 
-// ─── T6b: synthesize the engrave cards for a SUPPLIED multisig bundle ────────
+// ─── T6b: synthesize the engrave cards for a multisig bundle ────────────────
 //
-// multisigEngraveCards mirrors singleSigEngraveCards (gui/singlesig_engrave.go):
-// full -> [ms1, mk1, md1]; watch-only -> [mk1, md1] (the ms1 is left for the
-// operator to hand-engrave; bundleEngrave shows the reminder via the
-// cards-derived gate). The md1 strings are the SUPPLIED policy VERBATIM (I-2).
-// The ms1 is a single-string, single-plate SECRET card, engraved onto
-// owner-held steel only — never NFC.
+// F-189, LANDED: the one-of-each adapter multisigEngraveCards is DELETED. It had
+// no production caller after F-188 -- the supply path derives a leg per matched
+// slot and emits through multisigEngraveCardsMulti directly -- and was kept
+// "filed rather than deleted" with its test. A retired emitter is an invitation
+// to reintroduce the rule it encoded: exactly that happened once already in this
+// file's neighbourhood, where a review proposed relaxing a verify rule the
+// deleted symmetry made look optional. The SHAPE it pinned (full = ms1, mk1,
+// md1; watch-only = mk1, md1) is real and is not lost -- TestMultisigEngraveCards
+// now asserts it against the surviving producer, which is the one an operator's
+// plates actually come out of.
 //
-// It is a one-of-each adapter over multisigEngraveCardsMulti. `full` is the
-// presence of an ms1, which is what the old signature encoded in a separate
-// bool.
-//
-// IT HAS NO PRODUCTION CALLER SINCE F-188. It was retained for the SUPPLY path,
-// which kept byte-identical behaviour through it; that path now derives a leg
-// per matched slot and emits through multisigEngraveCardsMulti directly
-// (supplyEngraveTail). What is left is the one-of-each shape and its test.
-// Filed rather than deleted here: gui/multisig_engrave.go belongs to the build
-// tail's block, and removing a still-tested emitter is a change that wants its
-// own review rather than a ride on an operator-ruled output change.
-func multisigEngraveCards(ms1 string, mk1, md1 []string, full bool) []bundleCard {
-	var ms1s []string
-	if full {
-		ms1s = []string{ms1}
-	}
-	return multisigEngraveCardsMulti(ms1s, [][]string{mk1}, md1)
-}
-
 // multisigEngraveCardsMulti is S5's engrave set: EVERY ms1, then EVERY mk1, then
 // the md1.
 //

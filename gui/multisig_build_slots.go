@@ -34,14 +34,21 @@ import (
 //
 // WHAT THE FLOW ACTUALLY REACHES, said plainly rather than implied.
 //
-// S5 widened the MODEL and the TAIL to multi-slot self: buildSlotSources accepts
-// a SET of held slots, numbers their BIP-48 accounts off the master fingerprint,
-// and buildEngraveTail derives one leg per held slot at that slot's own origin.
-// What has NOT moved is the @S PICKER, which is still single-select, so a build
-// driven through the screens produces exactly one held slot and the multi-slot
-// shapes are exercised by tests driving the model directly. The multi-select
-// screen, and the multi-seed entry it implies, belongs to the block after this
-// one.
+// S5 widened the MODEL, the TAIL and the @S PICKER to multi-slot self:
+// buildSlotSources accepts a SET of held slots, numbers their BIP-48 accounts
+// off the master fingerprint, and buildEngraveTail derives one leg per held slot
+// at that slot's own origin.
+//
+// THE PICKER IS A MULTI-SELECT SINCE 4b10319, IN THIS SAME BRANCH. This paragraph
+// used to end "What has NOT moved is the @S PICKER, which is still single-select,
+// so a build driven through the screens produces exactly one held slot and the
+// multi-slot shapes are exercised by tests driving the model directly." Every
+// clause of that was false by the time it was read, and it cost two findings.
+// It licensed hand-built multi-slot fixtures as the only way to reach these
+// shapes -- which is how C-2's only guard came to be a registry the flow cannot
+// construct -- and its sibling sentence in gui/multisig_build.go was the premise
+// that made I-6's `open == 0` look unreachable. A reachability claim in a comment
+// is a fact a reviewer inherits; this one is now stated as what the screens do.
 //
 // S5 also removed S2's interim foreign-origin refusal, which is why S5 test 8
 // (TestGateStillFiresAfterOriginsDiverge) re-proves this gate through the REAL
@@ -438,7 +445,7 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 			// THE COMPARISON, through the shipped one. findUserSlot derives at
 			// each key's own OriginPath and matches on (chainCode, pubkey) -- never
 			// base58, never == on mismatched array/slice types.
-			if _, _, _, matched := findUserSlot(seed.Mnemonic, seed.Passphrase, net,
+			if _, _, matched := findUserSlot(seed.Mnemonic, seed.Passphrase, net,
 				[]md.ExpandedKey{k}); !matched {
 				return nil, errBuildSeedKeyMismatch{Slot: slot, Declared: card.Path}
 			}
@@ -553,7 +560,15 @@ func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegi
 // whose card does not derive from its seed; answering NO derives every held slot
 // and says so on the review. Neither is silent. Making it per-slot means turning
 // buildPolicyParams.SelfFromCard into a per-slot set, which is a change to the
-// model this block does not own; filed rather than smuggled in.
+// model this block does not own.
+//
+// FILED AS F-196 in design/FOLLOWUPS.md, owning phase: the spec (it is a model
+// change and earns its own R0). The ID is here so the claim is a GREP rather
+// than a promise: this comment previously said the limit was "filed rather than
+// smuggled in" and it was not -- the implementer's report drafted the entry and
+// the controller landed its sibling instead, so a reviewer inherited a filing
+// that did not exist. An assertion of that shape has to name something a reader
+// can look up.
 func buildSelfSourceFlow(ctx *Context, th *Colors, held []int) (slotSourceKind, bool) {
 	title := "Your key"
 	choices := []string{"NO, JUST MY SEED", "YES, CHECK THE CARD"}

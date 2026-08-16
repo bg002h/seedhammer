@@ -56,12 +56,16 @@ func s5OneSlotReadback(t *testing.T) (records []string, md1 []string, plate []st
 		t.Fatalf("master A fills slots %v of Trace B; this test needs a seed filling MORE "+
 			"slots than the run engraved, or the intersection it exercises is a no-op", filled)
 	}
-	idx, origin, reused, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	idx, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
 		t.Fatal("findUserSlot: master A matches no slot of Trace B")
 	}
-	if len(reused) < 2 || idx != filled[0] {
-		t.Fatalf("findUserSlot returned (@%d, reused %v), want the first of %v", idx, reused, filled)
+	// findUserSlot answers "which slot", first-by-index. WHICH SLOTS is
+	// allUserSlots' question and it is asked above -- F-189 removed the `reused`
+	// return, which had no production consumer and carried F-188's retired
+	// "this key is reused" claim.
+	if idx != filled[0] {
+		t.Fatalf("findUserSlot returned @%d, want the first of %v", idx, filled)
 	}
 
 	// THE PREMISE, MEASURED. The two slots must carry DIFFERENT keys at

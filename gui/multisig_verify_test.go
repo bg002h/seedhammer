@@ -18,7 +18,7 @@ func TestVerifyMultisig(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 	m := abandonAboutMnemonic()
-	_, origin, _, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	_, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
 		t.Fatal("findUserSlot: no match")
 	}
@@ -87,7 +87,7 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 	m := abandonAboutMnemonic()
-	_, origin, _, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	_, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
 		t.Fatal("findUserSlot: no match")
 	}
