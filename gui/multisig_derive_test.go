@@ -21,7 +21,7 @@ func TestDeriveMultisigLeg(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 	m := abandonAboutMnemonic()
-	idx, origin, _, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	idx, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok || idx != 1 {
 		t.Fatalf("findUserSlot idx=%d ok=%v, want match @1", idx, ok)
 	}

@@ -201,7 +201,27 @@ const (
 // (buildCosignerCards), where it is a structural backstop rather than a
 // reachable arm — written on the feed instead, it pins the very behaviour that
 // made Trace A unreachable while every unit test stayed green.
+//
+// A ZERO DEMAND IS SATISFIED BY ANY PAYLOAD, INCLUDING NONE, and that arm is
+// FIRST because the switch below cannot express it. Its first case is a
+// comma-OR (`state != cosignerSourceLoaded, have < open`), so a build needing no
+// cosigner cards at all was refused for want of a cosigner-card payload, and the
+// refusal contradicted itself in one sentence: "No payload is loaded, and this
+// policy needs no cosigner key cards ... pack the cards on the host". showError
+// is dismiss-only and dismissing returns straight out of the build.
+//
+// Pre-S5 it was unreachable, because `open` was always p.N-1 >= 1. S5's
+// multi-select @S picker is what made it reachable: an operator who holds every
+// slot of a 2-of-2 and types both seeds on the keyboard needs no payload for
+// anything.
+//
+// autoFill is the value the three states have to AGREE on, and it is the one
+// `cosignerSourceLoaded` already yielded here, so the other two are brought to
+// it rather than the reverse.
 func classifyCosignerSupply(state cosignerSourceState, have, open int) buildCosignerOutcome {
+	if open == 0 {
+		return cosignerAutoFill
+	}
 	switch {
 	case state != cosignerSourceLoaded, have < open:
 		return cosignerRefuse
@@ -356,16 +376,20 @@ type cosignerOrigin struct {
 // will put them in: every slot except the operator's own, ascending, in the
 // order the cards were chosen. It mirrors assembleBuildPolicy's own loop, and
 // the S1 tests assert the two agree rather than trusting that they do.
-// `selfFromCard` is S4's `both` assignment: the operator's own slot is filled
-// from a card too, so it is no longer skipped. The parameter is required rather
-// than inferred because the two shapes differ only in whether one slot is in the
-// map, and a wrong map silently mis-numbers every card in every refusal and on
-// the provenance line.
-func buildCosignerOrigins(n, selfSlot int, selfFromCard bool, chosen []int) []cosignerOrigin {
+// `p.SelfFromCard` is S4's `both` assignment: the operator's own slot is filled
+// from a card too, so it is no longer skipped. It takes the whole `p` from S5,
+// because the skip test is now set membership over `p.SelfSlots` -- and a wrong
+// map silently mis-numbers every card in every refusal and on the provenance
+// line.
+func buildCosignerOrigins(p buildPolicyParams, chosen []int) []cosignerOrigin {
+	held := make(map[int]bool, len(p.SelfSlots))
+	for _, s := range p.SelfSlots {
+		held[s] = true
+	}
 	out := make([]cosignerOrigin, 0, len(chosen))
 	gi := 0
-	for slot := 0; slot < n && gi < len(chosen); slot++ {
-		if slot == selfSlot && !selfFromCard {
+	for slot := 0; slot < p.N && gi < len(chosen); slot++ {
+		if held[slot] && !p.SelfFromCard {
 			continue
 		}
 		out = append(out, cosignerOrigin{slot: slot, card: chosen[gi] + 1})

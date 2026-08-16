@@ -33,16 +33,32 @@ func extractSuppliedMd1(cards []bundleCard) ([]string, bool) {
 	return md1, true
 }
 
-// extractSuppliedMd1AndMk1 reads back BOTH the operator mk1 key card AND the
-// wallet-policy md1 from the gathered card set (H1). It requires EXACTLY one of
-// each; ok=false on a missing card, a duplicate (>=2 of either), or any stray
-// cardMS1. Modeled on singleSigReadbackCards (gui/singlesig_verify.go:23). The
-// read-back mk1 is the operator's ENGRAVED plate (compared against the
-// re-derived mk1 inside verifyMultisig) — NOT a re-derived value. This is a
-// distinct helper from extractSuppliedMd1 (the supply/engrave filter, which
-// refuses any key card); do NOT widen that one — it has a second caller in the
-// live engrave flow (gui/multisig.go:71).
-func extractSuppliedMd1AndMk1(cards []bundleCard) (md1, mk1 []string, ok bool) {
+// extractReadbackMd1AndMk1s is the verify-bundle readback filter (H1): ONE
+// wallet-policy md1 and EVERY operator key plate that came back with it, in
+// gather order. The read-back mk1s are the operator's ENGRAVED plates, compared
+// against the re-derived legs inside verifyMultisigLegs -- NEVER a re-derived
+// value against itself. Modeled on singleSigReadbackCards
+// (gui/singlesig_verify.go:23).
+//
+// IT REPLACES extractSuppliedMd1AndMk1, which required EXACTLY ONE mk1 and
+// refused a second as ambiguous. That was right while a multisig build could
+// engrave only one leg, and it is what made the verify structurally single-leg:
+// a build holding three slots cuts three key plates, and a readback filter that
+// refuses the second and third guarantees two of them are never checked. Several
+// plates is now the normal case, so it is admitted and the BIJECTION in
+// verifyMultisigLegs is what resolves them -- each plate to the leg whose key it
+// carries, with nothing left over on either side.
+//
+// This is a distinct helper from extractSuppliedMd1 (the supply/engrave filter,
+// which refuses any key card); do NOT widen that one -- it has a second caller
+// in the live engrave flow (gui/multisig.go:71).
+//
+// The md1 stays EXACTLY ONE. Two descriptors is two wallets, and there is no
+// answer to "which one did you engrave" that a device may pick for the operator.
+// A stray cardMS1 still refuses: the ms1 is hand-typed for verify and never
+// scanned (§7.4), so one arriving over the reader means the operator put a
+// SECRET plate on a tag, and that is worth stopping for rather than absorbing.
+func extractReadbackMd1AndMk1s(cards []bundleCard) (md1 []string, mk1s [][]string, ok bool) {
 	for _, c := range cards {
 		switch c.kind {
 		case cardMD1:
@@ -51,18 +67,15 @@ func extractSuppliedMd1AndMk1(cards []bundleCard) (md1, mk1 []string, ok bool) {
 			}
 			md1 = c.strings
 		case cardMK1:
-			if mk1 != nil {
-				return nil, nil, false // more than one key card — ambiguous
-			}
-			mk1 = c.strings
+			mk1s = append(mk1s, c.strings)
 		case cardMS1:
-			return nil, nil, false // a stray secret card pollutes the supply.
+			return nil, nil, false // a stray secret card pollutes the readback.
 		}
 	}
-	if len(md1) == 0 || len(mk1) == 0 {
+	if len(md1) == 0 || len(mk1s) == 0 {
 		return nil, nil, false
 	}
-	return md1, mk1, true
+	return md1, mk1s, true
 }
 
 // allSlotsHaveXpub is the full-policy gate (I-3): the supplied md1 must be a

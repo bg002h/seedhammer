@@ -193,12 +193,23 @@ func TestMultisigBuildExperimentalWarningConfirm(t *testing.T) {
 }
 
 // buildWalkParamPickers accepts every buildParamPickFlow default in turn
-// (template wsh -> n=2 -> k=1 -> @0 -> fp Omit), leaving the flow at whatever
-// comes after the pickers. Each stage is asserted on the way past, because
-// tapping through a picker that did not appear silently answers the NEXT one.
+// (template wsh -> n=2 -> k=1 -> @0 -> "no further slots" -> fp Omit), leaving
+// the flow at whatever comes after the pickers. Each stage is asserted on the
+// way past, because tapping through a picker that did not appear silently
+// answers the NEXT one.
+//
+// S5's multi-select @S picker added the "Do you hold another slot?" stage, whose
+// default row is "NO, THAT IS ALL". So the all-defaults walk still produces the
+// one-element set {@0} that every caller of this helper was written against --
+// the extra tap is a screen, not a change of outcome.
+//
+// The new stage is matched on its LEAD rather than its title: the title is
+// "Your slots", which contains "Your slot" as a substring, so a title match
+// would find the wrong screen.
 func buildWalkParamPickers(t *testing.T, ctx *Context, frame func() (string, bool)) {
 	t.Helper()
-	for _, stage := range []string{"Template", "Cosigners", "Threshold", "Your slot", "Fingerprints"} {
+	for _, stage := range []string{"Template", "Cosigners", "Threshold", "Your slot",
+		"Do you hold another slot?", "Fingerprints"} {
 		if _, ok := pumpUntil(frame, stage, 16); !ok {
 			t.Fatalf("%s picker not shown", stage)
 		}

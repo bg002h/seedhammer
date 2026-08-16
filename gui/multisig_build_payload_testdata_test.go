@@ -44,6 +44,30 @@ var fixtureStub = [4]byte{0x5b, 0x48, 0xaf, 0x35}
 // The fixture roster, ordered. Index i is "payload card i". Five entries is the
 // most any S1 case needs (n tops out at 5, and the 0..n ruling allows a payload
 // carrying n cards).
+//
+// ─── F-180: THIS ORDER IS NOT THE EMULATOR PAYLOAD'S, AND THAT IS DELIBERATE ──
+//
+// Here                             A@0, B@0, C@0, A@1, B@1
+// cmd/buildpayloadcards/main.go    A@0, A@1, B@0, C@0   (cmd/emu/sysw_cards_payload.bin)
+//
+// Both are right for what they serve and NEITHER may be quietly re-ordered to
+// match the other. This roster is prefix-addressed: cosignerCardRecords(t, n)
+// takes the first n entries and S1's tests assert WHICH card fills WHICH slot,
+// so Trace A's 2-of-3 wants its two foreign cosigners (B@0, C@0) in the first
+// three. The emulator blob is walked by tap sequence and needs the two
+// same-master accounts adjacent at the front, because Trace B holds A@0 and A@1
+// and the picker walks payload record order.
+//
+// WHAT IT COSTS, and why saying it here is the whole fix: A TAP SEQUENCE
+// MEASURED AGAINST ONE IS WRONG AGAINST THE OTHER. Reaching Trace A's B@0 + C@0
+// is SKIP, USE, USE in a Go test over this roster and SKIP, SKIP in the emulator
+// over that blob. F-180 was filed because neither file said so, and a draft test
+// that carried the emulator's sequence across selected A@1 instead -- caught only
+// because S2's foreign-origin refusal happened to fire on it.
+//
+// Keep the two paragraphs above in sync with the twin note in
+// cmd/buildpayloadcards/main.go. If one roster is ever changed, the other's note
+// is the thing that goes stale first.
 var cosignerCardRoster = []struct {
 	mnemonic string
 	account  uint32

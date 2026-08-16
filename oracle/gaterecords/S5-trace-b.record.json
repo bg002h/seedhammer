@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "stage": "S5",
+  "recorded_at": "2026-08-16T13:10:22Z",
+  "oracles": [
+    {
+      "name": "md",
+      "commit": "5a0a4f41017d71d47f70684c145702d4ca0c3aa9",
+      "method": "binary-sha256",
+      "reported_version": "md 0.13.0",
+      "version_matches_pin": true
+    },
+    {
+      "name": "mk",
+      "commit": "a38a908e143c2c4bd6405997d62385b3df01615f",
+      "method": "binary-sha256",
+      "reported_version": "mk 0.13.0",
+      "version_matches_pin": true
+    },
+    {
+      "name": "ms",
+      "commit": "d49d5c099bab89a1738f0d0c3df9306b354d62c3",
+      "method": "binary-sha256",
+      "reported_version": "ms 0.16.0",
+      "version_matches_pin": true
+    }
+  ],
+  "inputs": {
+    "template": "build-policy (Trace B): Load Payload, then Engrave Multisig -\u003e Build policy, wsh sortedmulti 3-of-4. The operator HOLDS @0, @1 and @2 -- master A account 0, master A account 1, master B account 0 -- and payload cosigner card 4 (master C) fills @3. FULL mode: one ms1 per distinct held master, one mk1 per held slot, then the md1. Driven by cmd/emu/walk_trace_b.js; @0 and @1 take the payload's ClassMnemonic and @2 is TYPED on the device keyboard, because syswSession.take is first-match and cannot hand out a second master.",
+    "n": 4,
+    "k": 3,
+    "slot_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "fp_choice": "omit",
+    "origins": [
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/1h/2h",
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h"
+    ],
+    "seeds": [
+      {
+        "label": "self:masterA (slot @0, BIP-48 account 0)",
+        "digest": "c557eec878dfd852"
+      },
+      {
+        "label": "self:masterA (slot @1, BIP-48 account 1)",
+        "digest": "c557eec878dfd852"
+      },
+      {
+        "label": "self:masterB (slot @2, typed on the keyboard)",
+        "digest": "ecb0e7ba498c5920"
+      },
+      {
+        "label": "payload:masterC (card C@0, slot @3)",
+        "digest": "3a64bcd9cea43c0a"
+      }
+    ]
+  },
+  "payload": {
+    "name": "cmd/emu/sysw_cards_payload.bin",
+    "digest": "2527 1e58 3f3e aa03 ae18 f359 c72b 76e3"
+  },
+  "walk": {
+    "file": "S5-trace-b.walk.json",
+    "sha256": "3ac0f85d1dc53b67f08b98a95d9891031c86708698cae01d173da436bcf68d63",
+    "pace": 2048,
+    "elapsed_sec": 462,
+    "census": {
+      "strings": [
+        "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f",
+        "ms10entrsqplh7lml0alh7lml0alh7lml0als5cclar2zmksh6",
+        "mk1qpfxwdpqqsqhp7uadeeutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5fx368qrg28f8te2",
+        "mk1qpfxwdpp806lhaeh6reknylagmwyjycf8044xtt9flsdlkvt6f6cthyl99yee42sln0dmy2mnm7x6",
+        "mk1qpnxu9zqqsqhp7uadeeutks2lcztpqyqsqygpqyqsqygrqyqsqyg9qyqsqyqfz9jrcld706hn9svfgll7zvw5qnkxgea7gvezr79ykwqh7c2",
+        "mk1qpnxu9zp68w6hzragnj3g5qrl85zeape8wq0vdczfyy55tqsd5576trsa3p40nfpd7hsyjyf7vlx6hk2j6ckr4wf0m3ej5qda3epmem8t59h",
+        "mk1qpnxu9zzhpwhqz4qndj2dmjn8p",
+        "mk1qpz4mspqqsqhp7uad6ux3r03q5zg3vs7llvu2xd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emag0zr8gh9upnj25xq0fg0fqy8dga",
+        "mk1qpz4msppwyp4dfykwfkgg6fxyxetdcmythf4hsqzd3v879jprztejzs7ru2hwrrl5lpej444jxwfj",
+        "md1fc9ncrs9q6tvyyy5jmpprjjtvyyy5jmppp9gqpsgwyxxckg9qhwsv0jskp2rsal4elqtpkym09m9nl",
+        "md1fc9ncrs2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5wl4l0mn058ndxfl63ku4znzdd67w9fcd",
+        "md1fc9ncrsjfzvynh66n94j5lcxlmx9ayav9mj0jjejcxy50llpx82qfmryv7l68w6hzjneq4gl32fjk5",
+        "md1fc9ncrscl2yu529qqleaqk0gwfmsrmrwqjfp99zcyrd98kjcu8vgdtu6gt04upy3zutrxr6vmsmjw7",
+        "md1fc9ncr3rue7d40v4943v82ujlhr48x2rk7av9gmew82jq5zap9302ynhp37ggd6z5lp5zm3yqferql",
+        "md1fc9ncr309wwl2rcse69e0qvuhzq6k5jt8ymyydynzrv4kudj9m56mcqpxckrlzeq3y0cppephw3cjv",
+        "md1fc9ncr35f0xg2rc0ugjshlaruhytwx696ej6trer6486ajnxplvwf3eqy7pewnjcldss7d0scuqak8",
+        "md1fc9ncr37cmsx5tedmgpg3jz4xc5x2ue9a7z5h3rycu0nx9leekrarz2svuc4wj2qxd2smdkyn2d20"
+      ],
+      "announced": 51,
+      "unattributed": 0
+    },
+    "plate_digests": [
+      "0de338b49038dfc5",
+      "240d7f21cba5b8e4",
+      "87751e4241f64498",
+      "b0e18749d8df3301",
+      "f9c357f0803b0651",
+      "ca7f5c95fff701f9",
+      "7626dd503bed6882",
+      "12829cec8a9d2121",
+      "4cfe8842c794f6f7",
+      "b7876598cabaa821",
+      "20abec2e5d7486d1",
+      "91de87ce14147f74",
+      "e1a9441cebbf7e48",
+      "ab2b2be6fca544b9",
+      "8896007f0f3a539e",
+      "8e531523ef5e93bc",
+      "48759dab25a478dc"
+    ]
+  }
+}

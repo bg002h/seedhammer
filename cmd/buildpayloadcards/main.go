@@ -50,6 +50,26 @@ type card struct {
 
 // The coverage list, from the plan's S0 deliverable 2. Each entry exists for a
 // named stage; deleting one silently strands that stage's walk.
+//
+// ─── F-180: THIS ORDER IS NOT THE GO FIXTURES', AND THAT IS DELIBERATE ────────
+//
+// Here, cmd/buildpayloadcards' `wanted`: A@0, A@1, B@0, C@0
+// gui's cosignerCardRoster:               A@0, B@0, C@0, A@1, B@1
+//
+// Both are right for what they serve and NEITHER may be quietly re-ordered to
+// match the other. This list is the EMULATOR PAYLOAD's record order, which the
+// bounded-selection picker walks in order, so Trace B's two same-master accounts
+// (A@0, A@1) sit adjacent at the front where a walk can take them as slots @0 and
+// @1. The Go roster is prefix-addressed instead -- cosignerCardRecords(t, n)
+// takes the first n -- so Trace A's two foreign cosigners have to fall inside its
+// first three.
+//
+// WHAT IT COSTS, and why saying it here is the whole fix: A TAP SEQUENCE
+// MEASURED AGAINST ONE IS WRONG AGAINST THE OTHER. Reaching Trace A's B@0 + C@0
+// is SKIP, SKIP over this payload and SKIP, USE, USE over that roster. F-180 was
+// filed because neither file said so.
+//
+// Keep the two paragraphs above in sync with the twin note on cosignerCardRoster.
 var wanted = []card{
 	{"A@0 — Trace B slot @0, and the HONEST `both` case for S4's gate", masterA, 0},
 	{"A@1 — Trace B slot @1: same master, second account (multi-account)", masterA, 1},

@@ -70,7 +70,7 @@ func TestGateFiresOnBothSlotMismatch(t *testing.T) {
 		{Kind: slotFromBoth, SeedID: 0, Card: 0},
 		{Kind: slotFromCard, Card: 0},
 	}
-	notices, err := buildSlotGate(sources, reg, cards, gateNet)
+	notices, err := buildSlotGate(sources, md.MultisigWsh, reg, cards, gateNet)
 	if err == nil {
 		t.Fatalf("the gate ACCEPTED a `both` slot whose card is a different master's "+
 			"key; notices %q. This is the row the operator asked for by name: "+
@@ -106,7 +106,7 @@ func TestGateAcceptsBothSlotMatch(t *testing.T) {
 		{Kind: slotFromBoth, SeedID: 0, Card: 0},
 		{Kind: slotFromCard, Card: 0},
 	}
-	notices, err := buildSlotGate(sources, reg, cards, gateNet)
+	notices, err := buildSlotGate(sources, md.MultisigWsh, reg, cards, gateNet)
 	if err != nil {
 		t.Fatalf("the gate REFUSED an honest `both` slot: %v. A gate that cannot be "+
 			"satisfied is not a gate, it is a wall", err)
@@ -138,7 +138,7 @@ func TestGateIgnoresUnassignedCosigners(t *testing.T) {
 		{Kind: slotFromCard, Card: 0},
 		{Kind: slotFromCard, Card: 1},
 	}
-	notices, err := buildSlotGate(sources, reg, cards, gateNet)
+	notices, err := buildSlotGate(sources, md.MultisigWsh, reg, cards, gateNet)
 	if err != nil {
 		t.Fatalf("the gate refused the NORMAL shape -- the operator's seed plus two "+
 			"unrelated cosigner cards -- with %v. This is the false positive that "+
@@ -157,7 +157,7 @@ func TestGateIgnoresUnassignedCosigners(t *testing.T) {
 		{Kind: slotFromCard, Card: 1},
 		{Kind: slotFromCard, Card: 2},
 	}
-	if _, err := buildSlotGate(sources, reg, cards, gateNet); err != nil {
+	if _, err := buildSlotGate(sources, md.MultisigWsh, reg, cards, gateNet); err != nil {
 		t.Fatalf("a checked own-slot alongside two unrelated cards was refused: %v", err)
 	}
 }
@@ -172,8 +172,8 @@ func TestGateIgnoresUnassignedCosigners(t *testing.T) {
 // self-vs-card. sortedmulti(2,K,K,X) is spendable by K alone.
 func TestGateRefusesDuplicateKeyAcrossFinalSlots(t *testing.T) {
 	a0 := gateCard(t, 0)
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlot: 0, SelfFromCard: true}
-	_, _, _, err := assembleBuildPolicy(p, "", 0, []mk.Card{a0, a0})
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlots: []int{0}, SelfFromCard: true}
+	_, _, _, err := assembleBuildPolicy(p, nil, []mk.Card{a0, a0})
 	if err == nil {
 		t.Fatal("a policy whose two slots hold the SAME 65-byte chain code + pubkey " +
 			"assembled. sortedmulti(2,K,K) is spendable by K alone, so the displayed " +
@@ -188,7 +188,7 @@ func TestGateRefusesDuplicateKeyAcrossFinalSlots(t *testing.T) {
 	}
 	// And the message must not claim the operator's slot came from their seed
 	// when it came from a card: that sends them to change the wrong input.
-	msg := buildDuplicateKeyMessage(dup, p.SelfSlot, true,
+	msg := buildDuplicateKeyMessage(dup, p,
 		[]cosignerOrigin{{slot: 0, card: 1}, {slot: 1, card: 2}})
 	if strings.Contains(msg, "from your seed") {
 		t.Errorf("the duplicate refusal blames the seed for a slot filled from a card: %q", msg)
@@ -204,23 +204,67 @@ func TestGateRefusesDuplicateKeyAcrossFinalSlots(t *testing.T) {
 // One seed at two slots under DISTINCT origins is the legitimate multi-account
 // wallet SPEC 4.1 exists to make buildable. It proceeds, with the notice
 // findUserSlot already specifies for the same shape.
+//
+// THE FIXTURE IS THE FLOW'S OWN, AND THAT IS THE FIX FOR THIS CYCLE'S C-2. It
+// used to hand-build two slotSources sharing `SeedID: 0` -- a registry
+// buildMultisigPolicyFlow CANNOT construct, because it calls buildSeedForSlot
+// once per held slot and buildSeedForSlot calls reg.add() unconditionally, so
+// one master typed twice occupies two entries carrying two DIFFERENT SeedIDs.
+// The gate keyed its grouping on s.SeedID, every group therefore had exactly one
+// binding, and this notice could never fire in production -- invisible, because
+// the only thing pinning the mechanism was a fixture of an impossible shape.
+//
+// So the registry is built by TWO reg.add() calls with the SAME mnemonic and the
+// sources come from buildSlotSources, which is what the flow runs. If that
+// projection ever stops producing a shared-master multi-account build, this test
+// fails on its own premise rather than passing over a shape nobody ships.
 func TestGateAcceptsSameSeedAtDistinctOrigins(t *testing.T) {
-	reg := gateRegistry(t, fixtureMasterA, "")
-	cards := []mk.Card{gateCard(t, 0)} // A@0, at m/48'/0'/0'/2'
-	sources := []slotSource{
-		{Kind: slotFromBoth, SeedID: 0, Card: 0},    // origin m/48h/0h/0h/2h
-		{Kind: slotFromSeed, SeedID: 0, Account: 1}, // origin m/48h/0h/1h/2h
-		{Kind: slotFromCard, Card: 0},               // somebody else
+	// The FLOW's registry shape: master A typed twice, once per held slot.
+	reg, ids := s5Registry(t, fixtureMasterA, fixtureMasterA)
+	if ids[0] == ids[1] {
+		t.Fatalf("both held slots got seedID %d; the flow mints one per held slot and "+
+			"this fixture must model that", ids[0])
 	}
-	notices, err := buildSlotGate(sources, reg, cards, gateNet)
+	a, _ := reg.at(ids[0])
+	b, _ := reg.at(ids[1])
+	if a.MasterFP != b.MasterFP {
+		t.Fatalf("the two entries for ONE master derive fingerprints %08x and %08x; "+
+			"this fixture is no longer one seed at two slots", a.MasterFP, b.MasterFP)
+	}
+
+	cards := []mk.Card{gateCard(t, 1)} // B@0: somebody else, at @2
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{0, 1}}
+	sources := buildSlotSources(p, ids, []int{0}, reg)
+
+	// THE PREMISE, MEASURED: the production projection really did put the two held
+	// slots at DISTINCT origins (its account counter keys on the master
+	// fingerprint, so one master filling two slots gets accounts 0 and 1).
+	o0 := derivedSlotOrigin(p.Script, sources[0].Account).String()
+	o1 := derivedSlotOrigin(p.Script, sources[1].Account).String()
+	if sources[0].Kind != slotFromSeed || sources[1].Kind != slotFromSeed {
+		t.Fatalf("buildSlotSources produced kinds %v/%v for two held slots, want two "+
+			"derived", sources[0].Kind, sources[1].Kind)
+	}
+	if o0 == o1 {
+		t.Fatalf("both held slots derive at %s, so this is one key twice and not the "+
+			"multi-account shape row 5 rules on", o0)
+	}
+	if sources[0].SeedID == sources[1].SeedID {
+		t.Fatalf("the two held slots share seedID %d; a SeedID-keyed gate would group "+
+			"them and this test would stop being able to see the defect", sources[0].SeedID)
+	}
+
+	notices, err := buildSlotGate(sources, p.Script, reg, cards, gateNet)
 	if err != nil {
 		t.Fatalf("the gate REFUSED one seed at two DISTINCT origins: %v. That is the "+
 			"multi-account wallet SPEC 4.1 exists to build, and refusing it is the "+
 			"Critical round 0 shipped", err)
 	}
 	if len(notices) != 1 {
-		t.Fatalf("got %d notice(s) %q, want exactly 1: proceeding SILENTLY on a "+
-			"shape the spec calls out is half the requirement", len(notices), notices)
+		t.Fatalf("got %d notice(s) %q, want exactly 1: the operator holds TWO slots "+
+			"filled from ONE secret and the only surface that says so is this notice. "+
+			"Believing they are two independent keys is how a lost ms1 plate becomes a "+
+			"wallet nobody can spend from", len(notices), notices)
 	}
 	for _, want := range []string{"@0", "@1", "different key origins"} {
 		if !strings.Contains(notices[0], want) {
@@ -231,11 +275,16 @@ func TestGateAcceptsSameSeedAtDistinctOrigins(t *testing.T) {
 	// The SAME seed at the SAME origin twice is not this shape: it is one key
 	// twice, and it belongs to the duplicate-key refusal over the final slot set.
 	// The gate must not emit a "that is allowed" notice over it.
+	//
+	// HAND-BUILT ON PURPOSE, and said out loud: buildSlotSources cannot produce it
+	// (its account counter diverges two held slots of one master), so this arm is a
+	// unit assertion about buildSlotGate's distinctness rule and NOT a claim that
+	// the flow reaches this shape. The reachable shape is pinned above.
 	same := []slotSource{
-		{Kind: slotFromSeed, SeedID: 0, Account: 0},
-		{Kind: slotFromSeed, SeedID: 0, Account: 0},
+		{Kind: slotFromSeed, SeedID: ids[0], Account: 0},
+		{Kind: slotFromSeed, SeedID: ids[1], Account: 0},
 	}
-	notices, err = buildSlotGate(same, reg, cards, gateNet)
+	notices, err = buildSlotGate(same, md.MultisigWsh, reg, cards, gateNet)
 	if err != nil {
 		t.Fatalf("gate over two same-origin derived slots: %v", err)
 	}
@@ -263,7 +312,7 @@ func TestGateRefusesContradictingFingerprint(t *testing.T) {
 	cards := []mk.Card{card}
 	sources := []slotSource{{Kind: slotFromBoth, SeedID: 0, Card: 0}}
 
-	_, err := buildSlotGate(sources, reg, cards, gateNet)
+	_, err := buildSlotGate(sources, md.MultisigWsh, reg, cards, gateNet)
 	if err == nil {
 		t.Fatal("a card whose key matches the seed but whose fingerprint says another " +
 			"master was ACCEPTED. The fingerprint is written by whoever made the card " +
@@ -284,12 +333,12 @@ func TestGateRefusesContradictingFingerprint(t *testing.T) {
 	// this the test above would pass against a gate that refuses every card
 	// carrying any fingerprint at all.
 	card.Fingerprint = honest
-	if _, err := buildSlotGate(sources, reg, []mk.Card{card}, gateNet); err != nil {
+	if _, err := buildSlotGate(sources, md.MultisigWsh, reg, []mk.Card{card}, gateNet); err != nil {
 		t.Fatalf("the card's OWN fingerprint was refused as a contradiction: %v", err)
 	}
 	// And a card carrying no fingerprint has nothing to contradict.
 	card.Fingerprint = ""
-	if _, err := buildSlotGate(sources, reg, []mk.Card{card}, gateNet); err != nil {
+	if _, err := buildSlotGate(sources, md.MultisigWsh, reg, []mk.Card{card}, gateNet); err != nil {
 		t.Fatalf("a card with no fingerprint was refused: %v", err)
 	}
 }
@@ -310,7 +359,7 @@ func TestGateNeverPrintsSeedOrPassphrase(t *testing.T) {
 	var errs []error
 
 	mismatch := []slotSource{{Kind: slotFromBoth, SeedID: 0, Card: 0}}
-	_, err := buildSlotGate(mismatch, reg, []mk.Card{gateCard(t, 1)}, gateNet)
+	_, err := buildSlotGate(mismatch, md.MultisigWsh, reg, []mk.Card{gateCard(t, 1)}, gateNet)
 	if err == nil {
 		t.Fatal("the mismatch row did not fire, so this test has no message to inspect")
 	}
@@ -332,7 +381,7 @@ func TestGateNeverPrintsSeedOrPassphrase(t *testing.T) {
 	fpCard := gateCard(t, 0)
 	fpCard.Xpub = xpub
 	fpCard.Fingerprint = "deadbeef"
-	_, err = buildSlotGate(mismatch, reg, []mk.Card{fpCard}, gateNet)
+	_, err = buildSlotGate(mismatch, md.MultisigWsh, reg, []mk.Card{fpCard}, gateNet)
 	if err == nil {
 		t.Fatal("a card carrying this pair's own key under another master's " +
 			"fingerprint was accepted; the fingerprint row has nothing to inspect")
@@ -401,7 +450,7 @@ func TestGateDerivesAtTheCardsOwnOrigin(t *testing.T) {
 	sources := []slotSource{{Kind: slotFromBoth, SeedID: 0, Card: 0}}
 
 	t.Run("PROCEED when the key is genuinely derived there", func(t *testing.T) {
-		if _, err := buildSlotGate(sources, reg, []mk.Card{a1}, gateNet); err != nil {
+		if _, err := buildSlotGate(sources, md.MultisigWsh, reg, []mk.Card{a1}, gateNet); err != nil {
 			t.Fatalf("a card declaring %s, carrying the key that seed derives AT %s, "+
 				"was refused: %v. A gate deriving at the shared origin instead would "+
 				"fail exactly here", a1.Path, a1.Path, err)
@@ -414,7 +463,7 @@ func TestGateDerivesAtTheCardsOwnOrigin(t *testing.T) {
 		// origin binding can separate the two arms.
 		liar := a1
 		liar.Xpub = a0.Xpub
-		_, err := buildSlotGate(sources, reg, []mk.Card{liar}, gateNet)
+		_, err := buildSlotGate(sources, md.MultisigWsh, reg, []mk.Card{liar}, gateNet)
 		if err == nil {
 			t.Fatalf("a card declaring %s while carrying the key from %s was ACCEPTED. "+
 				"Its mk1 would assert membership in a wallet at a path its own key is "+
@@ -439,19 +488,23 @@ func TestGateDerivesAtTheCardsOwnOrigin(t *testing.T) {
 // binding, which had no test: in a `derived(seedID, account)` slot, `account`
 // occupies the BIP-48 ACCOUNT component of m/48'/0'/account'/2'. 4.1a item 1's
 // example implies it and nothing ruled it until the spec did.
+//
+// The SCRIPT-TYPE component is S5's business and is pinned separately, by
+// TestDerivedSlotOriginIsTemplateAware; this test holds the ACCOUNT binding at
+// the native-segwit template, which is where it was ruled.
 func TestDerivedSlotAccountIsTheBip48AccountComponent(t *testing.T) {
 	for account, want := range map[uint32]string{
 		0: "m/48h/0h/0h/2h",
 		1: "m/48h/0h/1h/2h",
 		7: "m/48h/0h/7h/2h",
 	} {
-		if got := derivedSlotOrigin(account).String(); got != want {
-			t.Errorf("derivedSlotOrigin(%d) = %s, want %s", account, got, want)
+		if got := derivedSlotOrigin(md.MultisigWsh, account).String(); got != want {
+			t.Errorf("derivedSlotOrigin(wsh, %d) = %s, want %s", account, got, want)
 		}
 	}
-	if derivedSlotOrigin(0).String() != multisigSharedOrigin().String() {
+	if derivedSlotOrigin(md.MultisigWsh, 0).String() != multisigSharedOrigin().String() {
 		t.Errorf("account 0 must BE the shared origin (%s), got %s",
-			multisigSharedOrigin(), derivedSlotOrigin(0))
+			multisigSharedOrigin(), derivedSlotOrigin(md.MultisigWsh, 0))
 	}
 }
 

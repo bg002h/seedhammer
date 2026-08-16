@@ -124,7 +124,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// Engrave (full = ms1+mk1+md1; watch-only = mk1+md1, + the ms1 reminder via
 	// bundleEngrave's cards-derived gate).
 	cards := singleSigEngraveCards(b, full)
-	bundleEngrave(ctx, th, cards)
+	bundleEngrave(ctx, th, "Engrave Single-Sig", cards)
 
 	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}

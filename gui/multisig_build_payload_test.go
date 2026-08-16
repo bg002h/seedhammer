@@ -81,12 +81,24 @@ func buildWalkToGather(t *testing.T, ctx *Context, frame func() (string, bool), 
 	}
 	click(&ctx.Router, Button3)
 	frame()
-	if _, ok := pumpUntil(frame, "Your slot", 16); !ok {
+	if _, ok := pumpUntil(frame, "Which slot is your key?", 16); !ok {
 		t.Fatal("self-slot picker not shown")
 	}
 	for i := 0; i < selfSlot; i++ {
 		click(&ctx.Router, Down)
 		frame()
+	}
+	click(&ctx.Router, Button3)
+	frame()
+	// S5's multi-select @S picker asks whether a SECOND slot is held. Row 0 is
+	// "NO, THAT IS ALL", so this helper still produces the one-element set every
+	// caller was written against.
+	//
+	// Matched on the LEAD, not the title: the new screen's title is "Your slots",
+	// which contains "Your slot" as a substring, so the first picker's match above
+	// was widened to its own lead for the same reason.
+	if _, ok := pumpUntil(frame, "Do you hold another slot?", 16); !ok {
+		t.Fatal("the another-slot question was not shown")
 	}
 	click(&ctx.Router, Button3)
 	frame()
@@ -417,7 +429,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 	// Self at @1, so the cosigners land on @0 and @2 — a self slot in the MIDDLE
 	// is what makes "ascending, skipping self" distinguishable from "the first
 	// len(cosigners) slots".
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: true}
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{1}, IncludeFp: true}
 	self := canonicalBip85Master(t)
 	selfXpub, selfFP, err := deriveAccountXpub(self, "", &chaincfg.MainNetParams, multisigSharedOrigin())
 	if err != nil {
@@ -427,7 +439,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 	// so "record order" cannot be confused with "the first two".
 	chosen := []int{0, 2}
 	picked := []mk.Card{cards[0], cards[2]}
-	_, _, slots, err := assembleBuildPolicy(p, selfXpub, selfFP, picked)
+	_, _, slots, err := assembleBuildPolicy(p, selfKeyAt(1, selfXpub, selfFP, multisigSharedOrigin()), picked)
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy: %v", err)
 	}
@@ -452,7 +464,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 
 	// The slot->card map the review screen announces must be the SAME mapping
 	// assembleBuildPolicy just produced, not a parallel guess at it.
-	origins := buildCosignerOrigins(p.N, p.SelfSlot, false, chosen)
+	origins := buildCosignerOrigins(p, chosen)
 	want := []cosignerOrigin{{slot: 0, card: 1}, {slot: 2, card: 3}}
 	if len(origins) != len(want) {
 		t.Fatalf("buildCosignerOrigins returned %d entries, want %d", len(origins), len(want))
@@ -465,8 +477,8 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 
 	// And the review screen SHOWS it — §0.1 clause 3 puts the announcement on
 	// the confirmation surface, not in scrollback.
-	lines := buildReviewLines(md.MultisigWsh, [4]byte{1, 2, 3, 4}, slots, true,
-		buildProvenanceLines(origins, len(cards)))
+	lines := buildReviewLines(md.MultisigWsh, [4]byte{1, 2, 3, 4}, slots, nil, true,
+		buildProvenanceLines(origins, len(cards)), nil)
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{"@0", "@2", "payload", "1 and 3", "of 3"} {
 		if !strings.Contains(joined, want) {

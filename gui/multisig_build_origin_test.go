@@ -10,136 +10,128 @@ import (
 	"seedhammer.com/mk"
 )
 
-// ─── M-E: the D-2 window, closed while it is open ────────────────────────────
+// ─── M-E: the D-2 window, CLOSED by giving every slot its own origin ─────────
 //
-// cosignerFromCard IGNORES the gathered card's declared origin, because
-// OriginShared mode declares one origin for the whole policy. That is correct
-// for a card actually minted at m/48'/0'/0'/2' and a lie for any other: the
-// assembled md1 would say the key derives at the shared origin when the card
+// Before S5, cosignerFromCard IGNORED the gathered card's declared origin,
+// because OriginShared mode declares one origin for the whole policy. That was
+// correct for a card actually minted at m/48'/0'/0'/2' and a lie for any other:
+// the assembled md1 would say the key derives at the shared origin when the card
 // says it does not. Funds-correct (addresses derive from the KEYS) and restore
-// fail-closed — but the plate carries a false path, and a BIP-48-aware
+// fail-closed -- but the plate carries a false path, and a BIP-48-aware
 // coordinator reading it derives at the wrong place.
 //
-// SPEC P1 permits refuse OR warn. THIS PLAN PICKS REFUSE, and the reason is the
-// exposure rather than the test shape (§0.1): a declared origin the flow cannot
-// honour is CONTRADICTED input, not an underdetermined spelling. §0.1 clause 1
-// gives a default only where an input leaves the answer open; here the operator
-// has already answered, and the device would be overruling them silently.
-//
-// It is INTERIM. S5 gives each slot its own origin and this refusal becomes an
-// accepted shape.
+// S2 closed that window by REFUSING the shape, explicitly as an INTERIM measure:
+// the alternative was not "permit" but "stamp m/48'/0'/0'/2' over a card that
+// says otherwise", which is the device overruling an answer the operator already
+// gave. S5 closes it the other way -- the card's origin is RECORDED -- and this
+// file changed with it. What survives verbatim is the property both stages exist
+// for: THE PLATE NEVER CARRIES A PATH THE CARD DISAGREES WITH.
 
-// TestBuildRefusesForeignOriginCardBeforeS5 is spec M-E.
-func TestBuildRefusesForeignOriginCardBeforeS5(t *testing.T) {
+// TestBuildRecordsTheCardsOwnOrigin is that property, over the shape S2 refused.
+func TestBuildRecordsTheCardsOwnOrigin(t *testing.T) {
 	// THE PAYLOAD ALREADY CARRIES ONE. Card A@1 is masterA's SECOND account, at
-	// m/48h/0h/1h/2h — deliberately, as S5 Trace B's multi-account shape
-	// (cmd/buildpayloadcards/main.go:55). Until S5 it cannot be honoured, so
-	// until S5 it is refused.
-	t.Run("the payload's second-account card is refused", func(t *testing.T) {
+	// m/48h/0h/1h/2h -- deliberately, as S5 Trace B's multi-account shape
+	// (cmd/buildpayloadcards/main.go:55).
+	t.Run("the payload's second-account card is placed at its own origin", func(t *testing.T) {
 		card := dupTestCard(t, 3) // A@1
 		if card.Path == multisigSharedOrigin().String() {
-			t.Fatalf("card A@1 declares %q, the shared origin — this test's premise "+
-				"is that the delivered payload carries a foreign-origin card", card.Path)
+			t.Fatalf("card A@1 declares %q, the shared origin: this test's premise is "+
+				"that the delivered payload carries a divergent-origin card", card.Path)
 		}
 		selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
-		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 0}
-		out, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP,
+		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{0}}
+		out, _, _, err := assembleBuildPolicy(p,
+			selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()),
 			[]mk.Card{dupTestCard(t, 1), card}) // B@0 at the shared origin, then A@1
-		var fo errBuildForeignOrigin
-		if !errors.As(err, &fo) {
-			t.Fatalf("a card declaring %q was stamped with the shared origin instead "+
-				"of refused (err = %v)", card.Path, err)
+		if err != nil {
+			t.Fatalf("a card declaring %q was refused: %v", card.Path, err)
 		}
-		if fo.Slot != 2 {
-			t.Errorf("blamed slot @%d; A@1 fills @2 here", fo.Slot)
+		_, keys, err := md.ExpandWalletPolicyChunks(out)
+		if err != nil {
+			t.Fatalf("the assembled md1 does not decode: %v", err)
 		}
-		if fo.Declared != card.Path {
-			t.Errorf("reported declared origin %q, want %q", fo.Declared, card.Path)
+		if got := keys[2].OriginPath.String(); got != card.Path {
+			t.Errorf("@2 declares %s, but its card says %s: the plate would carry a "+
+				"derivation path the card itself disagrees with", got, card.Path)
+		}
+		if keys[1].OriginPath.String() != multisigSharedOrigin().String() {
+			t.Errorf("@1 declares %s, want its card's own %s",
+				keys[1].OriginPath, multisigSharedOrigin())
+		}
+	})
+
+	// PERMISSIVE ON SPELLING, STRICT ON VALUE (§0.1). mk.Decode normalises to the
+	// `h` form, but an mk.Card can reach the assembler carrying apostrophes, and
+	// m/48'/0'/0'/2' and m/48h/0h/0h/2h are the same path. Treating them as
+	// different origins would tip the policy into divergent mode over NOTATION,
+	// which is the exact opposite of the rule.
+	t.Run("apostrophe and h spellings of one origin are one origin", func(t *testing.T) {
+		base := dupTestCard(t, 1) // B@0, at the shared origin
+		var minted []string
+		for _, spelling := range []string{"m/48h/0h/0h/2h", "m/48'/0'/0'/2'"} {
+			card := base
+			card.Path = spelling
+			selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
+			p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlots: []int{0}}
+			out, _, _, err := assembleBuildPolicy(p,
+				selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()), []mk.Card{card})
+			if err != nil {
+				t.Fatalf("a card declaring %q (the shared origin) was refused: %v", spelling, err)
+			}
+			minted = append(minted, strings.Join(out, "|"))
+		}
+		if minted[0] != minted[1] {
+			t.Error("the two spellings of one path minted DIFFERENT policies, so the " +
+				"wallet id depends on notation")
+		}
+	})
+
+	// An origin the device cannot READ is still refused, and for the reason that
+	// never changed: the alternative is stamping something nobody parsed.
+	t.Run("an unreadable declared origin is refused", func(t *testing.T) {
+		card := dupTestCard(t, 1)
+		card.Path = "m/48h/0h/notanumber/2h"
+		selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
+		p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlots: []int{0}}
+		out, _, _, err := assembleBuildPolicy(p,
+			selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()), []mk.Card{card})
+		if err == nil {
+			t.Fatalf("a card whose declared origin does not parse was accepted: %v", out)
 		}
 		if out != nil {
 			t.Errorf("md1 chunks were produced alongside the refusal: %v", out)
 		}
 	})
 
-	// PERMISSIVE ON SPELLING, STRICT ON VALUE (§0.1). mk.Decode normalises to the
-	// `h` form, but an mk.Card can reach the assembler carrying apostrophes, and
-	// m/48'/0'/0'/2' and m/48h/0h/0h/2h are the same path. Refusing one of them
-	// would be a refusal over notation, which is the exact opposite of the rule.
-	t.Run("apostrophe and h spellings of the shared origin are both accepted", func(t *testing.T) {
-		base := dupTestCard(t, 1) // B@0, at the shared origin
-		for _, spelling := range []string{"m/48h/0h/0h/2h", "m/48'/0'/0'/2'"} {
-			card := base
-			card.Path = spelling
-			selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
-			p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlot: 0}
-			if _, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP, []mk.Card{card}); err != nil {
-				t.Errorf("a card declaring %q (the shared origin) was refused: %v", spelling, err)
-			}
-		}
-	})
-
-	// An origin the device cannot READ is not an origin it can honour. Refusing
-	// is the same answer for the same reason; the alternative is stamping the
-	// shared origin over something nobody parsed.
-	t.Run("an unreadable declared origin is refused too", func(t *testing.T) {
-		card := dupTestCard(t, 1)
-		card.Path = "m/48h/0h/notanumber/2h"
-		selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
-		p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlot: 0}
-		_, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP, []mk.Card{card})
-		var fo errBuildForeignOrigin
-		if !errors.As(err, &fo) {
-			t.Fatalf("a card whose declared origin does not parse was accepted: %v", err)
-		}
-	})
-
-	// THE ORDER OF THE TWO REFUSALS IS RULED, and the delivered payload can
-	// trigger both on one build (self = masterA, cards A@0 + A@1). The duplicate
-	// wins: it is the graver harm — a repeated key degrades the quorum invisibly
-	// where a foreign origin mis-states a path that is printed on every artifact
-	// — and it is the check that OUTLIVES this stage. The origin refusal
-	// disappears at S5; §4.1's never does.
-	t.Run("a duplicate outranks a foreign origin", func(t *testing.T) {
+	// THE ORDER OF THE CHECKS IS RULED, and the delivered payload can trigger both
+	// on one build (self = masterA, cards A@0 + A@1). The duplicate wins: it is
+	// the graver harm, since a repeated key degrades the quorum invisibly where a
+	// declared origin is printed on every artifact, and §4.1's check is the one
+	// that OUTLIVES every stage.
+	t.Run("a duplicate outranks anything the encoder would say", func(t *testing.T) {
 		selfXpub, selfFP := dupTestSelf(t, fixtureMasterA)
-		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 0}
-		_, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP,
-			[]mk.Card{dupTestCard(t, 0), dupTestCard(t, 3)}) // A@0 (collides), A@1 (foreign)
+		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{0}}
+		_, _, _, err := assembleBuildPolicy(p,
+			selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()),
+			[]mk.Card{dupTestCard(t, 0), dupTestCard(t, 3)}) // A@0 (collides with self), A@1
 		var dup errBuildDuplicateKey
 		if !errors.As(err, &dup) {
-			t.Fatalf("a build that is BOTH a duplicate and a foreign origin reported "+
-				"%v; the duplicate must win", err)
-		}
-	})
-
-	// The refusal text: which slot, what the card says, what the device would
-	// have stamped, that nothing was cut, and the route that exists. No "scan".
-	t.Run("the refusal names the slot and both origins", func(t *testing.T) {
-		msg := buildForeignOriginMessage(
-			errBuildForeignOrigin{Slot: 2, Declared: "m/48h/0h/1h/2h"},
-			buildCosignerOrigins(3, 0, false, []int{0, 1}))
-		for _, want := range []string{
-			"slot @2", "payload card 2", "m/48h/0h/1h/2h",
-			multisigSharedOrigin().String(), "Nothing was engraved",
-		} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("refusal is missing %q:\n%s", want, msg)
-			}
-		}
-		if strings.Contains(msg, "scan") || strings.Contains(msg, "Scan") {
-			t.Errorf("the refusal tells the operator to scan:\n%s", msg)
-		}
-		if strings.Contains(msg, "\u2014") {
-			t.Errorf("the refusal contains an em-dash, which does not draw:\n%s", msg)
+			t.Fatalf("a build whose self key is repeated at @1 reported %v; the "+
+				"duplicate must win", err)
 		}
 	})
 }
 
-// TestBuildFlowRefusesForeignOriginCard drives the whole flow: a payload whose
-// only cosigner card is masterA's second account, a self seed that does not
-// collide with it, and all five picker defaults.
-func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
-	// Roster index 3 is A@1. cosignerCardRecords returns a PREFIX, so take four
-	// and drop the first three cards' chunks.
+// TestBuildFlowAcceptsDivergentOriginCard drives the WHOLE flow over the shape S2
+// refused: a payload whose only cosigner card is masterA's second account, a self
+// seed that does not collide with it, and all five picker defaults.
+//
+// It is the behavioural half of the removal. The old test asserted that this walk
+// ended on a "Key origin mismatch" modal; the assertion is now that it reaches
+// the policy review, which is the screen a build that WORKS reaches.
+func TestBuildFlowAcceptsDivergentOriginCard(t *testing.T) {
+	// Roster index 3 is A@1. cosignerCardFixtures returns a PREFIX, so take four
+	// and use only the fourth card's chunks.
 	all := cosignerCardFixtures(t, 4)
 	records := all[3]
 	synctest.Test(t, func(t *testing.T) {
@@ -147,13 +139,11 @@ func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
 		ctx.sysw = sessionHolding(records...)
-		done := false
-		// RASTERED, for TestBuildFlowRefusesDuplicateBeforeReview's reason: a
-		// refusal nobody can read is a refusal that did not happen, and content
-		// assertions cannot see that.
+		// RASTERED, for TestBuildFlowRefusesDuplicateBeforeReview's reason: a screen
+		// nobody can read is a screen that did not happen, and content assertions
+		// cannot see that.
 		frame, _, ink, quit := runUITouchRaster(ctx, func() {
 			buildMultisigPolicyFlow(ctx, &descriptorTheme)
-			done = true
 		})
 		defer quit()
 		buildWalkParamPickers(t, ctx, frame)
@@ -181,22 +171,15 @@ func TestBuildFlowRefusesForeignOriginCard(t *testing.T) {
 			t.Fatalf("S4's slot-source review was not reached; got %q", c)
 		}
 		click(&ctx.Router, Button3)
-		content, ok := pumpUntil(frame, "Key origin", 64)
+		content, ok := pumpUntil(frame, "Policy stub", 64)
 		if !ok {
-			t.Fatalf("a card declaring a foreign origin did not refuse; got %q", content)
+			t.Fatalf("a card declaring a divergent origin did not reach the policy "+
+				"review; got %q", content)
 		}
 		if ink() < buildWalkRasterFloor {
-			t.Errorf("the Key origin mismatch refusal drew only %d ink pixels (floor %d); "+
-				"its body is 362 chars, the longest refusal this flow draws",
+			t.Errorf("the policy review drew only %d ink pixels (floor %d)",
 				ink(), buildWalkRasterFloor)
 		}
-		t.Logf("Key origin mismatch refusal: ink = %d px", ink())
-		click(&ctx.Router, Button3)
-		for i := 0; i < 64 && !done; i++ {
-			frame()
-		}
-		if !done {
-			t.Fatal("the flow did not return after the foreign-origin refusal")
-		}
+		t.Logf("divergent-origin policy review: ink = %d px", ink())
 	})
 }

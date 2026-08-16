@@ -1,0 +1,51 @@
+{
+  "payload": {
+    "name": "cmd/emu/sysw_cards_payload.bin",
+    "digest": "2527 1e58 3f3e aa03 ae18 f359 c72b 76e3"
+  },
+  "inputs": {
+    "template": "build-policy (Trace B): Load Payload, then Engrave Multisig -> Build policy, wsh sortedmulti 3-of-4. The operator HOLDS @0, @1 and @2 -- master A account 0, master A account 1, master B account 0 -- and payload cosigner card 4 (master C) fills @3. FULL mode: one ms1 per distinct held master, one mk1 per held slot, then the md1. Driven by cmd/emu/walk_trace_b.js; @0 and @1 take the payload's ClassMnemonic and @2 is TYPED on the device keyboard, because syswSession.take is first-match and cannot hand out a second master.",
+    "n": 4,
+    "k": 3,
+    "slot_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "fp_choice": "omit",
+    "origins": [
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/1h/2h",
+      "m/48h/0h/0h/2h",
+      "m/48h/0h/0h/2h"
+    ],
+    "seeds": [
+      {
+        "label": "self:masterA (slot @0, BIP-48 account 0)",
+        "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      },
+      {
+        "label": "self:masterA (slot @1, BIP-48 account 1)",
+        "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      },
+      {
+        "label": "self:masterB (slot @2, typed on the keyboard)",
+        "words": "legal winner thank year wave sausage worth useful legal winner thank yellow"
+      },
+      {
+        "label": "payload:masterC (card C@0, slot @3)",
+        "words": "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
+      }
+    ]
+  },
+  "expect": {
+    "kind": "built-policy-full",
+    "policy_id_stub": "70fb9d6e",
+    "held_slots": [
+      0,
+      1,
+      2
+    ]
+  }
+}

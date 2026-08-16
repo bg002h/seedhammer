@@ -150,8 +150,8 @@ func TestMultisigBuildTemplateBinding(t *testing.T) {
 	}
 	card0 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[0]), Stubs: [][4]byte{{0, 0, 0, 0}}}
 	card2 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[2]), Stubs: [][4]byte{{0, 0, 0, 0}}}
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: false}
-	assembled, fullStub, _, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, []mk.Card{card0, card2})
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{1}, IncludeFp: false}
+	assembled, fullStub, _, err := assembleBuildPolicy(p, selfKeyAt(1, selfXpub, selfMasterFP, multisigSharedOrigin()), []mk.Card{card0, card2})
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy: %v", err)
 	}

@@ -15,10 +15,12 @@ import (
 // engraveMultisigFlow is the engraveMultisig program: gather a SUPPLIED
 // multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a full
 // policy (every slot xpub-present) -> take the seed through the ONE seed seam
-// -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
-// leg (ms1 + policy-bound mk1; the supplied md1 engraved VERBATIM) -> engrave
-// (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder) -> offer
-// verify-bundle -> show the multisig restore doc.
+// -> CROSS-MATCH the seed to EVERY descriptor slot it accounts for -> derive a
+// leg per matched slot at that slot's own origin (one policy-bound mk1 each,
+// one ms1 for the one seed; the supplied md1 engraved VERBATIM) -> state the
+// plate count -> engrave (full = ms1 + every mk1 + md1; watch-only drops the
+// ms1 and shows its hand-engrave reminder) -> offer verify-bundle -> show the
+// multisig restore doc.
 //
 // SECURITY SPINE (mirror gui/singlesig.go):
 //   - ONE SEED SEAM (I-7): the seed comes from seedEntryFlow ONLY, and nothing
@@ -32,8 +34,10 @@ import (
 //     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
 //     call so a payload-sourced secret is never compared against itself (§7.4).
 //     ms1 is engraved onto owner-held steel only, never NFC.
-//   - PER-LEG SCRUB (I-7): the entropy is gated + wiped inside deriveMultisigLeg;
-//     the seed/master/intermediates are scrubbed inside deriveAccountXpub (called
+//   - PER-LEG SCRUB (I-7): the entropy is gated + wiped inside deriveMultisigLeg,
+//     on EVERY call, so the per-matched-slot loop in supplyEngraveTail costs no
+//     more seed exposure than the single derive it replaced; the
+//     seed/master/intermediates are scrubbed inside deriveAccountXpub (called
 //     once per slot in the cross-match loop); the mnemonic []Word is zeroed when
 //     this flow returns (defer), after its LAST derivation consumer.
 
@@ -63,13 +67,21 @@ func engraveMultisigFlow(ctx *Context, th *Colors) {
 	buildMultisigPolicyFlow(ctx, th)
 }
 
-// supplyMultisigPolicyFlow is the UNCHANGED T6b body: gather a SUPPLIED
-// multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a full
-// policy (every slot xpub-present) -> take the seed through the ONE seed seam
-// -> CROSS-MATCH the seed to one descriptor slot -> derive the operator's
-// leg (ms1 + policy-bound mk1; the supplied md1 engraved VERBATIM) -> engrave
-// (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder) -> offer
-// verify-bundle -> show the multisig restore doc.
+// supplyMultisigPolicyFlow is the T6b body, with F-188's engrave rule: gather a
+// SUPPLIED multisig/miniscript wallet-policy md1 over NFC (PUBLIC) -> require a
+// full policy (every slot xpub-present) -> take the seed through the ONE seed
+// seam -> CROSS-MATCH the seed to EVERY descriptor slot it accounts for ->
+// derive a leg per matched slot at that slot's own origin -> state the plate
+// count -> engrave (full = ms1 + every mk1 + md1; watch-only drops the ms1) ->
+// offer verify-bundle over the slots this run cut -> show the multisig restore
+// doc.
+//
+// IT WAS "UNCHANGED T6b" UNTIL F-188. What changed is the engrave rule and only
+// the engrave rule: a seed the policy seats at several accounts now gets a plate
+// per seat, because that is what the verify already demanded and what the
+// operator needs to prove membership of each one. Everything else here -- the
+// gather, the full-policy gate, the seed seam, the passphrase, the verbatim
+// md1 -- is byte-for-byte the shipped flow.
 func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (1) Gather the SUPPLIED md1 over NFC (PUBLIC). Refuse a polluted/ambiguous
 	// supply BEFORE any seed is typed (no secret exists yet).
@@ -137,22 +149,72 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 		}
 	}
 
-	// (4) CROSS-MATCH the seed to one slot (I-1). Refuse on zero matches.
-	idx, origin, reused, ok := findUserSlot(mnemonic, passphrase, &chaincfg.MainNetParams, keys)
-	if !ok {
+	// (4) CROSS-MATCH the seed to EVERY slot it accounts for (I-1). Refuse on
+	// zero matches.
+	//
+	// allUserSlots, NOT findUserSlot, and the difference is F-188. findUserSlot
+	// answers "which slot is the operator in" and returns the FIRST match; the
+	// question this flow has to answer is "which slots does this seed HOLD", and
+	// a policy putting one seed at several accounts answers it with several --
+	// at DIFFERENT origins, carrying DIFFERENT keys. Cutting one plate and
+	// calling the rest a reused key described a shape the code does not produce,
+	// and left every matched slot but one unprovable by the operator.
+	slots := allUserSlots(mnemonic, passphrase, &chaincfg.MainNetParams, keys)
+	if len(slots) == 0 {
 		showError(ctx, th, "Engrave Multisig", "This seed is not a cosigner of the supplied policy.")
 		return
 	}
-	if len(reused) >= 2 {
-		showError(ctx, th, "Engrave Multisig",
-			fmt.Sprintf("This key is reused at slots %s; engraving the first (@%d).", formatSlotList(reused), idx))
+	// (4a) SAY WHAT WILL BE CUT, not what is being dropped. The operator is about
+	// to cut more plates than this policy's slot count suggests one seed should
+	// need, and the reason is a property of the POLICY (it seats them at several
+	// accounts) rather than of their seed. The plate census at (6a) states the
+	// count; this states why it is not one.
+	//
+	// TWO SENTENCES, BECAUSE THE POLICY HAS TWO SHAPES AND ONLY ONE OF THEM WAS
+	// EVER TRUE HERE. "each of those slots holds a DIFFERENT key" is right for the
+	// reused-SEED shape (one seed at several accounts, several origins, several
+	// keys) and FALSE for a supplied policy that seats one key at two slots -- the
+	// same claims-a-shape-the-code-does-not-have defect F-188's own commit message
+	// calls the tell, which is why it is not repeated here in the other direction.
+	//
+	// THE COLLAPSED ARM STATES NO COUNT. It is drawn before the engrave mode is
+	// chosen, so no leg has been minted and any number here would be a second
+	// prediction of the tail's behaviour. The census at (6a) carries the exact
+	// figure and derives it from the tail's own return.
+	if len(slots) >= 2 {
+		if multisigSlotsShareAKey(keys, slots) {
+			showNotice(ctx, th, "Engrave Multisig", fmt.Sprintf(
+				"Your seed is at slots %s of this policy, and more than one of them holds "+
+					"the SAME key at the SAME key path. Identical plates would carry "+
+					"identical information, so this run cuts one plate per DISTINCT key, "+
+					"not one per slot. The next screen states the exact count.",
+				formatSlotList(slots)))
+		} else {
+			showNotice(ctx, th, "Engrave Multisig", fmt.Sprintf(
+				"Your seed is at slots %s of this policy, at a different key path in each, so "+
+					"each of those slots holds a DIFFERENT key. This run engraves %s, one per "+
+					"slot.", formatSlotList(slots), plateWord(len(slots), "key plate", "key plates")))
+		}
 	}
 
 	// (5) Full vs watch-only.
+	//
+	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT, on THIS path too (C-3). The
+	// passphrase entered at (3) is a live derivation input all the way down --
+	// allUserSlots at (4), supplyEngraveTail at (6), deriveMultisigLeg,
+	// deriveAccountXpub -- so the plates are correct AND the backup is incomplete:
+	// ms1 encodes the WORDS, the passphrase is not in that entropy, and no plate
+	// this device cuts can be made to yield it. "Full (seed + keys)" over that is
+	// F-132's shape, a backup that is both wrong and trusted.
+	//
+	// S5 built buildFullModeLabel for exactly this harm and wired it to the BUILD
+	// path only, which left the asymmetry the wrong way round: the path that told
+	// the truth was behind the mandatory EXPERIMENTAL warning, and the
+	// hardware-validated front-door path was the one that lied.
 	modeChoice := &ChoiceScreen{
 		Title:   "Engrave Mode",
 		Lead:    "What to engrave?",
-		Choices: []string{"Full (seed + keys)", "Watch-only (keys)"},
+		Choices: []string{buildFullModeLabel(passphrase != ""), "Watch-only (keys)"},
 	}
 	modeSel, ok := modeChoice.Choose(ctx, th)
 	if !ok {
@@ -160,27 +222,144 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 	full := modeSel == 0
 
-	// (6) Derive the operator's leg. The mnemonic is consumed for the LAST time
-	// here (entropy gated + wiped inside).
-	b, err := deriveMultisigLeg(mnemonic, passphrase, &chaincfg.MainNetParams, origin, suppliedMd1, full)
+	// (6) Derive the operator's leg PER MATCHED SLOT, at that slot's own origin
+	// (F-188). The mnemonic is consumed for the LAST time here; deriveMultisigLeg
+	// gates and wipes its own entropy buffer on every call, so several legs cost
+	// no extra seed exposure. ONE ms1 for the one seed, however many slots it
+	// fills.
+	engravedSlots, cardsOut, err := supplyEngraveTail(mnemonic, passphrase,
+		&chaincfg.MainNetParams, keys, slots, suppliedMd1, full)
 	if err != nil {
 		showError(ctx, th, "Engrave Multisig", "Couldn't derive the bundle from the seed.")
 		return
 	}
 
-	// (7) Engrave (full = ms1+mk1+md1; watch-only = mk1+md1 + the ms1 reminder).
-	cardsOut := multisigEngraveCards(b.MS1, b.MK1, b.MD1, full)
-	bundleEngrave(ctx, th, cardsOut)
+	// (6a) HOW MANY PLATES, BEFORE THE FIRST ONE (the plan's S4 prose
+	// constraint). It binds harder here than anywhere else it applies: F-188 is
+	// the change that makes these inputs cut MORE plates than they did
+	// yesterday, so the operator has to learn the count before the first one
+	// rather than discover it four plates in. Back here aborts before anything
+	// is cut, which is the last moment that is free.
+	//
+	// THE TITLE DELIBERATELY DIFFERS FROM THE BUILD PATH'S CENSUS TITLE.
+	// cmd/emu/needle_test.go requires every string a walk anchors on to have
+	// exactly ONE production site, because a walk that cannot tell which flow
+	// drew a screen proves nothing about the flow it claims to have driven
+	// (F-169). The build census title is walk_s4_gate.js's anchor and lives in
+	// gui/multisig_build.go; reusing that literal here made it two-site and the
+	// gate said so, in the same run. Re-anchoring that walk was the alternative
+	// and there is nothing to re-anchor it ON: every other string on that screen
+	// comes from the shared buildPlateCensusLines. The BODY -- what the operator
+	// actually reads, including the count -- is identical in both flows.
+	//
+	// The counter matches SOURCE BYTES, comments included, so this note may not
+	// spell the build path's title either. That is not pedantry: a comment
+	// quoting a needle costs the needle its uniqueness just as effectively as a
+	// second screen does, and it took one test run to find out.
+	//
+	// AND THE COLLAPSE, FIRST ON THE PAGE (plan §0.1 clause 3). A supplied policy
+	// seating one key at two slots cuts FEWER plates than its matched-slot count
+	// suggests, and clause 3 puts an assumption upstream of steel on the
+	// confirmation surface itself rather than in scrollback. It leads the list
+	// because this screen is confirmable from any page: a note on page three is a
+	// note the operator can commit past without reading.
+	//
+	// THE PREDICATE IS THE TAIL'S OWN RETURN, not a re-derivation of it. The tail
+	// is the one place that decides which slots get a plate, so a note that asked
+	// any other source could claim a collapse that did not happen, or miss one
+	// that did.
+	census := buildPlateCensusLines(cardsOut)
+	if len(engravedSlots) < len(slots) {
+		census = append([]string{fmt.Sprintf(
+			"NOTE: slots %s hold only %s between them, so this run cuts %s, not one per slot.",
+			formatSlotList(slots),
+			plateWord(len(engravedSlots), "distinct key", "distinct keys"),
+			plateWord(len(engravedSlots), "key plate", "key plates"))}, census...)
+	}
+	if !confirmReviewScreen(ctx, th, "Plates To Cut", census) {
+		return
+	}
+
+	// (7) Engrave (full = ms1 + one mk1 per matched slot + md1; watch-only drops
+	// the ms1 and bundleEngrave shows the hand-engrave reminder instead).
+	//
+	// AN ABORT ENDS THE PROGRAM HERE (I-12). Everything below this line vouches
+	// for a COMPLETE set: the verify offer over plates that were never all cut
+	// (the md1 is emitted last, so the readback dies reading as "your plates are
+	// unreadable"), and the restore document headed "This backup is N plates". The
+	// abort modal is the operator's last screen, and it says so.
+	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut) != bundleEngraveDone {
+		return
+	}
 
 	// (8) Offer the verify-bundle.
-	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, b, full)
+	//
+	// engravedSlots IS THE OBLIGATION LIST, and it is the tail's own return
+	// rather than a recomputation of `slots`. The two are equal today by
+	// construction, and passing the tail's list is what keeps them that way: the
+	// verify's derive loop asks a re-typed seed which slots it FILLS, and only
+	// the engraver knows which of those it actually cut steel for.
+	//
+	// IT IS NOT REDUNDANT NOW THAT THE ENGRAVE COVERS EVERY MATCHED SLOT, because
+	// multisigVerifyFlow has another caller. On the BUILD path allUserSlots can
+	// still exceed what was engraved: a payload cosigner card carrying a DIFFERENT
+	// key derived from the same seed at another origin is not a duplicate
+	// (duplicateSlotPair refuses only IDENTICAL keys) and is admitted, so the seed
+	// accounts for a slot the operator never claimed. Dropping the expectation
+	// would reopen that as a false RED.
+	//
+	// suppliedMd1 IS THE OTHER HALF OF THE OBLIGATION, and it is the md1 this run
+	// engraved VERBATIM (I-2), so it is exactly what the operator will present.
+	// Slot indices alone get re-based onto whatever policy the readback supplies,
+	// which is how a byte-valid plate set from a DIFFERENT wallet reports
+	// "Verify OK" while this run's steel is never read.
+	//
+	// AND THE OFFER LOOPS (I-4). The incomplete screen told the operator to "run
+	// verify again with the remaining seeds" and nothing on the device could run
+	// it again: this was a one-shot `if sel == 0`, the program table has no
+	// standalone bundle verify, and their only route was to re-run the whole
+	// engrave. So a verify that ends short of a clean pass RE-OFFERS itself. Only
+	// verifyComplete falls through; a refusal or an abandon does not loop, because
+	// neither is a state the operator can change by trying again with the same
+	// inputs.
+	//
+	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, because this
+	// loop is otherwise unreachable from any executing test and was pinned only by
+	// a strings.Contains over this function's own source (B4).
+	lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+	for {
+		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
+		sel, ok := verifyChoice.Choose(ctx, th)
+		if !ok || sel != 0 {
+			break
+		}
+		res := multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)
+		if res != verifyIncomplete && res != verifyFailed {
+			break
+		}
+		lead = multisigVerifyRetryLead
+		choices = []string{"VERIFY AGAIN", "CONTINUE"}
 	}
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys
 	// decoded at step (2) — no second ExpandWalletPolicyChunks (t6b-M2).
-	multisigRestoreDocFlow(ctx, th, tpl, keys, nil)
+	//
+	// AND IT CARRIES THIS RUN'S SET (C-3, closing M-13). It passed nil, on a
+	// premise the code stated at multisigRestoreDocFlow and which was never true:
+	// this path DOES have a set of its own, `cardsOut`, and F-188 made that bite
+	// by letting the run cut several plates. So the document a reader holds in
+	// five years said neither how many plates the backup is nor -- the half that
+	// loses funds -- that a BIP-39 passphrase is a required spending factor absent
+	// from every one of them.
+	//
+	// ONE SEED, so ONE FACT. This path has a single seed seam by construction
+	// (step 3), so its inventory takes the single-seed arm and reads exactly as
+	// the single-seed build path's does. It carries no fingerprint because the
+	// single-seed arm renders none: with one seed there is nothing to tell apart,
+	// and deriving a master fingerprint here purely to print it would be another
+	// PBKDF2 pass over a mnemonic whose last consumer was step (6).
+	multisigRestoreDocFlow(ctx, th, tpl, keys,
+		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != "")))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

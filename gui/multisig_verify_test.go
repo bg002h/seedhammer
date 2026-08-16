@@ -18,7 +18,7 @@ func TestVerifyMultisig(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 	m := abandonAboutMnemonic()
-	_, origin, _, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	_, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
 		t.Fatal("findUserSlot: no match")
 	}
@@ -70,7 +70,7 @@ func TestVerifyMultisig(t *testing.T) {
 }
 
 // TestVerifyMultisigReadbackMk1 (T-H1, verify-cluster H1): route a readback
-// []bundleCard through the PRODUCTION extractSuppliedMd1AndMk1 → verifyMultisig.
+// []bundleCard through the PRODUCTION extractReadbackMd1AndMk1s → verifyMultisig.
 // On 3a23dbb the flow ignored the readback mk1 (passed reDerived.MK1 on both
 // sides), so a WRONG engraved mk1 plate silently PASSED. This test routes the
 // real readback mk1 and asserts:
@@ -87,7 +87,7 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 	m := abandonAboutMnemonic()
-	_, origin, _, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	_, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	if !ok {
 		t.Fatal("findUserSlot: no match")
 	}
@@ -109,11 +109,11 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 			{kind: cardMK1, strings: append([]string(nil), derived.MK1...)},
 			{kind: cardMD1, strings: append([]string(nil), derived.MD1...)},
 		}
-		md1RB, mk1RB, ok := extractSuppliedMd1AndMk1(cards)
+		md1RB, mk1RBs, ok := extractReadbackMd1AndMk1s(cards)
 		if !ok {
 			t.Fatal("helper rejected a valid mk1+md1 card set")
 		}
-		if err := verifyMultisig(derived, derived.MS1, mk1RB, md1RB); err != nil {
+		if err := verifyMultisig(derived, derived.MS1, mk1RBs[0], md1RB); err != nil {
 			t.Fatalf("correct readback: %v (want PASS)", err)
 		}
 	})
@@ -125,11 +125,11 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 			{kind: cardMK1, strings: mutated},
 			{kind: cardMD1, strings: append([]string(nil), derived.MD1...)},
 		}
-		md1RB, mk1RB, ok := extractSuppliedMd1AndMk1(cards)
+		md1RB, mk1RBs, ok := extractReadbackMd1AndMk1s(cards)
 		if !ok {
 			t.Fatal("helper rejected mutated mk1 card set")
 		}
-		if err := verifyMultisig(derived, derived.MS1, mk1RB, md1RB); err == nil {
+		if err := verifyMultisig(derived, derived.MS1, mk1RBs[0], md1RB); err == nil {
 			t.Fatal("undecodable mk1 accepted, want FAIL")
 		}
 	})
@@ -139,11 +139,11 @@ func TestVerifyMultisigReadbackMk1(t *testing.T) {
 			{kind: cardMK1, strings: append([]string(nil), foreign.MK1...)},
 			{kind: cardMD1, strings: append([]string(nil), derived.MD1...)},
 		}
-		md1RB, mk1RB, ok := extractSuppliedMd1AndMk1(cards)
+		md1RB, mk1RBs, ok := extractReadbackMd1AndMk1s(cards)
 		if !ok {
 			t.Fatal("helper rejected foreign mk1 card set")
 		}
-		err := verifyMultisig(derived, derived.MS1, mk1RB, md1RB)
+		err := verifyMultisig(derived, derived.MS1, mk1RBs[0], md1RB)
 		if err == nil {
 			t.Fatal("decodable-but-wrong foreign mk1 accepted, want FAIL")
 		}

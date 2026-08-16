@@ -57,11 +57,22 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 //
 // WHY NOT AN IDLE LIMIT. A timer that scrubs and exits mid-build would fire on
 // the operator reading this very document, and would throw away a build that
-// costs hours to redo. The registry today holds exactly one seed, which is what
-// the shipped flow already held, so an idle limit would buy no reduction in
-// exposure over the state of the tree. S5 multiplies the masters in it; the
-// bound is filed to be re-decided there, when it would actually change something.
-func buildPlateInventoryLines(cards []bundleCard) []string {
+// costs hours to redo. S5 multiplied what the registry holds -- up to one seed
+// per held slot, across distinct masters, for a build that grew to a dozen
+// plates over hours -- and the re-decision filed to S5 is now made: STILL NO
+// BOUND, on the new premise, stated honestly. On a full build the registry is
+// not the marginal copy: the same entropy is in the ms1 engrave strings
+// (immutable Go strings, unscrubbable) for the whole engrave, and it
+// accumulates on the plates in the tray -- whoever reaches an unattended
+// machine reads the steel, not the SRAM. An earlier scrub would protect only
+// watch-only builds, against a live-SRAM-extraction attacker this air-gapped,
+// physically-custodied device does not defend against anyway, and it would
+// break the one-site scrub invariant: BIP-39 derivation is checksum-free
+// PBKDF2, so a future read-after-scrub silently derives the all-"abandon"
+// wallet. The walk-away exposure is answered where it lives: the ruling below
+// tells the operator the machine holds every entered seed, and the plates
+// themselves, until the build ends.
+func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact) []string {
 	plan := bundlePlatePlan(cards)
 	lines := []string{
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
@@ -71,8 +82,172 @@ func buildPlateInventoryLines(cards []bundleCard) []string {
 			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
-	lines = append(lines, "Seed handling: this build does not time out. A seed you entered "+
-		"stays in device memory until the build ends, like the rest of the payload "+
-		"surface. Power the device off when you are done.")
+	lines = append(lines, buildPassphraseInventoryLines(seeds)...)
+	lines = append(lines, "Seed handling: this build does not time out. Every seed "+
+		"you entered -- this build can hold several -- stays in device memory until "+
+		"the build ends, and on a full build the words are also on the plates as "+
+		"they are cut. Do not leave a mid-build machine unattended: the plates are "+
+		"the secret. Power the device off when you are done.")
 	return lines
+}
+
+// ─── What is NOT on the plates ───────────────────────────────────────────────
+
+// buildPassphraseInventoryLines states, on the restore document, whether a
+// BIP-39 passphrase is part of this wallet and where it is not.
+//
+// THE PASSPHRASE IS A REQUIRED SPENDING FACTOR AND IS NEVER ENGRAVED. ms1 encodes
+// the WORDS; the passphrase is not in that entropy and no plate in the set can be
+// made to yield it. Before S5 neither the engrave-mode label nor this document
+// said so -- measured, gui/multisig_restore.go contained zero occurrences of the
+// word -- so a set labelled "Full (seed + keys)" could be missing the one factor
+// that reaches the money and vouch for itself while doing it. F-132's device
+// sibling exactly: that finding was a hashlock preimage required to spend, absent
+// from the backup and unmentioned by it.
+//
+// BOTH ARMS SPEAK, and the second is not symmetry for its own sake. This document
+// is read years later, alone, often by someone who was not the operator, holding
+// a pile of steel and asking one question: is this everything? "No BIP-39
+// passphrase was used" ANSWERS it. Silence leaves the reader unable to
+// distinguish a complete backup from one whose operator forgot to write the
+// passphrase down, and that is the state in which people give up on a recovery
+// that would have worked.
+//
+// NEITHER ARM ASSUMES A SEED PLATE EXISTS. A watch-only build engraves no ms1 at
+// all, so "the seed plate encodes the words only" and "these plates are the whole
+// backup" -- both in the first draft of this text -- are false there. The claim is
+// about the PASSPHRASE and is phrased to stay true in both modes; what the set
+// does and does not contain is the inventory's job, immediately above.
+func buildPassphraseInventoryLines(seeds []seedPassphraseFact) []string {
+	var passphrased, bare []seedPassphraseFact
+	for _, s := range seeds {
+		if s.Uses {
+			passphrased = append(passphrased, s)
+		} else {
+			bare = append(bare, s)
+		}
+	}
+	if len(passphrased) == 0 {
+		return []string{
+			"No BIP-39 passphrase was used, so no passphrase is needed to spend from " +
+				"this wallet.",
+		}
+	}
+	lines := []string{
+		"A BIP-39 passphrase WAS used. It is not on these plates and cannot be " +
+			"recovered from them: nothing this device engraves carries a passphrase.",
+		"Without it, these plates do not reach the money. Keep it somewhere " +
+			"separate, and make sure whoever needs this backup can also get the " +
+			"passphrase.",
+	}
+	// ONE SEED: the shipped two lines, unchanged. Everything in them is singular
+	// and everything singular is true, so a build with one master reads exactly as
+	// it always did.
+	if len(seeds) < 2 {
+		return lines
+	}
+	// SEVERAL SEEDS: name them, because "the passphrase" is a phrase with one
+	// referent and this backup has more than one. Every reference in the two lines
+	// above is singular; an operator holding three slots who records "the
+	// passphrase" and had typed two different ones loses the legs the other one
+	// derives, silently, with the backup vouching for itself throughout.
+	//
+	// THE LABEL AND THE FINGERPRINT TOGETHER, because neither alone identifies the
+	// seed to a reader in five years: the label says which slot it was entered
+	// for, and the fingerprint is what a coordinator shows beside the key so the
+	// reader can tell which ms1 plate the sentence is about.
+	for _, s := range passphrased {
+		lines = append(lines, fmt.Sprintf("Needs a passphrase: %s%s. If more than one "+
+			"is listed here they may be DIFFERENT passphrases; record each one "+
+			"against its fingerprint.", s.Label, seedFingerprintSuffix(s.MasterFP)))
+	}
+	// AND THE BARE ONES ARE SAID OUT LOUD. Silence here reads as "all of them need
+	// it", which sends a reader hunting for a passphrase that never existed for
+	// that seed -- and, worse, lets them conclude the one passphrase they have is
+	// the only factor missing.
+	for _, s := range bare {
+		lines = append(lines, fmt.Sprintf("Needs NO passphrase: %s%s.",
+			s.Label, seedFingerprintSuffix(s.MasterFP)))
+	}
+	return lines
+}
+
+// seedFingerprintSuffix renders " (master fingerprint xxxxxxxx)", or nothing at
+// all when the fingerprint is not known.
+//
+// A ZERO FINGERPRINT IS NOT PRINTED AS 00000000. Every fact the BUILD path emits
+// carries a real one -- seedRegistry.add derives it at registration and refuses a
+// seed whose master key cannot be built -- so this arm is for a caller that has
+// none to give, and printing a placeholder on a document read years later would
+// invite the reader to look for a key with that fingerprint.
+func seedFingerprintSuffix(fp uint32) string {
+	if fp == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (master fingerprint %08x)", fp)
+}
+
+// oneSeedPassphraseFact is the single-seed caller's fact.
+//
+// It exists so a flow with ONE seed says so in one place rather than
+// hand-building a struct literal with a zero fingerprint at every call site --
+// which is the shape that makes a reader wonder whether the zero is meaningful.
+// With one seed there is nothing to tell apart, so the inventory's single-seed
+// arm renders no fingerprint and none is needed.
+func oneSeedPassphraseFact(uses bool) []seedPassphraseFact {
+	return []seedPassphraseFact{{Label: "your seed", Uses: uses}}
+}
+
+// seedPassphraseFact is one registered (seed, passphrase) pair's passphrase
+// status, WITHOUT the secret: a label, the pair's master fingerprint, and
+// whether a passphrase is part of it.
+//
+// IT REPLACES A BOOLEAN, and the boolean was seedRegistry.usesPassphrase() --
+// an any() over the registry, whose single bit was the only passphrase signal
+// reaching either operator-facing surface. SPEC 4.1 makes the (seed, passphrase)
+// pair the derivation unit and asks the passphrase PER SEED, so a build holding
+// @0 and @1 can carry `alpha` and `beta`; the document then read "A BIP-39
+// passphrase WAS used ... Without IT ... Keep IT somewhere separate", every
+// reference singular, immediately after asserting "If any of them is missing,
+// this backup is incomplete." Nothing on steel or on that page let a reader
+// learn a SECOND passphrase exists. The commoner and equally fatal form is two
+// different masters with one passphrased, where the document could not say WHICH
+// of "ms1 secret share 1 of 2" / "2 of 2" needs it.
+//
+// NO MNEMONIC AND NO PASSPHRASE TEXT: this crosses into a display path, and the
+// only things a display path may hold are the ones an operator is meant to read.
+type seedPassphraseFact struct {
+	// Label is what the screens already call this seed ("your seed for @0").
+	Label string
+	// MasterFP is the fingerprint of the PAIR, which is what distinguishes two
+	// entries holding the same words under different passphrases.
+	MasterFP uint32
+	// Uses reports whether this pair carries a passphrase. An EXPLICITLY BOUND
+	// EMPTY passphrase is no passphrase: syswPassphraseFlowTitled can return
+	// ("", true), and a build that engraves a plain seed must not be labelled as
+	// though a factor were missing.
+	Uses bool
+}
+
+// buildFullModeLabel is the engrave-mode picker's first row.
+//
+// "Full (seed + keys)" is correct for a build with no passphrase and is a LIE for
+// one with a passphrase: what gets cut is the seed and the keys, and the third
+// factor the wallet needs is left in the operator's head. The label is where it
+// has to be said, because the label is what the operator reads before pressing --
+// a note somewhere else is a note read after the decision.
+//
+// It is said ONLY when a passphrase was actually used. A picker that warns about
+// a factor nobody supplied is §0.1's corollary in the other direction: a tool
+// that cries DEFAULT when the operator chose is a tool whose warnings get
+// ignored.
+//
+// The row does NOT wrap (ChoiceScreen.Draw uses widget.Label), so the longer
+// label is measured against the panel rather than judged by eye --
+// assertChoiceLabelFits, gui/multisig_build_prose_test.go.
+func buildFullModeLabel(passphrase bool) string {
+	if passphrase {
+		return "Full (seed + keys, NOT passphrase)"
+	}
+	return "Full (seed + keys)"
 }

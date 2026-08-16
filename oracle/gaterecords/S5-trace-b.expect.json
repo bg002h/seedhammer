@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "stage": "S5",
+  "record": "S5-trace-b.record.json",
+  "inputs": "S5-trace-b.inputs.json",
+  "note": "Derived live by cmd/gaterecord and compared against the walk's census before the record was written. Committed so the comparison runs where no Rust toolchain exists — which is every machine whose verdict gates a merge.",
+  "derivation": {
+    "oracles": [
+      {
+        "name": "ms",
+        "commit": "d49d5c099bab89a1738f0d0c3df9306b354d62c3",
+        "sha256": "9727689c5ee049c0135a386d7db1c0b58d45f239aced0ade7f6f288c5b1202e5",
+        "version": "ms 0.16.0"
+      },
+      {
+        "name": "md",
+        "commit": "5a0a4f41017d71d47f70684c145702d4ca0c3aa9",
+        "sha256": "9ef480ad1f1ecfd2e5241579a2f16a1b691d6e394981f6e654a4f3cbcc3729e9",
+        "version": "md 0.13.0"
+      },
+      {
+        "name": "mk",
+        "commit": "a38a908e143c2c4bd6405997d62385b3df01615f",
+        "sha256": "030ca21851126964553e18be876e5d6e6edb917f02bd3dec01a5d217b01d3641",
+        "version": "mk 0.13.0"
+      }
+    ],
+    "args": [
+      "ms derive --phrase <seed words: see the inputs file> --template bip48-p2wsh --account 0 --network mainnet --json",
+      "ms derive --phrase <seed words: see the inputs file> --template bip48-p2wsh --account 1 --network mainnet --json",
+      "md encode \"wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*))\" --key @i=<account xpub i from ms derive, i=0..3> --network mainnet --group-size 0 --force-chunked --policy-id-fingerprint",
+      "ms encode --phrase <seed words: see the inputs file> --group-size 0 --no-engraving-card",
+      "mk encode --xpub <account xpub from ms derive> --origin-path m/48'/0'/0'/2' --origin-fingerprint <master fp from ms derive> --policy-id-stub <policy id from md encode --policy-id-fingerprint> --group-size 0",
+      "mk encode --xpub <account xpub from ms derive> --origin-path m/48'/0'/1'/2' --origin-fingerprint <master fp from ms derive> --policy-id-stub <policy id from md encode --policy-id-fingerprint> --group-size 0"
+    ],
+    "derived_at": "2026-08-16T13:10:22Z"
+  },
+  "artifacts": [
+    {
+      "kind": "ms1",
+      "label": "self:masterA (slot @0, BIP-48 account 0) (ms1 secret share)",
+      "string": "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "ms1",
+      "label": "self:masterB (slot @2, typed on the keyboard) (ms1 secret share)",
+      "string": "ms10entrsqplh7lml0alh7lml0alh7lml0als5cclar2zmksh6",
+      "fingerprint": "b8688df1"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterA (slot @0, BIP-48 account 0) (mk1 key, slot 0)",
+      "string": "mk1qpfxwdpqqsqhp7uadeeutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5fx368qrg28f8te2",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterA (slot @0, BIP-48 account 0) (mk1 key, slot 0)",
+      "string": "mk1qpfxwdpp806lhaeh6reknylagmwyjycf8044xtt9flsdlkvt6f6cthyl99yee42sln0dmy2mnm7x6",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterA (slot @1, BIP-48 account 1) (mk1 key, slot 1)",
+      "string": "mk1qpnxu9zqqsqhp7uadeeutks2lcztpqyqsqygpqyqsqygrqyqsqyg9qyqsqyqfz9jrcld706hn9svfgll7zvw5qnkxgea7gvezr79ykwqh7c2",
+      "origin": "m/48'/0'/1'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterA (slot @1, BIP-48 account 1) (mk1 key, slot 1)",
+      "string": "mk1qpnxu9zp68w6hzragnj3g5qrl85zeape8wq0vdczfyy55tqsd5576trsa3p40nfpd7hsyjyf7vlx6hk2j6ckr4wf0m3ej5qda3epmem8t59h",
+      "origin": "m/48'/0'/1'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterA (slot @1, BIP-48 account 1) (mk1 key, slot 1)",
+      "string": "mk1qpnxu9zzhpwhqz4qndj2dmjn8p",
+      "origin": "m/48'/0'/1'/2'",
+      "fingerprint": "73c5da0a"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterB (slot @2, typed on the keyboard) (mk1 key, slot 2)",
+      "string": "mk1qpz4mspqqsqhp7uad6ux3r03q5zg3vs7llvu2xd8x2rk7av9gmew82jq5zap9302ynhp37ggd6z5u4emag0zr8gh9upnj25xq0fg0fqy8dga",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "b8688df1"
+    },
+    {
+      "kind": "mk1",
+      "label": "self:masterB (slot @2, typed on the keyboard) (mk1 key, slot 2)",
+      "string": "mk1qpz4msppwyp4dfykwfkgg6fxyxetdcmythf4hsqzd3v879jprztejzs7ru2hwrrl5lpej444jxwfj",
+      "origin": "m/48'/0'/0'/2'",
+      "fingerprint": "b8688df1"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 0)",
+      "string": "md1fc9ncrs9q6tvyyy5jmpprjjtvyyy5jmppp9gqpsgwyxxckg9qhwsv0jskp2rsal4elqtpkym09m9nl"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 1)",
+      "string": "md1fc9ncrs2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5wl4l0mn058ndxfl63ku4znzdd67w9fcd"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 2)",
+      "string": "md1fc9ncrsjfzvynh66n94j5lcxlmx9ayav9mj0jjejcxy50llpx82qfmryv7l68w6hzjneq4gl32fjk5"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 3)",
+      "string": "md1fc9ncrscl2yu529qqleaqk0gwfmsrmrwqjfp99zcyrd98kjcu8vgdtu6gt04upy3zutrxr6vmsmjw7"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 4)",
+      "string": "md1fc9ncr3rue7d40v4943v82ujlhr48x2rk7av9gmew82jq5zap9302ynhp37ggd6z5lp5zm3yqferql"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 5)",
+      "string": "md1fc9ncr309wwl2rcse69e0qvuhzq6k5jt8ymyydynzrv4kudj9m56mcqpxckrlzeq3y0cppephw3cjv"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 6)",
+      "string": "md1fc9ncr35f0xg2rc0ugjshlaruhytwx696ej6trer6486ajnxplvwf3eqy7pewnjcldss7d0scuqak8"
+    },
+    {
+      "kind": "md1",
+      "label": "wsh(sortedmulti(3,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/0'/2'/<0;1>/*,@3/48'/0'/0'/2'/<0;1>/*)) (md1 policy, chunk 7)",
+      "string": "md1fc9ncr37cmsx5tedmgpg3jz4xc5x2ue9a7z5h3rycu0nx9leekrarz2svuc4wj2qxd2smdkyn2d20"
+    }
+  ]
+}

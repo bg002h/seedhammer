@@ -31,7 +31,7 @@ func FuzzFindUserSlot(f *testing.F) {
 		}
 		m := abandonAboutMnemonic()
 		// MUST NOT panic.
-		_, _, _, _ = findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+		_, _, _ = findUserSlot(m, "", &chaincfg.MainNetParams, keys)
 	})
 }
 

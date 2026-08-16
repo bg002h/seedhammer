@@ -9,11 +9,17 @@ import (
 
 // ─── §0.1a: the BIP-48 script-type origin must be SPOKEN ─────────────────────
 //
-// multisigSharedOrigin() returns m/48'/0'/0'/2' UNCONDITIONALLY, and BIP-48
-// assigns 2' to NATIVE segwit, 1' to NESTED segwit, and nothing at all to legacy
-// P2SH. So an sh(wsh) build stamps the native-segwit path onto steel, and a
-// BIP-48-aware coordinator reading that plate derives at the wrong script-type
-// path. Nothing in S1-S6 said so.
+// BIP-48 assigns 2' to NATIVE segwit, 1' to NESTED segwit, and nothing at all to
+// legacy P2SH. Before S5 the device derived at 2' UNCONDITIONALLY, so an sh(wsh)
+// build stamped the native-segwit path onto steel and a BIP-48-aware coordinator
+// reading that plate derived at the wrong script-type path. Nothing in S1-S6
+// said so.
+//
+// S5 MADE THE DEFAULT TEMPLATE-AWARE (§0.1a, "not earlier than S5"), so the
+// announcement changed with it: sh(wsh) now derives at the path BIP-48 assigns
+// it, and the sentence states the assignment instead of warning about a gap.
+// derivedSlotOrigin is the single site for that mapping, and this test reads the
+// expected path off it rather than restating a literal that could drift.
 //
 // RULED: ANNOUNCE, DO NOT REFUSE. §0.1 clause 2 decides it — the origin is
 // printed with the xpub, carried in every mk1 and shown on the restore doc, so a
@@ -26,16 +32,17 @@ func TestBuildReviewAnnouncesTheBip48Origin(t *testing.T) {
 	stub := [4]byte{0x7b, 0x71, 0x64, 0x21}
 	slots := []md.SlotInfo{{Index: 0}, {Index: 1}}
 	joined := func(s md.MultisigScript) string {
-		return strings.Join(buildReviewLines(s, stub, slots, false, nil), "\n")
+		return strings.Join(buildReviewLines(s, stub, slots, nil, false, nil, nil), "\n")
 	}
 
 	// Every script type must state the origin the build is USING. An operator who
 	// cannot read the path off this screen cannot check it against anything.
 	t.Run("every template states the origin in force", func(t *testing.T) {
 		for _, s := range []md.MultisigScript{md.MultisigWsh, md.MultisigShWsh, md.MultisigSh} {
-			if !strings.Contains(joined(s), multisigSharedOrigin().String()) {
+			want := derivedSlotOrigin(s, 0).String()
+			if !strings.Contains(joined(s), want) {
 				t.Errorf("script %v: the review does not state the origin in force (%s):\n%s",
-					s, multisigSharedOrigin().String(), joined(s))
+					s, want, joined(s))
 			}
 		}
 	})
@@ -52,18 +59,20 @@ func TestBuildReviewAnnouncesTheBip48Origin(t *testing.T) {
 		}
 	})
 
-	// sh(wsh): BIP-48 assigns 1' here and the build uses 2'. This is the one
-	// place the device is knowingly off the BIP's own assignment, so it says so
-	// AND says the path it is using instead.
-	t.Run("nested segwit says BIP-48 assigns a different path", func(t *testing.T) {
+	// sh(wsh): from S5 the build DERIVES at BIP-48's nested-segwit path, so the
+	// announcement cites the assignment and names the path in force. It must no
+	// longer claim to be using the native-segwit 2' path, which was true only
+	// until S5 and would now send the operator to the wrong place.
+	t.Run("nested segwit names BIP-48's nested assignment as the path in force", func(t *testing.T) {
 		got := joined(md.MultisigShWsh)
 		for _, want := range []string{"BIP-48", "nested segwit", "m/48h/0h/0h/1h"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("nested segwit review is missing %q:\n%s", want, got)
 			}
 		}
-		if !strings.Contains(got, multisigSharedOrigin().String()) {
-			t.Errorf("nested segwit review does not say which path it actually uses:\n%s", got)
+		if strings.Contains(got, multisigSharedOrigin().String()) {
+			t.Errorf("nested segwit review still names the native-segwit path %s, which "+
+				"this build no longer derives at:\n%s", multisigSharedOrigin(), got)
 		}
 	})
 
@@ -99,7 +108,7 @@ func TestBuildReviewAnnouncesTheBip48Origin(t *testing.T) {
 	// one rasters at 2652 px against 7419 for the same text with a hyphen).
 	t.Run("the announcement can actually be drawn", func(t *testing.T) {
 		for _, s := range []md.MultisigScript{md.MultisigWsh, md.MultisigShWsh, md.MultisigSh} {
-			for _, line := range buildReviewLines(s, stub, slots, false, nil) {
+			for _, line := range buildReviewLines(s, stub, slots, nil, false, nil, nil) {
 				if strings.ContainsAny(line, "\u2014\u2013\u00b7\u2018\u2019\u201c\u201d") {
 					t.Errorf("script %v: review line %q carries a glyph the body face "+
 						"lacks, so the line does not draw", s, line)

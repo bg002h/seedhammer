@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"slices"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -42,6 +43,21 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if !ok {
 		return
 	}
+	// The @S picker's FIRST screen is a mandatory pick, so this cannot fire today.
+	// (It used to read "the @S picker always sets exactly one held slot", which
+	// stopped being true at 4b10319 when the picker became a multi-select in this
+	// same branch -- and that stale premise is exactly what hid I-6: an operator
+	// CAN now hold every slot, so `open` can be 0.)
+	//
+	// It is here because every use of p.SelfSlots below would otherwise index an
+	// empty slice, and a panic partway through a flow that cuts steel is a worse
+	// outcome than a named refusal. buildEngraveTail's errBuildNoHeldSlot is the
+	// same guard at the other end of the flow.
+	if len(p.SelfSlots) == 0 {
+		showError(ctx, th, "Build Policy", "This build holds no key of its own, so there "+
+			"is nothing for this device to engrave. Start again and choose your slot.")
+		return
+	}
 
 	// (2) THE PAYLOAD SUPPLIES THE WHOLE COSIGNER SET (S1). §3.3.2 admits
 	// ClassMDMK to this program; every such record is fed to the gather through
@@ -69,7 +85,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// answering a question the device already knew the answer to.
 	selfSource := slotFromSeed
 	if state == cosignerSourceLoaded && len(supply) >= p.N {
-		src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlot)
+		src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlots)
 		if !ok {
 			return
 		}
@@ -77,93 +93,124 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 	p.SelfFromCard = selfSource == slotFromBoth
 
-	open := p.N - 1
+	open := p.N - len(p.SelfSlots)
 	if p.SelfFromCard {
 		open = p.N
 	}
-	if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
-		// Refuse BEFORE the gather. Walking the operator into a gather that
-		// cannot succeed and dead-ending them there is the defect this stage
-		// removes; the message names the only route this hardware has.
-		showError(ctx, th, "Build Policy",
-			buildSupplyRefusal(state, len(supply), open, incomplete))
-		return
-	}
-	ctx.syswBundleSeeds = records
-	cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
-	if !ok {
-		return
-	}
-	// md1 records ride along on a systemwide payload and must not fail the build
-	// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
-	// here rather than there.
-	mk1s := mk1CosignerCards(cards)
-	// Re-classified over what the GATHER produced, not over what the payload
-	// held: on reader-equipped hardware the operator may have added more.
+
+	// A BUILD THAT DEMANDS NOTHING TALKS TO NO PAYLOAD (I-6). An operator holding
+	// every slot of a 2-of-2 and typing both seeds on the keyboard needs a payload
+	// for nothing, and every screen below this point is about resolving one:
+	// the under-supply refusal, the gather, the payload review, the card picker
+	// and the card decode. Running them for a demand of zero is what produced a
+	// refusal saying "this policy needs no cosigner key cards" and "load the
+	// payload" in one sentence.
 	//
-	// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
-	// is total, but leaving auto-fill as this switch's implicit default made the
-	// CALL SITE non-total: a fourth outcome, or any future disagreement between
-	// the two classify calls, would have taken the all-cards branch in silence.
-	// The ruling that forbids assuming `n-1` deserves a case analysis that says
-	// so at both ends.
-	var chosen []int
-	outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
-	switch outcome {
-	case cosignerRefuse:
-		showError(ctx, th, "Build Policy",
-			buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
-		return
-	case cosignerAutoFill:
-		// Exactly enough: every card fills a slot, in payload record order.
-		chosen = make([]int, len(mk1s))
-		for i := range chosen {
-			chosen[i] = i
-		}
-	case cosignerSelect:
-		// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
-		// over-supply is the CHOICE. A picker with one possible answer is a tap
-		// that teaches nothing.
-		if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+	// SKIPPING THE GATHER IS PART OF THE FIX, NOT A FLOURISH. Letting the flow
+	// through classifyCosignerSupply alone lands it in bundleGatherFlow, which
+	// needs one complete card to proceed and answers Done on zero with "No
+	// complete cards. Pack them on the host with `me sysw pack` and load the
+	// payload again." -- the same dead end, one screen later.
+	//
+	// Pre-S5 this branch was unreachable (`open` was always p.N-1 >= 1); S5's
+	// multi-select @S picker is what made it a shape an operator can build.
+	var (
+		cosigners []mk.Card
+		origins   []cosignerOrigin
+		mk1s      []bundleCard
+		// chosen stays declared out here because buildSlotSources reads it at (4).
+		// A zero-demand build leaves it nil, which that projection already handles:
+		// open == 0 means every slot is held and !p.SelfFromCard (a `both` build
+		// sets open = p.N), so every slot resolves to slotFromSeed with Card = -1.
+		chosen []int
+	)
+	if open > 0 {
+		if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
+			// Refuse BEFORE the gather. Walking the operator into a gather that
+			// cannot succeed and dead-ending them there is the defect this stage
+			// removes; the message names the only route this hardware has.
+			showError(ctx, th, "Build Policy",
+				buildSupplyRefusal(state, len(supply), open, incomplete))
 			return
 		}
-		chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+		ctx.syswBundleSeeds = records
+		cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
 		if !ok {
 			return
 		}
-	default:
-		showError(ctx, th, "Build Policy",
-			"Couldn't work out how the payload's cards fit this policy.")
-		return
-	}
-	if outcome == cosignerAutoFill {
-		// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
-		// of what the payload supplied on this arm too. Before the fold their
-		// only such screen was the shared gather's "Scan a card, or Done." — a
-		// count and an instruction this hardware cannot perform.
-		if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+		// md1 records ride along on a systemwide payload and must not fail the build
+		// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
+		// here rather than there.
+		mk1s = mk1CosignerCards(cards)
+		// Re-classified over what the GATHER produced, not over what the payload
+		// held: on reader-equipped hardware the operator may have added more.
+		//
+		// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
+		// is total, but leaving auto-fill as this switch's implicit default made the
+		// CALL SITE non-total: a fourth outcome, or any future disagreement between
+		// the two classify calls, would have taken the all-cards branch in silence.
+		// The ruling that forbids assuming `n-1` deserves a case analysis that says
+		// so at both ends.
+		outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
+		switch outcome {
+		case cosignerRefuse:
+			showError(ctx, th, "Build Policy",
+				buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
+			return
+		case cosignerAutoFill:
+			// Exactly enough: every card fills a slot, in payload record order.
+			chosen = make([]int, len(mk1s))
+			for i := range chosen {
+				chosen[i] = i
+			}
+		case cosignerSelect:
+			// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
+			// over-supply is the CHOICE. A picker with one possible answer is a tap
+			// that teaches nothing.
+			if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+				return
+			}
+			chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+			if !ok {
+				return
+			}
+		default:
+			showError(ctx, th, "Build Policy",
+				"Couldn't work out how the payload's cards fit this policy.")
 			return
 		}
+		if outcome == cosignerAutoFill {
+			// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
+			// of what the payload supplied on this arm too. Before the fold their
+			// only such screen was the shared gather's "Scan a card, or Done." — a
+			// count and an instruction this hardware cannot perform.
+			if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+				return
+			}
+		}
+		picked := make([]bundleCard, 0, len(chosen))
+		for _, i := range chosen {
+			picked = append(picked, mk1s[i])
+		}
+		cosigners, ok = buildCosignerCards(picked, open)
+		if !ok {
+			// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
+			// length equals `open` on both arms, so the count arm of
+			// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
+			// with a rewrite-the-payload remedy would be two equal counts and a
+			// wrong instruction. What is left is a card that passed mk.Decode in the
+			// gatherer and failed it here, which is a read failure, so say that.
+			showError(ctx, th, "Build Policy",
+				"Couldn't read the cosigner key cards from the payload.")
+			return
+		}
+		origins = buildCosignerOrigins(p, chosen)
 	}
-	picked := make([]bundleCard, 0, len(chosen))
-	for _, i := range chosen {
-		picked = append(picked, mk1s[i])
-	}
-	cosigners, ok := buildCosignerCards(picked, open)
-	if !ok {
-		// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
-		// length equals `open` on both arms, so the count arm of
-		// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
-		// with a rewrite-the-payload remedy would be two equal counts and a
-		// wrong instruction. What is left is a card that passed mk.Decode in the
-		// gatherer and failed it here, which is a read failure, so say that.
-		showError(ctx, th, "Build Policy",
-			"Couldn't read the cosigner key cards from the payload.")
-		return
-	}
-	origins := buildCosignerOrigins(p.N, p.SelfSlot, p.SelfFromCard, chosen)
 
-	// (3) The self seed, through the ONE seam, into the REGISTRY.
+	// (3) The self seed(s), through the ONE seam, into the REGISTRY -- ONE PER HELD
+	// SLOT, each screen naming its slot (SPEC 4.1: the passphrase prompt is per
+	// seed, and an unlabelled second prompt is indistinguishable from a repeat of
+	// the first).
 	//
 	// It is NOT keyboard-only, and on this flow that is not a theoretical point:
 	// seedEntryFlow is the source picker, and cmd/emu/walk_build_policy.js takes
@@ -178,18 +225,20 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// ever live and unowned.
 	reg := &seedRegistry{}
 	defer reg.scrub()
-	seedID, ok := buildSeedForSlot(ctx, th, reg, p.SelfSlot)
-	if !ok {
-		return
+	seedIDs := make([]int, 0, len(p.SelfSlots))
+	for _, slot := range p.SelfSlots {
+		id, ok := buildSeedForSlot(ctx, th, reg, slot)
+		if !ok {
+			return
+		}
+		seedIDs = append(seedIDs, id)
 	}
-	seed, _ := reg.at(seedID)
-	mnemonic, passphrase := seed.Mnemonic, seed.Passphrase
 
 	// (4) THE SEED<->KEY GATE (SPEC 4.3), at construction time and before
 	// assembly. On a `both` self slot it derives from the seed at the CARD's own
 	// declared origin and compares chain code + pubkey, through findUserSlot.
-	sources := buildSlotSources(p, seedID, chosen)
-	notices, gerr := buildSlotGate(sources, reg, cosigners, &chaincfg.MainNetParams)
+	sources := buildSlotSources(p, seedIDs, chosen, reg)
+	notices, gerr := buildSlotGate(sources, p.Script, reg, cosigners, &chaincfg.MainNetParams)
 	if gerr != nil {
 		var mm errBuildSeedKeyMismatch
 		if errors.As(gerr, &mm) {
@@ -208,29 +257,25 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 
 	// (4a) SPEC 4.3's review of the assignment, BEFORE assembly. Back abandons.
-	if !buildSlotSourceReviewFlow(ctx, th, sources, p.SelfSlot, origins, reg, notices) {
+	if !buildSlotSourceReviewFlow(ctx, th, sources, origins, reg, notices) {
 		return
 	}
 
-	// (4b) Derive the self key at the LOCKED shared origin (self-origin ==
-	// policy-origin by construction). deriveAccountXpub neuters (no xprv) +
-	// scrubs the seed/master internally.
+	// (4b) Derive each held slot's key AT THAT SLOT'S OWN ORIGIN (§0.1a's
+	// template-aware BIP-48 path, at the slot's own account). deriveAccountXpub
+	// neuters (no xprv) + scrubs the seed/master internally.
 	//
 	// SKIPPED on a `both` slot: M-B makes the CARD authoritative there, and the
 	// gate above has already proved the two agree, so deriving a second copy of
 	// the same key would only create a second thing that could be wrong.
-	selfXpub, selfMasterFP := "", uint32(0)
-	if !p.SelfFromCard {
-		x, fp, derr := deriveAccountXpub(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin())
-		if derr != nil {
-			showError(ctx, th, "Build Policy", "Couldn't derive your key from the seed.")
-			return
-		}
-		selfXpub, selfMasterFP = x, fp
+	self, derr := buildSelfKeys(sources, p.Script, reg, &chaincfg.MainNetParams)
+	if derr != nil {
+		showError(ctx, th, "Build Policy", "Couldn't derive your key from the seed.")
+		return
 	}
 
 	// (5) Assemble via the SOLE md1 producer md.EncodeMultisig.
-	assembledMd1, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, cosigners)
+	assembledMd1, stub, slots, err := assembleBuildPolicy(p, self, cosigners)
 	if err != nil {
 		// SPEC §4.1's refusal is NAMED, not folded into the generic failure. The
 		// generic text ("Couldn't assemble the wallet policy.") describes a device
@@ -239,13 +284,15 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		var dup errBuildDuplicateKey
 		if errors.As(err, &dup) {
 			showError(ctx, th, "Duplicate key",
-				buildDuplicateKeyMessage(dup, p.SelfSlot, p.SelfFromCard, origins))
+				buildDuplicateKeyMessage(dup, p, origins))
 			return
 		}
-		var fo errBuildForeignOrigin
-		if errors.As(err, &fo) {
-			showError(ctx, th, "Key origin mismatch",
-				buildForeignOriginMessage(fo, origins))
+		// SPEC M-1's refusal is NAMED for the same reason: a depth-0 cosigner card
+		// is the operator's input and the generic text sends them nowhere.
+		var eo errBuildEmptyOrigin
+		if errors.As(err, &eo) {
+			showError(ctx, th, "Key origin missing",
+				buildEmptyOriginMessage(eo, origins))
 			return
 		}
 		showError(ctx, th, "Build Policy", "Couldn't assemble the wallet policy.")
@@ -254,8 +301,25 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (6) Review the (stub, slots) ordering handle (I-ORDER), carrying S1's §0.1
 	// announcement of which payload cards filled which slots. Back -> abort.
-	if !buildReviewFlow(ctx, th, p.Script, stub, slots, p.IncludeFp,
-		buildProvenanceLines(origins, len(mk1s))) {
+	//
+	// AND THE KEYS, from S5. Before this the screen showed "@0 (no fp)" on the
+	// default path, so the operator confirmed a wallet policy whose contents they
+	// had never seen and the EXPERIMENTAL warning two screens later asked them to
+	// compare it against a coordinator with nothing on the device to compare.
+	//
+	// A policy whose keys cannot be shown is NOT engraved. §0.1 clause 2 is the
+	// rule: permissiveness stops where a wrong assumption would be invisible in
+	// every artifact, and a review screen that silently omits a slot's key is that
+	// invisibility manufactured on purpose.
+	slotKeys, slotOrigins, kerr := buildSlotKeyStrings(assembledMd1, self, cosigners)
+	if kerr != nil {
+		showError(ctx, th, "Build Policy",
+			"Couldn't show the keys this policy holds, so it was not engraved. Build "+
+				"again; if it happens twice, rewrite the payload on the host with `me sysw pack`.")
+		return
+	}
+	if !buildReviewFlow(ctx, th, p.Script, stub, slots, slotKeys, p.IncludeFp,
+		buildProvenanceLines(origins, len(mk1s)), heldSlotOrigins(p.SelfSlots, slotOrigins)) {
 		return
 	}
 
@@ -297,23 +361,32 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 
 	// (8) Full vs watch-only.
-	modeChoice := &ChoiceScreen{Title: "Engrave Mode", Lead: "What to engrave?", Choices: []string{"Full (seed + keys)", "Watch-only (keys)"}}
+	//
+	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT (S5). A BIP-39 passphrase is a
+	// required spending factor and is never engraved, so on a build that used one,
+	// "Full (seed + keys)" tells the operator that a partial backup is a complete
+	// one. The label is ASKED OF THE REGISTRY rather than tracked beside it: SPEC
+	// 4.1 makes the passphrase per-seed, so the honest question is about the set
+	// of pairs this flow actually holds, and one passphrased leg among three is
+	// enough.
+	usedPassphrase := reg.usesPassphrase()
+	modeChoice := &ChoiceScreen{Title: "Engrave Mode", Lead: "What to engrave?", Choices: []string{buildFullModeLabel(usedPassphrase), "Watch-only (keys)"}}
 	modeSel, ok := modeChoice.Choose(ctx, th)
 	if !ok {
 		return
 	}
 	full := modeSel == 0
 
-	// (9) Derive the operator's leg over the engrave md1 (full policy OR the
-	// stripped template; flows EXACTLY like a supplied md1; deriveMultisigLeg
-	// binds mk1.Stubs form-aware — WalletPolicyId for full, WDT-Id for template,
-	// C2) and engrave.
-	b, err := deriveMultisigLeg(mnemonic, passphrase, &chaincfg.MainNetParams, multisigSharedOrigin(), engraveMd1, full)
-	if err != nil {
+	// (9) Derive the operator's leg PER HELD SLOT, at that slot's own origin, over
+	// the engrave md1 (full policy OR the stripped template; flows EXACTLY like a
+	// supplied md1; deriveMultisigLeg binds mk1.Stubs form-aware — WalletPolicyId
+	// for full, WDT-Id for template, C2) and engrave.
+	legs, engravedSlots, cardsOut, terr := buildEngraveTail(sources, p.Script, reg,
+		&chaincfg.MainNetParams, cosigners, engraveMd1, full)
+	if terr != nil {
 		showError(ctx, th, "Build Policy", "Couldn't derive the bundle from the seed.")
 		return
 	}
-	cardsOut := multisigEngraveCards(b.MS1, b.MK1, b.MD1, full)
 
 	// (9a) HOW MANY PLATES, BEFORE THE FIRST ONE. Trace B cuts 6-9 plates over
 	// hours and the operator committed to that with no count at all. Back here
@@ -321,17 +394,67 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if !confirmReviewScreen(ctx, th, "Plate Count", buildPlateCensusLines(cardsOut)) {
 		return
 	}
-	bundleEngrave(ctx, th, cardsOut)
+	// AN ABORT ENDS THE PROGRAM HERE (I-12). Both surfaces below vouch for a
+	// COMPLETE set -- a verify over plates that were never all cut, and a restore
+	// document headed "This backup is N plates ... If any of them is missing, this
+	// backup is incomplete." An operator who just read "Bundle Incomplete: this
+	// set is not a usable backup yet" must not be shown either.
+	if bundleEngrave(ctx, th, "Build Policy", cardsOut) != bundleEngraveDone {
+		return
+	}
 
 	// (10) Offer verify-bundle — full policy only. The verify re-derives via the
 	// xpub seed-cross-match (findUserSlot), which a KEYLESS template has no xpub
 	// to match (D1); the template's binding is the device's own form-aware
 	// readback, already established at engrave. So a template engrave skips the
 	// cross-match verify offer.
-	if !template {
-		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-			multisigVerifyFlow(ctx, th, b, full)
+	//
+	// PER LEG, from S5. multisigVerifyFlow reads back EVERY engraved key plate,
+	// re-derives every leg the operator's seeds account for, and requires the
+	// pairing to be a bijection -- so a three-plate build cannot report Verify OK
+	// having compared one. `full` is the mode, which is what says whether an ms1
+	// must be hand-typed; the legs themselves are re-derived from a RE-TYPED seed
+	// rather than handed over from here (§7.4: comparing the engrave source
+	// against itself passes unconditionally).
+	//
+	// engravedSlots IS THE OBLIGATION LIST, and it is passed rather than
+	// recomputed. The verify's derive loop asks a re-typed seed which slots it
+	// FILLS; that set is not the set the engrave cut a plate for, and the
+	// difference is not hypothetical -- one seed can fill several slots at
+	// distinct origins with distinct keys. Handing over the tail's own held-slot
+	// indices is what keeps "every leg must find its plate" a statement about
+	// this run's steel instead of about the policy.
+	//
+	// engraveMd1 IS THE OTHER HALF OF IT. Slot indices alone are re-based onto
+	// whatever policy the readback supplies, so a byte-valid plate set from a
+	// DIFFERENT wallet -- the same cosigners at another threshold, say, from the
+	// generation this run supersedes -- satisfies the same integers and reports
+	// "Verify OK" while this run's steel is never read. This flow has held the
+	// closing datum all along; it hands it over now. It is the md1 that was
+	// ENGRAVED, not assembledMd1, because the plate the operator will present is
+	// the one that came off this machine.
+	//
+	// AND THE OFFER LOOPS (I-4), for the reason spelled out at the supply path's
+	// own offer: the incomplete screen prescribed a re-run this device could not
+	// perform. Only verifyComplete falls through to the restore document.
+	//
+	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, for the same
+	// reason the supply path does: without it this loop is unreachable from any
+	// executing test and its row-to-index mapping is unpinned (B4).
+	if !template && len(legs) > 0 {
+		lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+		for {
+			verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
+			sel, ok := verifyChoice.Choose(ctx, th)
+			if !ok || sel != 0 {
+				break
+			}
+			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)
+			if res != verifyIncomplete && res != verifyFailed {
+				break
+			}
+			lead = multisigVerifyRetryLead
+			choices = []string{"VERIFY AGAIN", "CONTINUE"}
 		}
 	}
 
@@ -347,7 +470,13 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// (11a) AND WHAT THE SET IS, afterwards. The restore doc is read years
 		// later, alone, often by someone who was not the operator, and a plate
 		// count is the one fact that tells them whether they are holding all of it.
-		multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut))
+		//
+		// PER SEED, not the label's single bit (I-5). The mode label asks "is this
+		// set short of a factor" and a bool answers it; the document has to say
+		// WHICH seed, because a build holding three slots can carry three different
+		// passphrases and "keep the passphrase somewhere separate" has one referent.
+		multisigRestoreDocFlow(ctx, th, tpl, keys,
+			buildPlateInventoryLines(cardsOut, reg.passphraseFacts()))
 	}
 }
 
@@ -359,20 +488,51 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 // card list assembleBuildPolicy fills from, walked in the same order, and the
 // self slot is included or skipped by the same p.SelfFromCard.
 //
-// What this stage can produce is a subset of what the model can express -- no
-// non-self slot is `derived` here, because multi-slot self is S5 -- and the gate
-// accepts the full model regardless. See multisig_build_slots.go.
-func buildSlotSources(p buildPolicyParams, seedID int, chosen []int) []slotSource {
+// `seedIDs[i]` is the seed the operator entered for `p.SelfSlots[i]`, so the two
+// slices are index-aligned by construction of the caller's loop.
+//
+// THE ACCOUNT IS ASSIGNED HERE, AND IT IS KEYED ON THE MASTER, NOT ON THE SEED
+// ID. A held slot's account is its ordinal among the held slots that share a
+// master fingerprint: the first slot a master fills gets account 0, the second
+// account 1, and so on. Keying on the seedID instead would mint the SAME key
+// twice whenever one master was registered twice -- which is exactly what the
+// per-slot entry screens do when the operator types one seed for two held slots
+// -- and §4.1's duplicate-key refusal would then reject a legitimate
+// multi-account wallet. Trace B is that wallet: @0 = A account 0, @1 = A account
+// 1, @2 = B account 0.
+func buildSlotSources(p buildPolicyParams, seedIDs []int, chosen []int, reg *seedRegistry) []slotSource {
 	out := make([]slotSource, p.N)
+	held := map[int]int{}
+	for i, s := range p.SelfSlots {
+		held[s] = i
+	}
+	// masterFP -> how many held slots that master already fills.
+	accounts := map[uint32]uint32{}
+	nextAccount := func(seedID int) uint32 {
+		seed, ok := reg.at(seedID)
+		if !ok {
+			return 0
+		}
+		a := accounts[seed.MasterFP]
+		accounts[seed.MasterFP] = a + 1
+		return a
+	}
 	gi := 0
 	for slot := 0; slot < p.N; slot++ {
-		if slot == p.SelfSlot && !p.SelfFromCard {
-			out[slot] = slotSource{Kind: slotFromSeed, SeedID: seedID, Account: 0, Card: -1}
+		hi, isHeld := held[slot]
+		seedID := -1
+		if isHeld && hi < len(seedIDs) {
+			seedID = seedIDs[hi]
+		}
+		if isHeld && !p.SelfFromCard {
+			out[slot] = slotSource{
+				Kind: slotFromSeed, SeedID: seedID, Account: nextAccount(seedID), Card: -1,
+			}
 			continue
 		}
 		kind := slotFromCard
 		id := -1
-		if slot == p.SelfSlot {
+		if isHeld {
 			kind = slotFromBoth
 			id = seedID
 		}
@@ -384,6 +544,47 @@ func buildSlotSources(p buildPolicyParams, seedID int, chosen []int) []slotSourc
 		gi++
 	}
 	return out
+}
+
+// heldSlotKey is one slot the operator fills FROM A SEED: the key derived for it
+// and the origin it was derived AT.
+//
+// The origin travels with the key rather than being recomputed at assembly, so
+// the path the device DERIVED at and the path it DECLARES on the plate cannot
+// come apart. A `both` slot has no entry here: SPEC M-B makes the card
+// authoritative there, so the slot is filled from the card like any other.
+type heldSlotKey struct {
+	Slot     int
+	Xpub     string
+	MasterFP uint32
+	Origin   bip32.Path
+}
+
+// buildSelfKeys derives one key per DERIVED held slot, at that slot's own origin
+// (§0.1a's template-aware BIP-48 path, at the slot's own account).
+//
+// SKIPPED ON A `both` SLOT, which is step (4b)'s pre-S5 rule unchanged: M-B makes
+// the card authoritative there and the gate has already proved the two agree, so
+// deriving a second copy of the same key would only create a second thing that
+// could be wrong.
+func buildSelfKeys(sources []slotSource, script md.MultisigScript, reg *seedRegistry, net *chaincfg.Params) ([]heldSlotKey, error) {
+	var out []heldSlotKey
+	for slot, s := range sources {
+		if s.Kind != slotFromSeed {
+			continue
+		}
+		seed, ok := reg.at(s.SeedID)
+		if !ok {
+			return nil, errBuildSlotAssignment{Slot: slot}
+		}
+		origin := derivedSlotOrigin(script, s.Account)
+		x, fp, err := deriveAccountXpub(seed.Mnemonic, seed.Passphrase, net, origin)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, heldSlotKey{Slot: slot, Xpub: x, MasterFP: fp, Origin: origin})
+	}
+	return out, nil
 }
 
 // buildSeedForSlot is seed entry PLUS its own passphrase, registered before it
@@ -470,19 +671,14 @@ func templateConsentFlow(ctx *Context, th *Colors, tmplMd1 []string) bool {
 // the shown stub/per-slot fingerprints against their coordinator BEFORE funding.
 // Hold to confirm; Back/ConfirmNo returns false and the caller ABORTS the
 // engrave. There is no skip/setting path. Mirrors childSeedWarning.
+//
+// The BODY is a separate function so the F-185 class check can render it without
+// driving the whole flow (gui/modal_fits_test.go).
 func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
 	warn := &ConfirmWarningScreen{
 		Title: "EXPERIMENTAL",
-		// NO EM-DASH. This body carried one, and S2's whole-walk raster floor
-		// measured what that cost: 4973 ink pixels against a 5482 px title-only
-		// frame, i.e. the BODY DID NOT DRAW AT ALL on the one screen that is the
-		// operator's last chance to stop. F-78's "zero-pixel glyph" understates
-		// it: the glyph takes its whole line with it.
-		Body: "This device-authored multisig policy is NOT validated end-to-end. There is no " +
-			"coordinator or hardware round-trip. You MUST verify the assembled descriptor and the " +
-			"shown policy stub + per-slot fingerprints against your coordinator/wallet BEFORE funding. " +
-			"The fingerprint choice changes the policy id.\n\nHold button to confirm.",
-		Icon: assets.IconHammer,
+		Body:  multisigBuildExperimentalWarningBody(),
+		Icon:  assets.IconHammer,
 	}
 	for !ctx.Done {
 		dims := ctx.Platform.DisplaySize()
@@ -496,6 +692,51 @@ func multisigBuildExperimentalWarning(ctx *Context, th *Colors) bool {
 		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))
 	}
 	return false
+}
+
+// multisigBuildExperimentalWarningBody is the warning's text.
+//
+// IT USED TO TEACH A CHECK THAT CANNOT CHECK. The shipped body said "verify the
+// assembled descriptor and the shown policy stub + per-slot fingerprints against
+// your coordinator/wallet BEFORE funding", and the fingerprint half of that is
+// void twice over:
+//
+//   - fingerprints are OMITTED BY DEFAULT. buildFingerprintChoice offers
+//     Omit first, so on the default path every slot on the review screen reads
+//     "no fingerprint" and there is nothing to compare at all.
+//   - present, they are CARD-SELF-DECLARED AND UNBOUND TO THE KEY (mk/mk.go).
+//     cosignerFromCard reads Fingerprint off the card string; nothing derives it
+//     from the xpub beside it. An attacker who substitutes a key writes the
+//     matching fingerprint next to it at no cost, and the operator's comparison
+//     passes on the forged card.
+//
+// A ritual that cannot fail is worse than silence: it spends the operator's
+// attention and hands back a false negative. So this asks for a comparison that
+// CAN fail -- the keys or the descriptor, against a wallet this device did not
+// author -- states that a matching fingerprint is not that comparison and why,
+// and names the check that actually settles it. The fingerprint choice's effect
+// on the policy id has moved to the review screen, which is where the choice is
+// shown and where an operator can still act on it.
+//
+// NO EM-DASH. This body carried one, and S2's whole-walk raster floor measured
+// what that cost: 4973 ink pixels against a 5482 px title-only frame, i.e. the
+// BODY DID NOT DRAW AT ALL on the one screen that is the operator's last chance
+// to stop. F-78's "zero-pixel glyph" understates it: the glyph takes its whole
+// line with it.
+//
+// ITS LENGTH IS GATED, not judged (F-185). A modal's body scrolls and nothing on
+// the frame says so, and this machine has no button that scrolls it, so a
+// sentence past the fold is a sentence the operator is never told exists.
+// gui/modal_fits_test.go renders this body and compares the DRAWN FRAME against
+// this string, with 80 characters of headroom to spare.
+func multisigBuildExperimentalWarningBody() string {
+	return "Nothing outside this device has checked this policy. Before you fund it, " +
+		"compare the keys you just reviewed, or the descriptor on the restore doc, " +
+		"against the same wallet in your coordinator.\n" +
+		"A matching fingerprint is not that check: a card states its own, and nothing " +
+		"binds it to the key.\n" +
+		"What settles it is restoring these plates in your coordinator and seeing your " +
+		"own first receive address.\n\nHold button to confirm."
 }
 
 // buildCosignerCards filters the gathered cards down to EXACTLY `want` cosigner
@@ -581,6 +822,102 @@ func multisigSelfSlotChoices(n int) []string {
 	return out
 }
 
+// multisigRemainingSlotChoices lists the slots NOT yet held, with the slot each
+// row maps to. The two slices are index-aligned, so a picker's chosen row can
+// never be read as a slot number directly -- which it is not, once @0 has been
+// taken and the first row means @1.
+func multisigRemainingSlotChoices(n int, held []int) (labels []string, slots []int) {
+	got := make(map[int]bool, len(held))
+	for _, s := range held {
+		got[s] = true
+	}
+	for i := 0; i < n; i++ {
+		if got[i] {
+			continue
+		}
+		labels = append(labels, fmt.Sprintf("@%d", i))
+		slots = append(slots, i)
+	}
+	return labels, slots
+}
+
+// multisigSelfSlotPickFlow is the @S picker as a SET, which is what lets the
+// operator hold SEVERAL of a policy's slots.
+//
+// WHY IT IS COMPOSED OUT OF ChoiceScreens RATHER THAN A NEW WIDGET. There is no
+// multi-select screen in this package -- measured, zero hits for
+// MultiSelect/Checkbox/toggle-list over gui/*.go -- and the shipped idiom for
+// "produce a subset as []int" is buildCosignerPickFlow's loop of bounded
+// ChoiceScreens. A toggle-list would need a selection MARKER, and a marker is
+// one more glyph that can raster to nothing on the one screen that decides
+// which keys are the operator's (F-78/F-151 is that failure twice already). So
+// every screen here is a widget that already ships and is already drawn
+// somewhere else in this flow.
+//
+// THE FIRST SCREEN IS THE SHIPPED ONE, CHARACTER FOR CHARACTER. "Which slot is
+// your key?" is a pinned walk needle with exactly one production site
+// (cmd/emu/needle_test.go), three walk drivers anchor on it, and its default row
+// is @0. So accepting every default produces {@0}: the pre-S5 single-select
+// behaviour unchanged, which is what keeps every existing test and walk meaning
+// what it meant.
+//
+// BACK IS NEVER A WAY TO CONFIRM. Back at any of the three surfaces returns
+// ok=false, which buildParamPickFlow reads as "step back one stage" -- the rule
+// it applies to every stage above the first. An operator who has picked @0, been
+// asked about a second slot and pressed Back has not said "just @0"; the screen
+// has a row that says that.
+//
+// The returned set is ASCENDING and distinct, which is what buildPolicyParams
+// documents and what buildSlotSources' account numbering walks.
+func multisigSelfSlotPickFlow(ctx *Context, th *Colors, n int) ([]int, bool) {
+	first := &ChoiceScreen{
+		Title:   "Your slot",
+		Lead:    "Which slot is your key?",
+		Choices: multisigSelfSlotChoices(n),
+	}
+	idx, ok := first.Choose(ctx, th)
+	if !ok {
+		return nil, false
+	}
+	held := []int{idx}
+	for len(held) < n {
+		more := &ChoiceScreen{
+			Title:   "Your slots",
+			Lead:    "Do you hold another slot?",
+			Choices: []string{"NO, THAT IS ALL", "YES, ONE MORE"},
+		}
+		sel, ok := more.Choose(ctx, th)
+		if !ok {
+			return nil, false
+		}
+		if sel != 1 {
+			break
+		}
+		labels, slots := multisigRemainingSlotChoices(n, held)
+		if len(slots) == 1 {
+			// A PICKER WITH ONE POSSIBLE ANSWER IS A TAP THAT TEACHES NOTHING.
+			// This package's own rule (syswSeedPicker says so in those words;
+			// buildCosignerPickFlow short-circuits on it), and it is not merely
+			// tidying: a screen offering one row invites the operator to believe
+			// they chose between alternatives that were never there.
+			held = append(held, slots[0])
+			continue
+		}
+		pick := &ChoiceScreen{
+			Title:   "Your slots",
+			Lead:    "Which other slot is yours?",
+			Choices: labels,
+		}
+		j, ok := pick.Choose(ctx, th)
+		if !ok {
+			return nil, false
+		}
+		held = append(held, slots[j])
+	}
+	slices.Sort(held)
+	return held, true
+}
+
 // The fp-presence picker (HOMOGENEOUS): Omit (index 0, default) -> no fp TLVs on
 // any slot; Include (index 1) -> every slot's master fp.
 func multisigFpChoices() []string       { return []string{"No (omit)", "Yes (include)"} }
@@ -588,14 +925,26 @@ func multisigIncludeFpFor(idx int) bool { return idx == 1 }
 
 // buildPolicyParams is the assembled shape the operator picked.
 type buildPolicyParams struct {
-	Script    md.MultisigScript
-	N         int
-	K         int
-	SelfSlot  int  // 0..N-1
+	Script md.MultisigScript
+	N      int
+	K      int
+	// SelfSlots is the SET of slots the operator HOLDS -- S5's multi-slot self,
+	// where before S5 this was a single `SelfSlot int`. Entries are slot indices
+	// in 0..N-1, ascending and distinct; the picker produces exactly one today
+	// and the model accepts several (Trace B holds @0, @1 and @2).
+	//
+	// EACH HELD SLOT GETS ITS OWN BIP-48 ACCOUNT, assigned by buildSlotSources as
+	// the slot's ordinal among the held slots sharing a MASTER. That is what keeps
+	// two slots held from one seed off §4.1's duplicate-key refusal: same master,
+	// different account, different key.
+	SelfSlots []int
 	IncludeFp bool // homogeneous fp-presence
-	// SelfFromCard is S4's `both` assignment on the operator's own slot: their
+	// SelfFromCard is S4's `both` assignment on the operator's own slot(s): their
 	// key arrives on a payload CARD, and the seed they supply is what the gate
-	// checks it against rather than what the slot is filled from.
+	// checks it against rather than what the slot is filled from. It applies to
+	// EVERY entry of SelfSlots, because the flow asks the question once; the
+	// per-slot model (slotSource) can express a mixture and assembleBuildPolicy
+	// reads the mixture off the held-key set rather than off this flag.
 	//
 	// SPEC M-B is why it changes the fill and not only the check: "in a `both`
 	// slot the card's declared origin and key are AUTHORITATIVE". The gate has
@@ -657,13 +1006,17 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 			p.K = multisigKFor(kIdx)
 			stage = stageSelfSlot
 		case stageSelfSlot:
-			sCS := &ChoiceScreen{Title: "Your slot", Lead: "Which slot is your key?", Choices: multisigSelfSlotChoices(p.N)}
-			sIdx, ok := sCS.Choose(ctx, th)
+			// A SET, from S5's multi-select picker. It cannot be empty (the first
+			// screen's pick is mandatory) and it cannot repeat a slot (each round
+			// picks from what is left), so the emptiness guard at the top of
+			// buildMultisigPolicyFlow and assembleBuildPolicy's duplicate-slot
+			// check are both backstops rather than reachable arms.
+			slots, ok := multisigSelfSlotPickFlow(ctx, th, p.N)
 			if !ok {
 				stage = stageK // Back -> re-pick k.
 				continue
 			}
-			p.SelfSlot = sIdx
+			p.SelfSlots = slots
 			stage = stageFp
 		case stageFp:
 			fpCS := &ChoiceScreen{Title: "Fingerprints", Lead: "Include key fingerprints?", Choices: multisigFpChoices()}
@@ -693,7 +1046,11 @@ func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
 // comment carrying a literal is counted as a flow that draws it.)
 const buildCosignerGatherTitle = "Cosigner Keys"
 
-var errBuildSlotCount = errors.New("multisig build: cosigner count != n-1")
+// errBuildSlotCount is a structurally impossible slot set: a held slot outside
+// 0..n-1, one slot held twice, or a cosigner count that is not exactly the
+// number of slots no held key fills. Before S5 it read "cosigner count != n-1",
+// which was the same condition when the operator could hold only one slot.
+var errBuildSlotCount = errors.New("multisig build: the slot set and the cosigner cards do not fit")
 
 // errBuildDuplicateKey is SPEC §4.1's refusal: two slots of the assembled policy
 // hold the same key. It carries BOTH slot indices so the flow can name them with
@@ -740,54 +1097,32 @@ func duplicateSlotPair(all []md.MultisigCosigner) (int, int, bool) {
 	return 0, 0, false
 }
 
-// errBuildForeignOrigin is spec M-E's INTERIM refusal: a gathered card declares
-// an origin the shared-origin policy cannot honour. It carries the slot and the
-// card's own spelling of its origin, so the refusal can quote the operator's
-// input back rather than paraphrase it.
+// errBuildEmptyOrigin is spec M-1's refusal: a cosigner card declares an origin
+// with NO components -- a depth-0 card, spelt "m". It carries the slot and the
+// card's own spelling, so the refusal can quote the operator's input back rather
+// than paraphrase it.
 //
-// INTERIM, and scheduled: S5 gives each slot its own origin, at which point this
-// shape is accepted and this error is deleted. Until then the alternative is not
-// "permit" but "stamp m/48'/0'/0'/2' over a card that says otherwise", which is
-// the device overruling an answer the operator already gave.
-type errBuildForeignOrigin struct {
+// It is NOT S2's foreign-origin refusal under a new name. That one refused every
+// card whose origin was not the shared one and S5 deletes it; this one refuses
+// the single shape md itself cannot encode, and it exists so the operator meets
+// a screen naming their card rather than "Couldn't assemble the wallet policy".
+type errBuildEmptyOrigin struct {
 	Slot     int
 	Declared string
 }
 
-func (e errBuildForeignOrigin) Error() string {
-	return fmt.Sprintf("multisig build: slot @%d declares origin %q, not the shared origin",
+func (e errBuildEmptyOrigin) Error() string {
+	return fmt.Sprintf("multisig build: slot @%d declares origin %q, which has no path components",
 		e.Slot, e.Declared)
 }
 
-// originIsShared reports whether a card's DECLARED origin is the policy's shared
-// origin.
+// buildEmptyOriginMessage is the operator-facing refusal. It says which slot,
+// what the card claims, that nothing was cut, and the routes that exist on this
+// hardware (§0.1b -- the payload and the keyboard, never "scan a card").
 //
-// PERMISSIVE ON SPELLING, STRICT ON VALUE (§0.1). The comparison is over parsed
-// path COMPONENTS, not over the two strings: mk.Decode normalises to the `h`
-// form but a card can reach here spelt with apostrophes, and m/48'/0'/0'/2' and
-// m/48h/0h/0h/2h are the same path. Refusing one of them would be a refusal over
-// notation, which is the exact opposite of the rule.
-//
-// A path that does not PARSE is not shared. An origin the device cannot read is
-// one it cannot honour, and the alternative is stamping the shared origin over
-// something nobody managed to interpret.
-func originIsShared(declared string, shared bip32.Path) bool {
-	p, err := bip32.ParsePath(declared)
-	if err != nil || len(p) != len(shared) {
-		return false
-	}
-	for i := range p {
-		if p[i] != shared[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// buildForeignOriginMessage is the operator-facing refusal. It quotes BOTH
-// origins, because the whole harm is that they differ and the operator is the
-// only one who knows which is right.
-func buildForeignOriginMessage(e errBuildForeignOrigin, origins []cosignerOrigin) string {
+// NO EM-DASH: it is a zero-pixel glyph in the body face and a line containing
+// one does not draw at all (F-78/F-151).
+func buildEmptyOriginMessage(e errBuildEmptyOrigin, origins []cosignerOrigin) string {
 	who := ""
 	for _, o := range origins {
 		if o.slot == e.Slot {
@@ -795,29 +1130,44 @@ func buildForeignOriginMessage(e errBuildForeignOrigin, origins []cosignerOrigin
 			break
 		}
 	}
-	return fmt.Sprintf("The key card for slot @%d%s says its key was derived at %s, "+
-		"but this build declares one shared origin, %s, for every slot. Stamping the "+
-		"shared origin on it would put a derivation path on your steel that the card "+
-		"itself disagrees with. Nothing was engraved. Use a card derived at %s, or "+
-		"wait for per-slot origins.",
-		e.Slot, who, e.Declared, multisigSharedOrigin().String(),
-		multisigSharedOrigin().String())
+	declared := e.Declared
+	if declared == "" {
+		declared = "m"
+	}
+	return fmt.Sprintf("The key card for slot @%d%s says its key was derived at %q, "+
+		"the master key itself, with no derivation path at all. A wallet policy has to "+
+		"record where every key came from, so this card cannot be placed in one. "+
+		"Nothing was engraved.\n\n"+
+		"Use a card derived at an account path such as %s, or rewrite the payload on "+
+		"the host with `me sysw pack`.",
+		e.Slot, who, declared, multisigSharedOrigin().String())
 }
 
 // buildSlotProvenance names one slot for a refusal, using what the flow already
 // knows: the self-slot the operator picked and the card→slot map
 // buildCosignerOrigins built. A refusal that says "slots @0 and @1" and stops
 // leaves the operator to work out which of their inputs to change.
-// `selfFromCard` is S4's `both` assignment: the operator's own slot is filled
+// `p.SelfFromCard` is S4's `both` assignment: the operator's own slot is filled
 // from a payload card too, so "your key, from your seed" would be a wrong claim
 // about where it came from and would send them to change the wrong input.
-func buildSlotProvenance(slot, selfSlot int, selfFromCard bool, origins []cosignerOrigin) string {
-	if slot == selfSlot && !selfFromCard {
+//
+// It takes the whole `p` from S5 because the question is now set membership --
+// "is this one of the slots the operator holds" -- and a single index cannot ask
+// it.
+func buildSlotProvenance(slot int, p buildPolicyParams, origins []cosignerOrigin) string {
+	held := false
+	for _, s := range p.SelfSlots {
+		if s == slot {
+			held = true
+			break
+		}
+	}
+	if held && !p.SelfFromCard {
 		return fmt.Sprintf("slot @%d (your key, from your seed)", slot)
 	}
 	for _, o := range origins {
 		if o.slot == slot {
-			if slot == selfSlot {
+			if held {
 				return fmt.Sprintf("slot @%d (your key, payload card %d)", slot, o.card)
 			}
 			return fmt.Sprintf("slot @%d (payload card %d)", slot, o.card)
@@ -836,9 +1186,9 @@ func buildSlotProvenance(slot, selfSlot int, selfFromCard bool, origins []cosign
 //
 // No em-dash: it is a zero-pixel glyph in poppins.Regular16, the body face (F-78,
 // re-measured for this text). The "Duplicate key" heading is the modal TITLE.
-func buildDuplicateKeyMessage(e errBuildDuplicateKey, selfSlot int, selfFromCard bool, origins []cosignerOrigin) string {
-	a := buildSlotProvenance(e.SlotA, selfSlot, selfFromCard, origins)
-	b := buildSlotProvenance(e.SlotB, selfSlot, selfFromCard, origins)
+func buildDuplicateKeyMessage(e errBuildDuplicateKey, p buildPolicyParams, origins []cosignerOrigin) string {
+	a := buildSlotProvenance(e.SlotA, p, origins)
+	b := buildSlotProvenance(e.SlotB, p, origins)
 	return fmt.Sprintf("%s and %s hold the SAME key. A policy that repeats a key can be "+
 		"spent by fewer different keys than its k-of-n says. Nothing was engraved. "+
 		"Build again and choose different cards, or use a different seed; if the "+
@@ -863,14 +1213,34 @@ func fpBytes(fp uint32) [4]byte {
 // cosignerFromCard parses ONE gathered cosigner mk.Card into a MultisigCosigner.
 // includeFp drives HOMOGENEOUS fp-presence: when true the card's 8-hex
 // Fingerprint is decoded to 4 bytes (a missing fp under Include is an error so
-// the policy stays homogeneous); when false no fp is set. The card's Origin is
-// IGNORED (OriginShared mode declares the single shared origin).
+// the policy stays homogeneous); when false no fp is set.
+//
+// THE CARD'S DECLARED ORIGIN IS CARRIED, from S5 (spec R-3). Before S5 it was
+// DISCARDED, because OriginShared mode declares one origin for the whole policy;
+// that was correct for a card actually minted at m/48'/0'/0'/2' and a lie for
+// any other, so S2 refused every other card outright rather than stamp a path
+// the card disagreed with. S5 gives each slot its own origin, which makes the
+// card's own answer the one the policy records.
+//
+// PERMISSIVE ON SPELLING, STRICT ON VALUE (§0.1): the origin is carried as
+// PARSED COMPONENTS, so m/48'/0'/0'/2' and m/48h/0h/0h/2h are the same origin
+// and neither notation changes the assembled bytes. A path that does not PARSE
+// is refused here rather than stamped over: an origin the device cannot read is
+// one it cannot honour.
 func cosignerFromCard(card mk.Card, includeFp bool) (md.MultisigCosigner, error) {
 	cc, pk, _, err := decodeXpubBytes(card.Xpub)
 	if err != nil {
 		return md.MultisigCosigner{}, err
 	}
-	c := md.MultisigCosigner{ChainCode: cc, CompressedPubkey: pk}
+	origin, err := bip32.ParsePath(card.Path)
+	if err != nil {
+		return md.MultisigCosigner{}, err
+	}
+	c := md.MultisigCosigner{
+		ChainCode:        cc,
+		CompressedPubkey: pk,
+		Origin:           originComponents(origin),
+	}
 	if includeFp {
 		if card.Fingerprint == "" {
 			return md.MultisigCosigner{}, errors.New("multisig build: Include selected but a cosigner card has no fingerprint")
@@ -888,44 +1258,58 @@ func cosignerFromCard(card mk.Card, includeFp bool) (md.MultisigCosigner, error)
 }
 
 // assembleBuildPolicy is the SOLE md1-bytes producer call site for the Build
-// path (I-VERBATIM). It places the self-derived key at p.SelfSlot and the
-// gathered cosigners in the REMAINING slots in gather order (ascending slot
-// index, skipping SelfSlot), builds the homogeneous-fp []MultisigCosigner, and
-// calls md.EncodeMultisig in that exact (caller-owned, order-preserving) order.
-func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint32, cosigners []mk.Card) (out []string, stub [4]byte, slots []md.SlotInfo, err error) {
-	// Defensive bounds: the @S picker is bounded to 0..n-1, but assembleBuildPolicy
-	// must never panic on an out-of-range self-slot (fuzz/robustness).
-	if p.N < 1 || p.SelfSlot < 0 || p.SelfSlot >= p.N {
+// path (I-VERBATIM). It places each held key at its own slot and the gathered
+// cosigners in the REMAINING slots in gather order (ascending slot index),
+// builds the homogeneous-fp []MultisigCosigner, and calls md.EncodeMultisig in
+// that exact (caller-owned, order-preserving) order.
+// `self` carries one entry per slot filled FROM A SEED, each with the origin it
+// was derived at; every remaining slot is filled from `cosigners` in gather
+// order, ascending. Before S5 this was a single (selfXpub, selfMasterFP) pair at
+// p.SelfSlot -- a shape that cannot express Trace B, where the operator holds
+// three slots across two masters.
+func assembleBuildPolicy(p buildPolicyParams, self []heldSlotKey, cosigners []mk.Card) (out []string, stub [4]byte, slots []md.SlotInfo, err error) {
+	if p.N < 1 {
 		return nil, [4]byte{}, nil, errBuildSlotCount
 	}
-	// S4: a `both` self slot is filled from a card like every other slot, so the
-	// set the operator chose is N long rather than N-1. Both counts are exact and
-	// neither is a floor -- the ruling that forbids assuming n-1 (F-173) is about
-	// the PAYLOAD's supply, never about the assembled set.
-	want := p.N - 1
-	if p.SelfFromCard {
-		want = p.N
+	// Defensive bounds: the @S picker is bounded to 0..n-1, but assembleBuildPolicy
+	// must never panic on an out-of-range or repeated held slot (fuzz/robustness).
+	bySlot := make(map[int]heldSlotKey, len(self))
+	for _, h := range self {
+		if h.Slot < 0 || h.Slot >= p.N {
+			return nil, [4]byte{}, nil, errBuildSlotCount
+		}
+		if _, dup := bySlot[h.Slot]; dup {
+			return nil, [4]byte{}, nil, errBuildSlotCount
+		}
+		bySlot[h.Slot] = h
 	}
-	if len(cosigners) != want {
+	// S4: a `both` self slot is filled from a card like every other slot, so the
+	// set the operator chose is N long rather than N-1. S5 generalises that to
+	// "every slot no held key fills". Both counts are exact and neither is a floor
+	// -- the ruling that forbids assuming n-1 (F-173) is about the PAYLOAD's
+	// supply, never about the assembled set.
+	if len(cosigners) != p.N-len(self) {
 		return nil, [4]byte{}, nil, errBuildSlotCount
 	}
 
 	all := make([]md.MultisigCosigner, p.N)
-	if !p.SelfFromCard {
-		selfCC, selfPK, _, derr := decodeXpubBytes(selfXpub)
-		if derr != nil {
-			return nil, [4]byte{}, nil, derr
-		}
-		self := md.MultisigCosigner{ChainCode: selfCC, CompressedPubkey: selfPK}
-		if p.IncludeFp {
-			self.Fingerprint = fpBytes(selfMasterFP)
-			self.FpPresent = true
-		}
-		all[p.SelfSlot] = self
-	}
 	gi := 0 // gather index into cosigners
 	for slot := 0; slot < p.N; slot++ {
-		if slot == p.SelfSlot && !p.SelfFromCard {
+		if h, held := bySlot[slot]; held {
+			selfCC, selfPK, _, derr := decodeXpubBytes(h.Xpub)
+			if derr != nil {
+				return nil, [4]byte{}, nil, derr
+			}
+			c := md.MultisigCosigner{
+				ChainCode:        selfCC,
+				CompressedPubkey: selfPK,
+				Origin:           originComponents(h.Origin),
+			}
+			if p.IncludeFp {
+				c.Fingerprint = fpBytes(h.MasterFP)
+				c.FpPresent = true
+			}
+			all[slot] = c
 			continue
 		}
 		c, cerr := cosignerFromCard(cosigners[gi], p.IncludeFp)
@@ -959,39 +1343,94 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 		return nil, [4]byte{}, nil, errBuildDuplicateKey{SlotA: a, SlotB: b}
 	}
 
-	// SPEC M-E, and it runs AFTER the duplicate check on purpose. The delivered
-	// payload can trigger both on one build (self = masterA, cards A@0 + A@1), and
-	// the duplicate is the graver harm — a repeated key degrades the quorum
-	// invisibly, where a foreign origin mis-states a path that is printed on every
-	// artifact and is therefore detectable by reading the output. It is also the
-	// check that OUTLIVES this stage: the origin refusal disappears at S5, §4.1's
-	// never does. Asserted, not left to the reading order.
+	// S5 REPLACES S2's INTERIM FOREIGN-ORIGIN REFUSAL, which stood exactly here.
+	// Until this stage every slot had to declare the one shared origin, because
+	// the alternative was not "permit" but "stamp m/48'/0'/0'/2' over a card that
+	// says otherwise", which is the device overruling an answer the operator
+	// already gave. Per-slot origins make the card's own answer recordable, so the
+	// shape is now ACCEPTED. §4.1's duplicate check above is the one that OUTLIVES
+	// the stage and it still runs FIRST, which was S2's ruling and is not reversed
+	// here: on the delivered payload one build can be both a duplicate and a
+	// divergent-origin set, and the duplicate is the graver harm.
 	//
-	// This loop mirrors the slot-fill loop above rather than folding into it,
-	// because folding would put the origin check BEFORE the duplicate check and
-	// silently reverse that ruling.
-	shared := multisigSharedOrigin()
-	gi = 0
-	for slot := 0; slot < p.N; slot++ {
-		if slot == p.SelfSlot && !p.SelfFromCard {
-			continue
+	// SHARED WHEN THE ORIGINS AGREE, DIVERGENT WHEN THEY DO NOT. The two are
+	// different WIRE FORMS of the same paths, so a policy that switched to
+	// divergent unconditionally would re-mint every id the shared form ever
+	// produced -- including S2's committed byte-identity golden and every wallet
+	// already matched against a coordinator. The comparison is over PARSED
+	// COMPONENTS, so it is a comparison of paths and never of notation.
+	req := md.EncodeMultisigRequest{
+		Cosigners: all,
+		K:         uint8(p.K),
+		Script:    p.Script,
+	}
+	if shared, ok := commonOrigin(all); ok {
+		req.OriginMode = md.OriginShared
+		req.SharedOrigin = shared
+	} else {
+		req.OriginMode = md.OriginDivergent
+	}
+	out, stub, slots, err = md.EncodeMultisig(req)
+	if err != nil {
+		// SPEC M-1, NAMED RATHER THAN GENERIC. A depth-0 card ("m") parses to a
+		// ZERO-component origin, which md refuses in either mode
+		// (md/encode_multisig.go:96-106). The encoder is left to be the authority
+		// on that -- it refuses first, and this only attributes the refusal to the
+		// slot whose card caused it, because "Couldn't assemble the wallet policy"
+		// describes a device problem and a depth-0 card is the operator's input.
+		if slot, ok := emptyOriginSlot(all); ok {
+			declared := ""
+			gi := 0
+			for s := 0; s < p.N; s++ {
+				if _, held := bySlot[s]; held {
+					continue
+				}
+				if s == slot {
+					declared = cosigners[gi].Path
+					break
+				}
+				gi++
+			}
+			return nil, [4]byte{}, nil, errBuildEmptyOrigin{Slot: slot, Declared: declared}
 		}
-		if !originIsShared(cosigners[gi].Path, shared) {
-			return nil, [4]byte{}, nil, errBuildForeignOrigin{
-				Slot: slot, Declared: cosigners[gi].Path,
+		return nil, [4]byte{}, nil, err
+	}
+	return out, stub, slots, nil
+}
+
+// commonOrigin reports the ONE origin every cosigner declares, or ok=false when
+// they differ. An empty origin is never a shared origin: md refuses it, and
+// naming the slot that carries it is worth more than a mode switch.
+func commonOrigin(all []md.MultisigCosigner) ([]md.PathComponent, bool) {
+	if len(all) == 0 {
+		return nil, false
+	}
+	first := all[0].Origin
+	if len(first) == 0 {
+		return nil, false
+	}
+	for _, c := range all[1:] {
+		if len(c.Origin) != len(first) {
+			return nil, false
+		}
+		for i := range first {
+			if c.Origin[i] != first[i] {
+				return nil, false
 			}
 		}
-		gi++
 	}
+	return first, true
+}
 
-	req := md.EncodeMultisigRequest{
-		Cosigners:    all,
-		K:            uint8(p.K),
-		Script:       p.Script,
-		OriginMode:   md.OriginShared,
-		SharedOrigin: originComponents(multisigSharedOrigin()),
+// emptyOriginSlot reports the first slot declaring a ZERO-component origin,
+// which is what a depth-0 ("m") card parses to.
+func emptyOriginSlot(all []md.MultisigCosigner) (int, bool) {
+	for i, c := range all {
+		if len(c.Origin) == 0 {
+			return i, true
+		}
 	}
-	return md.EncodeMultisig(req)
+	return 0, false
 }
 
 // buildReviewLines renders the (stub, slots) ordering-verification handle
@@ -1009,19 +1448,52 @@ func assembleBuildPolicy(p buildPolicyParams, selfXpub string, selfMasterFP uint
 // `script` drives §0.1a's ORIGIN announcement, which is the second assumption on
 // this screen and the one nobody owned until 2026-08-15. It sits with the
 // provenance line, above the stub, for the same clause-3 reason.
-func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) []string {
-	lines := append([]string{}, provenance...)
-	lines = append(lines, buildOriginAnnouncement(script)...)
+//
+// `slotKeys` IS THE POLICY'S CONTENTS, and until S5 this screen did not show
+// them. It printed "@0 fp xxxxxxxx", or on the DEFAULT path -- fingerprints are
+// omitted by default -- "@0 (no fp)", and nothing else. So the last screen before
+// an irreversible engrave asked the operator to confirm a wallet policy whose
+// keys they had never seen, and the EXPERIMENTAL warning one screen later told
+// them to compare it against their coordinator with nothing on the device to
+// compare. The keys are printed IN FULL, base58, the way an mk1 card and a
+// coordinator both spell them: a truncated or re-encoded form is a comparison
+// the operator cannot finish.
+//
+// THE INSTRUCTION IS PREPENDED, not appended, and that is the census NOTE's
+// precedent rather than a preference. confirmReviewScreen is confirmable from
+// ANY page (Button3 continues wherever the pager is), so a line added at the
+// bottom can be committed past unread; the plate census puts its note first for
+// exactly this reason.
+func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string, held []heldSlotOrigin) []string {
+	lines := []string{
+		"Check each key below against your coordinator, or against the card it came " +
+			"from, before you continue.",
+	}
+	lines = append(lines, provenance...)
+	lines = append(lines, buildOriginAnnouncement(script, held)...)
 	lines = append(lines,
 		fmt.Sprintf("Policy stub: %x", stub),
 		"Slots:",
 	)
-	for _, s := range slots {
+	for i, s := range slots {
+		label := fmt.Sprintf("@%d, no fingerprint", s.Index)
 		if s.FpPresent {
-			lines = append(lines, fmt.Sprintf("@%d  fp %x", s.Index, s.Fingerprint))
-		} else {
-			lines = append(lines, fmt.Sprintf("@%d  (no fp)", s.Index))
+			label = fmt.Sprintf("@%d, fingerprint %x", s.Index, s.Fingerprint)
 		}
+		key := ""
+		if i < len(slotKeys) {
+			key = slotKeys[i]
+		}
+		if key == "" {
+			// No key to show. The production flow cannot reach this -- it refuses
+			// before the review when buildSlotKeyStrings cannot map a slot -- but a
+			// caller that passes none gets a slot list, not a slot list that looks
+			// like it carried a key and lost it.
+			lines = append(lines, label)
+			continue
+		}
+		lines = append(lines, label+":")
+		lines = append(lines, chunkString(key, 20)...)
 	}
 	if includeFp {
 		lines = append(lines, "Fingerprints INCLUDED on every slot.")
@@ -1032,13 +1504,91 @@ func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInf
 	return lines
 }
 
+// buildSlotKeyStrings maps every slot of the ASSEMBLED policy back to the base58
+// xpub string the operator holds for it, so the review screen states what the
+// bytes carry rather than what the flow intended to put in them.
+//
+// IT READS THE ASSEMBLED md1, deliberately, rather than re-walking
+// assembleBuildPolicy's slot loop. A second copy of "which key fills which slot"
+// is how a review screen starts describing a different wallet from the one being
+// engraved: the two copies agree until one of them is edited. Here the slot order
+// comes from the md1's own expansion and each key is matched by its 65 bytes
+// (chain code || compressed pubkey), so the screen cannot disagree with the
+// plate unless the plate disagrees with itself.
+//
+// A SLOT IT CANNOT MAP IS AN ERROR, not a blank line. The whole point of the
+// screen is that the operator sees the policy's contents before confirming it; a
+// slot rendered empty would be the original defect with extra steps, so the flow
+// refuses instead.
+func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.Card) ([]string, []string, error) {
+	_, keys, err := md.ExpandWalletPolicyChunks(assembled)
+	if err != nil {
+		return nil, nil, err
+	}
+	type candidate struct {
+		cc  [32]byte
+		pk  [33]byte
+		str string
+	}
+	cands := make([]candidate, 0, len(self)+len(cosigners))
+	add := func(x string) {
+		cc, pk, _, derr := decodeXpubBytes(x)
+		if derr != nil {
+			return
+		}
+		cands = append(cands, candidate{cc: cc, pk: pk, str: x})
+	}
+	for _, h := range self {
+		add(h.Xpub)
+	}
+	for _, c := range cosigners {
+		add(c.Xpub)
+	}
+	out := make([]string, len(keys))
+	// AND THE ORIGINS, OFF THE SAME EXPANSION. §0.1a's announcement has to state
+	// the path this build stamped on EVERY slot, and the assembled bytes are the
+	// only source that cannot disagree with the plate. Re-deriving them from the
+	// slot sources would be a second copy of the tail's origin rule (derived ->
+	// derivedSlotOrigin, both -> the card's declared path), and two copies of that
+	// rule agree until one of them is edited.
+	origins := make([]string, len(keys))
+	for i, k := range keys {
+		if !k.XpubPresent {
+			return nil, nil, fmt.Errorf("multisig build: slot @%d carries no key to show", i)
+		}
+		origins[i] = k.OriginPath.String()
+		found := false
+		for _, c := range cands {
+			if slices.Equal(c.cc[:], k.Xpub[0:32]) && slices.Equal(c.pk[:], k.Xpub[32:65]) {
+				out[i] = c.str
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil, fmt.Errorf("multisig build: slot @%d holds a key none of this "+
+				"build's inputs accounts for", i)
+		}
+	}
+	return out, origins, nil
+}
+
 // buildOriginAnnouncement is §0.1a: the device says WHICH derivation path it
 // stamped on every slot, and by WHOSE authority.
 //
-// The assumption exists because multisigSharedOrigin() is unconditional while
-// BIP-48 is not: it assigns 2' to native segwit, 1' to nested segwit, and
-// NOTHING to legacy P2SH. So the operator picks a script type and the device
-// silently picks a path from it — a default nobody asked for.
+// The assumption exists because the operator picks a script type and the device
+// picks a derivation path from it: BIP-48 assigns 2' to native segwit, 1' to
+// nested segwit, and NOTHING to legacy P2SH. That is a default nobody asked for.
+//
+// S5 CHANGED WHAT IS ANNOUNCED, because S5 changed the default (§0.1a): sh(wsh)
+// now derives at 1', the path BIP-48 actually assigns it, so the sentence
+// stopped being "this build uses 2' until per-card origins land" and became a
+// plain statement of the assignment. Legacy sh is unchanged and still has no
+// authority to cite.
+//
+// It describes the slots THIS DEVICE DERIVES. A payload card's own origin is an
+// answer the operator already gave, and §0.1's corollary says a tool that cries
+// DEFAULT when the operator chose is a tool whose warnings get ignored.
 //
 // ANNOUNCE, DO NOT REFUSE, and §0.1 clause 2 is what decides it: the origin is
 // printed with the xpub, carried in every mk1 and shown on the restore doc, so a
@@ -1059,34 +1609,109 @@ func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInf
 // NO EM-DASHES. Measured 2026-08-15: a body line containing one rasters at
 // 2652 px against 7419 for the same text with a hyphen — the line does not draw
 // at all, which is F-151's shape and exactly what test 5's raster floor is for.
-func buildOriginAnnouncement(script md.MultisigScript) []string {
-	shared := multisigSharedOrigin().String()
+func buildOriginAnnouncement(script md.MultisigScript, held []heldSlotOrigin) []string {
+	// THE ORIGINS ARE THE ONES THIS BUILD ACTUALLY USED (I-7). This function
+	// hardcoded derivedSlotOrigin(script, 0), and buildReviewLines prints no
+	// per-slot origin, so a build holding @0 and @1 from one master -- which
+	// derives at m/48h/0h/0h/2h and m/48h/0h/1h/2h -- put NO correct statement of
+	// where @1's key lives on the last confirmation screen before the EXPERIMENTAL
+	// warning and the engrave. The very next screen then told the operator to
+	// "compare the keys you just reviewed against the same wallet in your
+	// coordinator"; one who took the announced origin at face value entered
+	// m/48'/0'/0'/2' for both, derived the wrong key for @1, and either blamed the
+	// device or mis-registered the wallet at a path the plate does not carry.
+	//
+	// §0.1a's requirement is that the device says which path it stamped on EVERY
+	// slot, so when the held slots diverge they are ENUMERATED. When they share
+	// one origin -- the ordinary single-slot build, and a multi-slot build across
+	// distinct masters at account 0 -- the sentence is the shipped scalar one,
+	// unchanged.
+	base, enumerated := heldOriginSummary(script, held)
+	if enumerated != "" {
+		base = enumerated
+	}
 	switch script {
 	case md.MultisigShWsh:
 		return []string{
-			fmt.Sprintf("Key origins: %s on every slot.", shared),
-			fmt.Sprintf("Note: BIP-48 assigns m/48h/0h/0h/1h to nested segwit. "+
-				"This build uses the shared %s path until per-card origins land.", shared),
+			fmt.Sprintf("Your key origins: %s.", base),
+			fmt.Sprintf("Key origins follow BIP-48 for nested segwit (script type 1h), "+
+				"so this build derives your keys at %s. A payload card keeps the origin "+
+				"it declares.", base),
 		}
 	case md.MultisigSh:
 		return []string{
-			fmt.Sprintf("Key origins: %s on every slot.", shared),
+			fmt.Sprintf("Your key origins: %s.", base),
 			fmt.Sprintf("No BIP assigns a derivation path for legacy P2SH multisig, "+
 				"so this is this device's convention, %s. It is recorded on every "+
-				"artifact.", shared),
+				"artifact.", base),
 		}
 	default:
 		return []string{
-			fmt.Sprintf("Key origins: %s, the BIP-48 path for native segwit.", shared),
+			fmt.Sprintf("Your key origins: %s, the BIP-48 path for native segwit.", base),
 		}
 	}
+}
+
+// heldSlotOrigin is one slot the operator holds, and the origin the ASSEMBLED
+// POLICY declares for it.
+//
+// The origin comes off the assembled bytes rather than from a second walk of the
+// slot sources, so the sentence on the review screen and the path on the plate
+// cannot come apart.
+type heldSlotOrigin struct {
+	Slot int
+	Path string
+}
+
+// heldSlotOrigins pairs the held slot indices with their assembled origins.
+// A slot index outside the assembled set is skipped rather than indexed: the
+// production flow cannot produce one (assembleBuildPolicy fills every slot), and
+// a panic on the last screen before an engrave is a worse outcome than a
+// sentence with one fewer slot in it.
+func heldSlotOrigins(held []int, slotOrigins []string) []heldSlotOrigin {
+	out := make([]heldSlotOrigin, 0, len(held))
+	for _, s := range held {
+		if s < 0 || s >= len(slotOrigins) || slotOrigins[s] == "" {
+			continue
+		}
+		out = append(out, heldSlotOrigin{Slot: s, Path: slotOrigins[s]})
+	}
+	return out
+}
+
+// heldOriginSummary reduces the held slots to what the announcement has to say.
+//
+// It returns (scalar, "") when every held slot shares ONE origin -- the shipped
+// sentence, unchanged, for the ordinary build -- and ("", enumeration) when they
+// diverge. An EMPTY held set falls back to derivedSlotOrigin(script, 0), which is
+// the account-0 default this build would use: a caller that supplies no slots is
+// a unit test of the wording rather than a flow, and the flow supplies them.
+func heldOriginSummary(script md.MultisigScript, held []heldSlotOrigin) (scalar, enumerated string) {
+	if len(held) == 0 {
+		return derivedSlotOrigin(script, 0).String(), ""
+	}
+	same := true
+	for _, h := range held[1:] {
+		if h.Path != held[0].Path {
+			same = false
+			break
+		}
+	}
+	if same {
+		return held[0].Path, ""
+	}
+	parts := make([]string, len(held))
+	for i, h := range held {
+		parts[i] = fmt.Sprintf("@%d at %s", h.Slot, h.Path)
+	}
+	return "", joinAnd(parts)
 }
 
 // buildReviewFlow displays the read-only (stub, slots) review and lets the
 // operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
 // paged read-only restore-doc screen idiom.
-func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, includeFp bool, provenance []string) bool {
-	lines := buildReviewLines(script, stub, slots, includeFp, provenance)
+func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string, held []heldSlotOrigin) bool {
+	lines := buildReviewLines(script, stub, slots, slotKeys, includeFp, provenance, held)
 	return confirmReviewScreen(ctx, th, "Policy Review", lines)
 }
 

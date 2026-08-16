@@ -357,21 +357,87 @@ func TestVerifyAllRefusesAnEmptyDirectory(t *testing.T) {
 // not in CI. There is nothing here that needs either — the record is a committed
 // file, and the question is whether it is there.
 func TestS0GateHasARecord(t *testing.T) {
-	const how = "\nProduce one: build and serve cmd/emu, run\n" +
-		"    const w = await import(\"./walk_trace_a.js\");\n" +
-		"    run(...).then(r => { window.__walk = r })   // fire and forget; poll window.__walk\n" +
-		"then\n" +
-		"    go run ./cmd/gaterecord -stage S0 -walk <saved __walk>.json \\\n" +
-		"        -inputs oracle/gaterecords/S0-trace-a.inputs.json -base S0-trace-a"
+	requireStageRecord(t, "S0", "walk_trace_a.js", "S0-trace-a")
+}
 
+// requiredStages is the list every stage-presence check iterates.
+//
+// IT IS A LIST RATHER THAN N COPIES OF THE SAME FUNCTION so the next stage
+// cannot forget. S5 is here because it had no analogue of S0's clause and the
+// omission was invisible: deleting all four S5-trace-b.* files left
+// `go test ./...` fully GREEN. The three generic iterators
+// (TestEveryGateRecordCensusMatchesItsCommittedExpectation,
+// TestEveryGateRecordOnDiskVerifies, and cmd/emu's anchor test) all range
+// Records(GateRecordsDir) -- a LISTING OF WHAT ALREADY EXISTS -- and Fatal only
+// when the directory is entirely empty, so with S0's four files still present
+// every one of them passed over a deleted flagship.
+//
+// This is the cycle's Critical #4 one layer up: not the walk's correctness, but
+// the evidence that a walk ran at all. A gate whose subject is a committed file
+// must be required BY NAME, never inferred from a non-empty directory.
+var requiredStages = []struct {
+	stage, walk, base string
+}{
+	{"S0", "walk_trace_a.js", "S0-trace-a"},
+	{"S5", "walk_trace_b.js", "S5-trace-b"},
+}
+
+// TestEveryRequiredStageHasAGateRecord is the table, and it is what makes the
+// two single-stage tests below regression guards rather than the whole rule.
+func TestEveryRequiredStageHasAGateRecord(t *testing.T) {
 	stages, err := StagesRecorded(GateRecordsDir)
 	if err != nil {
-		t.Fatalf("no gate records directory at %s: %v%s", GateRecordsDir, err, how)
+		t.Fatalf("no gate records directory at %s: %v", GateRecordsDir, err)
 	}
-	if len(stages["S0"]) == 0 {
-		t.Fatalf("S0 has no gate record in %s (stages present: %v).%s", GateRecordsDir, keys(stages), how)
+	for _, r := range requiredStages {
+		if len(stages[r.stage]) == 0 {
+			t.Errorf("%s has no gate record in %s (stages present: %v).%s",
+				r.stage, GateRecordsDir, keys(stages), mintInstructions(r.stage, r.walk, r.base))
+		}
 	}
-	t.Logf("S0 gate records: %v", stages["S0"])
+	t.Logf("required stages %v; recorded %v", requiredStages, stages)
+}
+
+// TestS5GateHasARecord is the flagship's own clause, beside S0's.
+//
+// S5 is the stage that builds a policy ON the device across two masters and
+// engraves it, so its gate record is the evidence that the built-policy flow
+// completed a walk at all. Reproduced by deletion before this existed: removing
+// oracle/gaterecords/S5-trace-b.{record,expect,walk,inputs}.json and running
+// `go test ./... -count=1` reported every package ok, including
+// "verified 1 gate record(s)".
+func TestS5GateHasARecord(t *testing.T) {
+	requireStageRecord(t, "S5", "walk_trace_b.js", "S5-trace-b")
+}
+
+// requireStageRecord fails when `stage` has no committed gate record.
+//
+// It never skips. Not under -short, not when the oracle binaries are missing,
+// not in CI. There is nothing here that needs either -- the record is a
+// committed file, and the question is whether it is there.
+func requireStageRecord(t *testing.T, stage, walk, base string) {
+	t.Helper()
+	stages, err := StagesRecorded(GateRecordsDir)
+	if err != nil {
+		t.Fatalf("no gate records directory at %s: %v%s", GateRecordsDir, err,
+			mintInstructions(stage, walk, base))
+	}
+	if len(stages[stage]) == 0 {
+		t.Fatalf("%s has no gate record in %s (stages present: %v).%s",
+			stage, GateRecordsDir, keys(stages), mintInstructions(stage, walk, base))
+	}
+	t.Logf("%s gate records: %v", stage, stages[stage])
+}
+
+// mintInstructions is the "produce one" note, per stage, so a failure names the
+// exact command rather than a shape.
+func mintInstructions(stage, walk, base string) string {
+	return "\nProduce one: build and serve cmd/emu, run\n" +
+		"    const w = await import(\"./" + walk + "\");\n" +
+		"    run(...).then(r => { window.__walk = r })   // fire and forget; poll window.__walk\n" +
+		"then\n" +
+		"    go run ./cmd/gaterecord -stage " + stage + " -walk <saved __walk>.json \\\n" +
+		"        -inputs oracle/gaterecords/" + base + ".inputs.json -base " + base
 }
 
 // TestEveryGateRecordOnDiskVerifies re-checks the pairing on every record: the
