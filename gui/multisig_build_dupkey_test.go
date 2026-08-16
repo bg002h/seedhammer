@@ -62,8 +62,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 	// Same master, same path, same key.
 	t.Run("the delivered collision is refused", func(t *testing.T) {
 		selfXpub, selfFP := dupTestSelf(t, fixtureMasterA)
-		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 0}
-		out, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP,
+		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{0}}
+		out, _, _, err := assembleBuildPolicy(p, selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()),
 			[]mk.Card{dupTestCard(t, 0), dupTestCard(t, 1)}) // A@0 then B@0
 		if err == nil {
 			t.Fatal("assembleBuildPolicy accepted a policy whose slots @0 and @1 hold " +
@@ -160,8 +160,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 	// a seed.
 	t.Run("card-vs-card duplicates are refused and named as cards", func(t *testing.T) {
 		selfXpub, selfFP := dupTestSelf(t, fixtureMasterC)
-		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 2}
-		_, _, _, err := assembleBuildPolicy(p, selfXpub, selfFP,
+		p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{2}}
+		_, _, _, err := assembleBuildPolicy(p, selfKeyAt(2, selfXpub, selfFP, multisigSharedOrigin()),
 			[]mk.Card{dupTestCard(t, 0), dupTestCard(t, 0)}) // A@0 twice
 		var dup errBuildDuplicateKey
 		if !errors.As(err, &dup) {
@@ -170,8 +170,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 		if dup.SlotA != 0 || dup.SlotB != 1 {
 			t.Fatalf("named @%d and @%d; want @0 and @1", dup.SlotA, dup.SlotB)
 		}
-		origins := buildCosignerOrigins(3, 2, false, []int{0, 0})
-		msg := buildDuplicateKeyMessage(dup, 2, false, origins)
+		origins := buildCosignerOrigins(buildPolicyParams{N: 3, SelfSlots: []int{2}}, []int{0, 0})
+		msg := buildDuplicateKeyMessage(dup, buildPolicyParams{N: 3, SelfSlots: []int{2}}, origins)
 		for _, want := range []string{"payload card 1", "Slot @0", "slot @1", "me sysw pack"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("card-vs-card refusal is missing %q:\n%s", want, msg)
@@ -188,8 +188,8 @@ func TestS2RefusesDuplicateKeysBeforeS4(t *testing.T) {
 	// say "scan" — a prompt pointing away from the only route the flow takes
 	// dead-ends the operator just as effectively as an impossible one.
 	t.Run("the refusal names both slots, their provenance and the way forward", func(t *testing.T) {
-		origins := buildCosignerOrigins(3, 0, false, []int{0, 1}) // @1 <- card 1, @2 <- card 2
-		msg := buildDuplicateKeyMessage(errBuildDuplicateKey{SlotA: 0, SlotB: 1}, 0, false, origins)
+		origins := buildCosignerOrigins(buildPolicyParams{N: 3, SelfSlots: []int{0}}, []int{0, 1}) // @1 <- card 1, @2 <- card 2
+		msg := buildDuplicateKeyMessage(errBuildDuplicateKey{SlotA: 0, SlotB: 1}, buildPolicyParams{N: 3, SelfSlots: []int{0}}, origins)
 		for _, want := range []string{
 			"Slot @0 (your key, from your seed)",
 			"slot @1 (payload card 1)",

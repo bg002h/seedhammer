@@ -62,7 +62,7 @@ export const NEEDLE_GATHER = "Cosigner Keys"; // gui/multisig_build.go
 //
 // The NOTE proves the sh(wsh) TEMPLATE took: buildOriginAnnouncement emits it
 // only for md.MultisigShWsh, so it cannot appear on a wsh or a legacy-sh build.
-export const NEEDLE_NESTED_NOTE = "BIP-48 assigns m/48h/0h/0h/1h to nested segwit"; // gui/multisig_build.go
+export const NEEDLE_NESTED_NOTE = "BIP-48 for nested segwit (script type 1h)"; // gui/multisig_build.go
 // The NAME is the gate's subject: scriptName's nested-segwit arm, one production
 // site in gui/md1_inspect.go, reaching the screen through desc4Display.
 export const NEEDLE_NESTED_NAME = "P2SH-P2WSH"; // gui/md1_inspect.go

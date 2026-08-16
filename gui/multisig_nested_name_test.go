@@ -112,8 +112,8 @@ func buildAssembledMd1(t *testing.T, script md.MultisigScript) []string {
 	card0 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[0]), Stubs: [][4]byte{{0, 0, 0, 0}}}
 	card2 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[2]), Stubs: [][4]byte{{0, 0, 0, 0}}}
 	out, _, _, err := assembleBuildPolicy(
-		buildPolicyParams{Script: script, N: 3, K: 2, SelfSlot: 1, IncludeFp: false},
-		selfXpub, selfFP, []mk.Card{card0, card2})
+		buildPolicyParams{Script: script, N: 3, K: 2, SelfSlots: []int{1}, IncludeFp: false},
+		selfKeyAt(1, selfXpub, selfFP, multisigSharedOrigin()), []mk.Card{card0, card2})
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy(%v): %v", script, err)
 	}

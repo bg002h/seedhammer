@@ -6,8 +6,19 @@ import (
 	"strings"
 	"testing"
 
+	"seedhammer.com/bip32"
 	"seedhammer.com/md"
 )
+
+// selfKeyAt is the ONE-held-slot []heldSlotKey that the pre-S5
+// assembleBuildPolicy signature carried as its (selfXpub, selfMasterFP) pair.
+//
+// It exists so a test that is not ABOUT multi-slot self keeps reading like the
+// single-slot build it describes, while the assembler's real parameter stays the
+// set S5 needs. Tests that ARE about multi-slot self build the slice directly.
+func selfKeyAt(slot int, xpub string, fp uint32, origin bip32.Path) []heldSlotKey {
+	return []heldSlotKey{{Slot: slot, Xpub: xpub, MasterFP: fp, Origin: origin}}
+}
 
 // suppliedMultisigMd1 loads the vendored full-policy wsh(sortedmulti(2,@0,@1,@2))
 // md1 chunk strings. The operator's abandon-about seed is slot @1 at

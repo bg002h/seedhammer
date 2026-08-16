@@ -56,8 +56,8 @@ func s2TraceAPolicy(t *testing.T) (chunks []string, xpubs []string, stub [4]byte
 	t.Helper()
 	selfXpub, selfFP := dupTestSelf(t, fixtureMasterA)
 	cards := []mk.Card{dupTestCard(t, 1), dupTestCard(t, 2)} // B@0, C@0
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 0}
-	got, stub, _, err := assembleBuildPolicy(p, selfXpub, selfFP, cards)
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{0}}
+	got, stub, _, err := assembleBuildPolicy(p, selfKeyAt(0, selfXpub, selfFP, multisigSharedOrigin()), cards)
 	if err != nil {
 		t.Fatalf("the device could not assemble Trace A: %v", err)
 	}

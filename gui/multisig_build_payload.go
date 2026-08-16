@@ -356,16 +356,20 @@ type cosignerOrigin struct {
 // will put them in: every slot except the operator's own, ascending, in the
 // order the cards were chosen. It mirrors assembleBuildPolicy's own loop, and
 // the S1 tests assert the two agree rather than trusting that they do.
-// `selfFromCard` is S4's `both` assignment: the operator's own slot is filled
-// from a card too, so it is no longer skipped. The parameter is required rather
-// than inferred because the two shapes differ only in whether one slot is in the
-// map, and a wrong map silently mis-numbers every card in every refusal and on
-// the provenance line.
-func buildCosignerOrigins(n, selfSlot int, selfFromCard bool, chosen []int) []cosignerOrigin {
+// `p.SelfFromCard` is S4's `both` assignment: the operator's own slot is filled
+// from a card too, so it is no longer skipped. It takes the whole `p` from S5,
+// because the skip test is now set membership over `p.SelfSlots` -- and a wrong
+// map silently mis-numbers every card in every refusal and on the provenance
+// line.
+func buildCosignerOrigins(p buildPolicyParams, chosen []int) []cosignerOrigin {
+	held := make(map[int]bool, len(p.SelfSlots))
+	for _, s := range p.SelfSlots {
+		held[s] = true
+	}
 	out := make([]cosignerOrigin, 0, len(chosen))
 	gi := 0
-	for slot := 0; slot < n && gi < len(chosen); slot++ {
-		if slot == selfSlot && !selfFromCard {
+	for slot := 0; slot < p.N && gi < len(chosen); slot++ {
+		if held[slot] && !p.SelfFromCard {
 			continue
 		}
 		out = append(out, cosignerOrigin{slot: slot, card: chosen[gi] + 1})

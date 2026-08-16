@@ -72,8 +72,10 @@ var buildFlowNeedles = []struct {
 	// origin announcement template-dependent.
 	//
 	// The NOTE is emitted only by buildOriginAnnouncement's md.MultisigShWsh arm,
-	// so it cannot appear on a wsh or legacy-sh build.
-	{"BIP-48 assigns m/48h/0h/0h/1h to nested segwit", "gui/multisig_build.go"},
+	// so it cannot appear on a wsh or legacy-sh build. S5 rewrote that sentence
+	// (§0.1a made the nested default 1h rather than a warning about 2h), so the
+	// needle moved with it.
+	{"BIP-48 for nested segwit (script type 1h)", "gui/multisig_build.go"},
 	// The NAME is S3's whole subject: scriptName's nested arm. It reaches the
 	// restore doc through desc4Display, and gui/multisig_restore.go deliberately
 	// does NOT quote it in a comment, because this counter matches source bytes

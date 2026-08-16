@@ -7,6 +7,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
+	"seedhammer.com/md"
 	"seedhammer.com/mk"
 )
 
@@ -447,7 +448,7 @@ func TestPerSeedPassphraseBindsToItsOwnSeed(t *testing.T) {
 		{Kind: slotFromBoth, SeedID: idA, Card: 0},
 		{Kind: slotFromBoth, SeedID: idB, Card: 1},
 	}
-	if _, gerr := buildSlotGate(sources, reg, []mk.Card{cardA, cardB}, net); gerr != nil {
+	if _, gerr := buildSlotGate(sources, md.MultisigWsh, reg, []mk.Card{cardA, cardB}, net); gerr != nil {
 		t.Fatalf("the gate refused two slots each holding the key ITS OWN "+
 			"(seed, passphrase) pair derives: %v. A flow-global passphrase applied "+
 			"to both is exactly what this looks like", gerr)
@@ -458,7 +459,7 @@ func TestPerSeedPassphraseBindsToItsOwnSeed(t *testing.T) {
 	crossed := []slotSource{
 		{Kind: slotFromBoth, SeedID: idB, Card: 0},
 	}
-	if _, gerr := buildSlotGate(crossed, reg, []mk.Card{cardA}, net); gerr == nil {
+	if _, gerr := buildSlotGate(crossed, md.MultisigWsh, reg, []mk.Card{cardA}, net); gerr == nil {
 		t.Fatal("seed B accepted seed A's card, so the gate is not comparing " +
 			"anything per-seed")
 	}

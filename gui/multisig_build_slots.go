@@ -32,19 +32,22 @@ import (
 // the case the operator asked about: a payload carrying their seed AND their own
 // key card.
 //
-// WHAT S4's FLOW ACTUALLY REACHES, said plainly rather than implied. The model
-// names three kinds; the build flow offers a choice between two of them, on ONE
-// slot:
+// WHAT THE FLOW ACTUALLY REACHES, said plainly rather than implied.
 //
-//   - the operator's own slot @S is `derived` (today's behaviour) or `both`;
-//   - every other slot is `payloadKey`.
+// S5 widened the MODEL and the TAIL to multi-slot self: buildSlotSources accepts
+// a SET of held slots, numbers their BIP-48 accounts off the master fingerprint,
+// and buildEngraveTail derives one leg per held slot at that slot's own origin.
+// What has NOT moved is the @S PICKER, which is still single-select, so a build
+// driven through the screens produces exactly one held slot and the multi-slot
+// shapes are exercised by tests driving the model directly. The multi-select
+// screen, and the multi-seed entry it implies, belongs to the block after this
+// one.
 //
-// `derived` at a slot that is NOT @S is multi-slot self, which is S5's stage and
-// is not buildable here. So the gate below accepts assignment sets richer than
-// this flow can produce, and its tests drive it directly. That is not a
-// shortcut: the plan says so at S5 test 8 -- "S2's interim refusal means a
-// divergent-origin input cannot reach the gate during S4, so every S4 gate test
-// is necessarily synthetic" -- and schedules the real-flow re-proof for S5.
+// S5 also removed S2's interim foreign-origin refusal, which is why S5 test 8
+// (TestGateStillFiresAfterOriginsDiverge) re-proves this gate through the REAL
+// flow: during S4 a divergent-origin input could not reach the gate at all, so
+// every S4 gate test below is necessarily synthetic, and without that re-proof
+// S4's proof would have expired silently.
 
 // slotSourceKind is SPEC 4.3's source table as a closed enum.
 type slotSourceKind int
@@ -89,9 +92,33 @@ type slotSource struct {
 // derivedSlotOrigin is M-B's second binding as one function: a `derived` slot's
 // account number IS the BIP-48 account component. It exists so the account ->
 // path mapping has exactly one site, and so a test can name it.
-func derivedSlotOrigin(account uint32) bip32.Path {
+//
+// FROM S5 IT IS ALSO TEMPLATE-AWARE (plan §0.1a). BIP-48 assigns the SCRIPT TYPE
+// component: 2' to native segwit and 1' to nested segwit, and NOTHING to legacy
+// P2SH. Before S5 this returned 2' unconditionally, so an sh(wsh) build stamped
+// the native-segwit path onto steel and a BIP-48-aware coordinator reading that
+// plate derived at the wrong script-type path. §0.1a rules that S5 is where the
+// default becomes template-aware -- not earlier, because making it so at S2 or S3
+// would have stranded S3's walk on S2's interim foreign-origin refusal.
+func derivedSlotOrigin(script md.MultisigScript, account uint32) bip32.Path {
 	const h = hdkeychain.HardenedKeyStart
-	return bip32.Path{48 | h, 0 | h, account | h, 2 | h}
+	return bip32.Path{48 | h, 0 | h, account | h, multisigScriptTypeComponent(script) | h}
+}
+
+// multisigScriptTypeComponent is BIP-48's script-type component for a template,
+// and the ONE site that decides it.
+//
+// wsh -> 2', the BIP's own recommended default for native segwit.
+// sh(wsh) -> 1', the BIP's assignment for nested segwit (S5; plan §0.1a).
+// sh -> 2', because NO BIP assigns legacy P2SH multisig a path at all. That one
+// is this device's convention rather than an authority's, which is exactly why
+// §0.1a requires it to be ANNOUNCED loudly rather than merely applied
+// (buildOriginAnnouncement).
+func multisigScriptTypeComponent(script md.MultisigScript) uint32 {
+	if script == md.MultisigShWsh {
+		return 1
+	}
+	return 2
 }
 
 // ─── The seed registry ───────────────────────────────────────────────────────
@@ -313,7 +340,11 @@ func bothSlotKey(card mk.Card) (md.ExpandedKey, error) {
 // assembleBuildPolicy, over the FINAL SLOT SET, where S2 landed it permanently
 // -- source-independent and therefore subsuming every arrival shape. S4 does not
 // replace that check; it feeds it more sources.
-func buildSlotGate(sources []slotSource, reg *seedRegistry, cards []mk.Card, net *chaincfg.Params) ([]string, error) {
+// `script` reaches the gate because derivedSlotOrigin is template-aware from S5
+// (§0.1a) and the gate's distinctness key is a derived slot's ORIGIN. Passing it
+// keeps derivedSlotOrigin the single account -> path site rather than growing a
+// second, script-blind copy of the mapping inside the gate.
+func buildSlotGate(sources []slotSource, script md.MultisigScript, reg *seedRegistry, cards []mk.Card, net *chaincfg.Params) ([]string, error) {
 	type binding struct {
 		slot   int
 		origin string
@@ -333,7 +364,7 @@ func buildSlotGate(sources []slotSource, reg *seedRegistry, cards []mk.Card, net
 				order = append(order, s.SeedID)
 			}
 			bound[s.SeedID] = append(bound[s.SeedID],
-				binding{slot: slot, origin: derivedSlotOrigin(s.Account).String()})
+				binding{slot: slot, origin: derivedSlotOrigin(script, s.Account).String()})
 		case slotFromBoth:
 			seed, ok := reg.at(s.SeedID)
 			if !ok {
@@ -454,7 +485,13 @@ func buildSelfSourceFlow(ctx *Context, th *Colors, slot int) (slotSourceKind, bo
 // coordinator comparison is S5's surface, once the per-slot keys are shown. What
 // this screen does instead is state what the device checked and what it took on
 // trust, which is a claim about the device and needs nothing from the operator.
-func buildSlotSourceLines(sources []slotSource, selfSlot int, origins []cosignerOrigin, reg *seedRegistry, notices []string) []string {
+//
+// S5: the account is named on a derived slot only when it is NOT account 0.
+// Before S5 the test was "is this the operator's one self slot", which cannot be
+// asked of a SET of held slots; the account is what actually distinguishes two
+// slots held from one master, and account 0 is the ordinary single-slot case
+// whose line reads exactly as it always did.
+func buildSlotSourceLines(sources []slotSource, origins []cosignerOrigin, reg *seedRegistry, notices []string) []string {
 	lines := []string{"Where each key comes from:"}
 	card := func(slot int) string {
 		for _, o := range origins {
@@ -482,7 +519,7 @@ func buildSlotSourceLines(sources []slotSource, selfSlot int, origins []cosigner
 			if ok {
 				label = seed.Label
 			}
-			if slot == selfSlot {
+			if s.Account == 0 {
 				lines = append(lines, fmt.Sprintf("@%d  yours: derived from %s", slot, label))
 			} else {
 				lines = append(lines, fmt.Sprintf("@%d  yours: derived from %s, account %d",
@@ -507,9 +544,9 @@ func buildSlotSourceLines(sources []slotSource, selfSlot int, origins []cosigner
 
 // buildSlotSourceReviewFlow shows that review. Back returns false and abandons
 // the build BEFORE anything is derived or assembled.
-func buildSlotSourceReviewFlow(ctx *Context, th *Colors, sources []slotSource, selfSlot int, origins []cosignerOrigin, reg *seedRegistry, notices []string) bool {
+func buildSlotSourceReviewFlow(ctx *Context, th *Colors, sources []slotSource, origins []cosignerOrigin, reg *seedRegistry, notices []string) bool {
 	return confirmReviewScreen(ctx, th, "Key sources",
-		buildSlotSourceLines(sources, selfSlot, origins, reg, notices))
+		buildSlotSourceLines(sources, origins, reg, notices))
 }
 
 // buildSeedKeyMismatchMessage is SPEC 4.3's "FAIL LOUDLY, name the slot".

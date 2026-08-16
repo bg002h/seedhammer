@@ -417,7 +417,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 	// Self at @1, so the cosigners land on @0 and @2 — a self slot in the MIDDLE
 	// is what makes "ascending, skipping self" distinguishable from "the first
 	// len(cosigners) slots".
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: true}
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{1}, IncludeFp: true}
 	self := canonicalBip85Master(t)
 	selfXpub, selfFP, err := deriveAccountXpub(self, "", &chaincfg.MainNetParams, multisigSharedOrigin())
 	if err != nil {
@@ -427,7 +427,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 	// so "record order" cannot be confused with "the first two".
 	chosen := []int{0, 2}
 	picked := []mk.Card{cards[0], cards[2]}
-	_, _, slots, err := assembleBuildPolicy(p, selfXpub, selfFP, picked)
+	_, _, slots, err := assembleBuildPolicy(p, selfKeyAt(1, selfXpub, selfFP, multisigSharedOrigin()), picked)
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestBuildSlotOrderIsPayloadRecordOrder(t *testing.T) {
 
 	// The slot->card map the review screen announces must be the SAME mapping
 	// assembleBuildPolicy just produced, not a parallel guess at it.
-	origins := buildCosignerOrigins(p.N, p.SelfSlot, false, chosen)
+	origins := buildCosignerOrigins(p, chosen)
 	want := []cosignerOrigin{{slot: 0, card: 1}, {slot: 2, card: 3}}
 	if len(origins) != len(want) {
 		t.Fatalf("buildCosignerOrigins returned %d entries, want %d", len(origins), len(want))

@@ -215,8 +215,8 @@ func TestAssembleBuildPolicy_T6bWrapperByteMatch(t *testing.T) {
 	card0 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[0]), Stubs: [][4]byte{{0, 0, 0, 0}}}
 	card2 := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: xpubFromExpandedKey(t, keys[2]), Stubs: [][4]byte{{0, 0, 0, 0}}}
 
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlot: 1, IncludeFp: false}
-	out, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, []mk.Card{card0, card2})
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 3, K: 2, SelfSlots: []int{1}, IncludeFp: false}
+	out, stub, slots, err := assembleBuildPolicy(p, selfKeyAt(1, selfXpub, selfMasterFP, multisigSharedOrigin()), []mk.Card{card0, card2})
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy: %v", err)
 	}
@@ -328,8 +328,8 @@ func TestAssembleBuildPolicy_Wrapper(t *testing.T) {
 	}
 	otherCard := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Fingerprint: "", Xpub: otherXpub, Stubs: [][4]byte{{0, 0, 0, 0}}}
 
-	p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlot: 0, IncludeFp: false}
-	out, stub, slots, err := assembleBuildPolicy(p, selfXpub, selfMasterFP, []mk.Card{otherCard})
+	p := buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 2, SelfSlots: []int{0}, IncludeFp: false}
+	out, stub, slots, err := assembleBuildPolicy(p, selfKeyAt(0, selfXpub, selfMasterFP, multisigSharedOrigin()), []mk.Card{otherCard})
 	if err != nil {
 		t.Fatalf("assembleBuildPolicy: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestAssembleBuildPolicy_NoXprv(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherCard := mk.Card{Network: "mainnet", Path: "m/48h/0h/0h/2h", Xpub: otherXpub, Stubs: [][4]byte{{0, 0, 0, 0}}}
-	out, _, _, err := assembleBuildPolicy(buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 1, SelfSlot: 1, IncludeFp: false}, selfXpub, selfFP, []mk.Card{otherCard})
+	out, _, _, err := assembleBuildPolicy(buildPolicyParams{Script: md.MultisigWsh, N: 2, K: 1, SelfSlots: []int{1}, IncludeFp: false}, selfKeyAt(1, selfXpub, selfFP, multisigSharedOrigin()), []mk.Card{otherCard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,16 +525,16 @@ func FuzzAssembleBuildPolicy(f *testing.F) {
 			Script:    multisigScriptFor(((scriptIdx % 3) + 3) % 3),
 			N:         n,
 			K:         k,
-			SelfSlot:  selfSlot,
+			SelfSlots: []int{selfSlot},
 			IncludeFp: includeFp,
 		}
 		// Must not panic. Out-of-range params return an error.
-		if p.SelfSlot >= p.N {
+		if selfSlot >= p.N {
 			return // a self-slot >= n would index out of range in a buggy impl;
 			// the assembler guards via the count check + slot placement, but skip
 			// the assertion for clearly-invalid inputs.
 		}
-		_, _, _, aerr := assembleBuildPolicy(p, selfXpub, selfFP, cards)
+		_, _, _, aerr := assembleBuildPolicy(p, selfKeyAt(selfSlot, selfXpub, selfFP, multisigSharedOrigin()), cards)
 
 		// NON-VACUITY, and this is the assertion M2 was missing. "Does not panic"
 		// stays green even when every case is rejected at the first check, which
