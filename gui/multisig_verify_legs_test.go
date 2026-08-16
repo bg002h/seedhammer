@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func s5TraceBEngraved(t *testing.T, full bool) (md1 []string, mk1Plates [][]stri
 	if err != nil {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
-	_, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, full)
+	_, _, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, full)
 	if err != nil {
 		t.Fatalf("buildEngraveTail(full=%v): %v", full, err)
 	}
@@ -355,61 +356,114 @@ func TestVerifyPairsByKeyNotByOrigin(t *testing.T) {
 	}
 }
 
-// TestReusedKeyVerifiesAgainstItsONEPlate is the I-1 regression guard.
+// TestVerifyFreshSlotsIsTheEngraversList replaces the I-1 guard that used to sit
+// here (TestReusedKeyVerifiesAgainstItsONEPlate).
 //
-// A policy may declare the SAME key at several slots. The SUPPLY path engraves
-// ONE plate for it and says so on screen (gui/multisig.go:145-149, "This key is
-// reused at slots @0 and @1; engraving the first (@0)"). The verify's derive
-// loop asked allUserSlots which slots the seed FILLS and made a leg for each, so
-// it manufactured a second leg no plate was ever cut for -- and reported "the
-// read-back bundle does NOT match the seed" over that engrave's own complete and
-// correct output.
+// That test pinned a same-key dedupe, and it pinned nothing: its first assertion
+// matched a leg against ITSELF -- true of any comparison that is reflexive -- and
+// the shape it claimed to model does not exist. A policy holding one seed at
+// several slots holds it at several ORIGINS, so the keys differ and the dedupe
+// never fired. Deleting the whole mechanism left `go test ./gui/` green (exit 0,
+// measured), which is the definition of inert.
 //
-// Both halves of the contract are pinned here, because a fix to either one alone
-// is wrong: the duplicate must be DROPPED, and a genuinely missing plate must
-// still FAIL. A review proposed getting the first by relaxing the second; that
-// makes a readback missing a plate PASS, which the sibling
-// "a leg with no plate at all FAILS" already forbids.
-func TestReusedKeyVerifiesAgainstItsONEPlate(t *testing.T) {
+// The rule that replaces it is not about keys at all: only the ENGRAVER knows
+// which slots it cut a plate for, so it says so, and the derive loop proves those
+// and no others. The two directions are pinned together here because a fix to
+// either alone is wrong -- the manufactured leg must go, and a plate that was
+// genuinely not read back must still FAIL.
+func TestVerifyFreshSlotsIsTheEngraversList(t *testing.T) {
 	md1, plates, _ := s5TraceBEngraved(t, false)
-	legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
-	legs = append(legs, s5ReDerivedLegs(t, fixtureMasterB, md1, "", false)...)
-	if len(legs) != 3 {
-		t.Fatalf("Trace B re-derived %d leg(s), want 3", len(legs))
+	m, err := bip39.ParseMnemonic(fixtureMasterA)
+	if err != nil {
+		t.Fatalf("ParseMnemonic: %v", err)
+	}
+	_, keys, err := md.ExpandWalletPolicyChunks(md1)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+	filled := allUserSlots(m, "", &chaincfg.MainNetParams, keys)
+	if len(filled) != 2 || filled[0] != 0 || filled[1] != 1 {
+		t.Fatalf("master A fills slots %v of Trace B, want [0 1]; this test's subject is a "+
+			"seed that fills MORE slots than the engrave cut plates for", filled)
 	}
 
-	t.Run("a duplicate leg is recognised as the SAME key", func(t *testing.T) {
-		// The reused shape: the identical derivation arriving twice. Reused slots
-		// hold one key at one origin, so their legs are byte-identical.
-		if i := verifyLegWithSameKey(legs, legs[0].B); i != 0 {
-			t.Fatalf("verifyLegWithSameKey did not recognise leg @%d's own bundle as a "+
-				"duplicate (got %d, want 0). A key reused across slots would then "+
-				"manufacture a leg no plate was cut for", legs[0].Slot, i)
+	t.Run("a seed filling two slots proves only the ONE this run engraved", func(t *testing.T) {
+		fresh, err := verifyFreshSlots([]int{0}, filled, map[int]bool{})
+		if err != nil {
+			t.Fatalf("verifyFreshSlots: %v", err)
 		}
-		// ...and a genuinely different key must NOT be swallowed as a duplicate.
-		if i := verifyLegWithSameKey(legs[:1], legs[2].B); i != -1 {
-			t.Fatalf("verifyLegWithSameKey called leg @%d a duplicate of leg @%d (got %d, "+
-				"want -1). Collapsing two DISTINCT keys into one leg would drop a plate "+
-				"from the coverage check entirely", legs[2].Slot, legs[0].Slot, i)
+		if len(fresh) != 1 || fresh[0] != 0 {
+			t.Fatalf("a supply engrave of @0 owes %v legs, want [0]. Every extra leg is one "+
+				"this run cut no plate for, and its verify FAILS over correct steel", fresh)
 		}
 	})
 
-	t.Run("one deduped leg verifies against its one plate", func(t *testing.T) {
+	t.Run("a slot an earlier seed already covered is not re-derived", func(t *testing.T) {
+		fresh, err := verifyFreshSlots([]int{0, 1}, filled, map[int]bool{0: true})
+		if err != nil {
+			t.Fatalf("verifyFreshSlots: %v", err)
+		}
+		if len(fresh) != 1 || fresh[0] != 1 {
+			t.Fatalf("got %v, want [1]: a covered slot re-derived is a second leg racing the "+
+				"first for one plate", fresh)
+		}
+	})
+
+	t.Run("an expected slot the seed does NOT fill is never manufactured", func(t *testing.T) {
+		// @2 is master B's. Master A cannot prove it, and inventing a leg for it
+		// here would report the wrong seed as a plate failure.
+		fresh, err := verifyFreshSlots([]int{0, 1, 2}, filled, map[int]bool{})
+		if err != nil {
+			t.Fatalf("verifyFreshSlots: %v", err)
+		}
+		if len(fresh) != 2 || fresh[0] != 0 || fresh[1] != 1 {
+			t.Fatalf("got %v, want [0 1]: master A fills @0 and @1 only", fresh)
+		}
+	})
+
+	t.Run("an empty expectation is REFUSED, not vacuously satisfied", func(t *testing.T) {
+		fresh, err := verifyFreshSlots(nil, filled, map[int]bool{})
+		if err == nil {
+			t.Fatalf("an empty engraved-slot set returned %v and no error. A verify with "+
+				"nothing to prove reports success over a readback it never looked at", fresh)
+		}
+		if !errors.Is(err, errVerifyNoExpectedSlots) {
+			t.Errorf("got %v, want errVerifyNoExpectedSlots", err)
+		}
+	})
+
+	t.Run("one leg verifies against its one plate", func(t *testing.T) {
+		legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
 		one := legs[:1]
 		idx := s5PlateFor(t, plates, one[0])
 		if err := verifyMultisigLegs(one, [][]string{plates[idx]}, md1); err != nil {
 			t.Fatalf("a single-leg engrave's own plate FAILED its verify: %v. This is the "+
-				"supply path's shipped shape for a reused key", err)
+				"supply path's shipped shape", err)
 		}
 	})
 
-	t.Run("a MISSING plate still FAILS after the dedupe", func(t *testing.T) {
-		// The half the relax-the-rule fix would have broken: three DISTINCT keys,
-		// two plates. Nothing here is a duplicate, so the dedupe cannot excuse it.
+	t.Run("a MISSING plate still FAILS", func(t *testing.T) {
+		// Three legs the engrave DID cut plates for, one plate not read back.
+		// Nothing about the expectation excuses it: the bijection is untouched.
+		legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
+		legs = append(legs, s5ReDerivedLegs(t, fixtureMasterB, md1, "", false)...)
 		short := append([][]string(nil), plates[:len(plates)-1]...)
 		if err := verifyMultisigLegs(legs, short, md1); err == nil {
-			t.Fatal("three distinct legs against two plates PASSED. The dedupe must drop " +
-				"only REPEATS of a key already covered, never a plate that was not read back")
+			t.Fatal("three legs against two plates PASSED. A plate that was not read back " +
+				"is a slot the operator cannot prove membership of")
+		}
+	})
+
+	t.Run("ZERO plates FAILS", func(t *testing.T) {
+		legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
+		err := verifyMultisigLegs(legs[:1], nil, md1)
+		if err == nil {
+			t.Fatal("a leg against an EMPTY plate set PASSED. Nothing was read back, so " +
+				"nothing was compared")
+		}
+		if !strings.Contains(err.Error(), "@0") {
+			t.Errorf("the failure %q does not name @0, so the operator cannot tell WHICH "+
+				"plate to present", err)
 		}
 	})
 }

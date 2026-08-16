@@ -176,9 +176,17 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// the per-leg verify runs with one plate and one seed and behaves exactly as
 	// the single-leg verify did -- the generalisation is the same code path, not
 	// a second one.
+	//
+	// []int{idx} IS THE WHOLE EXPECTATION, and passing it is what makes that
+	// sentence true. Step (4) above matched this seed at `reused` slots and this
+	// step engraved ONE plate, for @idx. The verify's own derive loop asks a
+	// re-typed seed which slots it FILLS -- which is `reused`, not {idx} -- so
+	// without the engraver's list it manufactured a leg for a plate this flow
+	// never cut and reported "Verify Failed" over this engrave's own complete,
+	// correct output.
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, full)
+		multisigVerifyFlow(ctx, th, full, []int{idx})
 	}
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys

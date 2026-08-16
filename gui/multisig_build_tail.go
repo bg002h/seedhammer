@@ -42,13 +42,22 @@ var errBuildNoHeldSlot = errors.New("multisig build: no slot is held by this dev
 // seed plate, because the second would be a duplicate secret on steel. The
 // plan's C2 second scenario is the other direction and is the one that loses
 // funds: a build across masters A and B in full mode must engrave BOTH ms1s.
+//
+// THE HELD SLOT INDICES LEAVE WITH THE LEGS (`slots`, parallel to `legs`), and
+// they are the verify's obligation list. Only the engraver knows what it cut:
+// this loop is the one place that decides which slots get a plate, and the
+// verify's derive loop must restrict itself to exactly those (verifyFreshSlots).
+// Re-deriving the set at the call site from `sources` would be a second copy of
+// that rule, and two copies of a rule this one is how a verify starts asking for
+// a plate the engrave never made.
 func buildEngraveTail(sources []slotSource, script md.MultisigScript, reg *seedRegistry,
 	net *chaincfg.Params, cards []mk.Card, engraveMd1 []string, full bool,
-) ([]bundle.Bundle, []bundleCard, error) {
+) ([]bundle.Bundle, []int, []bundleCard, error) {
 	var (
-		legs []bundle.Bundle
-		ms1s []string
-		mk1s [][]string
+		legs  []bundle.Bundle
+		slots []int
+		ms1s  []string
+		mk1s  [][]string
 	)
 	// The seeds whose plate is already accounted for, keyed on THE ms1 STRING.
 	//
@@ -81,11 +90,11 @@ func buildEngraveTail(sources []slotSource, script md.MultisigScript, reg *seedR
 			origin = derivedSlotOrigin(script, s.Account)
 		case slotFromBoth:
 			if s.Card < 0 || s.Card >= len(cards) {
-				return nil, nil, errBuildSlotAssignment{Slot: slot}
+				return nil, nil, nil, errBuildSlotAssignment{Slot: slot}
 			}
 			o, err := bip32.ParsePath(cards[s.Card].Path)
 			if err != nil {
-				return nil, nil, errBuildUnreadableCard{Slot: slot}
+				return nil, nil, nil, errBuildUnreadableCard{Slot: slot}
 			}
 			origin = o
 		default:
@@ -93,11 +102,11 @@ func buildEngraveTail(sources []slotSource, script md.MultisigScript, reg *seedR
 		}
 		seed, ok := reg.at(s.SeedID)
 		if !ok {
-			return nil, nil, errBuildSlotAssignment{Slot: slot}
+			return nil, nil, nil, errBuildSlotAssignment{Slot: slot}
 		}
 		b, err := deriveMultisigLeg(seed.Mnemonic, seed.Passphrase, net, origin, engraveMd1, full)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		// The dedupe runs on the RESULT, not on a prediction of it. Deciding
 		// beforehand needs an identity for "same seed" that the caller's bookkeeping
@@ -116,10 +125,11 @@ func buildEngraveTail(sources []slotSource, script md.MultisigScript, reg *seedR
 			}
 		}
 		legs = append(legs, b)
+		slots = append(slots, slot)
 		mk1s = append(mk1s, b.MK1)
 	}
 	if len(mk1s) == 0 {
-		return nil, nil, errBuildNoHeldSlot
+		return nil, nil, nil, errBuildNoHeldSlot
 	}
-	return legs, multisigEngraveCardsMulti(ms1s, mk1s, engraveMd1), nil
+	return legs, slots, multisigEngraveCardsMulti(ms1s, mk1s, engraveMd1), nil
 }

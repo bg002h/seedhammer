@@ -22,6 +22,10 @@ import (
 const (
 	multisigVerifyOKTitle = "Verify OK"
 	multisigVerifyOKBody  = "Operator key and secret verified. Other cosigners' keys are taken as supplied."
+	// multisigVerifyNoExpectationBody is what an empty engraved-slot set says. ONE
+	// STRING, TWO SITES (the entry guard and the derive loop's refusal), so the two
+	// cannot drift into telling the operator two different things about one state.
+	multisigVerifyNoExpectationBody = "This run engraved no key plate, so there is nothing to verify."
 )
 
 // ─── T6b: verify-bundle for a SUPPLIED multisig bundle (user's slot only) ────
@@ -98,9 +102,9 @@ type verifyLeg struct {
 // TestVerifyCoversEveryLeg/"a leg with no plate at all FAILS" holds the line.
 //
 // The real defect that proposal was aimed at is fixed where it belongs: in
-// multisigVerifyFlow's derive loop, which now collects ONE leg per distinct KEY
-// rather than one per slot (verifyLegWithSameKey), so a key reused across slots
-// stops manufacturing a leg that no plate was ever cut for.
+// multisigVerifyFlow's derive loop, which collects a leg only for a slot the
+// ENGRAVE actually cut a plate for (verifyFreshSlots), so a seed filling slots
+// this run did not engrave stops manufacturing legs no plate exists for.
 type errVerifyLegHasNoPlate struct{ Slot int }
 
 func (e errVerifyLegHasNoPlate) Error() string {
@@ -125,6 +129,56 @@ func (e errVerifyPlateUnclaimed) Error() string {
 // readback it never looked at, which is the single most expensive false GREEN
 // this flow can produce.
 var errVerifyNoLegs = errors.New("verify: no leg was re-derived, so nothing was checked")
+
+// errVerifyNoExpectedSlots is a verify whose caller named no engraved slot.
+//
+// It is an ERROR for errVerifyNoLegs' reason one level down: an empty obligation
+// list is satisfied by every readback, so a verify that accepted one would put
+// "Verify OK" on screen over a comparison that never ran. Both call sites carry
+// at least one slot today (errBuildNoHeldSlot refuses a build that holds none;
+// the supply path passes the slot findUserSlot matched), so this fires only when
+// a future caller loses the expectation on the way in -- which is exactly the
+// case where a vacuous pass would be invisible.
+var errVerifyNoExpectedSlots = errors.New("verify: the engrave named no slot, so this readback has nothing to prove")
+
+// verifyFreshSlots is the derive loop's obligation rule: the slots THIS seed
+// still owes a proof for.
+//
+// It is `expected` INTERSECT `filled`, minus what an earlier seed already
+// covered, and the intersection is the fix this file exists for.
+//
+//   - `expected` is what the ENGRAVER cut a plate for, passed in by the caller.
+//     Only the engraver knows it: the BUILD path cuts one plate per HELD slot
+//     (buildEngraveTail returns those indices), and the SUPPLY path cuts exactly
+//     ONE, for the first slot the seed matched (gui/multisig.go:141-149).
+//   - `filled` is allUserSlots -- every slot the seed accounts for AT THAT
+//     SLOT'S OWN ORIGIN. It is a different question with a different answer: one
+//     seed fills several slots of a policy that puts it at several accounts, and
+//     those slots carry DIFFERENT keys.
+//
+// Deriving a leg per FILLED slot is what made the supply path's own complete,
+// correct output verify as "Verify Failed: no read-back key plate carries slot
+// @1's key" -- a manufactured leg for a plate the flow had just announced it was
+// not cutting, and an honest operator told their good plates are bad.
+//
+// NOTHING IS RELAXED HERE. The legs this returns are still re-derived from a
+// RE-TYPED seed (§7.4) and still have to find their own plate in
+// verifyMultisigLegs' bijection; a plate that was not read back still FAILS,
+// naming its slot. What changed is which slots are on the list, not what the
+// list has to prove.
+func verifyFreshSlots(expected, filled []int, covered map[int]bool) ([]int, error) {
+	if len(expected) == 0 {
+		return nil, errVerifyNoExpectedSlots
+	}
+	fresh := make([]int, 0, len(filled))
+	for _, s := range filled {
+		if covered[s] || !slices.Contains(expected, s) {
+			continue
+		}
+		fresh = append(fresh, s)
+	}
+	return fresh, nil
+}
 
 // verifyMultisigLegs compares EVERY leg against the read-back plate set, and
 // requires the pairing to be a bijection.
@@ -167,27 +221,6 @@ func verifyMultisigLegs(legs []verifyLeg, mk1s [][]string, md1 []string) error {
 	return nil
 }
 
-// verifyLegWithSameKey reports the index of an already-collected leg carrying the
-// same account key as `b`, or -1. It compares the DERIVED mk1 chunks, which are
-// identical for two slots holding one key at one origin, so it needs no decode
-// and cannot disagree with what verifyClaimPlate pairs on.
-//
-// slices.Equal, NOT a hand-rolled loop. An mk1 is a SET of chunks, and comparing
-// them elementwise over one side's indices has two failure modes that the length
-// check has to be remembered to guard: a shorter card that is a PREFIX of a
-// longer one reads as equal -- a false duplicate, which drops a leg from the
-// coverage check and leaves a plate nobody verified -- and the other ordering
-// indexes past the end and panics. slices.Equal carries the length comparison
-// itself, so neither is reachable by a later edit.
-func verifyLegWithSameKey(legs []verifyLeg, b bundle.Bundle) int {
-	for i, l := range legs {
-		if slices.Equal(l.B.MK1, b.MK1) {
-			return i
-		}
-	}
-	return -1
-}
-
 // verifyClaimPlate finds the UNCLAIMED read-back plate carrying the same account
 // xpub as `want`. An undecodable plate is skipped here and caught by the
 // unclaimed sweep, so a corrupted plate can never be quietly dropped.
@@ -214,31 +247,60 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // multisigVerifyFlow drives the on-device verify-bundle for the multisig flow:
 // gather the engraved md1 + EVERY operator mk1 plate over NFC
 // (extractReadbackMd1AndMk1s), then for each seed the operator re-types
-// (fresh residency) re-derive EVERY leg that seed accounts for, hand-type that
-// seed's ms1 (full only; never NFC), and report PASS/FAIL — comparing the
-// READ-BACK plates against the re-derived legs (H1: never a re-derived value
-// against itself). `full` reports whether an ms1 was engraved (and so must be
-// hand-typed for verify).
+// (fresh residency) re-derive a leg for every ENGRAVED slot that seed accounts
+// for, hand-type that seed's ms1 (full only; never NFC), and report PASS/FAIL —
+// comparing the READ-BACK plates against the re-derived legs (H1: never a
+// re-derived value against itself). `full` reports whether an ms1 was engraved
+// (and so must be hand-typed for verify).
+//
+// `expectedSlots` IS THE OBLIGATION LIST, AND ONLY THE ENGRAVER HAS IT. The two
+// other candidates are both wrong, and one of them shipped:
+//
+//   - THE SEED cannot say what was engraved. allUserSlots answers "which slots
+//     does this seed fill", and a policy holding one seed at several accounts
+//     makes that a strictly larger set than the plates the SUPPLY path cuts for
+//     it (one). Deriving a leg per filled slot reported "Verify Failed" over
+//     this machine's own complete, correct output.
+//   - THE READBACK cannot say it either. It is the evidence being judged; a
+//     verify that takes its target from the evidence stops asking for the seed
+//     that proves the plate nobody presented.
+//
+// So the caller passes what it cut — buildEngraveTail's held-slot indices on the
+// build path, findUserSlot's matched slot on the supply path — and this flow
+// proves those and nothing else. It is not a relaxation: every leg still has to
+// find its own plate, and every plate still has to be claimed by a leg
+// (verifyMultisigLegs, unchanged).
 //
 // TWO THINGS CHANGED AT S5, and both are consequences of a build holding several
 // slots.
 //
-//  1. THE GATHER RUNS FIRST. It used to run after the seed. The readback is what
-//     says how many legs there are to prove, so the flow cannot know how many
-//     seeds to ask for until it has seen the plates; and gathering first matches
-//     the build path's own posture (TestBuildFlow_GatherBeforeSeed) — no secret
-//     is resident while a public set is being resolved.
+//  1. THE GATHER RUNS FIRST. It used to run after the seed, and gathering first
+//     matches the build path's own posture (TestBuildFlow_GatherBeforeSeed) — no
+//     secret is resident while a public set is being resolved. (The original
+//     reason given here was that the readback says how many legs there are to
+//     prove. That was the defect: the expectation does, and it arrives with the
+//     call. The ordering is still right, for the residency reason.)
 //  2. SEVERAL SEEDS. Trace B's three plates span two masters, and one seed can
-//     only prove its own. So the flow loops: type a seed, cover the slots it
-//     accounts for, and if plates remain, offer the next one. Declining is
-//     allowed and is reported as an INCOMPLETE verify — never as a pass over
+//     only prove its own. So the flow loops: type a seed, cover the engraved
+//     slots it accounts for, and if slots remain, offer the next one. Declining
+//     is allowed and is reported as an INCOMPLETE verify — never as a pass over
 //     plates nobody checked.
 //
 // ONE SCRUB SITE, DEFERRED BEFORE THE FIRST SEED EXISTS, is the same design the
 // build flow's seedRegistry uses and for the same reason: every exit below (a
 // Back, a refusal modal, a ctx.Done unwind, a panic) is covered by construction
 // rather than by an implementer remembering to add a wipe to a new return.
-func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
+func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int) {
+	// THE ENGRAVER'S OBLIGATION LIST ARRIVES FROM THE CALLER, and an empty one is
+	// refused BEFORE the operator is asked to present anything. A verify with no
+	// slot to prove cannot be satisfied by any readback, so sending them to the
+	// reader first would collect plates for a comparison that was never going to
+	// run. errVerifyNoExpectedSlots carries the same refusal for the derive loop.
+	if len(expectedSlots) == 0 {
+		showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
+		return
+	}
+
 	// Read back the PUBLIC cards over NFC via the T5 gatherer.
 	//
 	// NO PAYLOAD OFFER HERE, deliberately (plan stage 13c). §3.3.2 admits
@@ -261,6 +323,20 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 		showError(ctx, th, "Verify Bundle", "Couldn't decode the read-back wallet policy.")
 		return
 	}
+	// A FAST LENGTH PRECHECK, NAMED IN BOTH DIRECTIONS. It is a courtesy, not the
+	// mechanism: the per-slot bijection below is what decides, and it decides on
+	// IDENTITY rather than on cardinality -- a readback of the right NUMBER of
+	// plates carrying the wrong ones still fails there. What this buys is the
+	// moment it fails: an operator who has mislaid a plate, or brought one from an
+	// earlier run, learns it before typing a seed rather than after.
+	if len(readbackMk1s) != len(expectedSlots) {
+		showError(ctx, th, "Verify Bundle", fmt.Sprintf(
+			"Read back %s, but this run engraved %s. Present exactly the plates this "+
+				"run cut.",
+			plateWord(len(readbackMk1s), "key plate", "key plates"),
+			plateWord(len(expectedSlots), "key plate", "key plates")))
+		return
+	}
 
 	var typed []bip39.Mnemonic
 	defer func() {
@@ -273,7 +349,11 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 
 	var legs []verifyLeg
 	covered := make(map[int]bool, len(keys))
-	for len(legs) < len(readbackMk1s) {
+	// ONE LEG PER EXPECTED SLOT IS THE TERMINATION RULE, not one per plate read
+	// back. The obligation is what the engrave cut; the readback is the evidence
+	// offered against it, and letting the evidence set the target is how a verify
+	// stops asking for the seed that proves the plate nobody presented.
+	for len(legs) < len(expectedSlots) {
 		reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 		if !ok {
 			break
@@ -291,21 +371,34 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 		}
 
 		slots := allUserSlots(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
-		fresh := make([]int, 0, len(slots))
-		for _, s := range slots {
-			if !covered[s] {
-				fresh = append(fresh, s)
-			}
+		fresh, ferr := verifyFreshSlots(expectedSlots, slots, covered)
+		if ferr != nil {
+			showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
+			return
 		}
 		if len(fresh) == 0 {
-			// TWO DIFFERENT PROBLEMS, TWO DIFFERENT MESSAGES. A seed that is in the
-			// policy but already checked is an operator repeating themselves; a seed
-			// that is in no slot at all is the wrong wallet, and telling them to
-			// "try another" would send them looking for a seed that exists.
-			if len(slots) == 0 {
+			// THREE DIFFERENT PROBLEMS, THREE DIFFERENT MESSAGES, and the third is new
+			// with the expected-slot restriction. A seed that is in the policy but
+			// already checked is an operator repeating themselves; a seed in no slot at
+			// all is the wrong wallet, and telling them to "try another" would send
+			// them looking for a seed that exists. The third is a seed that IS a
+			// cosigner and whose slots this run simply did not engrave -- the supply
+			// path's other cosigner, or a build that held a subset -- and calling that
+			// "not a cosigner" would tell an operator holding the right seed that their
+			// wallet is wrong.
+			//
+			// The distinction is drawn with the SAME rule, run against an empty covered
+			// set, rather than with a second hand-rolled intersection.
+			everOwed, _ := verifyFreshSlots(expectedSlots, slots, nil)
+			switch {
+			case len(slots) == 0:
 				showError(ctx, th, "Verify Bundle", "That seed is not a cosigner of the "+
 					"read-back policy, so it cannot prove any of these plates.")
-			} else {
+			case len(everOwed) == 0:
+				showError(ctx, th, "Verify Bundle", "That seed is a cosigner, but none of "+
+					"its slots were engraved in this run. The plates still outstanding "+
+					"belong to a different seed.")
+			default:
 				showError(ctx, th, "Verify Bundle", "That seed's slots have already been "+
 					"checked. The plates still outstanding belong to a different seed.")
 			}
@@ -326,7 +419,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 				// checked, some not, nothing said, and on the build path the next
 				// thing the operator saw was the restore document. Breaking falls
 				// into the "Verify Incomplete" report, which is what a partial
-				// verify is. (len(legs) < len(readbackMk1s) necessarily holds here:
+				// verify is. (len(legs) < len(expectedSlots) necessarily holds here:
 				// the coverage break is tested only after this seed's derive loop.)
 				break
 			}
@@ -340,37 +433,15 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 				showError(ctx, th, "Verify Bundle", "Couldn't re-derive the bundle from the seed.")
 				return
 			}
-			// ONE LEG PER DISTINCT KEY, NOT PER SLOT -- and this is where the
-			// slot-vs-key mismatch belongs, not in verifyMultisigLegs' coverage rule.
-			//
-			// `fresh` comes from allUserSlots, which returns every slot the seed
-			// FILLS. A policy may declare the SAME key at several slots, and the
-			// SUPPLY path deliberately engraves ONE plate for it, announcing so on
-			// screen (gui/multisig.go:145-149: "This key is reused at slots @0 and
-			// @1; engraving the first (@0)"). Deriving a leg per slot therefore
-			// manufactured a second leg that no plate was ever cut for, and feeding
-			// the verify that engrave's own complete output reported "the read-back
-			// bundle does NOT match the seed" -- an honest operator told their good
-			// plates are bad, in exactly the case the device had just announced.
-			//
-			// Reused slots derive byte-identically (same key implies same origin, and
-			// the origin is what the leg is derived at), so the duplicate carries no
-			// information the first does not. Dropping it leaves every coverage
-			// guarantee intact: a genuinely MISSING plate still leaves a leg with a
-			// DISTINCT key unclaimed, and errVerifyLegHasNoPlate still fires.
-			if i := verifyLegWithSameKey(legs, b); i >= 0 {
-				covered[s] = true
-				continue
-			}
 			legs = append(legs, verifyLeg{Slot: s, B: b, MS1Readback: ms1Readback})
 			covered[s] = true
 		}
-		if len(legs) >= len(readbackMk1s) {
+		if len(legs) >= len(expectedSlots) {
 			break
 		}
 		next := &ChoiceScreen{
 			Title:   "Verify Bundle",
-			Lead:    fmt.Sprintf("%s not checked yet. Next seed?", plateWord(len(readbackMk1s)-len(legs), "key plate is", "key plates are")),
+			Lead:    fmt.Sprintf("%s not checked yet. Next seed?", plateWord(len(expectedSlots)-len(legs), "key plate is", "key plates are")),
 			Choices: []string{"TYPE THE NEXT SEED", "STOP HERE"},
 		}
 		if sel, ok := next.Choose(ctx, th); !ok || sel != 0 {
@@ -396,11 +467,12 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 	// a legitimate operator choice and it produces an INCOMPLETE verify, which is
 	// a different thing from a failed one and from a clean one. Reporting it as
 	// either would be the false GREEN this whole rewrite exists to remove.
-	if len(legs) < len(readbackMk1s) {
+	if len(legs) < len(expectedSlots) {
 		showError(ctx, th, "Verify Incomplete", fmt.Sprintf(
-			"Checked %d of the %d key plates read back. The rest were NOT verified. "+
-				"Run verify again with the remaining seeds before funding this wallet.",
-			len(legs), len(readbackMk1s)))
+			"Checked %d of the %d key plates this run engraved. The rest were NOT "+
+				"verified. Run verify again with the remaining seeds before funding "+
+				"this wallet.",
+			len(legs), len(expectedSlots)))
 		return
 	}
 

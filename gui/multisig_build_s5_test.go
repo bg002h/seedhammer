@@ -245,7 +245,7 @@ func TestLegDerivedAtHeldSlotOrigin(t *testing.T) {
 		t.Fatalf("the assembled md1 does not decode: %v", err)
 	}
 
-	legs, _, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, false)
+	legs, _, _, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, false)
 	if err != nil {
 		t.Fatalf("buildEngraveTail: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestOneMk1PerHeldSlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
-	legs, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, false)
+	legs, _, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, false)
 	if err != nil {
 		t.Fatalf("buildEngraveTail: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestFullModeEngravesMs1ForEveryMaster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
-	_, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, true)
+	_, _, cardsOut, err := buildEngraveTail(sources, p.Script, reg, s5Net, cards, out, true)
 	if err != nil {
 		t.Fatalf("buildEngraveTail(full): %v", err)
 	}
@@ -487,7 +487,7 @@ func TestReRunMintsByteIdenticalPlates(t *testing.T) {
 
 	runTail := func() []bundleCard {
 		t.Helper()
-		_, out, terr := buildEngraveTail(sources, p.Script, reg, s5Net, cards, first, true)
+		_, _, out, terr := buildEngraveTail(sources, p.Script, reg, s5Net, cards, first, true)
 		if terr != nil {
 			t.Fatalf("buildEngraveTail: %v", terr)
 		}

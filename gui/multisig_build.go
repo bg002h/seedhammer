@@ -322,7 +322,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// the engrave md1 (full policy OR the stripped template; flows EXACTLY like a
 	// supplied md1; deriveMultisigLeg binds mk1.Stubs form-aware — WalletPolicyId
 	// for full, WDT-Id for template, C2) and engrave.
-	legs, cardsOut, terr := buildEngraveTail(sources, p.Script, reg,
+	legs, engravedSlots, cardsOut, terr := buildEngraveTail(sources, p.Script, reg,
 		&chaincfg.MainNetParams, cosigners, engraveMd1, full)
 	if terr != nil {
 		showError(ctx, th, "Build Policy", "Couldn't derive the bundle from the seed.")
@@ -350,10 +350,18 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// must be hand-typed; the legs themselves are re-derived from a RE-TYPED seed
 	// rather than handed over from here (§7.4: comparing the engrave source
 	// against itself passes unconditionally).
+	//
+	// engravedSlots IS THE OBLIGATION LIST, and it is passed rather than
+	// recomputed. The verify's derive loop asks a re-typed seed which slots it
+	// FILLS; that set is not the set the engrave cut a plate for, and the
+	// difference is not hypothetical -- one seed can fill several slots at
+	// distinct origins with distinct keys. Handing over the tail's own held-slot
+	// indices is what keeps "every leg must find its plate" a statement about
+	// this run's steel instead of about the policy.
 	if !template && len(legs) > 0 {
 		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-			multisigVerifyFlow(ctx, th, full)
+			multisigVerifyFlow(ctx, th, full, engravedSlots)
 		}
 	}
 
