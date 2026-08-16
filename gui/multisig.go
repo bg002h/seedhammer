@@ -198,10 +198,23 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	}
 
 	// (5) Full vs watch-only.
+	//
+	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT, on THIS path too (C-3). The
+	// passphrase entered at (3) is a live derivation input all the way down --
+	// allUserSlots at (4), supplyEngraveTail at (6), deriveMultisigLeg,
+	// deriveAccountXpub -- so the plates are correct AND the backup is incomplete:
+	// ms1 encodes the WORDS, the passphrase is not in that entropy, and no plate
+	// this device cuts can be made to yield it. "Full (seed + keys)" over that is
+	// F-132's shape, a backup that is both wrong and trusted.
+	//
+	// S5 built buildFullModeLabel for exactly this harm and wired it to the BUILD
+	// path only, which left the asymmetry the wrong way round: the path that told
+	// the truth was behind the mandatory EXPERIMENTAL warning, and the
+	// hardware-validated front-door path was the one that lied.
 	modeChoice := &ChoiceScreen{
 		Title:   "Engrave Mode",
 		Lead:    "What to engrave?",
-		Choices: []string{"Full (seed + keys)", "Watch-only (keys)"},
+		Choices: []string{buildFullModeLabel(passphrase != ""), "Watch-only (keys)"},
 	}
 	modeSel, ok := modeChoice.Choose(ctx, th)
 	if !ok {
@@ -299,7 +312,15 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys
 	// decoded at step (2) — no second ExpandWalletPolicyChunks (t6b-M2).
-	multisigRestoreDocFlow(ctx, th, tpl, keys, nil)
+	//
+	// AND IT CARRIES THIS RUN'S SET (C-3, closing M-13). It passed nil, on a
+	// premise the code stated at multisigRestoreDocFlow and which was never true:
+	// this path DOES have a set of its own, `cardsOut`, and F-188 made that bite
+	// by letting the run cut several plates. So the document a reader holds in
+	// five years said neither how many plates the backup is nor -- the half that
+	// loses funds -- that a BIP-39 passphrase is a required spending factor absent
+	// from every one of them.
+	multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut, passphrase != ""))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

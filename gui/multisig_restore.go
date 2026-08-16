@@ -88,8 +88,15 @@ func desc4Display(tpl md.Template) string {
 // INVENTORY -- how many plates this backup is, and what each of them is -- which
 // is the one fact that tells a reader holding a pile of steel in five years
 // whether they are holding all of it. It is passed in rather than derived here
-// because only the flow that engraved knows what it cut; the supply path has no
-// set of its own and passes nil.
+// because only the flow that engraved knows what it cut.
+//
+// BOTH ENGRAVING CALLERS PASS ONE. This comment used to end "the supply path has
+// no set of its own and passes nil", which was false when it was written and
+// grew worse: supplyEngraveTail returns `cardsOut` and F-188 made that path cut
+// several plates. Passing nil there meant the front-door path's restore document
+// stated no plate count and -- through buildPlateInventoryLines' passphrase arm
+// -- never said that a BIP-39 passphrase is a required spending factor absent
+// from every plate in the set.
 func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey, extra []string) {
 	lines, _, err := multisigRestoreLines(tpl, keys)
 	if err != nil {
