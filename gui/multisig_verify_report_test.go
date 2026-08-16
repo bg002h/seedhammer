@@ -442,6 +442,32 @@ func TestVerifyRetriesAfterACorrectableFirstSeed(t *testing.T) {
 		t.Fatalf("the substitute readback %q is an ms1 after all, so it cannot drive "+
 			"the object-rejection arm", notAnMs1)
 	}
+	// THE SECOND REJECTION ARM, WHICH HAD NO ROW UNTIL ROUND 2 FOUND IT MISSING.
+	//
+	// multisigVerifyMS1Entry refuses on TWO counts and both must report
+	// `rejected` (gui/multisig_verify.go:1013 and :1018). notAnMs1 above drives
+	// only the first: it is not a codex32 object at all. THIS string IS a valid
+	// codex32 object -- a BIP-93 k=2 SSS share -- so `isStr` is true, the :1013
+	// arm is NOT taken, and DecodeMS1 refuses it at :1015 because a share is not
+	// the unshared m-format secret.
+	//
+	// Without this row, reverting :1018's `rejected` to false left the whole gui
+	// package GREEN, which is round-1 B3's dead end restored verbatim: an
+	// operator who hand-types a legitimate share reads a correctable-mistake
+	// screen, gets no retry, and is handed the restore document headed "If any
+	// of them is missing, this backup is incomplete" with ZERO plates verified.
+	//
+	// PREMISE, MEASURED, and it is the MIRROR of the check above: this string
+	// must be ms1-prefixed, because that is precisely what carries it PAST the
+	// object arm to the payload arm. Executed against the codex32 package
+	// directly: New() returns a String (id "name", threshold 2, share index 'a')
+	// and DecodeMS1 refuses it with "codex32: not an m-format secret payload".
+	const ms1ShareNotASecret = "ms12namea320zyxwvutsrqpnmlkjhgfedcaxrpp870hkkqrm"
+	if !strings.HasPrefix(strings.ToLower(ms1ShareNotASecret), "ms1") {
+		t.Fatalf("the k-of-n share fixture %q is not ms1-prefixed, so it would be "+
+			"refused as an OBJECT and merely repeat the arm notAnMs1 already covers",
+			ms1ShareNotASecret)
+	}
 
 	for _, tc := range []struct {
 		name    string
@@ -470,6 +496,24 @@ func TestVerifyRetriesAfterACorrectableFirstSeed(t *testing.T) {
 			want: verifyIncomplete,
 			because: "the screen names the wrong object, which is an input the operator " +
 				"can correct, and re-typing it is the whole remedy",
+		},
+		{
+			// THE OTHER REJECTION ARM. The needle is deliberately "isn't a VALID
+			// ms1", not the row above's "isn't an ms1": uiContains lowercases and
+			// strips spaces, so "isn't an ms1" matches ONLY :1013's screen and
+			// "isn't a valid ms1" matches ONLY :1018's. Copying the row above's
+			// needle here would make this row pass against the wrong arm and prove
+			// nothing.
+			name: "the first seed's hand-typed ms1 is a k-of-n share, not the secret",
+			exit: s5FirstSeedExit{
+				phrase: fixtureMasterA,
+				badMs1: ms1ShareNotASecret,
+				needle: "isn't a valid ms1",
+			},
+			want: verifyIncomplete,
+			because: "a share IS an ms1 object, so the flow gets past the object check " +
+				"and refuses the PAYLOAD -- and typing the unshared secret instead is a " +
+				"remedy the operator can carry out, exactly like the row above",
 		},
 		{
 			// AND A BACK IS STILL AN ABANDON. Nothing was shown to correct, so there
