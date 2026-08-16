@@ -288,3 +288,69 @@ func TestAllUserSlotsFindsEverySlotOneSeedFills(t *testing.T) {
 		t.Fatalf("findUserSlot returned (%d, %v), want (%d, true)", first, ok, want[0])
 	}
 }
+
+// TestVerifyPairsByKeyNotByOrigin pins the pairing RULE, which every other test
+// in this file is blind to.
+//
+// verifyClaimPlate pairs a leg to its plate by XPUB. The obvious alternative is
+// the ORIGIN PATH, and on this build the two are indistinguishable: Trace B's @0
+// and @2 both declare m/48h/0h/0h/2h -- one account of master A, one of master B
+// -- so the path is not unique across masters, but the claim loop is greedy over
+// UNCLAIMED plates, so while the plates arrive in the SAME ORDER as the legs the
+// collision resolves itself and both rules agree.
+//
+// Measured, not supposed: switching verifyClaimPlate to compare Path instead of
+// Xpub left this whole file GREEN.
+//
+//	MUT-PAIR-RAN want-path m/48h/0h/0h/2h got-path m/48h/0h/0h/2h xpub-equal true
+//	MUT-PAIR-RAN want-path m/48h/0h/1h/2h got-path m/48h/0h/1h/2h xpub-equal true
+//	MUT-PAIR-RAN want-path m/48h/0h/0h/2h got-path m/48h/0h/0h/2h xpub-equal true
+//	PAIR_MUTATED_EXIT=0
+//
+// A readback carries no such ordering guarantee: the operator presents plates in
+// whatever order they pick them up, and nothing binds that to the engrave order.
+// So this drives the same honest set REVERSED. Under key-pairing it passes;
+// under path-pairing @0's leg claims master B's plate and an honest readback
+// FAILS.
+func TestVerifyPairsByKeyNotByOrigin(t *testing.T) {
+	md1, plates, _ := s5TraceBEngraved(t, false) // watch-only: no ms1 on either side
+	legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
+	legs = append(legs, s5ReDerivedLegs(t, fixtureMasterB, md1, "", false)...)
+	if len(legs) != 3 {
+		t.Fatalf("Trace B re-derived %d leg(s), want 3", len(legs))
+	}
+
+	// THE PREMISE, ASSERTED RATHER THAN ASSUMED. This test only distinguishes the
+	// two rules while two legs share an origin. If the account numbering ever
+	// stops colliding, the test must say it has stopped testing its subject
+	// rather than keep reporting green.
+	byPath := map[string][]int{}
+	for _, l := range legs {
+		c, err := mk.Decode(l.B.MK1)
+		if err != nil {
+			t.Fatalf("the @%d leg's own mk1 does not decode: %v", l.Slot, err)
+		}
+		byPath[c.Path] = append(byPath[c.Path], l.Slot)
+	}
+	shared := false
+	for p, slots := range byPath {
+		if len(slots) > 1 {
+			shared = true
+			t.Logf("origin %s is declared by slots %v -- the collision this test needs", p, slots)
+		}
+	}
+	if !shared {
+		t.Fatalf("no two legs of Trace B share an origin path (%v), so this test can no longer "+
+			"tell key-pairing from path-pairing and is asserting nothing", byPath)
+	}
+
+	rev := make([][]string, len(plates))
+	for i, p := range plates {
+		rev[len(plates)-1-i] = p
+	}
+	if err := verifyMultisigLegs(legs, rev, md1); err != nil {
+		t.Fatalf("an honest three-plate readback presented in REVERSE order FAILED: %v. Every "+
+			"plate carries the key some leg derived; only the order changed, and a readback "+
+			"has no order to promise", err)
+	}
+}
