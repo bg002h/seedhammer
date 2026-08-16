@@ -354,3 +354,62 @@ func TestVerifyPairsByKeyNotByOrigin(t *testing.T) {
 			"has no order to promise", err)
 	}
 }
+
+// TestReusedKeyVerifiesAgainstItsONEPlate is the I-1 regression guard.
+//
+// A policy may declare the SAME key at several slots. The SUPPLY path engraves
+// ONE plate for it and says so on screen (gui/multisig.go:145-149, "This key is
+// reused at slots @0 and @1; engraving the first (@0)"). The verify's derive
+// loop asked allUserSlots which slots the seed FILLS and made a leg for each, so
+// it manufactured a second leg no plate was ever cut for -- and reported "the
+// read-back bundle does NOT match the seed" over that engrave's own complete and
+// correct output.
+//
+// Both halves of the contract are pinned here, because a fix to either one alone
+// is wrong: the duplicate must be DROPPED, and a genuinely missing plate must
+// still FAIL. A review proposed getting the first by relaxing the second; that
+// makes a readback missing a plate PASS, which the sibling
+// "a leg with no plate at all FAILS" already forbids.
+func TestReusedKeyVerifiesAgainstItsONEPlate(t *testing.T) {
+	md1, plates, _ := s5TraceBEngraved(t, false)
+	legs := s5ReDerivedLegs(t, fixtureMasterA, md1, "", false)
+	legs = append(legs, s5ReDerivedLegs(t, fixtureMasterB, md1, "", false)...)
+	if len(legs) != 3 {
+		t.Fatalf("Trace B re-derived %d leg(s), want 3", len(legs))
+	}
+
+	t.Run("a duplicate leg is recognised as the SAME key", func(t *testing.T) {
+		// The reused shape: the identical derivation arriving twice. Reused slots
+		// hold one key at one origin, so their legs are byte-identical.
+		if i := verifyLegWithSameKey(legs, legs[0].B); i != 0 {
+			t.Fatalf("verifyLegWithSameKey did not recognise leg @%d's own bundle as a "+
+				"duplicate (got %d, want 0). A key reused across slots would then "+
+				"manufacture a leg no plate was cut for", legs[0].Slot, i)
+		}
+		// ...and a genuinely different key must NOT be swallowed as a duplicate.
+		if i := verifyLegWithSameKey(legs[:1], legs[2].B); i != -1 {
+			t.Fatalf("verifyLegWithSameKey called leg @%d a duplicate of leg @%d (got %d, "+
+				"want -1). Collapsing two DISTINCT keys into one leg would drop a plate "+
+				"from the coverage check entirely", legs[2].Slot, legs[0].Slot, i)
+		}
+	})
+
+	t.Run("one deduped leg verifies against its one plate", func(t *testing.T) {
+		one := legs[:1]
+		idx := s5PlateFor(t, plates, one[0])
+		if err := verifyMultisigLegs(one, [][]string{plates[idx]}, md1); err != nil {
+			t.Fatalf("a single-leg engrave's own plate FAILED its verify: %v. This is the "+
+				"supply path's shipped shape for a reused key", err)
+		}
+	})
+
+	t.Run("a MISSING plate still FAILS after the dedupe", func(t *testing.T) {
+		// The half the relax-the-rule fix would have broken: three DISTINCT keys,
+		// two plates. Nothing here is a duplicate, so the dedupe cannot excuse it.
+		short := append([][]string(nil), plates[:len(plates)-1]...)
+		if err := verifyMultisigLegs(legs, short, md1); err == nil {
+			t.Fatal("three distinct legs against two plates PASSED. The dedupe must drop " +
+				"only REPEATS of a key already covered, never a plate that was not read back")
+		}
+	})
+}

@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
@@ -87,6 +88,19 @@ type verifyLeg struct {
 // errVerifyLegHasNoPlate is a leg the readback does not account for: no plate
 // carries this slot's key. It names the SLOT, because that is the only thing the
 // operator can act on.
+//
+// THIS RULE IS LOAD-BEARING AND MUST NOT BE RELAXED. A review proposed dropping
+// it, on the reasoning that the unclaimed-plate sweep already carries coverage.
+// It does not: with three legs and two plates, both plates get claimed, the
+// third leg is skipped, the sweep is satisfied and a readback MISSING A PLATE
+// reports Verify OK -- "check what was shown, call the rest verified", which is
+// the shipped defect this whole rewrite exists to remove.
+// TestVerifyCoversEveryLeg/"a leg with no plate at all FAILS" holds the line.
+//
+// The real defect that proposal was aimed at is fixed where it belongs: in
+// multisigVerifyFlow's derive loop, which now collects ONE leg per distinct KEY
+// rather than one per slot (verifyLegWithSameKey), so a key reused across slots
+// stops manufacturing a leg that no plate was ever cut for.
 type errVerifyLegHasNoPlate struct{ Slot int }
 
 func (e errVerifyLegHasNoPlate) Error() string {
@@ -151,6 +165,27 @@ func verifyMultisigLegs(legs []verifyLeg, mk1s [][]string, md1 []string) error {
 		}
 	}
 	return nil
+}
+
+// verifyLegWithSameKey reports the index of an already-collected leg carrying the
+// same account key as `b`, or -1. It compares the DERIVED mk1 chunks, which are
+// identical for two slots holding one key at one origin, so it needs no decode
+// and cannot disagree with what verifyClaimPlate pairs on.
+//
+// slices.Equal, NOT a hand-rolled loop. An mk1 is a SET of chunks, and comparing
+// them elementwise over one side's indices has two failure modes that the length
+// check has to be remembered to guard: a shorter card that is a PREFIX of a
+// longer one reads as equal -- a false duplicate, which drops a leg from the
+// coverage check and leaves a plate nobody verified -- and the other ordering
+// indexes past the end and panics. slices.Equal carries the length comparison
+// itself, so neither is reachable by a later edit.
+func verifyLegWithSameKey(legs []verifyLeg, b bundle.Bundle) int {
+	for i, l := range legs {
+		if slices.Equal(l.B.MK1, b.MK1) {
+			return i
+		}
+	}
+	return -1
 }
 
 // verifyClaimPlate finds the UNCLAIMED read-back plate carrying the same account
@@ -284,7 +319,16 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 		if full {
 			s, ok := multisigVerifyMS1Entry(ctx, th)
 			if !ok {
-				return
+				// BREAK, NOT RETURN. On the FIRST seed this reaches the silent
+				// abandon below, which is the shipped behaviour. On the SECOND or
+				// later seed `legs` already holds verified plates, and a bare return
+				// here walked out of the flow with NO SCREEN AT ALL -- some plates
+				// checked, some not, nothing said, and on the build path the next
+				// thing the operator saw was the restore document. Breaking falls
+				// into the "Verify Incomplete" report, which is what a partial
+				// verify is. (len(legs) < len(readbackMk1s) necessarily holds here:
+				// the coverage break is tested only after this seed's derive loop.)
+				break
 			}
 			ms1Readback = s
 		}
@@ -295,6 +339,28 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 			if derr != nil {
 				showError(ctx, th, "Verify Bundle", "Couldn't re-derive the bundle from the seed.")
 				return
+			}
+			// ONE LEG PER DISTINCT KEY, NOT PER SLOT -- and this is where the
+			// slot-vs-key mismatch belongs, not in verifyMultisigLegs' coverage rule.
+			//
+			// `fresh` comes from allUserSlots, which returns every slot the seed
+			// FILLS. A policy may declare the SAME key at several slots, and the
+			// SUPPLY path deliberately engraves ONE plate for it, announcing so on
+			// screen (gui/multisig.go:145-149: "This key is reused at slots @0 and
+			// @1; engraving the first (@0)"). Deriving a leg per slot therefore
+			// manufactured a second leg that no plate was ever cut for, and feeding
+			// the verify that engrave's own complete output reported "the read-back
+			// bundle does NOT match the seed" -- an honest operator told their good
+			// plates are bad, in exactly the case the device had just announced.
+			//
+			// Reused slots derive byte-identically (same key implies same origin, and
+			// the origin is what the leg is derived at), so the duplicate carries no
+			// information the first does not. Dropping it leaves every coverage
+			// guarantee intact: a genuinely MISSING plate still leaves a leg with a
+			// DISTINCT key unclaimed, and errVerifyLegHasNoPlate still fires.
+			if i := verifyLegWithSameKey(legs, b); i >= 0 {
+				covered[s] = true
+				continue
 			}
 			legs = append(legs, verifyLeg{Slot: s, B: b, MS1Readback: ms1Readback})
 			covered[s] = true
@@ -312,10 +378,16 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool) {
 		}
 	}
 
-	// Back at the FIRST seed entry is abandoning the verify, not completing a
-	// partial one, and it is the shipped behaviour: return in silence. It is the
-	// only way to reach zero legs, because every other exit above returns on its
-	// own screen.
+	// Back before ANY leg is verified is abandoning the verify, not completing a
+	// partial one, and it is the shipped behaviour: return in silence.
+	//
+	// The earlier wording here claimed zero legs was reachable only from the first
+	// seed's entry "because every other exit above returns on its own screen".
+	// That was false: the ms1 entry's Back returned bare from any seed, so a
+	// partial verify could walk out silently. It breaks now, so the condition this
+	// tests is genuinely "nothing was verified" rather than "we came from one
+	// particular screen" -- a state, which is checkable, instead of a provenance,
+	// which was not.
 	if len(legs) == 0 {
 		return
 	}
