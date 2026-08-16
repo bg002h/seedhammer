@@ -72,7 +72,7 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // wallet. The walk-away exposure is answered where it lives: the ruling below
 // tells the operator the machine holds every entered seed, and the plates
 // themselves, until the build ends.
-func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
+func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact) []string {
 	plan := bundlePlatePlan(cards)
 	lines := []string{
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
@@ -82,7 +82,7 @@ func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
 			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
-	lines = append(lines, buildPassphraseInventoryLines(passphrase)...)
+	lines = append(lines, buildPassphraseInventoryLines(seeds)...)
 	lines = append(lines, "Seed handling: this build does not time out. Every seed "+
 		"you entered -- this build can hold several -- stays in device memory until "+
 		"the build ends, and on a full build the words are also on the plates as "+
@@ -118,20 +118,115 @@ func buildPlateInventoryLines(cards []bundleCard, passphrase bool) []string {
 // backup" -- both in the first draft of this text -- are false there. The claim is
 // about the PASSPHRASE and is phrased to stay true in both modes; what the set
 // does and does not contain is the inventory's job, immediately above.
-func buildPassphraseInventoryLines(passphrase bool) []string {
-	if !passphrase {
+func buildPassphraseInventoryLines(seeds []seedPassphraseFact) []string {
+	var passphrased, bare []seedPassphraseFact
+	for _, s := range seeds {
+		if s.Uses {
+			passphrased = append(passphrased, s)
+		} else {
+			bare = append(bare, s)
+		}
+	}
+	if len(passphrased) == 0 {
 		return []string{
 			"No BIP-39 passphrase was used, so no passphrase is needed to spend from " +
 				"this wallet.",
 		}
 	}
-	return []string{
+	lines := []string{
 		"A BIP-39 passphrase WAS used. It is not on these plates and cannot be " +
 			"recovered from them: nothing this device engraves carries a passphrase.",
 		"Without it, these plates do not reach the money. Keep it somewhere " +
 			"separate, and make sure whoever needs this backup can also get the " +
 			"passphrase.",
 	}
+	// ONE SEED: the shipped two lines, unchanged. Everything in them is singular
+	// and everything singular is true, so a build with one master reads exactly as
+	// it always did.
+	if len(seeds) < 2 {
+		return lines
+	}
+	// SEVERAL SEEDS: name them, because "the passphrase" is a phrase with one
+	// referent and this backup has more than one. Every reference in the two lines
+	// above is singular; an operator holding three slots who records "the
+	// passphrase" and had typed two different ones loses the legs the other one
+	// derives, silently, with the backup vouching for itself throughout.
+	//
+	// THE LABEL AND THE FINGERPRINT TOGETHER, because neither alone identifies the
+	// seed to a reader in five years: the label says which slot it was entered
+	// for, and the fingerprint is what a coordinator shows beside the key so the
+	// reader can tell which ms1 plate the sentence is about.
+	for _, s := range passphrased {
+		lines = append(lines, fmt.Sprintf("Needs a passphrase: %s%s. If more than one "+
+			"is listed here they may be DIFFERENT passphrases; record each one "+
+			"against its fingerprint.", s.Label, seedFingerprintSuffix(s.MasterFP)))
+	}
+	// AND THE BARE ONES ARE SAID OUT LOUD. Silence here reads as "all of them need
+	// it", which sends a reader hunting for a passphrase that never existed for
+	// that seed -- and, worse, lets them conclude the one passphrase they have is
+	// the only factor missing.
+	for _, s := range bare {
+		lines = append(lines, fmt.Sprintf("Needs NO passphrase: %s%s.",
+			s.Label, seedFingerprintSuffix(s.MasterFP)))
+	}
+	return lines
+}
+
+// seedFingerprintSuffix renders " (master fingerprint xxxxxxxx)", or nothing at
+// all when the fingerprint is not known.
+//
+// A ZERO FINGERPRINT IS NOT PRINTED AS 00000000. Every fact the BUILD path emits
+// carries a real one -- seedRegistry.add derives it at registration and refuses a
+// seed whose master key cannot be built -- so this arm is for a caller that has
+// none to give, and printing a placeholder on a document read years later would
+// invite the reader to look for a key with that fingerprint.
+func seedFingerprintSuffix(fp uint32) string {
+	if fp == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (master fingerprint %08x)", fp)
+}
+
+// oneSeedPassphraseFact is the single-seed caller's fact.
+//
+// It exists so a flow with ONE seed says so in one place rather than
+// hand-building a struct literal with a zero fingerprint at every call site --
+// which is the shape that makes a reader wonder whether the zero is meaningful.
+// With one seed there is nothing to tell apart, so the inventory's single-seed
+// arm renders no fingerprint and none is needed.
+func oneSeedPassphraseFact(uses bool) []seedPassphraseFact {
+	return []seedPassphraseFact{{Label: "your seed", Uses: uses}}
+}
+
+// seedPassphraseFact is one registered (seed, passphrase) pair's passphrase
+// status, WITHOUT the secret: a label, the pair's master fingerprint, and
+// whether a passphrase is part of it.
+//
+// IT REPLACES A BOOLEAN, and the boolean was seedRegistry.usesPassphrase() --
+// an any() over the registry, whose single bit was the only passphrase signal
+// reaching either operator-facing surface. SPEC 4.1 makes the (seed, passphrase)
+// pair the derivation unit and asks the passphrase PER SEED, so a build holding
+// @0 and @1 can carry `alpha` and `beta`; the document then read "A BIP-39
+// passphrase WAS used ... Without IT ... Keep IT somewhere separate", every
+// reference singular, immediately after asserting "If any of them is missing,
+// this backup is incomplete." Nothing on steel or on that page let a reader
+// learn a SECOND passphrase exists. The commoner and equally fatal form is two
+// different masters with one passphrased, where the document could not say WHICH
+// of "ms1 secret share 1 of 2" / "2 of 2" needs it.
+//
+// NO MNEMONIC AND NO PASSPHRASE TEXT: this crosses into a display path, and the
+// only things a display path may hold are the ones an operator is meant to read.
+type seedPassphraseFact struct {
+	// Label is what the screens already call this seed ("your seed for @0").
+	Label string
+	// MasterFP is the fingerprint of the PAIR, which is what distinguishes two
+	// entries holding the same words under different passphrases.
+	MasterFP uint32
+	// Uses reports whether this pair carries a passphrase. An EXPLICITLY BOUND
+	// EMPTY passphrase is no passphrase: syswPassphraseFlowTitled can return
+	// ("", true), and a build that engraves a plain seed must not be labelled as
+	// though a factor were missing.
+	Uses bool
 }
 
 // buildFullModeLabel is the engrave-mode picker's first row.

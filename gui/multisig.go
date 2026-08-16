@@ -347,7 +347,15 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// five years said neither how many plates the backup is nor -- the half that
 	// loses funds -- that a BIP-39 passphrase is a required spending factor absent
 	// from every one of them.
-	multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut, passphrase != ""))
+	//
+	// ONE SEED, so ONE FACT. This path has a single seed seam by construction
+	// (step 3), so its inventory takes the single-seed arm and reads exactly as
+	// the single-seed build path's does. It carries no fingerprint because the
+	// single-seed arm renders none: with one seed there is nothing to tell apart,
+	// and deriving a master fingerprint here purely to print it would be another
+	// PBKDF2 pass over a mnemonic whose last consumer was step (6).
+	multisigRestoreDocFlow(ctx, th, tpl, keys,
+		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != "")))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

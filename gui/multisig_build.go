@@ -466,7 +466,13 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// (11a) AND WHAT THE SET IS, afterwards. The restore doc is read years
 		// later, alone, often by someone who was not the operator, and a plate
 		// count is the one fact that tells them whether they are holding all of it.
-		multisigRestoreDocFlow(ctx, th, tpl, keys, buildPlateInventoryLines(cardsOut, usedPassphrase))
+		//
+		// PER SEED, not the label's single bit (I-5). The mode label asks "is this
+		// set short of a factor" and a bool answers it; the document has to say
+		// WHICH seed, because a build holding three slots can carry three different
+		// passphrases and "keep the passphrase somewhere separate" has one referent.
+		multisigRestoreDocFlow(ctx, th, tpl, keys,
+			buildPlateInventoryLines(cardsOut, reg.passphraseFacts()))
 	}
 }
 

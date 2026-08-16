@@ -243,6 +243,29 @@ func (r *seedRegistry) usesPassphrase() bool {
 	return false
 }
 
+// passphraseFacts is the registry's per-seed answer, and it is what the restore
+// document takes instead of usesPassphrase()'s single bit.
+//
+// SPEC 4.1 makes the (seed, passphrase) pair the derivation unit and asks the
+// passphrase PER SEED, so an any() collapses N per-seed facts into one bool and
+// a second required passphrase is deduped out of existence on the one artifact
+// that outlives the operator. usesPassphrase() SURVIVES for the engrave-mode
+// LABEL, which is a different question with a genuinely boolean answer: is this
+// set short of a spending factor, yes or no, on a row that does not wrap.
+//
+// IT CARRIES NO SECRET. Only the label, the pair's master fingerprint and a
+// bool cross into the display path; the mnemonic and the passphrase text stay in
+// the registry, which is the one thing that scrubs them.
+func (r *seedRegistry) passphraseFacts() []seedPassphraseFact {
+	out := make([]seedPassphraseFact, 0, len(r.seeds))
+	for _, s := range r.seeds {
+		out = append(out, seedPassphraseFact{
+			Label: s.Label, MasterFP: s.MasterFP, Uses: s.Passphrase != "",
+		})
+	}
+	return out
+}
+
 // scrub zeroes every registered mnemonic. THE ONE SCRUB SITE (SPEC 4.2).
 //
 // The Passphrase field is dropped rather than overwritten, and the difference is

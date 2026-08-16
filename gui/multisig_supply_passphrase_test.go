@@ -315,7 +315,7 @@ func TestSupplyRestoreDocSaysSoWhenNoPassphraseWasUsed(t *testing.T) {
 		t.Errorf("a build with no passphrase is labelled as though one were missing: %q",
 			buildFullModeLabel(false))
 	}
-	if !strings.Contains(strings.Join(buildPassphraseInventoryLines(false), " "),
+	if !strings.Contains(strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false)), " "),
 		"No BIP-39 passphrase was used") {
 		t.Error("the bare arm of the inventory does not answer the reader's question, " +
 			"so a complete backup is indistinguishable from one missing a factor")
