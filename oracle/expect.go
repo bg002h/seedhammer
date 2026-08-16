@@ -176,6 +176,31 @@ func CheckArtifactShape(k ExpectKind, arts []Artifact) error {
 		return fmt.Errorf("%w: kind %q engraves %v and the artifact set is empty",
 			ErrBadRecord, k, want)
 	}
+	// BIND THE LABEL TO THE BYTES (review I-2).
+	//
+	// Everything below reasons about Artifact.Kind, and nothing untagged ever
+	// checked that a Kind matches the String it labels. One edited word therefore
+	// defeated the guarantees this function is cited for: a built-policy-full set
+	// whose only "ms1" artifact actually held an md1 STRING passed shape,
+	// fingerprint-scoping and CompareCensus -- a "Full backup" with no seed in it
+	// -- and a watch-only set whose "mk1" held an ms1 string passed too, which is
+	// a SECRET on steel in the mode that promises none.
+	//
+	// The m-format prefixes ARE the Kind strings, so the check is the obvious
+	// one. Deliberately in the function rather than in a test: it must hold for
+	// every caller, and a caller is exactly what a fabricated record is.
+	for i, a := range arts {
+		if !strings.HasPrefix(a.String, a.Kind) {
+			got := a.String
+			if len(got) > 8 {
+				got = got[:8]
+			}
+			return fmt.Errorf("%w: artifact %d is labelled %q but its string starts %q; the "+
+				"label and the bytes disagree, so every downstream check that trusts the "+
+				"label is reasoning about something that is not there",
+				ErrBadRecord, i, a.Kind, got)
+		}
+	}
 	at := 0
 	for _, kind := range want {
 		n := 0

@@ -507,7 +507,16 @@ func arts(spec ...string) []Artifact {
 	out := make([]Artifact, len(spec))
 	for i, s := range spec {
 		kind, fp, _ := strings.Cut(s, ":")
-		out[i] = Artifact{Kind: kind, Label: "a" + strconv.Itoa(i), String: "x", Fingerprint: fp}
+		// The String must carry its Kind's prefix: CheckArtifactShape now binds the
+		// label to the bytes (review I-2), so a placeholder like "x" is no longer a
+		// valid artifact in any shape. Deriving the string FROM the kind keeps this
+		// helper honest for every kind without listing them.
+		out[i] = Artifact{
+			Kind:        kind,
+			Label:       "a" + strconv.Itoa(i),
+			String:      kind + "qqqq" + strconv.Itoa(i),
+			Fingerprint: fp,
+		}
 	}
 	return out
 }
@@ -1030,5 +1039,50 @@ func TestCompareCensusCatchesAMultiKindReorder(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "plate 0") || !strings.Contains(err.Error(), "plate 2") {
 		t.Errorf("the refusal must name both plates that differ; got: %v", err)
+	}
+}
+
+// TestArtifactKindMustMatchItsBytes closes review finding I-2.
+//
+// Every shape/scope/compare check reasons about Artifact.Kind, and none of them
+// used to verify the Kind described the String it labelled. The two cases below
+// are the ones with consequences, and both were MEASURED to pass before the fix:
+//
+//   - a `built-policy-full` set whose "ms1" artifact holds an md1 string: a Full
+//     backup that contains no seed, while claiming to be one.
+//   - a watch-only set whose "mk1" artifact holds an ms1 string: a SECRET on
+//     steel in the mode whose whole promise is that there is none.
+//
+// One edited word in a committed JSON file was enough for either.
+func TestArtifactKindMustMatchItsBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind ExpectKind
+		arts []Artifact
+		want string
+	}{
+		{
+			name: "full backup whose ms1 is really an md1",
+			kind: KindBuiltPolicyFull,
+			arts: []Artifact{{Kind: "ms1", String: "md1qqqqfake", Label: "seed"}},
+			want: `labelled "ms1"`,
+		},
+		{
+			name: "watch-only whose mk1 is really an ms1",
+			kind: KindBuiltPolicyWatch,
+			arts: []Artifact{{Kind: "mk1", String: "ms1qqqqfake", Label: "card"}},
+			want: `labelled "mk1"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckArtifactShape(tc.kind, tc.arts)
+			if err == nil {
+				t.Fatalf("a mislabelled artifact was ACCEPTED; the label and the bytes "+
+					"disagree and nothing noticed (kind %q, arts %+v)", tc.kind, tc.arts)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refusal does not name the mislabelled artifact: %v", err)
+			}
+		})
 	}
 }

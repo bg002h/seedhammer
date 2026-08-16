@@ -56,11 +56,20 @@
 # This script also holds the only code path that can mint the S2 md1 golden
 # (-update), which is what makes the golden trustworthy elsewhere.
 #
-# EVERY TAGGED TEST MUST BE NAMED IN THE -run FILTER BELOW. That filter is an
-# ALLOWLIST: a test added behind the tag and not added there still compiles, and
-# still passes `go vet -tags oraclelive` on CI, and never executes anywhere. A
-# check that exists and never runs is the exact defect this deliverable was filed
-# about.
+# THE -run FILTER IS DERIVED FROM THE SOURCE, NOT MAINTAINED BY HAND.
+#
+# It used to be a hand-written allowlist, and the comment here warned that a
+# tagged test missing from it "still compiles, still passes `go vet -tags
+# oraclelive` on CI, and never executes anywhere". The warning was correct and
+# nothing enforced it: review I-1 renamed the two S5.0 live tests out from under
+# the filter, mutated the encoder so every @i took another cosigner's key, and
+# this script still printed "live checks: PASS (exit 0)" -- because
+# `go test -run <matches nothing>` exits 0.
+#
+# So the list is now built by grepping `func Test` out of every //go:build
+# oraclelive file, and the run is checked for VACUITY afterwards: the number of
+# tests that actually ran must equal the number discovered. A filter that
+# silences a check, and a run that executes nothing, both fail loudly now.
 #
 # The tagged files are type-checked on every push by
 # `go vet -tags oraclelive ./oracle/ ./gui/ ./sysw/` in .github/workflows/
@@ -96,10 +105,35 @@ echo "   primary checkouts expected BESIDE this repo: descriptor-mnemonic,"
 echo "   mnemonic-key, mnemonic-secret (drift) and mnemonic-engrave (sysw vectors)"
 echo
 
-CGO_ENABLED=0 go test -tags oraclelive -count=1 -v \
-  -run 'TestLiveDerivationReproducesEveryCommittedExpectation|TestRealPinsResolveTheInstalledOracles|TestPinsAreCurrentWithTheirPrimaries|TestBuiltPolicyDerivationMatchesTheS2Golden|TestBuiltPolicyDerivesDivergentOrigins|TestAssembledMd1MatchesThePrimaryByteForByte|TestVendoredVectorsAreInSyncWithThePrimary' \
-  ./oracle/ ./gui/ ./sysw/ "$@"
+# Discover every test behind the tag, from the tree rather than from memory.
+tagged_files=$(grep -rl 'go:build oraclelive' --include='*.go' ./oracle/ ./gui/ ./sysw/)
+if [ -z "$tagged_files" ]; then
+  echo "::error::no //go:build oraclelive files found; this script would run nothing"
+  exit 1
+fi
+tagged_tests=$(grep -h '^func Test' $tagged_files | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | sort -u)
+want=$(printf '%s\n' "$tagged_tests" | grep -c .)
+if [ "$want" -eq 0 ]; then
+  echo "::error::tagged files exist but declare no tests; this script would run nothing"
+  exit 1
+fi
+filter=$(printf '%s\n' "$tagged_tests" | paste -sd'|' -)
+echo "   discovered $want tagged test(s) from source"
+echo
+
+out=$(CGO_ENABLED=0 go test -tags oraclelive -count=1 -v -run "^($filter)\$" ./oracle/ ./gui/ ./sysw/ "$@" 2>&1)
 rc=$?
+printf '%s\n' "$out"
+
+# VACUITY CHECK. `go test -run <matches nothing>` exits 0, so a green exit code
+# alone proves nothing about whether anything ran.
+ran=$(printf '%s\n' "$out" | grep -c '^=== RUN   Test')
+if [ "$ran" -ne "$want" ]; then
+  echo
+  echo "::error::discovered $want tagged test(s) but only $ran executed --"
+  echo "         a live check that does not run is the defect this script exists to prevent"
+  rc=1
+fi
 
 echo
 if [ $rc -eq 0 ]; then
