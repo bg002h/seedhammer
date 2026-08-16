@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -256,11 +257,61 @@ func (r *seedRegistry) usesPassphrase() bool {
 // IT CARRIES NO SECRET. Only the label, the pair's master fingerprint and a
 // bool cross into the display path; the mnemonic and the passphrase text stay in
 // the registry, which is the one thing that scrubs them.
+//
+// ONE FACT PER SECRET, NOT PER REGISTRY ENTRY, and that is B1. The registry holds
+// one entry per HELD SLOT -- buildMultisigPolicyFlow calls buildSeedForSlot once
+// per held slot and buildSeedForSlot calls reg.add unconditionally -- so an
+// operator holding @0 and @1 from one master, typing the same passphrase at both
+// prompts, produced TWO facts for ONE secret. The document then printed the same
+// fingerprint on two lines, each ending "if more than one is listed here they may
+// be DIFFERENT passphrases", three steps after the Key-sources gate had correctly
+// said "Slots @0 and @1 all come from your seed". A reader who cannot find the
+// second passphrase has to decide whether a fully recoverable backup is
+// unrecoverable.
+//
+// THE KEY IS (Mnemonic, Passphrase) -- THE DERIVATION UNIT -- AND DELIBERATELY
+// NOT MasterFP. The difference is which way the key FAILS. This dedupe SUPPRESSES
+// a sentence, so a false merge drops a required passphrase off the one artifact
+// that outlives the operator, and a 4-byte fingerprint collision between two
+// unrelated seeds would do exactly that. buildSlotGate keys on MasterFP because
+// there a collision only ADDS a spurious notice. Same class of identity rule,
+// opposite failure direction, so the two sites key differently ON PURPOSE. The
+// registry holds both halves of the pair, so this key is exact rather than a
+// surrogate for it.
+//
+// THE LABELS ARE JOINED RATHER THAN DROPPED. The merged fact still names every
+// held slot the secret covers, because losing one would hide a SLOT -- the same
+// failure direction the merge exists to avoid -- and the reader needs to know
+// which plates the one passphrase reaches.
 func (r *seedRegistry) passphraseFacts() []seedPassphraseFact {
-	out := make([]seedPassphraseFact, 0, len(r.seeds))
+	type group struct {
+		mnemonic   bip39.Mnemonic
+		passphrase string
+		masterFP   uint32
+		labels     []string
+	}
+	groups := make([]group, 0, len(r.seeds))
 	for _, s := range r.seeds {
+		merged := false
+		for i := range groups {
+			g := &groups[i]
+			if g.passphrase == s.Passphrase && slices.Equal(g.mnemonic, s.Mnemonic) {
+				g.labels = append(g.labels, s.Label)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			groups = append(groups, group{
+				mnemonic: s.Mnemonic, passphrase: s.Passphrase, masterFP: s.MasterFP,
+				labels: []string{s.Label},
+			})
+		}
+	}
+	out := make([]seedPassphraseFact, 0, len(groups))
+	for _, g := range groups {
 		out = append(out, seedPassphraseFact{
-			Label: s.Label, MasterFP: s.MasterFP, Uses: s.Passphrase != "",
+			Label: joinAnd(g.labels), MasterFP: g.masterFP, Uses: g.passphrase != "",
 		})
 	}
 	return out
