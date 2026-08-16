@@ -311,7 +311,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// rule: permissiveness stops where a wrong assumption would be invisible in
 	// every artifact, and a review screen that silently omits a slot's key is that
 	// invisibility manufactured on purpose.
-	slotKeys, kerr := buildSlotKeyStrings(assembledMd1, self, cosigners)
+	slotKeys, slotOrigins, kerr := buildSlotKeyStrings(assembledMd1, self, cosigners)
 	if kerr != nil {
 		showError(ctx, th, "Build Policy",
 			"Couldn't show the keys this policy holds, so it was not engraved. Build "+
@@ -319,7 +319,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		return
 	}
 	if !buildReviewFlow(ctx, th, p.Script, stub, slots, slotKeys, p.IncludeFp,
-		buildProvenanceLines(origins, len(mk1s))) {
+		buildProvenanceLines(origins, len(mk1s)), heldSlotOrigins(p.SelfSlots, slotOrigins)) {
 		return
 	}
 
@@ -1460,13 +1460,13 @@ func emptyOriginSlot(all []md.MultisigCosigner) (int, bool) {
 // ANY page (Button3 continues wherever the pager is), so a line added at the
 // bottom can be committed past unread; the plate census puts its note first for
 // exactly this reason.
-func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string) []string {
+func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string, held []heldSlotOrigin) []string {
 	lines := []string{
 		"Check each key below against your coordinator, or against the card it came " +
 			"from, before you continue.",
 	}
 	lines = append(lines, provenance...)
-	lines = append(lines, buildOriginAnnouncement(script)...)
+	lines = append(lines, buildOriginAnnouncement(script, held)...)
 	lines = append(lines,
 		fmt.Sprintf("Policy stub: %x", stub),
 		"Slots:",
@@ -1516,10 +1516,10 @@ func buildReviewLines(script md.MultisigScript, stub [4]byte, slots []md.SlotInf
 // screen is that the operator sees the policy's contents before confirming it; a
 // slot rendered empty would be the original defect with extra steps, so the flow
 // refuses instead.
-func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.Card) ([]string, error) {
+func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.Card) ([]string, []string, error) {
 	_, keys, err := md.ExpandWalletPolicyChunks(assembled)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	type candidate struct {
 		cc  [32]byte
@@ -1541,10 +1541,18 @@ func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.
 		add(c.Xpub)
 	}
 	out := make([]string, len(keys))
+	// AND THE ORIGINS, OFF THE SAME EXPANSION. §0.1a's announcement has to state
+	// the path this build stamped on EVERY slot, and the assembled bytes are the
+	// only source that cannot disagree with the plate. Re-deriving them from the
+	// slot sources would be a second copy of the tail's origin rule (derived ->
+	// derivedSlotOrigin, both -> the card's declared path), and two copies of that
+	// rule agree until one of them is edited.
+	origins := make([]string, len(keys))
 	for i, k := range keys {
 		if !k.XpubPresent {
-			return nil, fmt.Errorf("multisig build: slot @%d carries no key to show", i)
+			return nil, nil, fmt.Errorf("multisig build: slot @%d carries no key to show", i)
 		}
+		origins[i] = k.OriginPath.String()
 		found := false
 		for _, c := range cands {
 			if slices.Equal(c.cc[:], k.Xpub[0:32]) && slices.Equal(c.pk[:], k.Xpub[32:65]) {
@@ -1554,11 +1562,11 @@ func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("multisig build: slot @%d holds a key none of this "+
+			return nil, nil, fmt.Errorf("multisig build: slot @%d holds a key none of this "+
 				"build's inputs accounts for", i)
 		}
 	}
-	return out, nil
+	return out, origins, nil
 }
 
 // buildOriginAnnouncement is §0.1a: the device says WHICH derivation path it
@@ -1597,8 +1605,27 @@ func buildSlotKeyStrings(assembled []string, self []heldSlotKey, cosigners []mk.
 // NO EM-DASHES. Measured 2026-08-15: a body line containing one rasters at
 // 2652 px against 7419 for the same text with a hyphen — the line does not draw
 // at all, which is F-151's shape and exactly what test 5's raster floor is for.
-func buildOriginAnnouncement(script md.MultisigScript) []string {
-	base := derivedSlotOrigin(script, 0).String()
+func buildOriginAnnouncement(script md.MultisigScript, held []heldSlotOrigin) []string {
+	// THE ORIGINS ARE THE ONES THIS BUILD ACTUALLY USED (I-7). This function
+	// hardcoded derivedSlotOrigin(script, 0), and buildReviewLines prints no
+	// per-slot origin, so a build holding @0 and @1 from one master -- which
+	// derives at m/48h/0h/0h/2h and m/48h/0h/1h/2h -- put NO correct statement of
+	// where @1's key lives on the last confirmation screen before the EXPERIMENTAL
+	// warning and the engrave. The very next screen then told the operator to
+	// "compare the keys you just reviewed against the same wallet in your
+	// coordinator"; one who took the announced origin at face value entered
+	// m/48'/0'/0'/2' for both, derived the wrong key for @1, and either blamed the
+	// device or mis-registered the wallet at a path the plate does not carry.
+	//
+	// §0.1a's requirement is that the device says which path it stamped on EVERY
+	// slot, so when the held slots diverge they are ENUMERATED. When they share
+	// one origin -- the ordinary single-slot build, and a multi-slot build across
+	// distinct masters at account 0 -- the sentence is the shipped scalar one,
+	// unchanged.
+	base, enumerated := heldOriginSummary(script, held)
+	if enumerated != "" {
+		base = enumerated
+	}
 	switch script {
 	case md.MultisigShWsh:
 		return []string{
@@ -1621,11 +1648,66 @@ func buildOriginAnnouncement(script md.MultisigScript) []string {
 	}
 }
 
+// heldSlotOrigin is one slot the operator holds, and the origin the ASSEMBLED
+// POLICY declares for it.
+//
+// The origin comes off the assembled bytes rather than from a second walk of the
+// slot sources, so the sentence on the review screen and the path on the plate
+// cannot come apart.
+type heldSlotOrigin struct {
+	Slot int
+	Path string
+}
+
+// heldSlotOrigins pairs the held slot indices with their assembled origins.
+// A slot index outside the assembled set is skipped rather than indexed: the
+// production flow cannot produce one (assembleBuildPolicy fills every slot), and
+// a panic on the last screen before an engrave is a worse outcome than a
+// sentence with one fewer slot in it.
+func heldSlotOrigins(held []int, slotOrigins []string) []heldSlotOrigin {
+	out := make([]heldSlotOrigin, 0, len(held))
+	for _, s := range held {
+		if s < 0 || s >= len(slotOrigins) || slotOrigins[s] == "" {
+			continue
+		}
+		out = append(out, heldSlotOrigin{Slot: s, Path: slotOrigins[s]})
+	}
+	return out
+}
+
+// heldOriginSummary reduces the held slots to what the announcement has to say.
+//
+// It returns (scalar, "") when every held slot shares ONE origin -- the shipped
+// sentence, unchanged, for the ordinary build -- and ("", enumeration) when they
+// diverge. An EMPTY held set falls back to derivedSlotOrigin(script, 0), which is
+// the account-0 default this build would use: a caller that supplies no slots is
+// a unit test of the wording rather than a flow, and the flow supplies them.
+func heldOriginSummary(script md.MultisigScript, held []heldSlotOrigin) (scalar, enumerated string) {
+	if len(held) == 0 {
+		return derivedSlotOrigin(script, 0).String(), ""
+	}
+	same := true
+	for _, h := range held[1:] {
+		if h.Path != held[0].Path {
+			same = false
+			break
+		}
+	}
+	if same {
+		return held[0].Path, ""
+	}
+	parts := make([]string, len(held))
+	for i, h := range held {
+		parts[i] = fmt.Sprintf("@%d at %s", h.Slot, h.Path)
+	}
+	return "", joinAnd(parts)
+}
+
 // buildReviewFlow displays the read-only (stub, slots) review and lets the
 // operator Continue (Button3 -> true) or Back (Button1 -> false). Reuses the
 // paged read-only restore-doc screen idiom.
-func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string) bool {
-	lines := buildReviewLines(script, stub, slots, slotKeys, includeFp, provenance)
+func buildReviewFlow(ctx *Context, th *Colors, script md.MultisigScript, stub [4]byte, slots []md.SlotInfo, slotKeys []string, includeFp bool, provenance []string, held []heldSlotOrigin) bool {
+	lines := buildReviewLines(script, stub, slots, slotKeys, includeFp, provenance, held)
 	return confirmReviewScreen(ctx, th, "Policy Review", lines)
 }
 

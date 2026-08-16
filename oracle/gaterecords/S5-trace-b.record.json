@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "stage": "S5",
-  "recorded_at": "2026-08-16T09:53:56Z",
+  "recorded_at": "2026-08-16T13:10:22Z",
   "oracles": [
     {
       "name": "md",
@@ -67,9 +67,9 @@
   },
   "walk": {
     "file": "S5-trace-b.walk.json",
-    "sha256": "83522bfcc456b029fc737bf415059291096c4284526a9cfa79a71d2f03ee53fe",
+    "sha256": "3ac0f85d1dc53b67f08b98a95d9891031c86708698cae01d173da436bcf68d63",
     "pace": 2048,
-    "elapsed_sec": 446,
+    "elapsed_sec": 462,
     "census": {
       "strings": [
         "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f",

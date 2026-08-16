@@ -110,6 +110,16 @@ export const NEEDLE_CENSUS = "Plate Count"; // gui/multisig_build.go
 // that a refusal is reported as a refusal rather than as a timeout.
 export const NEEDLE_GATE_FAIL = "Key does not match seed"; // gui/multisig_build.go
 
+// ORIGINS_EXPECTED are the BIP-48 paths this build derives its held slots at:
+// master A at accounts 0 and 1, master B at account 0. Two DISTINCT paths, which
+// is what makes the Policy Review's announcement an enumeration rather than a
+// scalar, and what a scalar announcement gets wrong.
+//
+// They are literals here on purpose. Deriving them in the walk would let the
+// walk and the device agree by sharing a bug; a walk asserting a path a human
+// wrote down is the only kind that can catch one.
+export const ORIGINS_EXPECTED = ["m/48h/0h/0h/2h", "m/48h/0h/1h/2h"];
+
 // NOT needles, and named so a future author who reaches for one finds out why.
 //
 //   "Scan a card, or Done"        the gather's BODY, drawn by the shared gatherer
@@ -354,6 +364,27 @@ async function runEngraveTail({ pollMs = 75, settleMs = 150 }) {
   const acts = [], digests = [];
 
   const review = await readAllPages();
+  // ─── §0.1a's ORIGIN ANNOUNCEMENT, ASSERTED RATHER THAN TAPPED PAST ──────────
+  //
+  // This walk used to read `await tap(CONFIRM, 400); // past the Policy Review`
+  // and assert NOTHING on this screen -- so the wrong sentence was minted into a
+  // green gate record. Trace B derives @0 at m/48h/0h/0h/2h and @1 at
+  // m/48h/0h/1h/2h, and buildOriginAnnouncement hardcoded account 0, so the LAST
+  // confirmation screen before the EXPERIMENTAL warning and the engrave carried
+  // no correct statement of where @1's key lives. The very next screen tells the
+  // operator to compare these keys against the same wallet in their coordinator.
+  //
+  // IT THROWS RATHER THAN RECORDING A FLAG. A claim in the returned object is
+  // evidence for a reader; a throw is what stops a walk minting a record that
+  // vouches for a sentence the device should not have drawn.
+  for (const want of ORIGINS_EXPECTED) {
+    if (!review.text.includes(squash(want))) {
+      throw new Error(`the Policy Review does not state the origin ${want}. ` +
+        `This build derives its held slots at ${ORIGINS_EXPECTED.join(" and ")}, and ` +
+        `\u00a70.1a requires the device to say which path it stamped on EVERY slot. ` +
+        `Screen: ${JSON.stringify(review.text)}`);
+    }
+  }
   await tap(CONFIRM, 400);               // past the Policy Review
 
   await waitFor("Which md1?");
@@ -616,7 +647,24 @@ export async function run({ payload = "cards", n = 4, k = 3, held = [0, 1, 2],
     multiAccount: sources.text.includes(squash(`@${held[1]}  yours: derived from your seed for @${held[1]}, account 1`)),
     cosignerSlot: sources.text.includes(squash(`@${n - 1}  a cosigner: payload card ${cardsGathered}, taken as supplied`)),
     nothingCrossChecked: sources.text.includes(squash("nothing was cross-checked")),
+    // SPEC 4.3 row 5's NOTICE, and it is the surface C-2 made unreachable. The
+    // gate grouped its bindings on s.SeedID while the flow mints one SeedID PER
+    // HELD SLOT, so every group held exactly one binding and this sentence could
+    // never fire -- for the shape Trace B IS. `multiAccount` above is not a
+    // substitute and was a false friend: it greps the review for "account 1",
+    // which proves only that the account counter diverged.
+    //
+    // The operator holds @0 and @1 from ONE master, the tail cuts ONE ms1 for
+    // it, and this is the only sentence anywhere that says those two slots share
+    // a secret.
+    multiAccountNotice: sources.text.includes(squash("multi-account wallet and is allowed")),
   };
+  if (!claims.multiAccountNotice) {
+    throw new Error("the Key-sources review does not announce that two held slots " +
+      "come from ONE seed. The tail cuts one ms1 for that master, so losing that " +
+      "plate loses BOTH keys, and the review reads as two independent secrets. " +
+      `Screen: ${JSON.stringify(sources.text)}`);
+  }
   await tap(CONFIRM, 400);
 
   await waitFor("Policy stub");

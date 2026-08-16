@@ -118,7 +118,7 @@ func TestBuildReviewShowsTheKeysItIsAskingToConfirm(t *testing.T) {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
 
-	keyStrs, err := buildSlotKeyStrings(assembled, self, cards)
+	keyStrs, slotOrigins, err := buildSlotKeyStrings(assembled, self, cards)
 	if err != nil {
 		t.Fatalf("buildSlotKeyStrings: %v", err)
 	}
@@ -136,7 +136,8 @@ func TestBuildReviewShowsTheKeysItIsAskingToConfirm(t *testing.T) {
 	for _, c := range cards {
 		want = append(want, c.Xpub)
 	}
-	lines := buildReviewLines(p.Script, stub, slots, keyStrs, p.IncludeFp, nil)
+	lines := buildReviewLines(p.Script, stub, slots, keyStrs, p.IncludeFp, nil,
+		heldSlotOrigins(p.SelfSlots, slotOrigins))
 	joined := strings.Join(lines, "")
 	for i, x := range want {
 		if len(x) < 100 {
@@ -187,7 +188,7 @@ func TestBuildReviewKeysReachThePixels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
-	keyStrs, err := buildSlotKeyStrings(assembled, self, cards)
+	keyStrs, slotOrigins, err := buildSlotKeyStrings(assembled, self, cards)
 	if err != nil {
 		t.Fatalf("buildSlotKeyStrings: %v", err)
 	}
@@ -196,7 +197,8 @@ func TestBuildReviewKeysReachThePixels(t *testing.T) {
 	pl.display = sh2DisplaySize
 	ctx := NewContext(pl)
 	frame, _, ink, quit := runUITouchRaster(ctx, func() {
-		buildReviewFlow(ctx, &descriptorTheme, p.Script, stub, slots, keyStrs, p.IncludeFp, nil)
+		buildReviewFlow(ctx, &descriptorTheme, p.Script, stub, slots, keyStrs, p.IncludeFp, nil,
+			heldSlotOrigins(p.SelfSlots, slotOrigins))
 	})
 	defer quit()
 
@@ -284,13 +286,13 @@ func TestBuildSlotKeyStringsRefusesAnUnmappableSlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Trace B did not assemble: %v", err)
 	}
-	if _, err := buildSlotKeyStrings(assembled, self, nil); err == nil {
+	if _, _, err := buildSlotKeyStrings(assembled, self, nil); err == nil {
 		t.Error("buildSlotKeyStrings mapped every slot with the cosigner card withheld, " +
 			"so a slot whose key it cannot name would render blank instead of refusing")
 	}
 	// The honest direction: with every input present it succeeds. Without this,
 	// the assertion above passes for a function that always errors.
-	if _, err := buildSlotKeyStrings(assembled, self, cards); err != nil {
+	if _, _, err := buildSlotKeyStrings(assembled, self, cards); err != nil {
 		t.Errorf("buildSlotKeyStrings failed on complete inputs: %v", err)
 	}
 }

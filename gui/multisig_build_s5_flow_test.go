@@ -5,6 +5,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"seedhammer.com/md"
 	"seedhammer.com/mk"
 )
 
@@ -227,6 +228,41 @@ func TestBuildFlowAnnouncesTwoSlotsFromOneSeed(t *testing.T) {
 			if !strings.Contains(pagesSeen, want) {
 				t.Errorf("the notice does not name %s: %q", want, pagesSeen)
 			}
+		}
+
+		// ─── I-7, on the same walk: the ORIGIN ANNOUNCEMENT ──────────────────
+		//
+		// The next confirmation screen is the Policy Review, the LAST screen before
+		// the EXPERIMENTAL warning and the engrave. buildOriginAnnouncement
+		// hardcoded derivedSlotOrigin(script, 0) and buildReviewLines prints no
+		// per-slot origin, so for this exact build -- @0 at m/48h/0h/0h/2h and @1 at
+		// m/48h/0h/1h/2h -- the screen contained NO correct statement of where @1's
+		// key lives. The screen after it tells the operator to compare the keys they
+		// just reviewed against the same wallet in their coordinator; one who takes
+		// the announced origin at face value enters m/48'/0'/0'/2' for both, derives
+		// the wrong key for @1, and either blames the device or registers the wallet
+		// at a path the plate does not carry.
+		click(&ctx.Router, Button3) // confirm the Key-sources review
+		frame()
+		if c, ok := pumpUntil(frame, "Policy stub", 96); !ok {
+			t.Fatalf("the Policy Review was not reached; got %q", c)
+		}
+		want0 := derivedSlotOrigin(md.MultisigWsh, 0).String()
+		want1 := derivedSlotOrigin(md.MultisigWsh, 1).String()
+		if want0 == want1 {
+			t.Fatalf("accounts 0 and 1 derive the same origin %s, so this assertion cannot "+
+				"separate an enumerated announcement from a scalar one", want0)
+		}
+		reviewPages, found := s5PageForNeedle(t, ctx, frame, want1, 12)
+		if !found {
+			t.Fatalf("the Policy Review NEVER states @1's origin (%s).\nPages drawn: %q\n"+
+				"The operator holds two accounts of one master and is about to be told to "+
+				"compare these keys against their coordinator. The only origin on the "+
+				"screen is @0's, so @1 is unstated and the comparison they are asked to "+
+				"perform derives the wrong key", want1, reviewPages)
+		}
+		if !strings.Contains(reviewPages, want0) {
+			t.Errorf("the Policy Review states @1's origin but not @0's: %q", reviewPages)
 		}
 	})
 }
