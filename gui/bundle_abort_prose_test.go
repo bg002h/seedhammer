@@ -76,39 +76,104 @@ func TestAbortWarningSaysDestroyForASetCarryingASeed(t *testing.T) {
 	}
 }
 
-// TestAbortWarningTellsTheOperatorHowToFinishTheSet.
+// TestAbortWarningPromisesOnlyWhatTheDeviceCanDO is I-11's arm, and it REPLACES
+// an assertion that pinned a promise the device cannot keep.
 //
 // Re-running the same inputs mints BYTE-IDENTICAL plates: no rand in md/, mk/ or
 // codex32/, and mk's chunk_set_id derives from the bytecode rather than from
-// randomness. TestReRunMintsByteIdenticalPlates pins that property. It is what
-// makes an interrupted 9-plate engrave recoverable -- the operator re-runs and
-// cuts only what is missing -- and until S5 the device never told them, on the
-// one screen an interrupted operator actually reaches. "Start the bundle over"
-// says the opposite of the truth: it tells them to throw away hours of work that
-// is still good.
-func TestAbortWarningTellsTheOperatorHowToFinishTheSet(t *testing.T) {
+// randomness. TestReRunMintsByteIdenticalPlates pins that property, and it is
+// TRUE. What S5 then wrote on this screen was not: "so you only cut the ones you
+// are missing" describes a RESUME with no implementation anywhere in the tree.
+// bundlePlatePlan is always the whole set, all four bundleEngrave call sites
+// pass the full slice with no start index, the per-plate picker's only rows are
+// validateMdmk's three engraving styles, EngraveScreen.Engrave returns true only
+// after an actual cut, and Back aborts the whole set.
+//
+// An operator at plate 7 of 9 who believes that sentence has three options and
+// all of them are bad: cut a SECOND seed plate (which buildEngraveTail refuses
+// to produce on purpose), re-run onto an already-engraved plate (named on no
+// screen), or press Back, which re-shows this same modal. This test is the
+// replacement, and it asserts the direction that matters -- the screen must not
+// promise a resume -- because the previous assertion REQUIRED the false one.
+func TestAbortWarningPromisesOnlyWhatTheDeviceCanDo(t *testing.T) {
 	for _, secret := range []bool{false, true} {
 		msg := bundleAbortWarningText(bundlePlate{cardIdx: 2, cardTotal: 4, label: "mk1 key"}, secret)
 		low := strings.ToLower(msg)
 
-		// The property, in the operator's terms rather than the encoder's.
+		// The TRUE half is kept: a re-run reproduces the same plates, which is what
+		// makes starting over safe rather than a fresh roll of the dice.
 		if !strings.Contains(low, "same") {
 			t.Errorf("secret=%v: the abort never says a re-run reproduces the same "+
 				"plates:\n%s", secret, msg)
 		}
-		if !strings.Contains(low, "missing") {
-			t.Errorf("secret=%v: the abort never says only the MISSING plates need "+
-				"cutting, which is the whole recovery:\n%s", secret, msg)
+		// And the operator is told what actually happens: it starts at plate 1.
+		if !strings.Contains(low, "plate 1") {
+			t.Errorf("secret=%v: the abort does not say a re-run RESTARTS the set:\n%s",
+				secret, msg)
 		}
-		// And it must have stopped saying the opposite.
+		// THE FALSE PROMISE MUST BE GONE. There is no skip row on the per-plate
+		// picker and no persisted per-plate state, so "you only cut the ones you are
+		// missing" prescribes an action the device offers nowhere.
+		for _, banned := range []string{"only cut the ones", "you are missing"} {
+			if strings.Contains(low, banned) {
+				t.Errorf("secret=%v: the abort still promises a partial re-cut (%q). "+
+					"bundleEngrave always walks the plan from index 0 and no screen in "+
+					"the tree offers a skip:\n%s", secret, banned, msg)
+			}
+		}
+		// And it must not have gone back to the OTHER wrong thing either.
 		if strings.Contains(low, "start the bundle over") {
-			t.Errorf("secret=%v: the abort still tells the operator to start over, "+
-				"throwing away plates a re-run would reproduce exactly:\n%s", secret, msg)
+			t.Errorf("secret=%v: the abort is back to the pre-S5 wording:\n%s", secret, msg)
 		}
 		// It draws: no glyph the body face lacks.
 		if strings.ContainsAny(msg, "—–·‘’“”…") {
 			t.Errorf("secret=%v: the abort carries a glyph the body face lacks, so its "+
 				"line does not draw:\n%q", secret, msg)
+		}
+	}
+
+	// A SEED-BEARING SET IS WARNED THAT THE RE-RUN RE-CUTS THE SEED PLATE. That is
+	// the one consequence of "start over" this device owes an operator it has just
+	// told to DESTROY rather than bin a plate.
+	secret := bundleAbortWarningText(bundlePlate{cardIdx: 2, cardTotal: 4, label: "mk1 key"}, true)
+	if !strings.Contains(strings.ToUpper(secret), "RE-CUTS THE SEED PLATE") {
+		t.Errorf("a seed-bearing set is not told that starting over cuts the seed plate "+
+			"again:\n%s", secret)
+	}
+}
+
+// TestBundleEngraveHasNoResumeMechanism is the DEPARTURE CHECK for the sentence
+// above: the text now says there is no resume, and this is the run-check that
+// the claim is true rather than a comment nobody verified.
+//
+// It reads the shipped source, because the property is structural: a plan that
+// is always whole, call sites that pass no start index, and a per-plate picker
+// whose rows come from validateMdmk. If a resume is ever built, this test fails
+// and the abort text has to be rewritten in the same edit -- which is exactly
+// the coupling that went missing the first time.
+func TestBundleEngraveHasNoResumeMechanism(t *testing.T) {
+	body := funcBody(t, "bundle_flow.go", "func bundleEngrave(")
+	if !strings.Contains(body, "bundlePlatePlan(cards)") {
+		t.Fatalf("funcBody did not capture bundleEngrave; got %d bytes", len(body))
+	}
+	if !strings.Contains(body, "for _, p := range plan {") {
+		t.Error("bundleEngrave no longer walks the WHOLE plan. If it grew a start " +
+			"index, the abort warning's \"it starts again at plate 1\" is now false " +
+			"and must be rewritten with it")
+	}
+	plan := funcBody(t, "bundle_flow.go", "func bundlePlatePlan(")
+	if strings.Contains(plan, "startAt") || strings.Contains(plan, "skip") {
+		t.Error("bundlePlatePlan appears to have grown a resume parameter; the abort " +
+			"warning promises the opposite")
+	}
+	// And no screen in the package offers to skip a plate that is already cut.
+	// Blunt substring over the source, deliberately: a skip row added by any route
+	// must trip this.
+	for _, file := range []string{"bundle_flow.go", "gui.go"} {
+		src := readGuiFile(t, file)
+		if strings.Contains(src, "already cut") {
+			t.Errorf("%s offers an \"already cut\" route; the abort warning says there "+
+				"is no way to resume", file)
 		}
 	}
 }

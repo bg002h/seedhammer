@@ -215,8 +215,14 @@ func s5DriveVerifyTwoSeeds(t *testing.T, records []string, expected []int, engra
 			break
 		}
 		last = c
-		if uiContains(last, "belong to a different seed") ||
-			uiContains(last, "cannot prove any of these plates") {
+		// The mid-loop refusals, by the phrase each of them now carries. I-14
+		// replaced "The plates still outstanding belong to a different seed." --
+		// which the device cannot support, and which is false whenever a per-slot
+		// passphrase diverged by one character -- so the needle moved with it.
+		if uiContains(last, "were built from different words") ||
+			uiContains(last, "DO fill another slot with no passphrase") ||
+			uiContains(last, "cannot prove any of these plates") ||
+			uiContains(last, "No slot matches that seed") {
 			click(&ctx.Router, Button3) // dismiss the refusal
 			continue
 		}
@@ -277,7 +283,18 @@ func TestVerifyReportsIncompleteAfterAMidLoopRefusal(t *testing.T) {
 			"reason the ms1 entry's Back was converted from return to break in this same "+
 			"function", last)
 	}
-	if !uiContains(last, "Checked 2 of the 3") {
+	// AND IT SAYS WHAT WAS CHECKED, BY SLOT. The number used to be `len(legs)` --
+	// a count of slots RE-DERIVED FROM A TYPED SEED, printed as "key plates
+	// checked" with the comparator structurally unreachable on this path (C-1).
+	// It is now produced by verifyMultisigLegsPartial, and the screen names the
+	// slots in both directions so the operator knows WHICH plate is outstanding.
+	if !uiContains(last, "Checked 2 key plates") {
 		t.Errorf("the incomplete report does not say how much was checked: %q", last)
+	}
+	for _, want := range []string{"@0", "@1", "@2", "NOT verified"} {
+		if !uiContains(last, want) {
+			t.Errorf("the incomplete report does not carry %q, so the operator cannot "+
+				"tell which slot is still unproved: %q", want, last)
+		}
 	}
 }

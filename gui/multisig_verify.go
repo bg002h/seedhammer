@@ -50,6 +50,53 @@ const (
 	// does not draw at all (F-78/F-151).
 	multisigVerifyForeignPolicyBody = "The read-back wallet policy is NOT the wallet policy this run engraved. " +
 		"These plates belong to a different wallet. Present the md1 and the key plates this run cut."
+	// multisigVerifyRetryLead is the RE-offer both engraving callers make after a
+	// verify that ended short of a clean pass. ONE STRING, TWO SITES, so the build
+	// path and the supply path cannot drift into describing one state two ways --
+	// and so it stays a single production site for a walk needle.
+	//
+	// It is the mechanism the "Verify Incomplete" screen's instruction refers to.
+	// Before it, that instruction named nothing: the verify was offered once and
+	// the device has no standalone bundle verify anywhere in its program table.
+	multisigVerifyRetryLead = "Not every plate is verified. Try again?"
+)
+
+// multisigVerifyResult is what multisigVerifyFlow tells its caller, and it
+// exists so the incomplete screen's instruction can be TRUE.
+//
+// The flow returned void, so neither caller could tell a clean pass from an
+// incomplete or a failed one, and the screen after every outcome was the same:
+// the verify offer fell through to the restore document. That made "Run verify
+// again with the remaining seeds" a prescription with no implementation --
+// multisigVerifyFlow's only callers are one-shot post-engrave offers (a bare
+// `if sel == 0 { ... }`), gui/plate_verify.go states outright that the bundle
+// verifies are untouched by the word-plate menu, and the program dispatch table
+// carries no standalone bundle verify. The operator's only route was to re-run
+// the whole engrave and cut every plate again over hours; the predictable
+// response is to fund the wallet anyway.
+//
+// FOUR OUTCOMES, NOT A BOOL, because the callers owe three different things.
+// Only verifyComplete may fall through to the restore document. Incomplete and
+// Failed must be RE-OFFERED, since both are states an operator can act on with
+// the plates in front of them. Refused and Abandoned must not be: a structural
+// refusal (no obligation, no policy, an unreadable readback) says nothing the
+// operator can fix by trying again with the same inputs, and an abandon is them
+// choosing to stop.
+type multisigVerifyResult int
+
+const (
+	// verifyComplete is the only clean pass: every expected slot got a leg, every
+	// leg found its plate, and the bijection closed.
+	verifyComplete multisigVerifyResult = iota
+	// verifyIncomplete is a partial verify: what was compared MATCHED, and slots
+	// remain unproved.
+	verifyIncomplete
+	// verifyFailed is a comparison that ran and disagreed.
+	verifyFailed
+	// verifyRefused is a structural refusal before any comparison could run.
+	verifyRefused
+	// verifyAbandoned is the operator leaving before any leg existed.
+	verifyAbandoned
 )
 
 // ─── F-191: a keystroke must not be reported as a wrong wallet ───────────────
@@ -301,19 +348,9 @@ func verifyFreshSlots(expected, filled []int, covered map[int]bool) ([]int, erro
 // A plate that does not decode pairs with nothing, so it surfaces as its leg's
 // missing plate and then as an unclaimed plate -- never as a silent skip.
 func verifyMultisigLegs(legs []verifyLeg, mk1s [][]string, md1 []string) error {
-	if len(legs) == 0 {
-		return errVerifyNoLegs
-	}
-	claimed := make([]bool, len(mk1s))
-	for _, l := range legs {
-		idx, ok := verifyClaimPlate(l.B.MK1, mk1s, claimed)
-		if !ok {
-			return errVerifyLegHasNoPlate{Slot: l.Slot}
-		}
-		claimed[idx] = true
-		if err := verifyMultisig(l.B, l.MS1Readback, mk1s[idx], md1); err != nil {
-			return fmt.Errorf("slot @%d: %w", l.Slot, err)
-		}
+	claimed, err := verifyMultisigLegsPartial(legs, mk1s, md1)
+	if err != nil {
+		return err
 	}
 	for i, c := range claimed {
 		if !c {
@@ -321,6 +358,153 @@ func verifyMultisigLegs(legs []verifyLeg, mk1s [][]string, md1 []string) error {
 		}
 	}
 	return nil
+}
+
+// verifyMultisigLegsPartial is the FORWARD half of that bijection: every leg
+// must find its own plate and that plate must survive the full comparator. It
+// returns which plates were claimed, so the caller can decide whether the
+// reverse sweep is owed.
+//
+// IT EXISTS BECAUSE A PARTIAL VERIFY STILL HAS TO COMPARE SOMETHING. Before
+// this, a run the operator stopped early returned from the flow at the
+// "Verify Incomplete" screen WITHOUT ever calling the comparator -- the only
+// function in this file that touches a read-back plate at all -- and the screen
+// then reported `len(legs)` as a count of "key plates checked". That number is a
+// count of slots RE-DERIVED FROM A TYPED SEED. Every upstream gate on that path
+// is cardinality or provenance (the md1 equality, the mk1 count) and none of
+// them is plate IDENTITY, so a foreign mk1 among the presented plates was
+// reported to the operator as verified. On a 3-of-4 that is a plate the wallet
+// needs, believed good.
+//
+// THE REVERSE SWEEP IS THE PART A PARTIAL RUN CANNOT OWE, and only that part. An
+// unclaimed plate means steel this policy has no leg for -- but a run that
+// stopped after two of three seeds has legs it never built, so the plates for
+// them are legitimately unclaimed and refusing over that would report a FAILURE
+// for an operator who did nothing wrong. Everything else is unchanged: each leg
+// still has to find its plate, and that plate still has to pass the fingerprint,
+// origin, md1 and stub-binding checks in bundle.Verify.
+func verifyMultisigLegsPartial(legs []verifyLeg, mk1s [][]string, md1 []string) ([]bool, error) {
+	if len(legs) == 0 {
+		return nil, errVerifyNoLegs
+	}
+	claimed := make([]bool, len(mk1s))
+	for _, l := range legs {
+		idx, ok := verifyClaimPlate(l.B.MK1, mk1s, claimed)
+		if !ok {
+			return nil, errVerifyLegHasNoPlate{Slot: l.Slot}
+		}
+		claimed[idx] = true
+		if err := verifyMultisig(l.B, l.MS1Readback, mk1s[idx], md1); err != nil {
+			return nil, fmt.Errorf("slot @%d: %w", l.Slot, err)
+		}
+	}
+	return claimed, nil
+}
+
+// multisigVerifyFailureText turns the comparator's diagnosis into the sentence
+// the operator reads, instead of throwing it away.
+//
+// The shipped screen bound `err` for a nil check and discarded it, so an ms1
+// typo, an ms1 presence mismatch and a missing plate for slot @2 all collapsed
+// into "The read-back bundle does NOT match the seed. Check the engraved
+// plates." -- which tells an operator with perfect steel and one mistyped
+// character to distrust the steel. The string dates from an era when exactly ONE
+// plate existed and "the engraved plates" was unambiguous; S5 makes a run cut 3
+// to 9.
+//
+// The two structural errors carry the one thing the operator can act on and are
+// named: errVerifyLegHasNoPlate knows WHICH slot has no plate (that is the whole
+// reason it carries a slot number), and errVerifyPlateUnclaimed knows WHICH
+// plate belongs to nothing. Anything else is the comparator's own wrapped
+// message, appended -- bundle.Verify's ms1 arms already say "ms1", which is the
+// one word that stops an operator scrapping good plates over a keystroke.
+//
+// NO EM-DASH: it is a zero-pixel glyph in the body face and a line carrying one
+// does not draw at all (F-78/F-151).
+func multisigVerifyFailureText(err error) string {
+	var noPlate errVerifyLegHasNoPlate
+	if errors.As(err, &noPlate) {
+		return fmt.Sprintf("No read-back key plate carries slot @%d's key. Either that "+
+			"plate was not presented, or it is not the one this run cut. Present every "+
+			"plate this run engraved, or re-cut slot @%d's.", noPlate.Slot, noPlate.Slot)
+	}
+	var unclaimed errVerifyPlateUnclaimed
+	if errors.As(err, &unclaimed) {
+		return fmt.Sprintf("Read-back key plate %d belongs to no slot of this wallet. It "+
+			"is steel from another run or another wallet; take it off the bench and "+
+			"verify again.", unclaimed.Plate+1)
+	}
+	return "The read-back bundle does NOT match the seed you typed.\n\n" +
+		"Details: " + err.Error() + "\n\n" +
+		"Check what that names before you re-cut anything: a hand-typed ms1 is one " +
+		"character away from this message, and the plates may be perfect."
+}
+
+// multisigVerifyIncompleteText is the partial-verify report, and the number in
+// it is the number of plates the COMPARATOR matched.
+//
+// The sentence it replaces said "Checked %d of the %d key plates this run
+// engraved" over `len(legs)` -- a count of slots re-derived from a typed seed,
+// produced by the loop counter rather than by the comparison. It also prescribed
+// a remedy the device does not have ("Run verify again with the remaining
+// seeds"): multisigVerifyFlow's only callers were one-shot post-engrave offers,
+// the program table carries no standalone bundle verify, and the operator's only
+// route was to re-run the whole engrave. The remedy exists now -- both callers
+// re-offer the verify on anything short of a clean pass -- so the instruction
+// names the button they are about to be shown rather than a program that is not
+// there.
+//
+// IT NAMES THE SLOTS in both directions. "2 of 3" leaves the operator to work
+// out WHICH one is outstanding from a policy they are holding on steel.
+func multisigVerifyIncompleteText(checked, outstanding []int) string {
+	those := "those plates"
+	if len(outstanding) == 1 {
+		those = "that plate"
+	}
+	return fmt.Sprintf("Checked %s: %s. Compared against the plates you presented, "+
+		"and they match.\n\n%s NOT verified: %s. Nothing has been proved about "+
+		"%s.\n\nChoose VERIFY AGAIN on the next screen and type the remaining seed, or "+
+		"do not fund this wallet until you have.",
+		plateWord(len(checked), "key plate", "key plates"), formatSlotList(checked),
+		plateWord(len(outstanding), "slot is", "slots are"), formatSlotList(outstanding),
+		those)
+}
+
+// multisigVerifyCoveredSeedBody is what the operator reads when the seed they
+// just typed cannot advance the verify because its slots are already covered, or
+// because this run engraved none of them.
+//
+// NEITHER ARM ASSERTS A FOREIGN SEED ANY MORE, and that is the fix. Both used to
+// end "The plates still outstanding belong to a different seed." -- a fact the
+// device cannot support and, at S5, often false: the passphrase prompt is PER
+// HELD SLOT (buildSeedForSlot), it has NO confirm-entry, and nothing compares
+// two registry entries holding the same words. One mistyped character on the
+// second slot's passphrase mints what looks like a second master, at the same
+// origin, with a different key -- so the outstanding plate really was built from
+// THESE words, under a passphrase that differs by one character, and the device
+// sends an operator holding the only seed that exists to look for a second one.
+//
+// It is the same class as F-191 at a new site, and the unconditional half of the
+// remedy costs nothing: never assert "a different seed" when the device cannot
+// distinguish that from "the same seed, a different BIP-39 passphrase".
+//
+// `bareWordsMatch` is multisigVerifySeedIsInnocent's answer, wired in here for
+// the one case the device CAN settle outright: a passphrase was typed and these
+// same words fill a slot WITHOUT it, so the outstanding plates may simply be the
+// bare-words wallet and the operator can try again in seconds.
+//
+// NO EM-DASH: a zero-pixel glyph in this face takes its whole line with it.
+func multisigVerifyCoveredSeedBody(engravedNone, bareWordsMatch bool) string {
+	lead := "That seed's slots have already been checked."
+	if engravedNone {
+		lead = "That seed is a cosigner, but none of its slots were engraved in this run."
+	}
+	if bareWordsMatch {
+		return lead + " These same words DO fill another slot with no passphrase. " +
+			"Try again and skip the passphrase."
+	}
+	return lead + " The outstanding plates were built from different words, or from " +
+		"these words with a different BIP-39 passphrase."
 }
 
 // verifyClaimPlate finds the UNCLAIMED read-back plate carrying the same account
@@ -423,7 +607,15 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // implicated: the EVIDENCE still comes from the plates, and every leg is still
 // re-derived from a RE-TYPED seed. What gained the policy identity is the
 // OBLIGATION, which is the half only the engraver ever knew.
-func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string) {
+//
+// IT RETURNS ITS VERDICT, from this fold. A void verify left both callers unable
+// to tell a clean pass from an incomplete or failed one, so the screen after
+// EITHER was the restore document -- and the incomplete screen's own instruction
+// ("run verify again") named an action that existed nowhere on the device: this
+// function's only callers are one-shot post-engrave offers, and the program
+// dispatch table has no standalone bundle verify. The verdict is what lets the
+// callers re-offer, which is what makes that instruction true.
+func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string) multisigVerifyResult {
 	// THE ENGRAVER'S OBLIGATION LIST ARRIVES FROM THE CALLER, and an empty one is
 	// refused BEFORE the operator is asked to present anything. A verify with no
 	// slot to prove cannot be satisfied by any readback, so sending them to the
@@ -431,7 +623,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// run. errVerifyNoExpectedSlots carries the same refusal for the derive loop.
 	if len(expectedSlots) == 0 {
 		showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
-		return
+		return verifyRefused
 	}
 	// AND SO IS A MISSING POLICY, for the same reason one level over. An absent
 	// engraved md1 would make the equality check below vacuous -- every readback
@@ -441,7 +633,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// exactly when a vacuous pass would be invisible.
 	if len(engravedMd1) == 0 {
 		showError(ctx, th, "Verify Bundle", multisigVerifyNoPolicyBody)
-		return
+		return verifyRefused
 	}
 
 	// Read back the PUBLIC cards over NFC via the T5 gatherer.
@@ -454,12 +646,15 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// The passphrase step below uses passphraseFlow for the same reason.
 	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 	if !ok {
-		return
+		// Back at the gather is the operator declining to present plates at all.
+		// It is an ABANDON rather than an incomplete: nothing was compared, so
+		// there is nothing to re-offer them a second attempt at.
+		return verifyAbandoned
 	}
 	readbackMd1, readbackMk1s, ok := extractReadbackMd1AndMk1s(cards)
 	if !ok {
 		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card(s) (mk1).")
-		return
+		return verifyRefused
 	}
 	// THE POLICY IDENTITY, CHECKED FIRST AND ON THE BYTES.
 	//
@@ -477,12 +672,12 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// holding, which is the one thing this check exists to notice.
 	if !slices.Equal(readbackMd1, engravedMd1) {
 		showError(ctx, th, "Verify Bundle", multisigVerifyForeignPolicyBody)
-		return
+		return verifyFailed
 	}
 	_, keys, err := md.ExpandWalletPolicyChunks(readbackMd1)
 	if err != nil {
 		showError(ctx, th, "Verify Bundle", "Couldn't decode the read-back wallet policy.")
-		return
+		return verifyFailed
 	}
 	// A FAST LENGTH PRECHECK, NAMED IN BOTH DIRECTIONS. It is a courtesy, not the
 	// mechanism: the per-slot bijection below is what decides, and it decides on
@@ -496,7 +691,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				"run cut.",
 			plateWord(len(readbackMk1s), "key plate", "key plates"),
 			plateWord(len(expectedSlots), "key plate", "key plates")))
-		return
+		return verifyIncomplete
 	}
 
 	var typed []bip39.Mnemonic
@@ -535,7 +730,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		fresh, ferr := verifyFreshSlots(expectedSlots, slots, covered)
 		if ferr != nil {
 			showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
-			return
+			return verifyRefused
 		}
 		if len(fresh) == 0 {
 			// THREE DIFFERENT PROBLEMS, THREE DIFFERENT MESSAGES, and the third is new
@@ -564,13 +759,18 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				innocent := multisigVerifySeedIsInnocent(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
 				showError(ctx, th, "Verify Bundle",
 					multisigVerifyNoSlotBody(passphrase != "", innocent))
-			case len(everOwed) == 0:
-				showError(ctx, th, "Verify Bundle", "That seed is a cosigner, but none of "+
-					"its slots were engraved in this run. The plates still outstanding "+
-					"belong to a different seed.")
 			default:
-				showError(ctx, th, "Verify Bundle", "That seed's slots have already been "+
-					"checked. The plates still outstanding belong to a different seed.")
+				// AND THE OTHER TWO ARMS ASK THE SAME QUESTION (I-14). Both used to
+				// assert "The plates still outstanding belong to a different seed." --
+				// a fact the device cannot support, and at S5 frequently false: the
+				// passphrase prompt is per HELD SLOT with no confirm-entry, so one
+				// mistyped character on the second slot mints what looks like a second
+				// master from the SAME words. The routine that can settle part of it
+				// was already here and wired into the first arm only.
+				bare := multisigVerifySeedIsInnocent(reMnemonic, passphrase,
+					&chaincfg.MainNetParams, keys)
+				showError(ctx, th, "Verify Bundle",
+					multisigVerifyCoveredSeedBody(len(everOwed) == 0, bare))
 			}
 			// BREAK, NOT RETURN, for the ms1 entry's reason twenty lines down and
 			// against the same evidence. All three screens above are about the SEED
@@ -616,7 +816,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				keys[s].OriginPath, readbackMd1, full)
 			if derr != nil {
 				showError(ctx, th, "Verify Bundle", "Couldn't re-derive the bundle from the seed.")
-				return
+				return verifyFailed
 			}
 			legs = append(legs, verifyLeg{Slot: s, B: b, MS1Readback: ms1Readback})
 			covered[s] = true
@@ -645,27 +845,54 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// particular screen" -- a state, which is checkable, instead of a provenance,
 	// which was not.
 	if len(legs) == 0 {
-		return
+		return verifyAbandoned
 	}
 
 	// NOT A PASS, AND NOT SILENCE. Stopping early with plates still outstanding is
 	// a legitimate operator choice and it produces an INCOMPLETE verify, which is
 	// a different thing from a failed one and from a clean one. Reporting it as
 	// either would be the false GREEN this whole rewrite exists to remove.
+	//
+	// AND IT IS NOT A COUNT OF ANYTHING UNTIL THE COMPARATOR HAS RUN (C-1). This
+	// branch used to `return` here, which made the call below structurally
+	// unreachable on this path -- so the screen reported `len(legs)`, a count of
+	// slots RE-DERIVED FROM A TYPED SEED, as a count of "key plates checked". A
+	// foreign mk1 among the presented plates was never decoded, never xpub-matched
+	// and never stub-bound, and the operator read it as verified.
+	//
+	// The forward half of the bijection runs; only the "every plate must be
+	// claimed" sweep is skipped, because a run that stopped early legitimately has
+	// plates no leg was ever built for. A leg whose plate FAILS is a Verify
+	// Failed, not an Incomplete: the operator is holding bad steel and stopping
+	// early does not make that provisional.
 	if len(legs) < len(expectedSlots) {
-		showError(ctx, th, "Verify Incomplete", fmt.Sprintf(
-			"Checked %d of the %d key plates this run engraved. The rest were NOT "+
-				"verified. Run verify again with the remaining seeds before funding "+
-				"this wallet.",
-			len(legs), len(expectedSlots)))
-		return
+		if _, err := verifyMultisigLegsPartial(legs, readbackMk1s, readbackMd1); err != nil {
+			showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
+			return verifyFailed
+		}
+		checked := make([]int, 0, len(legs))
+		for _, l := range legs {
+			checked = append(checked, l.Slot)
+		}
+		outstanding := make([]int, 0, len(expectedSlots)-len(legs))
+		for _, s := range expectedSlots {
+			if !covered[s] {
+				outstanding = append(outstanding, s)
+			}
+		}
+		slices.Sort(checked)
+		slices.Sort(outstanding)
+		showError(ctx, th, "Verify Incomplete",
+			multisigVerifyIncompleteText(checked, outstanding))
+		return verifyIncomplete
 	}
 
 	if err := verifyMultisigLegs(legs, readbackMk1s, readbackMd1); err != nil {
-		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
-		return
+		showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
+		return verifyFailed
 	}
 	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKMessage(len(legs), full))
+	return verifyComplete
 }
 
 // multisigVerifyMS1Entry hand-types ONE ms1 and returns its canonical string.
@@ -713,6 +940,17 @@ func multisigVerifyMS1Entry(ctx *Context, th *Colors) (string, bool) {
 // does not draw at all (F-78/F-151).
 func multisigVerifyOKMessage(legs int, full bool) string {
 	if legs <= 1 {
+		// AND THE SINGLE-LEG ARM OBEYS `full` TOO (I-13). It ignored it and
+		// returned the secret-claiming body unconditionally, so an ordinary
+		// watch-only run -- one held or matched slot, "Watch-only (keys)" chosen,
+		// no ms1 created, none requested, none typed, none compared, the ms1 leg
+		// skipped on both sides by bundle.Verify's presence semantics -- finished
+		// on "Operator key and secret verified." That is the doc comment's own rule
+		// broken two lines below where it is stated, in the commonest case this
+		// screen has.
+		if !full {
+			return "Operator key verified. Other cosigners' keys are taken as supplied."
+		}
 		return multisigVerifyOKBody
 	}
 	if full {

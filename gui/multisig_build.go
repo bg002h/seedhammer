@@ -361,7 +361,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	if !confirmReviewScreen(ctx, th, "Plate Count", buildPlateCensusLines(cardsOut)) {
 		return
 	}
-	bundleEngrave(ctx, th, "Build Policy", cardsOut)
+	// AN ABORT ENDS THE PROGRAM HERE (I-12). Both surfaces below vouch for a
+	// COMPLETE set -- a verify over plates that were never all cut, and a restore
+	// document headed "This backup is N plates ... If any of them is missing, this
+	// backup is incomplete." An operator who just read "Bundle Incomplete: this
+	// set is not a usable backup yet" must not be shown either.
+	if bundleEngrave(ctx, th, "Build Policy", cardsOut) != bundleEngraveDone {
+		return
+	}
 
 	// (10) Offer verify-bundle — full policy only. The verify re-derives via the
 	// xpub seed-cross-match (findUserSlot), which a KEYLESS template has no xpub
@@ -393,10 +400,24 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// closing datum all along; it hands it over now. It is the md1 that was
 	// ENGRAVED, not assembledMd1, because the plate the operator will present is
 	// the one that came off this machine.
+	//
+	// AND THE OFFER LOOPS (I-4), for the reason spelled out at the supply path's
+	// own offer: the incomplete screen prescribed a re-run this device could not
+	// perform. Only verifyComplete falls through to the restore document.
 	if !template && len(legs) > 0 {
-		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-		if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-			multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)
+		lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+		for {
+			verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
+			sel, ok := verifyChoice.Choose(ctx, th)
+			if !ok || sel != 0 {
+				break
+			}
+			res := multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)
+			if res != verifyIncomplete && res != verifyFailed {
+				break
+			}
+			lead = multisigVerifyRetryLead
+			choices = []string{"VERIFY AGAIN", "CONTINUE"}
 		}
 	}
 

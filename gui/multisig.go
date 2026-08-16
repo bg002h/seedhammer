@@ -282,7 +282,15 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 
 	// (7) Engrave (full = ms1 + one mk1 per matched slot + md1; watch-only drops
 	// the ms1 and bundleEngrave shows the hand-engrave reminder instead).
-	bundleEngrave(ctx, th, "Engrave Multisig", cardsOut)
+	//
+	// AN ABORT ENDS THE PROGRAM HERE (I-12). Everything below this line vouches
+	// for a COMPLETE set: the verify offer over plates that were never all cut
+	// (the md1 is emitted last, so the readback dies reading as "your plates are
+	// unreadable"), and the restore document headed "This backup is N plates". The
+	// abort modal is the operator's last screen, and it says so.
+	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut) != bundleEngraveDone {
+		return
+	}
 
 	// (8) Offer the verify-bundle.
 	//
@@ -305,9 +313,28 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// Slot indices alone get re-based onto whatever policy the readback supplies,
 	// which is how a byte-valid plate set from a DIFFERENT wallet reports
 	// "Verify OK" while this run's steel is never read.
-	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)
+	//
+	// AND THE OFFER LOOPS (I-4). The incomplete screen told the operator to "run
+	// verify again with the remaining seeds" and nothing on the device could run
+	// it again: this was a one-shot `if sel == 0`, the program table has no
+	// standalone bundle verify, and their only route was to re-run the whole
+	// engrave. So a verify that ends short of a clean pass RE-OFFERS itself. Only
+	// verifyComplete falls through; a refusal or an abandon does not loop, because
+	// neither is a state the operator can change by trying again with the same
+	// inputs.
+	lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+	for {
+		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
+		sel, ok := verifyChoice.Choose(ctx, th)
+		if !ok || sel != 0 {
+			break
+		}
+		res := multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)
+		if res != verifyIncomplete && res != verifyFailed {
+			break
+		}
+		lead = multisigVerifyRetryLead
+		choices = []string{"VERIFY AGAIN", "CONTINUE"}
 	}
 
 	// (9) Restore doc (display-only, PUBLIC — no secret). Reuses the tpl/keys

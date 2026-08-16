@@ -378,7 +378,20 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 // PARAMETER and not a rename because bundleEngrave is shared by the bundle flow,
 // single-sig, the supplied-md1 path and Build alike; the same judgement S2 made
 // for bundleGatherFlow's title, applied to the screen at the other end.
-func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) {
+//
+// IT REPORTS WHETHER THE SET WAS FINISHED, from this fold. It returned void and
+// both abort paths were bare `return`s, so no caller could distinguish a
+// completed run from an aborted one -- and both multisig callers walked straight
+// on. An operator who ran out of blanks at card 4 of 6 read "Bundle Incomplete
+// ... This set is not a usable backup yet", and two screens later was asked
+// "Verify the engraved plates?" over a verify that structurally cannot succeed
+// (the md1 is emitted LAST and was never cut, so it dies at
+// extractReadbackMd1AndMk1s reading as "your plates are unreadable"). Then the
+// restore document printed, headed "This backup is 9 plates ... If any of them
+// is missing, this backup is incomplete." -- the artifact this diff itself says
+// is read years later, alone, presented as the last word of a run the device had
+// just said produced no usable backup.
+func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) bundleEngraveResult {
 	plan := bundlePlatePlan(cards)
 	for _, p := range plan {
 		labels, plates, err := validateMdmk(ctx.Platform, p.str)
@@ -386,7 +399,7 @@ func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) {
 			// A verified card whose string can't fit a plate is unexpected; abort
 			// the whole set rather than engrave a partial bundle.
 			bundleAbortWarning(ctx, th, cards, p)
-			return
+			return bundleEngraveAborted
 		}
 		cs := &ChoiceScreen{
 			Title:   fmt.Sprintf("Card %d of %d | Plate %d of %d", p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal), // F-78: "·" is a zero-pixel glyph in this font
@@ -399,7 +412,7 @@ func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) {
 			if !ok {
 				// Set-level abort: a partial bundle can't be used.
 				bundleAbortWarning(ctx, th, cards, p)
-				return
+				return bundleEngraveAborted
 			}
 			if NewEngraveScreen(ctx, plates[idx]).Engrave(ctx, &engraveTheme) {
 				engraved = true
@@ -417,7 +430,25 @@ func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) {
 	if bundleShowMs1Reminder(cards) {
 		showError(ctx, th, title, bundleMs1ReminderText())
 	}
+	return bundleEngraveDone
 }
+
+// bundleEngraveResult is whether the whole plate set was cut.
+//
+// A BOOL WOULD DO AND A NAMED TYPE IS WHAT THE CALL SITES NEED: every caller of
+// this function is deciding whether to go on to a surface that VOUCHES for the
+// set -- a verify offer, a restore document -- so the two states are worth
+// having names at the `if`.
+type bundleEngraveResult int
+
+const (
+	// bundleEngraveDone: every plate in the plan was engraved.
+	bundleEngraveDone bundleEngraveResult = iota
+	// bundleEngraveAborted: the operator backed out, or a plate would not
+	// validate. Either way the set on the bench is partial and nothing may
+	// describe it as a backup.
+	bundleEngraveAborted
+)
 
 // bundleShowMs1Reminder reports whether the end-of-engrave ms1 hand-engrave
 // reminder should be shown: true unless an ms1 share was itself engraved in this
@@ -474,25 +505,52 @@ func bundleSetCarriesASecret(cards []bundleCard) bool {
 // 6 to 9 plates over hours, nothing records which were cut, and a power loss
 // loses that state -- but the encoders are DETERMINISTIC (no rand in md/, mk/ or
 // codex32/, and mk's chunk_set_id derives from the bytecode rather than from
-// randomness), so re-running the same inputs mints byte-identical plates and only
-// the missing ones need cutting. TestReRunMintsByteIdenticalPlates pins the
-// property; this is where the operator is told it exists.
+// randomness), so re-running the same inputs mints byte-identical plates.
+// TestReRunMintsByteIdenticalPlates pins the property; this is where the
+// operator is told it exists.
+//
+// (3) AND THE PROMISE HAD TO STOP BEING MORE THAN THE DEVICE CAN KEEP (I-11).
+// This text used to end "so you only cut the ones you are missing", which
+// describes a RESUME that does not exist: bundleEngrave always walks the plan
+// from index 0, every call site passes the full card slice with no start index,
+// the per-plate picker's only rows are validateMdmk's three engraving styles
+// with no skip anywhere in the tree, EngraveScreen.Engrave returns true only
+// after an actual cut, and Back aborts the whole set. An operator taking the
+// sentence at face value at plate 7 of 9 has exactly three options, all bad: cut
+// a SECOND seed plate (which buildEngraveTail refuses to produce on purpose --
+// "the second would be a duplicate secret on steel" -- and which contradicts the
+// census the same run printed), re-run the identical job onto an
+// already-engraved plate (named on no screen), or press Back, which re-shows
+// this same modal. There is no fourth, and no per-plate state is persisted:
+// releaseResumeState is mid-cut resume of a SINGLE plate.
+//
+// So the byte-identity fact is kept, because it is TRUE and it is what makes a
+// re-run safe, and the false half is replaced by what the device actually does
+// -- the same honest thing its sibling multiPlateEngrave has always said
+// (gui/derive_xpub.go): finish the set in one sitting, or start over. On a
+// seed-bearing set the re-run WILL re-cut the seed plate, which is said out loud
+// because it is the plate the operator has been told to destroy rather than bin.
 //
 // AND THIS IS WHERE IT HAS TO BE SAID. The restore document carries the set
-// inventory, and it is printed at the end of a SUCCESSFUL run -- an operator
-// whose engrave died never reaches it. This modal is the only screen they get.
+// inventory, and both engraving callers now gate it on this function's own
+// caller returning bundleEngraveDone -- so an operator whose engrave died really
+// does not reach it, and this modal really is the only screen they get. (Until
+// I-12 that was an ASSERTION rather than a fact: the abort did not propagate,
+// and the restore document printed after every abort.)
 //
 // Its length is gated by the F-185 class check (gui/modal_fits_test.go): the body
 // scrolls, nothing on the frame says so, and this machine has no button that
 // scrolls it.
 func bundleAbortWarningText(p bundlePlate, secret bool) string {
 	msg := fmt.Sprintf("Stopped at card %d of %d (%s). This set is not a usable backup yet.\n"+
-		"To finish it, run this again and give the same answers: it cuts the same "+
-		"plates, byte for byte, so you only cut the ones you are missing.\n",
+		"There is no way to resume: a re-run gives the same answers and cuts the "+
+		"same plates, byte for byte, but it starts again at plate 1. Finish a set "+
+		"in one sitting, or start over with fresh blanks.\n",
 		p.cardIdx, p.cardTotal, p.label)
 	if secret {
-		return msg + "If you throw any of it away instead, a plate with your seed on it " +
-			"must be DESTROYED, not binned: cut it up or grind the words off."
+		return msg + "A re-run RE-CUTS the seed plate. Any plate with your seed on it " +
+			"that you are not keeping must be DESTROYED, not binned: cut it up or " +
+			"grind the words off."
 	}
 	return msg + "No plate in this set carries a seed."
 }
