@@ -1016,12 +1016,25 @@ func TestSupplyAbortIsTheLastScreenOfTheProgram(t *testing.T) {
 // It also re-asserts the OBLIGATION WIRING the two shipped tests pin, because
 // the retry loop is where a fold could most easily start passing something else:
 // the tail's own slot indices and the md1 that was ENGRAVED.
+//
+// IT IS NOT THE BEHAVIOURAL PIN, AND IT STAYS ANYWAY. Round 1 measured what this
+// file alone is worth: four strings.Contains calls over the callers' source, and
+// two independent mutations of the loop they describe -- one iteration instead of
+// a loop, and the two row labels swapped -- left the whole tree green. The
+// behaviour is pinned by TestBothEngraveFlowsDriveTheRetryLoop, which drives
+// these screens through the multisigVerifyFn seam. Neither test covers the
+// other: the seam test substitutes the verdict source, so it cannot see WHICH
+// obligation the caller hands over, and this one cannot see what the loop does.
+//
+// The needles name multisigVerifyFn rather than multisigVerifyFlow because that
+// is the call the callers make; the arguments -- the tail's own slot indices and
+// the ENGRAVED md1 -- are the part this test exists for and are unchanged.
 func TestBothEngraveFlowsReOfferTheVerify(t *testing.T) {
 	for _, tc := range []struct{ file, fn, call string }{
 		{"multisig.go", "func supplyMultisigPolicyFlow(",
-			"multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)"},
+			"multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)"},
 		{"multisig_build.go", "func buildMultisigPolicyFlow(",
-			"multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)"},
+			"multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)"},
 	} {
 		body := funcBody(t, tc.file, tc.fn)
 		if !strings.Contains(body, tc.call) {

@@ -347,19 +347,30 @@ func TestBuildEngraveTailReturnsTheSlotsItCut(t *testing.T) {
 }
 
 // TestBuildPassesTheTailsSlotsToTheVerify pins the WIRING at the build call
-// site, which no behavioural test in this package can reach: the verify offer
-// sits after bundleEngrave, and driving a real engrave is not something a unit
-// test does.
+// site.
 //
 // The type system only demands *a* []int. This demands the one the tail
 // returned, because any other list is a set of slots this run did not cut.
+//
+// IT IS A SOURCE ASSERTION ON PURPOSE, and the reason is narrower than it used
+// to be. This comment said no behavioural test in the package could reach the
+// offer "and driving a real engrave is not something a unit test does";
+// TestBothEngraveFlowsDriveTheRetryLoop now does exactly that, because B4
+// measured what leaving the tail to source greps costs. What that walk cannot
+// see is WHICH obligation crosses the call -- it substitutes the verdict source
+// at the multisigVerifyFn seam, so the arguments go to a stub. So this test
+// keeps the argument list and that one keeps the behaviour; neither covers the
+// other.
+//
+// The needle names multisigVerifyFn because that is the call the caller makes
+// (B4's seam). The ARGUMENTS are what this test exists for and are unchanged.
 func TestBuildPassesTheTailsSlotsToTheVerify(t *testing.T) {
 	body := funcBody(t, "multisig_build.go", "func buildMultisigPolicyFlow(")
 	if !strings.Contains(body, "engravedSlots, cardsOut, terr := buildEngraveTail(") {
 		t.Fatal("buildMultisigPolicyFlow no longer names the tail's held-slot indices; " +
 			"the verify's obligation list has lost its provenance")
 	}
-	if !strings.Contains(body, "multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)") {
+	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)") {
 		t.Error("the build path does not hand the tail's own slot indices AND the md1 it " +
 			"engraved to the verify. Any other list is an obligation over plates this run " +
 			"did not cut, and slot indices with no policy behind them are satisfied by a " +
@@ -371,13 +382,16 @@ func TestBuildPassesTheTailsSlotsToTheVerify(t *testing.T) {
 // the OTHER call site, and it exists because C1 was a two-caller defect: both
 // held the closing datum, neither passed it.
 //
-// The verify offer sits after bundleEngrave on this path too, so no behavioural
-// test in this package reaches it. `suppliedMd1` is the right name and not just
-// A name: I-2 engraves the supplied policy VERBATIM, so it is precisely the md1
-// the operator will present at readback.
+// `suppliedMd1` is the right name and not just A name: I-2 engraves the supplied
+// policy VERBATIM, so it is precisely the md1 the operator will present at
+// readback.
+//
+// Source assertion, for its twin's reason above: the behavioural walk over this
+// same offer substitutes the verdict source, so the arguments it is handed are
+// the stub's, not the verify's.
 func TestSupplyPassesTheEngravedPolicyToTheVerify(t *testing.T) {
 	body := funcBody(t, "multisig.go", "func supplyMultisigPolicyFlow(")
-	if !strings.Contains(body, "multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)") {
+	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)") {
 		t.Error("the supply path does not hand the engraved policy to the verify. Slot " +
 			"indices alone are re-based onto whatever policy the readback supplies, which " +
 			"is how another wallet's plates report Verify OK")

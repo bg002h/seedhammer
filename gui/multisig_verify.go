@@ -634,6 +634,31 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // function's only callers are one-shot post-engrave offers, and the program
 // dispatch table has no standalone bundle verify. The verdict is what lets the
 // callers re-offer, which is what makes that instruction true.
+
+// multisigVerifyFn is the in-file test-only seam BOTH engrave callers dispatch
+// through, and it exists so the RETRY LOOP can be driven (B4).
+//
+// The loop is unreachable from a unit test without it: reaching the offer means
+// completing a real engrave, and reaching a SECOND attempt means driving an
+// entire readback -- gather, seed entry, passphrase, ms1 -- twice, inside a walk
+// that has already cut nine plates. So I-4's whole mechanism was pinned by four
+// strings.Contains calls over the callers' SOURCE, and two independent mutations
+// left the tree green: turning `for {` into a one-iteration loop restored the
+// pre-fold one-shot offer, and swapping the {"VERIFY AGAIN", "CONTINUE"} labels
+// made VERIFY AGAIN exit the verify and CONTINUE re-run it -- the loop keys on
+// the returned INDEX and there is no label lookup anywhere. Coverage on the
+// unmutated tree put both loop bodies at execution count 0.
+//
+// The seam substitutes the VERDICT SOURCE only. The offer screens, the
+// ChoiceScreen row mapping, the loop condition and the retry lead are all the
+// production ones under the test, which is where both mutations live.
+//
+// It mirrors the package's other in-file test seams (bip85SeedHook,
+// bip85PkeyHook, freetextPlateHook, freetextEngraveHook, buildMultisigSeedHook).
+// nil is not a legal value: it is a var, not a hook, and production never
+// reassigns it.
+var multisigVerifyFn = multisigVerifyFlow
+
 func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string) multisigVerifyResult {
 	// THE ENGRAVER'S OBLIGATION LIST ARRIVES FROM THE CALLER, and an empty one is
 	// refused BEFORE the operator is asked to present anything. A verify with no

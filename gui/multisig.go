@@ -322,6 +322,10 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// verifyComplete falls through; a refusal or an abandon does not loop, because
 	// neither is a state the operator can change by trying again with the same
 	// inputs.
+	//
+	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, because this
+	// loop is otherwise unreachable from any executing test and was pinned only by
+	// a strings.Contains over this function's own source (B4).
 	lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
 	for {
 		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
@@ -329,7 +333,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 		if !ok || sel != 0 {
 			break
 		}
-		res := multisigVerifyFlow(ctx, th, full, engravedSlots, suppliedMd1)
+		res := multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)
 		if res != verifyIncomplete && res != verifyFailed {
 			break
 		}

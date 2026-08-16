@@ -437,6 +437,10 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// AND THE OFFER LOOPS (I-4), for the reason spelled out at the supply path's
 	// own offer: the incomplete screen prescribed a re-run this device could not
 	// perform. Only verifyComplete falls through to the restore document.
+	//
+	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, for the same
+	// reason the supply path does: without it this loop is unreachable from any
+	// executing test and its row-to-index mapping is unpinned (B4).
 	if !template && len(legs) > 0 {
 		lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
 		for {
@@ -445,7 +449,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 			if !ok || sel != 0 {
 				break
 			}
-			res := multisigVerifyFlow(ctx, th, full, engravedSlots, engraveMd1)
+			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)
 			if res != verifyIncomplete && res != verifyFailed {
 				break
 			}
