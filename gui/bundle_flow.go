@@ -123,8 +123,18 @@ func (s *bundleGatherScreen) tally() []string {
 }
 
 // bundleGatherFlow accumulates distinct verified cards via NFC, returning them
-// on "Done adding cards" (Button3) or (nil,false) on Back / an empty bundle. It
-// owns its own scanner goroutine (clone of mk1GatherFlow's shell). With
+// on "Done adding cards" (Button3), or (nil,false) on Back or on the context
+// being done. Those two are the ONLY (nil,false) returns in the function.
+//
+// PRESSING DONE ON AN EMPTY BUNDLE IS NOT ONE OF THEM, and this comment said it
+// was until S6a step 8. bundleDoneEmpty shows an error screen and LOOPS back to
+// the gatherer, so the operator carries on scanning rather than being dropped out
+// of the program; bundleDonePending with nothing complete behind it does the same.
+// The distinction is load-bearing rather than cosmetic -- an exit classification
+// taking the old wording at face value would have argued a row on an exit that
+// does not exist.
+//
+// It owns its own scanner goroutine (clone of mk1GatherFlow's shell). With
 // testPlatform.NFCReader()==nil the goroutine doesn't run; the gatherer +
 // review flow are driven directly in tests.
 //
@@ -363,8 +373,8 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 }
 
 // bundleEngrave is the Phase-3 guided verbatim engrave. It is a SIBLING of
-// multiPlateEngrave (R0-M2: Go has no default params; deriveXpubFlow's call site
-// at derive_xpub.go:162 stays BYTE-UNCHANGED), reusing the same per-plate
+// multiPlateEngrave (R0-M2: Go has no default params; deriveXpubFlow's own call
+// to it, gui/derive_xpub.go:390, stays BYTE-UNCHANGED), reusing the same per-plate
 // validateMdmk + ChoiceScreen + NewEngraveScreen machinery. It loops the plan,
 // titling each plate "Card X of Y | Plate P of Q"; a set-level Back records no
 // completed state and warns the partial bundle is unusable (I-5). At the end it
@@ -532,11 +542,24 @@ func bundleSetCarriesASecret(cards []bundleCard) bool {
 // because it is the plate the operator has been told to destroy rather than bin.
 //
 // AND THIS IS WHERE IT HAS TO BE SAID. The restore document carries the set
-// inventory, and both engraving callers now gate it on this function's own
-// caller returning bundleEngraveDone -- so an operator whose engrave died really
-// does not reach it, and this modal really is the only screen they get. (Until
-// I-12 that was an ASSERTION rather than a fact: the abort did not propagate,
-// and the restore document printed after every abort.)
+// inventory, and all THREE callers that carry a post-engrave tail now gate it on
+// this function's own caller returning bundleEngraveDone: engraveSingleSigFlow
+// (gui/singlesig.go), supplyMultisigPolicyFlow (gui/multisig.go) and
+// buildMultisigPolicyFlow (gui/multisig_build.go). So an operator whose engrave
+// died really does not reach it, and this modal really is the only screen they
+// get. bundleFlow, at the top of this file, is the fourth bundleEngrave call site
+// and needs no gate: it returns on the very next line, so nothing downstream of
+// it vouches for the set.
+//
+// THIS SENTENCE SAID "both" UNTIL S6a STEP 8, AND IT WAS FALSE ON THE DAY IT WAS
+// WRITTEN. S5's I-12 fold gated the two multisig callers and generalised from the
+// two it was looking at; engraveSingleSigFlow already existed, ungated, with a
+// tail of its own, so a single-sig abort still fell through to the verify offer
+// and the restore document. S6a step 5 gated it. Counting the callers is not
+// pedantry here: this comment is the justification a reviewer inherits rather
+// than re-derives, which is how the gap survived a whole cycle. (Until I-12 it
+// was an ASSERTION rather than a fact for the multisig pair too: the abort did
+// not propagate, and the restore document printed after every abort.)
 //
 // Its length is gated by the F-185 class check (gui/modal_fits_test.go): the body
 // scrolls, nothing on the frame says so, and this machine has no button that

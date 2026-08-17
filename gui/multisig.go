@@ -31,7 +31,7 @@ import (
 //     phase's PRIMARY data entries. A payload-borne ClassMnemonic reaches
 //     derivation on purpose, and cmd/emu/walk_build_policy.js drives exactly
 //     that. What survives is the split that is load-bearing:
-//     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
+//     seedEntryFlowTypedOnly (gui/derive_xpub.go:140), which the VERIFY flows
 //     call so a payload-sourced secret is never compared against itself (§7.4).
 //     ms1 is engraved onto owner-held steel only, never NFC.
 //   - PER-LEG SCRUB (I-7): the entropy is gated + wiped inside deriveMultisigLeg,
@@ -326,6 +326,15 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, because this
 	// loop is otherwise unreachable from any executing test and was pinned only by
 	// a strings.Contains over this function's own source (B4).
+	//
+	// ONE RECORD FOR THE WHOLE LOOP, DECLARED OUTSIDE IT. That is what makes the
+	// adverse bit STICKY across attempts: a first attempt that found a bad plate
+	// and a second that passed is statusVerifiedOnRetry on the document, not a
+	// bare pass. Declaring it inside the loop would let the last attempt overwrite
+	// what an earlier one observed, which is the last-wins design an earlier fold
+	// specified in writing and which silently downgrades a failed check to "not
+	// fully checked".
+	var rec verifyRecord
 	lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
 	for {
 		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: lead, Choices: choices}
@@ -333,7 +342,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 		if !ok || sel != 0 {
 			break
 		}
-		res := multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)
+		res := multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1, &rec)
 		if res != verifyIncomplete && res != verifyFailed {
 			break
 		}
@@ -358,8 +367,13 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// single-seed arm renders none: with one seed there is nothing to tell apart,
 	// and deriving a master fingerprint here purely to print it would be another
 	// PBKDF2 pass over a mnemonic whose last consumer was step (6).
+	//
+	// THE STATUS IS WHAT THE LOOP ABOVE RECORDED. A skipped or abandoned verify
+	// leaves `rec` at its zero value and the document claims nothing; an empty
+	// string would render as silence, and silence is what reads as a pass.
 	multisigRestoreDocFlow(ctx, th, tpl, keys,
-		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != "")))
+		buildVerifyStatusLine(rec),
+		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

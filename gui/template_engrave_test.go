@@ -126,6 +126,14 @@ func TestEngraveSingleSigFlowTemplate(t *testing.T) {
 		}
 		// Confirm "I understand" → engrave (full = 3 cards).
 		click(&ctx.Router, Button3)
+		// S6a/F-202: the pre-engrave plate census stands between the template
+		// consent and the first plate. pumpUntil never presses and
+		// confirmReviewScreen loops until it is pressed, so this walk parks here
+		// for its whole budget without this press.
+		if c, ok := pumpUntil(frame, "Plates To Cut", 64); !ok {
+			t.Fatalf("the plate census was not shown before the engrave; got %q", c)
+		}
+		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 1 of 3", 64); !ok {
 			t.Fatalf("template engrave did not reach the 3-card engrave; got %q", c)
 		}

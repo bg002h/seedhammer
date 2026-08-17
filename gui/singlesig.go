@@ -22,7 +22,7 @@ import (
 //     gui/derive_xpub.go:88) and §0.1b rules the payload and the keyboard this
 //     phase's PRIMARY data entries. A payload-borne ClassMnemonic reaches
 //     derivation on purpose. What survives is the split that is load-bearing:
-//     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
+//     seedEntryFlowTypedOnly (gui/derive_xpub.go:140), which the VERIFY flows
 //     call so a payload-sourced secret is never compared against itself (§7.4).
 //     ms1 is engraved onto owner-held steel only, never NFC.
 //   - PER-LEG SCRUB (D11): the entropy is gated on mnemonic validity and wiped
@@ -74,10 +74,27 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	}
 
 	// Full (engrave ms1+mk1+md1) vs watch-only (mk1+md1 + ms1 reminder).
+	//
+	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT (F-198a), on this path too. The
+	// passphrase taken above is a LIVE derivation input -- it reaches
+	// deriveSingleSigBundle below and changes the master fingerprint and every
+	// key under it -- while the ms1 this run engraves encodes the WORDS ONLY.
+	// Measured on the same twelve words: the ms1 string is byte-identical with
+	// and without a passphrase, and the master fingerprint is not. So the words
+	// alone restore a DIFFERENT wallet, with no error anywhere, and
+	// "Full (seed + keys)" over that promises a backup that does not reach the
+	// money.
+	//
+	// The label is where it has to be said, because the label is what the
+	// operator reads BEFORE pressing; a note anywhere else is a note read after
+	// the decision. buildFullModeLabel already returns the correct string and was
+	// wired to both multisig paths -- single-sig was the last holdout, which left
+	// the asymmetry the wrong way round: the two paths that told the truth are
+	// the multisig ones, and the flagship was the one that lied.
 	modeChoice := &ChoiceScreen{
 		Title:   "Engrave Mode",
 		Lead:    "What to engrave?",
-		Choices: []string{"Full (seed + keys)", "Watch-only (keys)"},
+		Choices: []string{buildFullModeLabel(passphrase != ""), "Watch-only (keys)"},
 	}
 	modeSel, ok := modeChoice.Choose(ctx, th)
 	if !ok {
@@ -124,14 +141,84 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// Engrave (full = ms1+mk1+md1; watch-only = mk1+md1, + the ms1 reminder via
 	// bundleEngrave's cards-derived gate).
 	cards := singleSigEngraveCards(b, full)
-	bundleEngrave(ctx, th, "Engrave Single-Sig", cards)
+
+	// HOW MANY PLATES, BEFORE THE FIRST ONE (F-202). The operator commits to a 2-
+	// or 3-plate cut -- minutes per plate -- and until now no screen on this path
+	// stated the count. Back here aborts before anything is cut, which is the
+	// last moment that is free.
+	//
+	// THE TITLE IS THE OTHER FRONT-DOOR PATH'S, not the build path's. The build
+	// census title is walk_s4_gate.js's anchor, and cmd/emu/needle_test.go
+	// requires a walk's anchor to have exactly one production site; reusing it
+	// here would make it two-site and break that gate. gui/multisig.go carries
+	// the same note for the same reason. The BODY -- what the operator actually
+	// reads, including the count -- comes from the shared buildPlateCensusLines
+	// and is identical on all three paths.
+	//
+	// AND THIS NOTE MAY NOT SPELL THE BUILD TITLE EITHER. That counter matches
+	// SOURCE BYTES, comments included (F-184), so a comment quoting a needle
+	// costs it its uniqueness exactly as a second screen does. The first draft of
+	// this comment named the string and turned the gate red; it is recorded here
+	// because reading the warning next door did not prevent committing it.
+	if !confirmReviewScreen(ctx, th, "Plates To Cut", buildPlateCensusLines(cards)) {
+		return
+	}
+
+	// AN ABORT ENDS THE PROGRAM HERE (F-197). Everything below this line vouches
+	// for a COMPLETE set: the verify offer over plates that were never all cut
+	// (the md1 is emitted last, so the readback dies reading as "your plates are
+	// unreadable"), and the restore document headed "This backup is N plates ...
+	// If any of them is missing, this backup is incomplete." The abort modal is
+	// the operator's last screen, and bundleAbortWarningText says so.
+	//
+	// The two multisig callers gained this gate at S5's I-12 and this one did
+	// not, so a fix described as covering every engraving caller covered two of
+	// the three that carry a post-engrave tail.
+	if bundleEngrave(ctx, th, "Engrave Single-Sig", cards) != bundleEngraveDone {
+		return
+	}
 
 	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
+	//
+	// THE RECORD IS DECLARED HERE, NOT INSIDE THE OFFER, so that a Skip leaves it
+	// at its zero value and the document below says the weakest true thing. This
+	// path has no retry loop -- the offer is a one-shot `if` -- so `rec` is written
+	// at most once, and statusVerifiedOnRetry is unreachable from it by
+	// construction rather than by an assertion.
+	var rec verifyRecord
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, full, template)
+		singleSigVerifyFlow(ctx, th, full, template, &rec)
 	}
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
-	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path)
+	//
+	// THE STATUS IS WHAT THE VERIFY ABOVE RECORDED, and on a Skip that is the zero
+	// cell -- `rec` is untouched and buildVerifyStatusLine renders the weakest of
+	// the four lines. An empty string here would render as SILENCE, and silence is
+	// what reads as a pass to the stranger holding the steel: an omission that
+	// STRENGTHENS the claim, which is the one failure direction S6a G2 forbids.
+	//
+	// IT IS BUILT FROM THE RECORD, NOT FROM A STATUS. buildVerifyStatusLine
+	// derives the cell itself, because a verifyStatus has already lost the mode
+	// and the mode is what stops a watch-only pass line claiming an ms1
+	// comparison that never ran.
+	//
+	// AND IT CARRIES THIS RUN'S SET (F-198b). It passed nil, and the document was
+	// not one with a missing sentence -- it had no inventory AT ALL: four lines,
+	// master fingerprint, descriptor and two addresses, saying no plate count, no
+	// completeness claim and, the half that loses funds, nothing about the BIP-39
+	// passphrase the run above may have derived from. A reader holding this pile
+	// of steel in five years could not learn that a third spending factor was
+	// ever in play.
+	//
+	// ONE SEED, so ONE FACT and seedCapacityOne. This flow has a single seed seam
+	// by construction (seedEntryFlow, and nothing else in it reads a secret), so
+	// its inventory takes the single-seed arm and its walk-away ruling names the
+	// one seed the device is holding rather than the BUILD path's registry. It
+	// carries no fingerprint because the single-seed arm renders none: with one
+	// seed there is nothing to tell apart.
+	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
+		buildVerifyStatusLine(rec),
+		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
 }

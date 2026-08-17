@@ -103,7 +103,7 @@ func s5StubVerifyFn(t *testing.T, verdicts ...multisigVerifyResult) *int {
 	calls := 0
 	prev := multisigVerifyFn
 	multisigVerifyFn = func(ctx *Context, th *Colors, full bool, expectedSlots []int,
-		engravedMd1 []string,
+		engravedMd1 []string, rec *verifyRecord,
 	) multisigVerifyResult {
 		calls++
 		if calls <= len(verdicts) {

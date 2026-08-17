@@ -106,6 +106,20 @@ func s5OneSlotReadback(t *testing.T) (records []string, md1 []string, plate []st
 // from it is the C1 defect, in miniature, moved into the harness.
 func s5DriveVerify(t *testing.T, records []string, expected []int, engravedMd1 []string, phrase string) (last string, done bool) {
 	t.Helper()
+	return s5DriveVerifyRec(t, records, expected, engravedMd1, phrase, &verifyRecord{})
+}
+
+// s5DriveVerifyRec is s5DriveVerify with the caller's own verifyRecord, so a
+// test can read WHAT THE FLOW OBSERVED and not only what it drew.
+//
+// The record is the S6a seam: the two booleans the restore document's status
+// line is generated from, written at the return sites inside the flow. A test
+// that wants the document's own words for a real verify has to get them from a
+// real run, and this is the only way in.
+func s5DriveVerifyRec(t *testing.T, records []string, expected []int, engravedMd1 []string,
+	phrase string, rec *verifyRecord,
+) (last string, done bool) {
+	t.Helper()
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -115,7 +129,7 @@ func s5DriveVerify(t *testing.T, records []string, expected []int, engravedMd1 [
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1)
+		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1, rec)
 		done = true
 	})
 	defer quit()
@@ -221,7 +235,9 @@ func TestVerifyRefusesAnEmptyExpectation(t *testing.T) {
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append([]string(nil), records...)
-	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, nil, md1) })
+	frame, quit := runUI(ctx, func() {
+		multisigVerifyFlow(ctx, &descriptorTheme, false, nil, md1, &verifyRecord{})
+	})
 	defer quit()
 	c, ok := pumpUntil(frame, "nothing to verify", 16)
 	if !ok {
@@ -247,7 +263,7 @@ func TestVerifyRefusesAMissingEngravedPolicy(t *testing.T) {
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 	frame, quit := runUI(ctx, func() {
-		multisigVerifyFlow(ctx, &descriptorTheme, false, []int{slot}, nil)
+		multisigVerifyFlow(ctx, &descriptorTheme, false, []int{slot}, nil, &verifyRecord{})
 	})
 	defer quit()
 	c, ok := pumpUntil(frame, "nothing to check the plates against", 16)
@@ -370,7 +386,7 @@ func TestBuildPassesTheTailsSlotsToTheVerify(t *testing.T) {
 		t.Fatal("buildMultisigPolicyFlow no longer names the tail's held-slot indices; " +
 			"the verify's obligation list has lost its provenance")
 	}
-	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)") {
+	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1, &rec)") {
 		t.Error("the build path does not hand the tail's own slot indices AND the md1 it " +
 			"engraved to the verify. Any other list is an obligation over plates this run " +
 			"did not cut, and slot indices with no policy behind them are satisfied by a " +
@@ -391,7 +407,7 @@ func TestBuildPassesTheTailsSlotsToTheVerify(t *testing.T) {
 // the stub's, not the verify's.
 func TestSupplyPassesTheEngravedPolicyToTheVerify(t *testing.T) {
 	body := funcBody(t, "multisig.go", "func supplyMultisigPolicyFlow(")
-	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)") {
+	if !strings.Contains(body, "multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1, &rec)") {
 		t.Error("the supply path does not hand the engraved policy to the verify. Slot " +
 			"indices alone are re-based onto whatever policy the readback supplies, which " +
 			"is how another wallet's plates report Verify OK")

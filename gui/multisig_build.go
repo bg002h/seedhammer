@@ -441,6 +441,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, for the same
 	// reason the supply path does: without it this loop is unreachable from any
 	// executing test and its row-to-index mapping is unpinned (B4).
+	//
+	// ONE RECORD FOR THE WHOLE LOOP, AND IT IS DECLARED OUTSIDE THE GATE ABOVE as
+	// well as outside the loop: the restore document below is drawn on runs that
+	// never entered the verify at all (a template, or a build holding no leg of
+	// its own), and on those the zero value is the truthful status. Sticky, for
+	// the supply path's reason -- an earlier attempt that found a bad plate is not
+	// erased by a later one that passed.
+	var rec verifyRecord
 	if !template && len(legs) > 0 {
 		lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
 		for {
@@ -449,7 +457,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 			if !ok || sel != 0 {
 				break
 			}
-			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)
+			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1, &rec)
 			if res != verifyIncomplete && res != verifyFailed {
 				break
 			}
@@ -475,8 +483,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// set short of a factor" and a bool answers it; the document has to say
 		// WHICH seed, because a build holding three slots can carry three different
 		// passphrases and "keep the passphrase somewhere separate" has one referent.
+		//
+		// THE STATUS IS WHAT THE LOOP ABOVE RECORDED. A run that skipped the verify,
+		// or never reached it, leaves `rec` at its zero value and this document
+		// claims nothing; an empty string would render as silence, and silence is
+		// what reads as a pass.
 		multisigRestoreDocFlow(ctx, th, tpl, keys,
-			buildPlateInventoryLines(cardsOut, reg.passphraseFacts()))
+			buildVerifyStatusLine(rec),
+			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany))
 	}
 }
 
@@ -856,10 +870,15 @@ func multisigRemainingSlotChoices(n int, held []int) (labels []string, slots []i
 //
 // THE FIRST SCREEN IS THE SHIPPED ONE, CHARACTER FOR CHARACTER. "Which slot is
 // your key?" is a pinned walk needle with exactly one production site
-// (cmd/emu/needle_test.go), three walk drivers anchor on it, and its default row
-// is @0. So accepting every default produces {@0}: the pre-S5 single-select
-// behaviour unchanged, which is what keeps every existing test and walk meaning
-// what it meant.
+// (cmd/emu/needle_test.go), FOUR walk drivers anchor on it -- walk_build_policy,
+// walk_s3_nested, walk_s4_gate and walk_trace_b, each declaring its own
+// NEEDLE_SLOT -- and its default row is @0. So accepting every default produces
+// {@0}: the pre-S5 single-select behaviour unchanged, which is what keeps every
+// existing test and walk meaning what it meant. (This said "three", and "three"
+// was TRUE when it was written on 2026-08-15; walk_trace_b landed the next day
+// and nothing counted again. S6a step 8's re-sweep did. A comment that states a
+// count over a growing set goes stale by other people's work, not by its own
+// author's mistake, which is why the drivers are now NAMED rather than tallied.)
 //
 // BACK IS NEVER A WAY TO CONFIRM. Back at any of the three surfaces returns
 // ok=false, which buildParamPickFlow reads as "step back one stage" -- the rule

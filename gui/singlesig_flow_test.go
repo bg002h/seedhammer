@@ -80,6 +80,16 @@ func TestEngraveSingleSigFlowFull(t *testing.T) {
 		}
 		// Wallet policy: Full policy md1 (choice 0, default).
 		click(&ctx.Router, Button3)
+		// S6a/F-202: the pre-engrave plate census now stands between the policy
+		// form and the first plate. confirmReviewScreen loops until Button1/
+		// Button3/Center, and pumpUntil only pumps frames -- it never presses --
+		// so this walk parks here for its whole budget without the press below.
+		// The census is CONFIRMED rather than backed out of, because the assertion
+		// this walk exists for is on the screen after it.
+		if c, ok := pumpUntil(frame, "Plates To Cut", 64); !ok {
+			t.Fatalf("the plate census was not shown before the engrave; got %q", c)
+		}
+		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 1 of 3", 64); !ok {
 			t.Fatalf("full mode did not reach engrave with 3 cards; got %q", c)
 		}
@@ -118,6 +128,11 @@ func TestEngraveSingleSigFlowWatchOnly(t *testing.T) {
 			t.Fatalf("did not reach the wallet-policy form choice; got %q", c)
 		}
 		// Wallet policy: Full policy md1 (choice 0, default).
+		click(&ctx.Router, Button3)
+		// S6a/F-202's census, pressed through -- see the Full walk above.
+		if c, ok := pumpUntil(frame, "Plates To Cut", 64); !ok {
+			t.Fatalf("the plate census was not shown before the engrave; got %q", c)
+		}
 		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 1 of 2", 64); !ok {
 			t.Fatalf("watch-only mode did not reach engrave with 2 cards; got %q", c)

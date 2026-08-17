@@ -174,7 +174,7 @@ func s5DriveVerifyTwoSeeds(t *testing.T, records []string, expected []int, engra
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1)
+		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1, &verifyRecord{})
 	})
 	defer quit()
 
