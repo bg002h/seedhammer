@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"seedhammer.com/bundle"
 	"seedhammer.com/md"
@@ -648,4 +649,548 @@ func TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument(t *testing.T) {
 				"verified", file)
 		}
 	}
+}
+
+// ─── S6a step 5: the single-sig path, through the real screens ───────────────
+//
+// THE DEFECT THESE ROWS EXIST FOR IS VERIFIED BY BYTES, NOT BY READING THE CALL
+// GRAPH. On the same twelve words, with and without a BIP-39 passphrase:
+//
+//	ms1          ms10entrsqqq...cj9sxraq34v7f   IDENTICAL   -- the WORDS only
+//	master fp    73c5da0a  vs  fc60c6df         DIFFERS
+//
+// So a passphrase run engraves plates that restore a DIFFERENT wallet from the
+// one the operator just funded, silently, with no error anywhere -- and until
+// this step the flow labelled that set "Full (seed + keys)" and printed a
+// restore document that never mentioned a passphrase at all. Permanently
+// unspendable, and the paperwork vouched for it.
+//
+// EVERY ROW BELOW DRIVES THE PRODUCTION SCREENS. buildFullModeLabel(true) and
+// buildPassphraseInventoryLines already returned the correct sentences before
+// this step and were simply unreachable from this flow, so a helper-level
+// assertion would have been green on the broken tree. That is the shape that let
+// the multisig instance of this defect ship.
+
+// s6aSingleSigOpts picks which single-sig run a walk drives.
+type s6aSingleSigOpts struct {
+	// passphrase takes the payload-borne BIP-39 passphrase at the prompt. It is
+	// a LIVE derivation input all the way down to deriveSingleSigBundle, which is
+	// the whole subject of F-198.
+	passphrase bool
+	// watchOnly picks row 1 of the engrave-mode picker: mk1 + md1, no ms1 on
+	// steel.
+	watchOnly bool
+}
+
+// s6aSingleSigRun is what a walk observed, in the operator's own order.
+type s6aSingleSigRun struct {
+	mode   string // the engrave-mode picker's frame -- what is read BEFORE pressing
+	census string // the pre-engrave "Plates To Cut" frame
+	doc    string // EVERY page of the restore document
+	plates int
+}
+
+// s6aPumpCollecting is pumpUntil that keeps every frame rather than the last
+// one, so a row can say what was drawn BEFORE a screen and not merely that the
+// screen was eventually reached.
+func s6aPumpCollecting(frame func() (string, bool), want string, maxFrames int) ([]string, bool) {
+	var seen []string
+	for i := 0; i < maxFrames; i++ {
+		c, ok := frame()
+		if !ok {
+			break
+		}
+		seen = append(seen, c)
+		if uiContains(c, want) {
+			return seen, true
+		}
+	}
+	return seen, false
+}
+
+// s6aDriveSingleSigToPolicyForm drives engraveSingleSigFlow from its first
+// screen to just past the wallet-policy form picker (answered "Full policy
+// md1"), and returns the ENGRAVE-MODE frame the operator read on the way.
+//
+// It stops there because the next screen is the census, and two rows below need
+// to observe the run's arrival at that screen differently: T6 wants everything
+// drawn before it, and T5 wants to press through it.
+func s6aDriveSingleSigToPolicyForm(t *testing.T, ctx *Context, frame func() (string, bool),
+	opts s6aSingleSigOpts,
+) string {
+	t.Helper()
+	frame()
+	click(&ctx.Router, Button3) // 12 WORDS
+	frame()
+	driveWords(&ctx.Router, abandonAboutPhrase())
+	if c, ok := pumpUntil(frame, "Wallet Type", 160); !ok {
+		t.Fatalf("did not reach the wallet-type picker; got %q", c)
+	}
+	click(&ctx.Router, Button3) // BIP-84 default
+	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+		t.Fatalf("did not reach the passphrase prompt; got %q", c)
+	}
+	if opts.passphrase {
+		// THE PASSPHRASE COMES FROM THE PAYLOAD, not the keyboard: SYSW 3.3.2
+		// admits ClassPassphrase to this program, and the session below holds one.
+		click(&ctx.Router, Down) // "Add passphrase"
+		frame()
+		click(&ctx.Router, Button3)
+		frame()
+		if c, ok := pumpUntil(frame, "Password from where?", 64); !ok {
+			t.Fatalf("the payload's passphrase was not offered; got %q.\nWithout it this "+
+				"walk derives the EMPTY-passphrase wallet and asserts nothing about a "+
+				"passphrase run", c)
+		}
+		click(&ctx.Router, Button3) // FROM PAYLOAD (index 0)
+		frame()
+	} else {
+		click(&ctx.Router, Button3) // Skip
+	}
+	mode, ok := pumpUntil(frame, "What to engrave?", 96)
+	if !ok {
+		t.Fatalf("did not reach the engrave-mode choice; got %q", mode)
+	}
+	if opts.watchOnly {
+		click(&ctx.Router, Down) // row 1
+		frame()
+	}
+	click(&ctx.Router, Button3)
+	if c, ok := pumpUntil(frame, "Engrave wallet policy", 64); !ok {
+		t.Fatalf("did not reach the wallet-policy form choice; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Full policy md1 (row 0, the default)
+	return mode
+}
+
+// s6aSingleSigWalk drives engraveSingleSigFlow end to end, THROUGH EVERY PLATE,
+// to the restore document.
+//
+// IT CUTS THE STEEL because both surfaces this step is about are post-decision:
+// the mode label is what the operator reads before pressing, and the restore
+// document is drawn after the last plate. A walk that stopped at the engrave
+// picker would reach neither.
+func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
+	t.Helper()
+	var run s6aSingleSigRun
+	synctest.Test(t, func(t *testing.T) {
+		e := newEngraver()
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		p.engraver = e
+		ctx := NewContext(p)
+		if opts.passphrase {
+			ctx.sysw = sessionHolding(s5PassphraseRecord)
+		}
+		done := false
+		frame, quit := runUI(ctx, func() {
+			engraveSingleSigFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+
+		run.mode = s6aDriveSingleSigToPolicyForm(t, ctx, frame, opts)
+		c, ok := pumpUntil(frame, "Plates To Cut", 96)
+		if !ok {
+			t.Fatalf("the plate census was not shown before the engrave; got %q", c)
+		}
+		run.census = c
+		click(&ctx.Router, Button3)
+		frame()
+
+		for {
+			if _, ok := pumpUntil(frame, "Choose engraving", 96); !ok {
+				break
+			}
+			click(&ctx.Router, Button3) // first variant
+			frame()
+			s5EngraveOnePlate(t, ctx, frame, e)
+			run.plates++
+			if run.plates > 24 {
+				t.Fatal("the engrave loop did not terminate")
+			}
+		}
+		if run.plates == 0 {
+			t.Fatal("no plate was cut, so this walk never reached the post-engrave surfaces")
+		}
+
+		// A WATCH-ONLY SET ENDS ON THE ms1 HAND-ENGRAVE REMINDER, because no ms1
+		// was cut here; a full set suppresses it (bundleShowMs1Reminder).
+		if _, ok := pumpUntil(frame, "Verify the engraved plates?", 32); !ok {
+			click(&ctx.Router, Button3) // dismiss the reminder
+			frame()
+			if c, ok := pumpUntil(frame, "Verify the engraved plates?", 96); !ok {
+				t.Fatalf("the verify offer was not reached after %d plate(s); got %q",
+					run.plates, c)
+			}
+		}
+		click(&ctx.Router, Down) // Skip
+		frame()
+		click(&ctx.Router, Button3)
+		frame()
+
+		if c, ok := pumpUntil(frame, "Descriptor:", 96); !ok {
+			t.Fatalf("the restore doc was not shown; got %q", c)
+		}
+		// THE DOCUMENT IS A PAGER and the inventory is appended at the TAIL, after
+		// the descriptor chunks and both addresses, so a single-frame assertion
+		// misses every line this step adds.
+		run.doc, _ = s5PageForNeedle(t, ctx, frame, "\x00never matches\x00", 24)
+		click(&ctx.Router, Button3) // done with the restore doc
+		for i := 0; i < 256 && !done; i++ {
+			if _, ok := frame(); !ok {
+				break
+			}
+		}
+		if !done {
+			t.Fatal("the flow did not return after the restore doc")
+		}
+	})
+	return run
+}
+
+// TestSingleSigPassphraseRunTellsTheOperatorWhatIsMissing is T1 and T2, and both
+// halves are funds-bearing.
+//
+// T1 is the label the operator reads BEFORE pressing. T2 is the artifact that
+// outlives them: a stranger holding this steel in five years has no other way to
+// learn that a third spending factor was ever in play, and no plate in the set
+// can be made to yield it.
+func TestSingleSigPassphraseRunTellsTheOperatorWhatIsMissing(t *testing.T) {
+	run := s6aSingleSigWalk(t, s6aSingleSigOpts{passphrase: true})
+	t.Logf("the passphrased single-sig run cut %d plate(s)", run.plates)
+	t.Logf("engrave-mode screen: %q", run.mode)
+	t.Logf("restore doc: %q", run.doc)
+
+	// T1 -- THE LABEL. "Full (seed + keys)" over a passphrase build tells the
+	// operator a partial backup is a complete one, at the one moment they can
+	// still choose otherwise.
+	if !uiContains(run.mode, "NOT passphrase") {
+		t.Errorf("the single-sig engrave-mode picker calls a PASSPHRASE build "+
+			"\"Full (seed + keys)\":\n%q\nms1 encodes the WORDS ONLY -- measured, it is "+
+			"byte-identical with and without a passphrase, while the master fingerprint "+
+			"is not -- so this row promises a backup that restores a DIFFERENT wallet. "+
+			"buildFullModeLabel(true) already returns the correct string; it was simply "+
+			"not called here", run.mode)
+	}
+
+	// T2 -- THE DOCUMENT. Two claims, and the second is what F-198 understated:
+	// this document had no inventory AT ALL, so it stated no plate count, no
+	// completeness claim and no passphrase fact.
+	if !uiContains(run.doc, "BIP-39 passphrase WAS used") {
+		t.Errorf("the single-sig restore document never mentions the passphrase:\n%q\n"+
+			"A reader holding this pile of steel has no way to learn a third spending "+
+			"factor exists. The words alone restore a different wallet, with no error", run.doc)
+	}
+	if !uiContains(run.doc, "This backup is") {
+		t.Errorf("the single-sig restore document carries no plate inventory at all:\n%q\n"+
+			"The one fact that tells a reader whether they hold ALL of it is how many "+
+			"plates there are", run.doc)
+	}
+	// AND THE CONSEQUENCE, not just the fact. "A passphrase was used" without
+	// "these plates do not reach the money" leaves a reader free to assume the
+	// steel is sufficient.
+	if !uiContains(run.doc, "do not reach the money") {
+		t.Errorf("the document names the passphrase but not what its absence costs:\n%q",
+			run.doc)
+	}
+	// The seed statement lands on the same document (step 3's text, step 5's
+	// wiring): a full run says WHICH plate is the secret.
+	if !uiContains(run.doc, "this set contains YOUR seed") {
+		t.Errorf("the full single-sig document does not say which plate carries the "+
+			"seed:\n%q", run.doc)
+	}
+}
+
+// TestSingleSigBareRunDoesNotCryWolf is T3, the NON-VACUITY arm.
+//
+// Without it, "always print the passphrase warning" satisfies T1 and T2 -- and a
+// picker that cries DEFAULT when the operator chose is a picker whose warnings
+// get ignored. The bare run must read exactly as it always did, and its document
+// must ANSWER the reader's question rather than go silent: silence leaves them
+// unable to tell a complete backup from one whose operator forgot to write the
+// passphrase down.
+//
+// IT DRIVES THE MODE PICKER RATHER THAN buildFullModeLabel, because the named
+// mutation ("make buildFullModeLabel always return the passphrase arm") is not
+// the only way this half goes wrong: a call site passing `true` unconditionally
+// is invisible to a helper-level assertion. The DOCUMENT half is asserted on
+// buildPassphraseInventoryLines directly, as its prior art does -- this walk
+// cuts no plates and so never reaches a restore document.
+func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
+	var mode string
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		// THE REAL PANEL, and this is load-bearing rather than tidy. On
+		// newPlatform's default (smaller) display the full row draws as
+		// "seed + keys, NOT passph" -- truncated mid-word, because widget.Label
+		// does not wrap -- and the negative assertion below then cannot see the
+		// clause it is written to forbid. Measured by running this row's own
+		// mutation, which failed on the OTHER assertion and left this one vacuous.
+		// sh2DisplaySize is the machine, and is the same panel assertChoiceLabelFits
+		// budgets the label against.
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		frame, quit := runUI(ctx, func() {
+			engraveSingleSigFlow(ctx, &descriptorTheme)
+		})
+		defer quit()
+		mode = s6aDriveSingleSigToPolicyForm(t, ctx, frame, s6aSingleSigOpts{})
+	})
+	t.Logf("bare engrave-mode screen: %q", mode)
+
+	if uiContains(mode, "NOT passphrase") {
+		t.Errorf("a single-sig build with NO passphrase is labelled as though a factor "+
+			"were missing:\n%q\nA warning that fires when the operator chose plainly is a "+
+			"warning that gets ignored on the run where it matters", mode)
+	}
+	if !uiContains(mode, "Full (seed + keys)") {
+		t.Errorf("the bare run's engrave-mode picker no longer offers the full row at "+
+			"all:\n%q", mode)
+	}
+
+	// THE DOCUMENT HALF. A bare run must SAY so, not go quiet.
+	bare := strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false)), " ")
+	if !strings.Contains(bare, "No BIP-39 passphrase was used") {
+		t.Errorf("the bare arm of the inventory does not answer the reader's question, so "+
+			"a complete backup is indistinguishable from one missing a factor:\n%s", bare)
+	}
+	if strings.Contains(bare, "BIP-39 passphrase WAS used") {
+		t.Errorf("the bare arm warns about a passphrase nobody used:\n%s", bare)
+	}
+}
+
+// TestSingleSigAbortIsTheLastScreenOfTheProgram is T5, and it is F-197 driven
+// through the real screens.
+//
+// Everything past the engrave vouches for a COMPLETE set: the verify offer runs
+// over plates that were never all cut -- the md1 is emitted LAST, so the readback
+// dies reading as "your plates are unreadable" -- and the restore document is
+// headed "This backup is N plates ... If any of them is missing, this backup is
+// incomplete." The abort modal must be the operator's last screen.
+//
+// IT ASSERTS IT SAW THE ABORT FIRST. If a future change moves the abort route,
+// this row would otherwise start passing by never reaching an abort at all,
+// which is the vacuity its multisig twins are written against.
+//
+// NO ENGRAVER IS NEEDED: Back at the FIRST plate's style picker is
+// bundleEngrave's set-level abort, and nothing has been cut at that point.
+func TestSingleSigAbortIsTheLastScreenOfTheProgram(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		done := false
+		frame, quit := runUI(ctx, func() {
+			engraveSingleSigFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+
+		s6aDriveSingleSigToPolicyForm(t, ctx, frame, s6aSingleSigOpts{})
+		if c, ok := pumpUntil(frame, "Plates To Cut", 96); !ok {
+			t.Fatalf("the plate census was not shown; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+		frame()
+		if c, ok := pumpUntil(frame, "Choose engraving", 96); !ok {
+			t.Fatalf("the engrave-style picker was not reached; got %q", c)
+		}
+
+		// THE ABORT.
+		click(&ctx.Router, Button1)
+		if c, ok := pumpUntil(frame, "Bundle Incomplete", 96); !ok {
+			t.Fatalf("Back at the engrave picker did not produce the abort warning; got "+
+				"%q.\nWithout it this row asserts nothing about what follows an abort", c)
+		}
+		click(&ctx.Router, Button3) // dismiss the abort modal
+
+		var after []string
+		for i := 0; i < 256 && !done; i++ {
+			c, ok := frame()
+			if !ok {
+				break
+			}
+			after = append(after, c)
+		}
+		joined := strings.Join(after, " || ")
+		if !done {
+			t.Fatalf("the program did not end after the abort; it drew:\n%q", joined)
+		}
+		for _, banned := range []string{"Verify the engraved plates?", "This backup is", "Descriptor:"} {
+			if uiContains(joined, banned) {
+				t.Errorf("after \"This set is not a usable backup yet\", the single-sig flow "+
+					"still drew %q.\nThe verify cannot succeed over a set whose md1 was never "+
+					"cut, and the restore document describes a partial set as a backup.\nDrawn "+
+					"after the abort:\n%q", banned, joined)
+			}
+		}
+	})
+}
+
+// TestSingleSigShowsThePlateCensusBeforeTheEngrave is T6.
+//
+// The operator commits to a 2- or 3-plate cut, minutes per plate, and until this
+// step no screen on this path stated the count. Back at the census aborts before
+// anything is cut, which is the last moment that is free.
+//
+// THE CLAIM IS ORDERING, NOT PRESENCE. A census drawn after the first plate is
+// no census at all, so this row keeps every frame and reports what was drawn
+// first -- which is also what makes the "remove the census call" mutation fail
+// with the engrave picker's own text rather than with a bare timeout.
+func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		frame, quit := runUI(ctx, func() {
+			engraveSingleSigFlow(ctx, &descriptorTheme)
+		})
+		defer quit()
+
+		s6aDriveSingleSigToPolicyForm(t, ctx, frame, s6aSingleSigOpts{})
+		seen, ok := s6aPumpCollecting(frame, "Plates To Cut", 96)
+		joined := strings.Join(seen, " || ")
+		if !ok {
+			t.Fatalf("the single-sig flow never drew a plate census. It drew:\n%q\n"+
+				"The operator commits to minutes per plate with no count, and the last "+
+				"free moment to abort is before the first cut", joined)
+		}
+		for _, banned := range []string{"Choose engraving", "Card 1 of"} {
+			if uiContains(strings.Join(seen[:len(seen)-1], " || "), banned) {
+				t.Errorf("the engrave picker (%q) was drawn BEFORE the plate census, so the "+
+					"count arrives after the operator has already committed:\n%q",
+					banned, joined)
+			}
+		}
+		// AND THE COUNT IS ON IT. A census screen with no number is a screen that
+		// answers nothing; the count is derived through bundlePlatePlan, the same
+		// function bundleEngrave loops, so it cannot drift from what is cut. A FULL
+		// single-sig run is ms1(1) + mk1(2) + md1(3) = 6, and every one of those
+		// terms comes from the plan rather than from this comment.
+		census := seen[len(seen)-1]
+		if !uiContains(census, "This engraves 6 plates") {
+			t.Errorf("the census screen does not state the plate count this run actually "+
+				"cuts:\n%q", census)
+		}
+		// THE SCREEN IS A PAGER, so the instruction the count exists FOR is not on
+		// page 1 at all -- measured, not assumed: page 1 ends mid-inventory.
+		pages, ok := s5PageForNeedle(t, ctx, frame, "have that many blanks ready", 8)
+		if !ok {
+			t.Errorf("the census never tells the operator to have that many blanks ready "+
+				"before starting, on any page:\n%q", pages)
+		}
+	})
+}
+
+// TestSeedHandlingRulingMatchesEachPathsCapacity is T7c, and it is the row that
+// covers the one thing no compiler and no other test can see: WHICH capacity
+// each of the three call sites hands over.
+//
+// buildPlateInventoryLines takes a seedCapacity, and T7 asserts it produces the
+// right text WHEN HANDED a given one. That says nothing about whether any call
+// site hands it the right one -- and a swapped argument compiles, renders, and
+// looks entirely healthy. Only the build path holds a registry that can carry a
+// seed per held slot; the supply path and single-sig each have ONE seed seam by
+// construction, so "Every seed you entered -- this build can hold several" is
+// false on both of them.
+//
+// EVERY ARM DRIVES ITS FLOW TO A RENDERED DOCUMENT. A unit assertion on the
+// helper is exactly what let the multisig instance of this cycle's defect ship,
+// and the capacity argument is not visible from the helper at all.
+//
+// THE ARMS ARE WHOLE-CLAUSE AND MUTUALLY EXCLUSIVE: each asserts its own subject
+// is present AND the other absent, so swapping either call site's argument fails
+// on both halves rather than on a needle that happens to survive.
+func TestSeedHandlingRulingMatchesEachPathsCapacity(t *testing.T) {
+	const (
+		oneSubject  = "The seed you entered"
+		manySubject = "Every seed you entered"
+	)
+	check := func(t *testing.T, path, doc, want, notWant string) {
+		t.Helper()
+		if !uiContains(doc, want) {
+			t.Errorf("the %s restore document's seed-handling ruling does not carry %q, "+
+				"which is the subject that path's seed capacity entitles:\n%q",
+				path, want, doc)
+		}
+		if uiContains(doc, notWant) {
+			t.Errorf("the %s restore document's seed-handling ruling says %q. That "+
+				"describes a different machine from the one the operator was standing at, "+
+				"on the artifact read years later:\n%q", path, notWant, doc)
+		}
+	}
+
+	// SINGLE-SIG: one seed seam (seedEntryFlow, and nothing else reads a secret).
+	// Driven WATCH-ONLY, which is also the cheaper set -- two cards rather than
+	// three -- and which exercises the arm that drops the "plates are the secret"
+	// pair, so the ruling under test is the one this path most often prints.
+	t.Run("single-sig", func(t *testing.T) {
+		run := s6aSingleSigWalk(t, s6aSingleSigOpts{watchOnly: true})
+		t.Logf("the watch-only single-sig run cut %d plate(s)", run.plates)
+		check(t, "single-sig", run.doc, oneSubject, manySubject)
+		// The watch-only document must not contradict itself about the one thing
+		// it exists to settle: it says no plate holds the seed, so it may not also
+		// say the plates ARE the secret.
+		if uiContains(run.doc, "the plates are the secret") {
+			t.Errorf("the watch-only single-sig document says the plates are the secret, "+
+				"over a set whose own inventory says no plate in it holds the seed:\n%q",
+				run.doc)
+		}
+		if !uiContains(run.doc, "this set contains NO seed") {
+			t.Errorf("the watch-only single-sig document never says the set holds no seed. "+
+				"Silence is what a reader mistakes for a lost plate:\n%q", run.doc)
+		}
+	})
+
+	// MULTISIG SUPPLY: also one seed seam, and this document CHANGES -- it said
+	// "this build can hold several" today, which S5 wired to a path it does not
+	// fit.
+	t.Run("multisig-supply", func(t *testing.T) {
+		_, doc := s5SupplyPassphraseWalk(t)
+		check(t, "multisig supply", doc, oneSubject, manySubject)
+	})
+
+	// MULTISIG BUILD: the registry, one seed per held slot across distinct
+	// masters. Its document must stay byte-identical to the S5-reviewed sentence.
+	t.Run("multisig-build", func(t *testing.T) {
+		records := cosignerCardRecords(t, 4) // A@0, B@0, C@0, A@1
+		synctest.Test(t, func(t *testing.T) {
+			e := newEngraver()
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			p.engraver = e
+			ctx := NewContext(p)
+			ctx.sysw = sessionHolding(records...)
+			done := false
+			// THE RASTER HARNESS, for s5EngraveEveryPlate's measured reason: the
+			// frames a plate takes depend on which harness pumps them.
+			frame, _, _, quit := runUITouchRaster(ctx, func() {
+				buildMultisigPolicyFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+
+			s5DriveBuildToEngravePicker(t, ctx, frame)
+			t.Logf("the build run cut %d plate(s)", s5EngraveEveryPlate(t, ctx, frame, e))
+
+			if c, ok := pumpUntil(frame, "Verify the engraved plates?", 96); !ok {
+				t.Fatalf("the verify offer was not reached after the engrave; got %q", c)
+			}
+			click(&ctx.Router, Down) // Skip
+			frame()
+			click(&ctx.Router, Button3)
+			frame()
+			if c, ok := pumpUntil(frame, "Descriptor:", 128); !ok {
+				t.Fatalf("the restore doc was not shown; got %q", c)
+			}
+			doc, _ := s5PageForNeedle(t, ctx, frame, "\x00never matches\x00", 32)
+			check(t, "multisig build", doc, manySubject, oneSubject)
+			click(&ctx.Router, Button3) // done with the restore doc
+			for i := 0; i < 256 && !done; i++ {
+				if _, ok := frame(); !ok {
+					break
+				}
+			}
+			if !done {
+				t.Error("the build flow did not return after the restore doc")
+			}
+		})
+	})
 }
