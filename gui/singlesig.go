@@ -133,5 +133,19 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	}
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
-	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path)
+	//
+	// THE STATUS IS THE ZERO CELL UNTIL THE VERIFY IS WIRED (S6a step 7), AND
+	// THAT IS THE DIRECTION THIS HAS TO FAIL IN. The verify above records nothing
+	// yet, so the document claims nothing: verifyStatusNotFullyCheckedLine is
+	// byte-identical to what buildVerifyStatusLine renders for a record with
+	// neither bit set, which is exactly the run this path can currently describe.
+	// An empty string here would render as SILENCE, and silence is what reads as
+	// a pass to the stranger holding the steel -- an omission that STRENGTHENS
+	// the claim, which is the one failure direction S6a G2 forbids.
+	//
+	// `extra` is nil for the same reason: the set inventory is step 5's, and a
+	// document that says nothing about the set is weaker than one that says
+	// something wrong about it.
+	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
+		verifyStatusNotFullyCheckedLine, nil)
 }

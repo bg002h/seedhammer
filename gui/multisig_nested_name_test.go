@@ -227,7 +227,10 @@ func TestRestoreDocNestedNameIsActuallyDrawn(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
 	}
 	frame, _, ink, quit := runUITouchRaster(ctx, func() {
-		multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, nil)
+		// The status is the production placeholder (S6a step 4), not "": this test
+		// rasterises the document the operator is shown, and a document with an
+		// empty first line is not one any call site produces.
+		multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, verifyStatusNotFullyCheckedLine, nil)
 	})
 	defer quit()
 	content, ok := pumpUntil(frame, "P2SH-P2WSH", 64)

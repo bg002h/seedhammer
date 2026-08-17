@@ -475,7 +475,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// set short of a factor" and a bool answers it; the document has to say
 		// WHICH seed, because a build holding three slots can carry three different
 		// passphrases and "keep the passphrase somewhere separate" has one referent.
+		//
+		// THE STATUS IS THE ZERO CELL UNTIL THE VERIFY IS WIRED (S6a step 7). The
+		// retry loop above records nothing yet, so this document claims nothing:
+		// verifyStatusNotFullyCheckedLine is what buildVerifyStatusLine renders for
+		// a record with neither bit set. An empty string would render as silence,
+		// and silence is what reads as a pass.
 		multisigRestoreDocFlow(ctx, th, tpl, keys,
+			verifyStatusNotFullyCheckedLine,
 			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany))
 	}
 }

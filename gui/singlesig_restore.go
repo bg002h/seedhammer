@@ -116,7 +116,19 @@ func singleSigRestoreLines(masterFP uint32, desc *bip380.Descriptor) ([]string, 
 // (NOT DescriptorScreen — the 0-alloc gate, recon Topic-8). It is display-only;
 // no secret material, no engrave. parentFP (R0-I1) is threaded so the displayed
 // descriptor's xpub is canonical (byte-matches the engraved mk1).
-func restoreDocFlow(ctx *Context, th *Colors, xpub string, masterFP, parentFP uint32, script md.ScriptKind, path bip32.Path) {
+//
+// `status` IS THE DOCUMENT'S FIRST LINE, and the position is the whole of it
+// (S6a §4.2). restoreDocScreen is a PAGER, so a trailing parameter cannot reach
+// slice index 0, and index 0 is what "page 1" means here -- a verification
+// status the reader has to page to is one the reader does not have. `extra` is
+// appended at the TAIL, where the set inventory belongs: the status answers
+// "can I trust any of this?" before the wallet, and the inventory answers "is
+// this everything?" after it.
+//
+// BOTH ARE PASSED IN RATHER THAN DERIVED HERE, for the same reason
+// multisigRestoreDocFlow's already were: only the flow that engraved knows what
+// it cut, and only the flow that verified knows what it observed.
+func restoreDocFlow(ctx *Context, th *Colors, xpub string, masterFP, parentFP uint32, script md.ScriptKind, path bip32.Path, status string, extra []string) {
 	desc, err := singleSigRestoreDescriptor(xpub, masterFP, parentFP, script, path)
 	if err != nil {
 		showError(ctx, th, "Restore Doc", "Couldn't build the watch-only descriptor.")
@@ -127,7 +139,7 @@ func restoreDocFlow(ctx *Context, th *Colors, xpub string, masterFP, parentFP ui
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return
 	}
-	restoreDocScreen(ctx, th, lines)
+	restoreDocScreen(ctx, th, append(append([]string{status}, lines...), extra...))
 }
 
 // restoreDocScreen is a plain, paged, read-only display of the restore lines

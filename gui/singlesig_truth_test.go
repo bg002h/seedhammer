@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"seedhammer.com/bundle"
+	"seedhammer.com/md"
 )
 
 // ─── S6a: the verification status line, tested as a pure function ────────────
@@ -466,6 +467,185 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// ─── S6a step 4: the status reaches slice index 0, the inventory the tail ────
+//
+// Step 4 is a SIGNATURE CHANGE and nothing else. Both restore-doc flows gain
+// `status` and `extra`; WHAT flows through them arrives at steps 5 and 7. So
+// there are exactly two things this step can get wrong, and both are below:
+// POSITION, and the placeholder the four call sites pass while the verify is
+// still unwired.
+//
+// THESE ARE NOT T11 AND NOT T20, and writing either here would be writing a test
+// that cannot observe what it names. Both assert on a rendered document carrying
+// a REAL verification status -- T11 through a production flow, T20 across all
+// three of them -- and no flow records a verify bit until step 7, so every
+// document in the tree today carries the same zero-cell line. What IS observable
+// now is the seam itself, which is why only the seam is asserted.
+
+// TestRestoreDocPutsTheStatusFirstAndTheInventoryLast is step 4's own row: the
+// `status` parameter lands at slice index 0 of what restoreDocScreen is given,
+// and `extra` lands at the tail, on BOTH restore-doc flows.
+//
+// THE PAGER IS THE WHOLE REASON THERE ARE TWO PARAMETERS. An earlier round of
+// the design specified only a trailing `extra` and had the status ride in it;
+// append(lines, extra...) cannot place anything at index 0, so the status would
+// have arrived after the descriptor and both addresses -- several pages into a
+// screen whose Page button the reader has to know to press. That is the mutation
+// this test exists for, and it is a shape the compiler is perfectly happy with.
+//
+// THE FIXTURE STATUSES ARE SYNTHETIC ON PURPOSE. Position is the claim here, so
+// the strings only need to be short and distinguishable: the real status line
+// wraps to most of page 1 on this pager, and "did it come first" then cannot be
+// read off a single frame at all. The REAL line's placement on a REAL document is
+// T11's, at step 7.
+func TestRestoreDocPutsTheStatusFirstAndTheInventoryLast(t *testing.T) {
+	const (
+		statusNeedle = "ZZSTATUSZZ"
+		extraNeedle  = "ZZINVENTORYZZ"
+	)
+	extra := []string{extraNeedle}
+
+	// page1 renders a restore-doc flow and returns its FIRST frame. This screen
+	// never presses on its own -- pumpUntil only pumps -- so the first frame is
+	// page 1, which is the page the operator is looking at.
+	page1 := func(t *testing.T, ui func(ctx *Context)) string {
+		t.Helper()
+		ctx := NewContext(newPlatform())
+		frame, quit := runUI(ctx, func() { ui(ctx) })
+		defer quit()
+		content, ok := frame()
+		if !ok {
+			t.Fatal("the restore doc produced no frame")
+		}
+		return content
+	}
+
+	// uiIndex is uiContains' answer to WHERE, and it has to normalise the same
+	// way: the space glyph inks nothing, so op.Drawer.ExtractText never sees one
+	// and a needle carrying a space matches nothing at all.
+	uiIndex := func(content, needle string) int {
+		return strings.Index(strings.ToLower(content),
+			strings.ReplaceAll(strings.ToLower(needle), " ", ""))
+	}
+
+	// firstDocLine is the first line the DOCUMENT itself contributes, so "the
+	// status is at index 0" is checkable as "the status is drawn before it".
+	check := func(t *testing.T, name, content, firstDocLine string) {
+		t.Helper()
+		si := uiIndex(content, statusNeedle)
+		if si < 0 {
+			t.Errorf("%s: page 1 of the restore document does not carry the status at "+
+				"all. A trailing parameter cannot reach slice index 0, and a status the "+
+				"reader has to page to is one the reader does not have\n  page 1 %q",
+				name, content)
+			return
+		}
+		di := uiIndex(content, firstDocLine)
+		if di < 0 {
+			t.Fatalf("%s: page 1 does not carry %q, so this test cannot say what the "+
+				"status precedes\n  page 1 %q", name, firstDocLine, content)
+		}
+		if si > di {
+			t.Errorf("%s: the status is on page 1 but is drawn BELOW %q, so it is not at "+
+				"slice index 0\n  page 1 %q", name, firstDocLine, content)
+		}
+		if uiIndex(content, extraNeedle) >= 0 {
+			t.Errorf("%s: the set inventory is on PAGE 1. It is appended at the tail, "+
+				"after the descriptor and both addresses, so a first page carrying it is "+
+				"a document whose two ends have been swapped\n  page 1 %q", name, content)
+		}
+	}
+
+	t.Run("single-sig", func(t *testing.T) {
+		_, _, pfp, err := decodeXpubBytes(knownAccountXpub84)
+		if err != nil {
+			t.Fatalf("decodeXpubBytes: %v", err)
+		}
+		content := page1(t, func(ctx *Context) {
+			restoreDocFlow(ctx, &descriptorTheme, knownAccountXpub84, knownMasterFP, pfp,
+				md.ScriptWpkh, singleSigPath(84), statusNeedle, extra)
+		})
+		check(t, "single-sig", content, "Master fp:")
+	})
+
+	t.Run("multisig", func(t *testing.T) {
+		tpl, keys, err := md.ExpandWalletPolicyChunks(buildAssembledMd1(t, md.MultisigWsh))
+		if err != nil {
+			t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
+		}
+		content := page1(t, func(ctx *Context) {
+			multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, statusNeedle, extra)
+		})
+		// "Type:" is multisigRestoreLines' own first line on the expandOK branch,
+		// which is the branch every assembled full policy lands on.
+		check(t, "multisig", content, "Type:")
+	})
+}
+
+// TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument pins WHAT the four
+// call sites pass while steps 5 and 7 are still outstanding.
+//
+// A SIGNATURE CHANGE LANDS AHEAD OF ITS VALUES, so for the length of this step
+// every restore document in the tree carries a placeholder -- and a placeholder
+// is a claim like any other. The rule it has to satisfy is S6a G2's direction:
+// if step 7 never arrived, the document must say LESS than the truth, never
+// more. verifyStatusNotFullyCheckedLine is the weakest of the four lines and is
+// byte-identical to what the builder renders for a record with neither bit set,
+// so wiring the real record in later can only ever strengthen a document that
+// earned it.
+//
+// THE FAILURE THIS GUARDS IS "" AND IT IS NOT A HYPOTHETICAL. An empty status
+// still occupies index 0 and still compiles; it renders as SILENCE, and silence
+// about a verification is precisely what reads as a pass to a stranger years
+// later. That is an omission that STRENGTHENS a claim, and it is the one
+// direction the design does not allow a mistake in.
+func TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument(t *testing.T) {
+	// (a) THE PLACEHOLDER IS THE ZERO CELL, exactly. Not "similar to": step 7
+	// replaces these literals with buildVerifyStatusLine(rec), and on a run that
+	// recorded nothing that substitution has to be a no-op on the page.
+	if got := buildVerifyStatusLine(verifyRecord{}); got != verifyStatusNotFullyCheckedLine {
+		t.Errorf("the step-4 placeholder is not what an unrecorded verify renders, so "+
+			"wiring the record in at step 7 would silently change every document that "+
+			"recorded nothing\n  placeholder %q\n  zero cell   %q",
+			verifyStatusNotFullyCheckedLine, got)
+	}
+
+	// (b) AND EVERY PRODUCTION CALL SITE PASSES IT. Three flows reach a restore
+	// document and all three are wired the same way; a site left on "" is invisible
+	// to the compiler and to every rendering test, because an empty label draws
+	// nothing and asserting on nothing is what the whole cycle is about.
+	//
+	// THIS ROW IS EXPECTED TO GO RED AT STEP 7 and must be updated then, not
+	// loosened: that is the step where these literals become
+	// buildVerifyStatusLine(rec) and where T20 takes over the same duty on a
+	// rendered document.
+	//
+	// THE SEARCH IS OVER CODE, NOT SOURCE, and that is not a refinement: all
+	// three call sites carry a comment explaining the placeholder BY NAME, so a
+	// site edited to "" would leave its own justification behind and a raw
+	// readGuiFile would keep passing over it. Found by running this row's own
+	// mutation, which is the only reason it is written this way.
+	codeOf := func(t *testing.T, file string) string {
+		t.Helper()
+		var code []string
+		for _, line := range strings.Split(readGuiFile(t, file), "\n") {
+			if i := strings.Index(line, "//"); i >= 0 {
+				line = line[:i]
+			}
+			code = append(code, line)
+		}
+		return strings.Join(code, "\n")
+	}
+	for _, file := range []string{"singlesig.go", "multisig.go", "multisig_build.go"} {
+		if src := codeOf(t, file); !strings.Contains(src, "verifyStatusNotFullyCheckedLine") {
+			t.Errorf("gui/%s reaches a restore document but names no status placeholder. "+
+				"A restore-doc call site whose status is \"\" renders a blank first line, "+
+				"and a document silent about its verification is one a stranger reads as "+
+				"verified", file)
 		}
 	}
 }

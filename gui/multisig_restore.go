@@ -97,11 +97,18 @@ func desc4Display(tpl md.Template) string {
 // stated no plate count and -- through buildPlateInventoryLines' passphrase arm
 // -- never said that a BIP-39 passphrase is a required spending factor absent
 // from every plate in the set.
-func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey, extra []string) {
+//
+// `status` IS THE DOCUMENT'S FIRST LINE (S6a §4.2), and it is a SECOND
+// parameter rather than one more entry in `extra` because this screen is a
+// PAGER: append(lines, extra...) cannot place anything at slice index 0, and
+// index 0 is what page 1 means. Silence about the verification is the one thing
+// the status exists to stop being mistakable for a pass, so it goes where the
+// reader cannot miss it -- above the wallet it scopes, not below it.
+func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey, status string, extra []string) {
 	lines, _, err := multisigRestoreLines(tpl, keys)
 	if err != nil {
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return
 	}
-	restoreDocScreen(ctx, th, append(lines, extra...))
+	restoreDocScreen(ctx, th, append(append([]string{status}, lines...), extra...))
 }

@@ -358,7 +358,14 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// single-seed arm renders none: with one seed there is nothing to tell apart,
 	// and deriving a master fingerprint here purely to print it would be another
 	// PBKDF2 pass over a mnemonic whose last consumer was step (6).
+	//
+	// THE STATUS IS THE ZERO CELL UNTIL THE VERIFY IS WIRED (S6a step 7). The
+	// retry loop above records nothing yet, so this document claims nothing:
+	// verifyStatusNotFullyCheckedLine is what buildVerifyStatusLine renders for a
+	// record with neither bit set. An empty string would render as silence, and
+	// silence is what reads as a pass.
 	multisigRestoreDocFlow(ctx, th, tpl, keys,
+		verifyStatusNotFullyCheckedLine,
 		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
 }
 
