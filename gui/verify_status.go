@@ -130,9 +130,15 @@ const (
 	// reader to confirm before relying, and deliberately does NOT cry wolf: the
 	// modal case reaching it is an operator who skipped the verify, whose backup
 	// is probably fine.
+	//
+	// IT NAMES NO ARTIFACT ON THE PAGE, and that is load-bearing. An earlier
+	// draft said "(master fingerprint below)" -- true of the single-sig document
+	// (gui/singlesig_restore.go:107 prints "Master fp: %08x") and FALSE of both
+	// multisig documents, which carry a policy, a descriptor and addresses but no
+	// fingerprint. This one constant renders on all three, so any artifact it
+	// names must exist on all three. Whole-diff review I-1.
 	verifyStatusNotFullyCheckedLine = "These plates were not fully checked. " +
-		"Confirm they restore this wallet (master fingerprint below) before " +
-		"relying on this backup."
+		"Confirm they restore this wallet before relying on this backup."
 	// verifyStatusDidNotPassLine says a check RAN and did not pass. It does not
 	// say which check or how, and that is deliberate: the device could not
 	// reliably earn the stronger claim, and the stranger holding the steel can

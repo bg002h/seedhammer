@@ -32,7 +32,7 @@ import (
 // so they are assembled from clauses rather than pasted.
 const (
 	t21ZeroCellLine = "These plates were not fully checked. Confirm they restore " +
-		"this wallet (master fingerprint below) before relying on this backup."
+		"this wallet before relying on this backup."
 	t21DidNotPassLine = "A verification check ran and did not pass: a comparison did " +
 		"not match, or a plate could not be read or accounted for. Do NOT rely on this " +
 		"backup until a full check passes. Check again with every plate this run " +
@@ -2339,4 +2339,50 @@ func guiDocComment(t *testing.T, file, decl string) string {
 			"a statement about the empty string", file, decl)
 	}
 	return strings.Join(block, "\n")
+}
+
+// TestScopeLineRendersOnlyUnderCheckDidNotPass pins §4.7f's SECOND half.
+//
+// §4.7f says the scoping line renders under statusCheckDidNotPass "NOT under
+// statusNotFullyChecked, whose own line already tells the reader to confirm
+// before relying -- R7 ruled that widening it to the modal Skip path cries wolf
+// on a backup that is probably fine."
+//
+// THAT NEGATIVE WAS GUARDED BY NOTHING (whole-diff review M-2). The positive
+// half is driven by the flow tests, but no test drove the ZERO CELL through
+// verifyStatusScopeLines, so widening the condition to `status != ""` -- the
+// obvious way to write this function wrong -- broke no test at all. Crying wolf
+// on the modal path is a real cost: an operator who is told the page may be
+// wrong every time they skip a check learns to ignore the line that matters.
+//
+// All four cells are driven, so the mutation has nowhere to hide.
+func TestScopeLineRendersOnlyUnderCheckDidNotPass(t *testing.T) {
+	full := verifyRecord{pass: &passRecord{full: true, legs: 1}}
+	adverse := verifyRecord{adverse: true}
+	retry := verifyRecord{pass: &passRecord{full: true, legs: 1}, adverse: true}
+
+	for _, tc := range []struct {
+		name string
+		rec  verifyRecord
+		want bool
+	}{
+		{"zero cell (skipped verify) -- must NOT scope", verifyRecord{}, false},
+		{"pass, no adverse -- must NOT scope", full, false},
+		{"pass on retry -- must NOT scope", retry, false},
+		{"adverse, no pass -- MUST scope", adverse, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := buildVerifyStatusLine(tc.rec)
+			got := verifyStatusScopeLines(status)
+			if tc.want && len(got) != 1 {
+				t.Fatalf("status %q got %d scope lines, want exactly 1:\n%q",
+					status, len(got), got)
+			}
+			if !tc.want && len(got) != 0 {
+				t.Fatalf("status %q got %d scope lines, want 0 -- §4.7f forbids "+
+					"scoping this cell, and widening it cries wolf on a backup "+
+					"that is probably fine:\n%q", status, len(got), got)
+			}
+		})
+	}
 }
