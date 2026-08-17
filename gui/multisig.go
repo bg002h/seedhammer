@@ -31,7 +31,7 @@ import (
 //     phase's PRIMARY data entries. A payload-borne ClassMnemonic reaches
 //     derivation on purpose, and cmd/emu/walk_build_policy.js drives exactly
 //     that. What survives is the split that is load-bearing:
-//     seedEntryFlowTypedOnly (gui/derive_xpub.go:124), which the VERIFY flows
+//     seedEntryFlowTypedOnly (gui/derive_xpub.go:140), which the VERIFY flows
 //     call so a payload-sourced secret is never compared against itself (§7.4).
 //     ms1 is engraved onto owner-held steel only, never NFC.
 //   - PER-LEG SCRUB (I-7): the entropy is gated + wiped inside deriveMultisigLeg,

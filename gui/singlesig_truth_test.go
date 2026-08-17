@@ -2230,3 +2230,113 @@ func TestMultisigVerifyRecordsWhatItObserved(t *testing.T) {
 		}
 	})
 }
+
+// ─── T8: the abort-gate justification must name all THREE tail-carrying callers ─
+//
+// S6a §4.8b comment 1. gui/bundle_flow.go justified where the abort warning's
+// text lives with "both engraving callers now gate it on this function's own
+// caller returning bundleEngraveDone", and that sentence was FALSE ON THE DAY IT
+// WAS WRITTEN: three bundleEngrave call sites carry a post-engrave tail and only
+// two of them gated. S5's I-12 fold gated the two multisig callers and
+// generalised from the two it happened to be looking at; engraveSingleSigFlow
+// already existed, ungated, with a tail, so a single-sig abort still printed the
+// restore document. S6a step 5 gated it and step 8 corrects the sentence.
+//
+// This is the class of claim a reviewer INHERITS AS A GIVEN rather than checks --
+// F-196's lesson, one stage earlier in this same codebase -- so the correction is
+// pinned by a test rather than left to the next reader to re-derive.
+//
+// WHY THE POSITIVE HALF IS SCOPED TO ONE COMMENT BLOCK. A bare `!Contains` over
+// the file is satisfied by deleting the justification outright, and by any
+// differently-false replacement (§5.2). A positive `Contains` over the whole FILE
+// is barely better: it can be satisfied by some OTHER comment that happens to
+// carry the words, which is exactly how step 4's guard passed with the code
+// gutted. So the positive half reads only the doc comment immediately above
+// bundleAbortWarningText -- the sentence actually under review -- while the
+// negative half keeps the whole file, where it is strictly stronger.
+func TestBundleAbortJustificationNamesEveryTailCarryingCaller(t *testing.T) {
+	const file = "bundle_flow.go"
+
+	// NEGATIVE, FILE-WIDE. The false claim must be gone from the file, not merely
+	// moved out of the paragraph it was in.
+	if src := readGuiFile(t, file); strings.Contains(src, "both engraving callers") {
+		t.Error("gui/bundle_flow.go still justifies the abort warning's placement with " +
+			"\"both engraving callers\". THREE bundleEngrave call sites carry a " +
+			"post-engrave tail -- engraveSingleSigFlow (gui/singlesig.go), " +
+			"supplyMultisigPolicyFlow (gui/multisig.go) and buildMultisigPolicyFlow " +
+			"(gui/multisig_build.go) -- so \"both\" undercounts the callers the gate " +
+			"has to hold for, and it undercounted them when it was written")
+	}
+
+	// POSITIVE, SCOPED TO THE SENTENCE UNDER REVIEW. Each of the three callers that
+	// carries a tail is named, because a corrected COUNT that still does not say
+	// WHICH callers leaves the next reader exactly where the last one was.
+	doc := guiDocComment(t, file, "func bundleAbortWarningText(")
+	for _, caller := range []string{
+		"engraveSingleSigFlow",     // gui/singlesig.go:177 -- gated by S6a step 5
+		"supplyMultisigPolicyFlow", // gui/multisig.go:291   -- gated by S5's I-12
+		"buildMultisigPolicyFlow",  // gui/multisig_build.go:402 -- gated by S5's I-12
+	} {
+		if !strings.Contains(doc, caller) {
+			t.Errorf("the justification above bundleAbortWarningText does not name %s, "+
+				"which carries a post-engrave tail and gates on bundleEngraveDone:\n%s",
+				caller, doc)
+		}
+	}
+	// AND THE COUNT ITSELF, pinned to the corrected sentence rather than to the
+	// bare word. A first draft of this row asserted only that the block contained
+	// "three" somewhere, and the mutation run showed it PASSING against the old
+	// comment: the same block already says "exactly three options" about something
+	// else entirely, four paragraphs up. That is the false-PASS this test exists to
+	// forbid, reproduced inside the test itself, so the needle is the phrase that
+	// carries the claim.
+	const countClaim = "all THREE callers that carry a post-engrave tail"
+	if !strings.Contains(doc, countClaim) {
+		t.Errorf("the justification above bundleAbortWarningText does not state the "+
+			"count as %q. \"both\" was wrong by exactly one and nothing in the source "+
+			"said so:\n%s", countClaim, doc)
+	}
+	if strings.Contains(doc, "both engraving callers") {
+		t.Errorf("the justification above bundleAbortWarningText still claims \"both "+
+			"engraving callers\":\n%s", doc)
+	}
+}
+
+// guiDocComment returns the contiguous `//` comment block immediately above `decl`
+// in a source file of this package.
+//
+// It exists so a source assertion can be aimed at ONE comment. readGuiFile hands
+// back the whole file, and over a 900-line file a positive `Contains` proves only
+// that the words appear SOMEWHERE -- which a comment about something else
+// satisfies just as well as the one being policed. Same blunt-source-inspection
+// idiom as funcBody and readGuiFile; narrower target.
+//
+// It FATALS rather than returning "" when the declaration is missing or carries no
+// doc comment, because both of those states would otherwise let every `Contains`
+// below it assert against the empty string and report a pass.
+func guiDocComment(t *testing.T, file, decl string) string {
+	t.Helper()
+	src := readGuiFile(t, file)
+	i := strings.Index(src, decl)
+	if i < 0 {
+		t.Fatalf("%s does not contain %q -- this guard protects nothing", file, decl)
+	}
+	if strings.Contains(src[i+len(decl):], decl) {
+		t.Fatalf("%s contains %q more than once, so this guard cannot tell which "+
+			"comment it is reading", file, decl)
+	}
+	above := strings.Split(src[:i], "\n")
+	above = above[:len(above)-1] // drop the partial line `decl` starts on
+	var block []string
+	for j := len(above) - 1; j >= 0; j-- {
+		if !strings.HasPrefix(strings.TrimSpace(above[j]), "//") {
+			break
+		}
+		block = append([]string{above[j]}, block...)
+	}
+	if len(block) == 0 {
+		t.Fatalf("%s: %q has no doc comment, so a Contains assertion on it would be "+
+			"a statement about the empty string", file, decl)
+	}
+	return strings.Join(block, "\n")
+}

@@ -870,10 +870,15 @@ func multisigRemainingSlotChoices(n int, held []int) (labels []string, slots []i
 //
 // THE FIRST SCREEN IS THE SHIPPED ONE, CHARACTER FOR CHARACTER. "Which slot is
 // your key?" is a pinned walk needle with exactly one production site
-// (cmd/emu/needle_test.go), three walk drivers anchor on it, and its default row
-// is @0. So accepting every default produces {@0}: the pre-S5 single-select
-// behaviour unchanged, which is what keeps every existing test and walk meaning
-// what it meant.
+// (cmd/emu/needle_test.go), FOUR walk drivers anchor on it -- walk_build_policy,
+// walk_s3_nested, walk_s4_gate and walk_trace_b, each declaring its own
+// NEEDLE_SLOT -- and its default row is @0. So accepting every default produces
+// {@0}: the pre-S5 single-select behaviour unchanged, which is what keeps every
+// existing test and walk meaning what it meant. (This said "three", and "three"
+// was TRUE when it was written on 2026-08-15; walk_trace_b landed the next day
+// and nothing counted again. S6a step 8's re-sweep did. A comment that states a
+// count over a growing set goes stale by other people's work, not by its own
+// author's mistake, which is why the drivers are now NAMED rather than tallied.)
 //
 // BACK IS NEVER A WAY TO CONFIRM. Back at any of the three surfaces returns
 // ok=false, which buildParamPickFlow reads as "step back one stage" -- the rule

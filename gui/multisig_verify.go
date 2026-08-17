@@ -75,13 +75,19 @@ const (
 // the whole engrave and cut every plate again over hours; the predictable
 // response is to fund the wallet anyway.
 //
-// FOUR OUTCOMES, NOT A BOOL, because the callers owe three different things.
+// FIVE OUTCOMES, NOT A BOOL, because the callers owe three different things.
 // Only verifyComplete may fall through to the restore document. Incomplete and
 // Failed must be RE-OFFERED, since both are states an operator can act on with
 // the plates in front of them. Refused and Abandoned must not be: a structural
 // refusal (no obligation, no policy, an unreadable readback) says nothing the
 // operator can fix by trying again with the same inputs, and an abandon is them
 // choosing to stop.
+//
+// THE HEADLINE SAID "FOUR" UNTIL S6a STEP 8, while the paragraph under it named
+// all five and the const block below declares all five. Three obligations over
+// five outcomes is the whole point of the type, so the two numbers were never the
+// same number -- and S6a round 0 repeated the "four" straight out of this
+// headline, which is what a miscount in a comment costs.
 type multisigVerifyResult int
 
 const (
