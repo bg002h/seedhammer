@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"seedhammer.com/bundle"
 )
 
 // ─── S6a: the verification status line, tested as a pure function ────────────
@@ -265,6 +267,205 @@ func TestVerifyPassLineClausesAreEachBackedByARecord(t *testing.T) {
 		wantRetry := wantLine + " " + t21RetrySuffix
 		if gotRetry != wantRetry {
 			t.Errorf("%s retry line\n  got  %q\n  want %q", m.name, gotRetry, wantRetry)
+		}
+	}
+}
+
+// ─── S6a: the single-sig path says what it does not contain ──────────────────
+//
+// The restore document is read years later, alone, by someone who was not the
+// operator, holding a pile of steel and asking ONE question: is this everything?
+// Before S6a the document answered neither half of it on the single-sig path --
+// it never said whether a seed is on these plates at all, and the shared
+// seed-handling ruling it inherited described a registry that path does not have.
+//
+// These are the step-3 rows of the plan's test table (T4, T7). Both assert
+// through buildPlateInventoryLines, which is the function every restore document
+// is built from, rather than on the arm-picking helpers underneath it: a helper
+// that returns the right string and is never reached is the shape that let the
+// multisig instance of this defect ship.
+
+// TestRestoreDocSaysWhetherTheSetContainsASeed is T4.
+//
+// WATCH-ONLY IS THE ARM THAT DID NOT EXIST. A watch-only set engraves no ms1 at
+// all, and every line the document carried was phrased as though one were on the
+// bench. The absence line is the one the stranger needs: it says the words must
+// come from somewhere else, so a reader holding a COMPLETE watch-only backup does
+// not conclude that a seed plate was lost and give up on a recovery that would
+// have worked.
+//
+// "YOUR seed", NOT "THE seed". The definite article, sitting directly under "If
+// any of them is missing, this backup is incomplete.", answers "is this
+// everything?" with YES -- which is false on a 2-of-3 and costs the recovery.
+//
+// THE SINGULAR AND PLURAL ARMS ARE NOT COSMETIC. "Each plate marked 'ms1 secret
+// share'" over a set holding ONE reads, to a reader counting plates, as though a
+// plate were missing -- numberedLabel leaves a one-leg build UNNUMBERED -- so the
+// arm is chosen by the ms1 CARD COUNT.
+//
+// The single-sig fixtures come from singleSigEngraveCards rather than from
+// hand-built literals, so the arms are selected by the card shapes that flow
+// actually cuts.
+func TestRestoreDocSaysWhetherTheSetContainsASeed(t *testing.T) {
+	const (
+		absence = "Seed: this set contains NO seed. It is watch-only: it records " +
+			"the wallet, but it can never spend. If funds must be recovered, the " +
+			"seed words must come from somewhere else -- no plate in this set holds " +
+			"them."
+		presence = "Seed: this set contains YOUR seed, on the plate marked 'ms1 " +
+			"secret share'. Treat that plate as the secret itself."
+		several = "Seed: this set contains YOUR seeds, on the plates marked 'ms1 " +
+			"secret share'. Treat each of those plates as the secret itself."
+	)
+	b := bundle.Bundle{
+		MS1: "ms1secretshare",
+		MK1: []string{"mk1a", "mk1b"},
+		MD1: []string{"md1a"},
+	}
+	doc := func(cards []bundleCard, capacity seedCapacity) string {
+		return strings.Join(
+			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity), "\n")
+	}
+
+	watch := doc(singleSigEngraveCards(b, false), seedCapacityOne)
+	if !strings.Contains(watch, absence) {
+		t.Errorf("the watch-only single-sig document does not say the set contains NO "+
+			"seed. Silence is what a reader mistakes for a lost plate:\nwant %q\ngot:\n%s",
+			absence, watch)
+	}
+	if strings.Contains(watch, presence) || strings.Contains(watch, several) {
+		t.Errorf("the watch-only single-sig document claims a seed is on these plates. "+
+			"No ms1 is engraved in watch-only mode:\n%s", watch)
+	}
+
+	full := doc(singleSigEngraveCards(b, true), seedCapacityOne)
+	if !strings.Contains(full, presence) {
+		t.Errorf("the full single-sig document does not say which plate carries the "+
+			"seed:\nwant %q\ngot:\n%s", presence, full)
+	}
+	if strings.Contains(full, absence) {
+		t.Errorf("the full single-sig document says the set contains NO seed, over an "+
+			"engraved ms1 plate:\n%s", full)
+	}
+	if strings.Contains(full, several) {
+		t.Errorf("a set carrying ONE ms1 plate is described in the plural, which reads "+
+			"to a plate-counting stranger as an incomplete set:\n%s", full)
+	}
+
+	pair := doc([]bundleCard{
+		{kind: cardMS1, label: "ms1 secret share 1 of 2", summary: "seed", strings: []string{"ms1a"}},
+		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
+		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1a"}},
+	}, seedCapacityMany)
+	if !strings.Contains(pair, several) {
+		t.Errorf("a set carrying two ms1 plates does not name them in the plural, so "+
+			"the document points at one plate while the set is two:\nwant %q\ngot:\n%s",
+			several, pair)
+	}
+	if strings.Contains(pair, presence) {
+		t.Errorf("a two-ms1 set is described as though it held a single seed plate:\n%s",
+			pair)
+	}
+}
+
+// TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates is T7.
+//
+// THE RULING HAS TWO INDEPENDENT AXES. The subject is a property of the PATH --
+// how many seeds it can hold -- because a build that happened to take one seed
+// can still hold several, and two otherwise identical builds must not print
+// different documents because of runtime happenstance. The "plates are the
+// secret" pair is a property of THIS RUN, and it is false on every watch-only run
+// of every path: the document would otherwise assert "no plate in this set holds
+// them" and, a few lines later, "the plates are the secret", contradicting itself
+// about the one thing it exists to settle.
+//
+// The multi-seed, seed-bearing arm is asserted BYTE-EXACT against the shipped
+// sentence, because the multisig BUILD path's full-mode document must not churn:
+// that text is already reviewed, and a whole-string comparison makes a rewording
+// a deliberate test update rather than a silent pass.
+func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
+	const shipped = "Seed handling: this build does not time out. Every seed you " +
+		"entered -- this build can hold several -- stays in device memory until the " +
+		"build ends, and on a full build the words are also on the plates as they " +
+		"are cut. Do not leave a mid-build machine unattended: the plates are the " +
+		"secret. Power the device off when you are done."
+
+	if got := buildSeedHandlingRuling(seedCapacityMany, true); got != shipped {
+		t.Errorf("the multi-seed, seed-bearing ruling is no longer byte-identical to "+
+			"the S5-reviewed sentence, so the multisig build path's document churns "+
+			"for no gain in truth:\nwant %q\ngot  %q", shipped, got)
+	}
+
+	one := buildSeedHandlingRuling(seedCapacityOne, true)
+	if !strings.Contains(one, "The seed you entered") {
+		t.Errorf("a one-seed path's ruling does not name the ONE seed it holds:\n%s", one)
+	}
+	if strings.Contains(one, "Every seed") {
+		t.Errorf("a one-seed path's ruling claims the machine holds every seed entered, "+
+			"over a flow with a single seed seam:\n%s", one)
+	}
+	many := buildSeedHandlingRuling(seedCapacityMany, true)
+	if !strings.Contains(many, "Every seed") {
+		t.Errorf("the build path's ruling no longer says the machine holds EVERY seed "+
+			"entered:\n%s", many)
+	}
+	if strings.Contains(many, "The seed you entered") {
+		t.Errorf("the build path's ruling describes a registry that holds one seed, "+
+			"which S5 falsified:\n%s", many)
+	}
+
+	// THE SEEDLESS ARM IS COVERED BY NOTHING ELSE IN THE TREE: three existing
+	// tests run the glyph guard over an inventory, and all three build it over
+	// ms1-BEARING cards, so this fixture is built on purpose.
+	watchOnly := []bundleCard{
+		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1a"}},
+		{kind: cardMD1, label: "md1 descriptor", summary: "policy", strings: []string{"md1a"}},
+	}
+	doc := strings.Join(buildPlateInventoryLines(
+		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne), "\n")
+	if strings.Contains(doc, "the plates are the secret") {
+		t.Errorf("a watch-only document says the plates are the secret, on a set whose "+
+			"own inventory says no plate in it holds the seed:\n%s", doc)
+	}
+	if strings.Contains(doc, "the words are also on the plates") {
+		t.Errorf("a watch-only document claims the words are on the plates. No ms1 is "+
+			"engraved on this run:\n%s", doc)
+	}
+	// The device DOES hold seed material in memory in watch-only mode -- it
+	// derives from a mnemonic either way -- so the walk-away warning stays. Only
+	// the half about the steel goes.
+	for _, want := range []string{"does not time out", "unattended", "still holding seed material"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the watch-only ruling dropped %q. The machine is still holding "+
+				"seed material when the operator walks away, and that is the half of "+
+				"the exposure no scrub and no mode changes:\n%s", want, doc)
+		}
+	}
+
+	// EVERY OPERATOR STRING THIS STEP EMITS MUST DRAW. The body face lacks these
+	// glyphs, so a line carrying one does not render AT ALL -- on a page whose
+	// entire job is to say what the backup does and does not contain. Swept over
+	// the whole cross-product, because the arms this step adds are the ones no
+	// shipped test reaches.
+	oneMS1 := []bundleCard{
+		{kind: cardMS1, label: "ms1 secret share", summary: "seed", strings: []string{"ms1a"}},
+		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1a"}},
+	}
+	twoMS1 := []bundleCard{
+		{kind: cardMS1, label: "ms1 secret share 1 of 2", summary: "seed", strings: []string{"ms1a"}},
+		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
+	}
+	for _, cards := range [][]bundleCard{watchOnly, oneMS1, twoMS1} {
+		for _, capacity := range []seedCapacity{seedCapacityOne, seedCapacityMany} {
+			for _, uses := range []bool{false, true} {
+				for _, line := range buildPlateInventoryLines(
+					cards, oneSeedPassphraseFact(uses), capacity) {
+					if strings.ContainsAny(line, "—–·‘’“”…") {
+						t.Errorf("an inventory line carries a glyph the body face lacks, "+
+							"so it does not draw:\n%q", line)
+					}
+				}
+			}
 		}
 	}
 }

@@ -476,7 +476,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// WHICH seed, because a build holding three slots can carry three different
 		// passphrases and "keep the passphrase somewhere separate" has one referent.
 		multisigRestoreDocFlow(ctx, th, tpl, keys,
-			buildPlateInventoryLines(cardsOut, reg.passphraseFacts()))
+			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany))
 	}
 }
 

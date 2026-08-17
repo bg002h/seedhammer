@@ -48,12 +48,58 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // buildPlateInventoryLines is the same census AFTER the fact, on the restore
 // doc, for the reader who is not the operator and is not in the same decade.
 //
-// IT ALSO CARRIES THIS STAGE'S WALK-AWAY RULING. The build flow holds seed
-// material in a registry with no time bound, and wipeGuard brackets only the
-// unlock session, so an operator who walks away mid-build leaves it live. S4
-// owns the registry and therefore rules the bound, and the ruling is the second
-// arm the plan offers: this flow is NON-WIPING, like the rest of the systemwide
-// surface (SYSW 3.2.1), and it says so here rather than leaving it silent.
+// IT ALSO CARRIES THIS STAGE'S WALK-AWAY RULING, which is assembled by
+// buildSeedHandlingRuling below and keyed on the CAPACITY of the path that
+// called here -- the shared function serves three flows, and they do not all
+// hold the same number of seeds.
+//
+// THE ORDER IS what-it-is, what-it-is-NOT, how-to-handle-it: the plate list and
+// its completeness claim, then what the set does and does not contain (the seed
+// statement, then the passphrase statement), then the ruling.
+func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact,
+	capacity seedCapacity) []string {
+	plan := bundlePlatePlan(cards)
+	lines := []string{
+		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
+	}
+	for _, c := range cards {
+		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
+			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
+	}
+	lines = append(lines, "If any of them is missing, this backup is incomplete.")
+	lines = append(lines, buildSeedInventoryLines(cards)...)
+	lines = append(lines, buildPassphraseInventoryLines(seeds)...)
+	lines = append(lines, buildSeedHandlingRuling(capacity, bundleSetCarriesASecret(cards)))
+	return lines
+}
+
+// ─── The walk-away ruling, and the two axes it is assembled from ─────────────
+
+// seedCapacity is how many seeds a PATH can hold, which is what the
+// seed-handling ruling describes.
+//
+// IT IS DELIBERATELY NOT THE RUNTIME COUNT. A build that happened to take one
+// seed can still hold several, and two otherwise identical builds must not
+// print different documents because of runtime happenstance. The document
+// describes the machine the operator was standing at, not the tally of that
+// particular run.
+type seedCapacity int
+
+const (
+	// seedCapacityOne is a single seed seam by construction: the single-sig
+	// flow, and the multisig SUPPLY path, which derives everything it engraves
+	// from one mnemonic.
+	seedCapacityOne seedCapacity = iota
+	// seedCapacityMany is the multisig BUILD path's registry, which holds one
+	// seed per held slot, across distinct masters, for the length of the build.
+	seedCapacityMany
+)
+
+// buildSeedHandlingRuling is the walk-away ruling. The build flow holds seed
+// material with no time bound, and wipeGuard brackets only the unlock session,
+// so an operator who walks away mid-build leaves it live. This flow is
+// NON-WIPING, like the rest of the systemwide surface (SYSW 3.2.1), and it says
+// so here rather than leaving it silent.
 //
 // WHY NOT AN IDLE LIMIT. A timer that scrubs and exits mid-build would fire on
 // the operator reading this very document, and would throw away a build that
@@ -69,26 +115,117 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // physically-custodied device does not defend against anyway, and it would
 // break the one-site scrub invariant: BIP-39 derivation is checksum-free
 // PBKDF2, so a future read-after-scrub silently derives the all-"abandon"
-// wallet. The walk-away exposure is answered where it lives: the ruling below
-// tells the operator the machine holds every entered seed, and the plates
-// themselves, until the build ends.
-func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact) []string {
-	plan := bundlePlatePlan(cards)
-	lines := []string{
-		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
+// wallet. The walk-away exposure is answered where it lives: the ruling tells
+// the operator what the machine is still holding until the build ends.
+//
+// TWO INDEPENDENT AXES, AND THE SECOND ONE IS NOT THE FIRST. The subject is a
+// property of the PATH (seedCapacity). The two "plates" clauses are a property
+// of THIS RUN, and they are FALSE on every watch-only run of every path: no ms1
+// is engraved there, so "the plates are the secret" would sit a few lines under
+// the inventory's own statement that no plate in this set holds the seed, and
+// the document would contradict itself about the one thing it exists to settle.
+// The device does hold seed material in memory in watch-only mode -- it derives
+// from a mnemonic either way -- so the warning stays and only the steel half
+// goes.
+//
+// "SEED MATERIAL", and two rejected drafts are worth naming. The shipped
+// singular "your seed" is a singular/plural wobble on the multi-seed path. "The
+// words you typed" fixes the wobble and introduces a FALSEHOOD: seedEntryFlow is
+// a source picker, not a keyboard, and on a payload-sourced run nothing was
+// typed. "Seed material" is number-neutral and provenance-neutral, so it is true
+// on every path and from every source. A wording fix for a wording defect can
+// introduce a factual one; any replacement string is new text and inherits the
+// whole truth obligation.
+//
+// "ON A FULL BUILD" IS KEPT VERBATIM inside the seed-bearing arm even though
+// that arm now fires only on seed-bearing builds, which makes the qualifier
+// vestigial. Removing it would re-word an S5-reviewed sentence for no gain in
+// truth, and byte-identity with reviewed text is worth more than tidiness.
+func buildSeedHandlingRuling(capacity seedCapacity, seedOnPlates bool) string {
+	subject := "The seed you entered -- this build holds exactly one --"
+	if capacity == seedCapacityMany {
+		subject = "Every seed you entered -- this build can hold several --"
 	}
+	base := "Seed handling: this build does not time out. " + subject +
+		" stays in device memory until the build ends"
+	if seedOnPlates {
+		return base + ", and on a full build the words are also on the plates as " +
+			"they are cut. Do not leave a mid-build machine unattended: the plates " +
+			"are the secret. Power the device off when you are done."
+	}
+	return base + ". Do not leave a mid-build machine unattended: it is still " +
+		"holding seed material. Power the device off when you are done."
+}
+
+// ─── What IS on the plates ───────────────────────────────────────────────────
+
+// buildSeedInventoryLines states, on the restore document, whether a SEED is on
+// the plates the reader is holding.
+//
+// THE SILENCE IT REPLACES COST BOTH DIRECTIONS. A watch-only set engraves no ms1
+// at all, and nothing on the page said so, so a stranger holding a COMPLETE
+// backup could only conclude that the seed plate had been lost -- which is the
+// state in which recoverable backups get abandoned, the same failure mode
+// buildPassphraseInventoryLines exists to prevent. On a seed-bearing set the
+// document never said which plate must be treated as the secret itself.
+//
+// "YOUR seed", NOT "THE seed". The definite article, sitting directly under "If
+// any of them is missing, this backup is incomplete.", answers the reader's one
+// question -- is this everything? -- with YES. On a 2-of-3 that answer is false
+// and costs the recovery. "Your seed" is true in every mode, and is already this
+// codebase's own word for the fact (oneSeedPassphraseFact).
+//
+// NO SUFFICIENCY CLAIM IN EITHER DIRECTION. It does not say the seed plates
+// alone can spend (false on k-of-n) and does not say they cannot (false on
+// single-sig). It states presence and consequence and stops; how many keys must
+// sign is the descriptor's job, on the same page. Nor does it claim the plates
+// rebuild the wallet's ADDRESSES: on a policy shape expandedToDescriptor cannot
+// render, the same document already says "Addresses unavailable for this policy
+// shape.", and the two would contradict each other in print.
+//
+// THE SINGULAR AND PLURAL ARMS ARE CHOSEN BY THE ms1 CARD COUNT, which is a fact
+// of THIS RUN and not of the path -- unlike seedCapacity, one function up.
+// Keying it on capacity would print "Each plate marked 'ms1 secret share'" over
+// the ORDINARY one-slot multisig build, where numberedLabel leaves the single
+// card UNNUMBERED; a reader counting one plate against a document saying "each"
+// concludes a plate is missing from a complete set, and stops.
+//
+// THE LABEL IS NAMED AS A PREFIX, not as an exact string: single-sig labels the
+// card exactly "ms1 secret share" and multisig numbers it ("ms1 secret share 1
+// of 2"), so "the plate marked 'ms1 secret share'" is true of both. A future
+// relabel must propagate into these lines; the coupling is deliberate and
+// greppable.
+//
+// ABSENCE IS ASKED THROUGH bundleSetCarriesASecret rather than through a second
+// hand-written scan, so this document and the abort warning can never disagree
+// about whether the set holds a seed.
+//
+// PASSPHRASE FACTS STAY OUT: that is the passphrase lines' job, immediately
+// after.
+func buildSeedInventoryLines(cards []bundleCard) []string {
+	if !bundleSetCarriesASecret(cards) {
+		return []string{
+			"Seed: this set contains NO seed. It is watch-only: it records the " +
+				"wallet, but it can never spend. If funds must be recovered, the seed " +
+				"words must come from somewhere else -- no plate in this set holds them.",
+		}
+	}
+	ms1s := 0
 	for _, c := range cards {
-		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
-			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
+		if c.kind == cardMS1 {
+			ms1s++
+		}
 	}
-	lines = append(lines, "If any of them is missing, this backup is incomplete.")
-	lines = append(lines, buildPassphraseInventoryLines(seeds)...)
-	lines = append(lines, "Seed handling: this build does not time out. Every seed "+
-		"you entered -- this build can hold several -- stays in device memory until "+
-		"the build ends, and on a full build the words are also on the plates as "+
-		"they are cut. Do not leave a mid-build machine unattended: the plates are "+
-		"the secret. Power the device off when you are done.")
-	return lines
+	if ms1s == 1 {
+		return []string{
+			"Seed: this set contains YOUR seed, on the plate marked 'ms1 secret " +
+				"share'. Treat that plate as the secret itself.",
+		}
+	}
+	return []string{
+		"Seed: this set contains YOUR seeds, on the plates marked 'ms1 secret " +
+			"share'. Treat each of those plates as the secret itself.",
+	}
 }
 
 // ─── What is NOT on the plates ───────────────────────────────────────────────

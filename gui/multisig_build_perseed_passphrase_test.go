@@ -131,7 +131,7 @@ func TestRestoreDocNamesEveryPassphrasedSeed(t *testing.T) {
 				}
 			}
 
-			doc := strings.Join(buildPlateInventoryLines(cards, facts), "\n")
+			doc := strings.Join(buildPlateInventoryLines(cards, facts, seedCapacityMany), "\n")
 			t.Logf("restore doc:\n%s", doc)
 
 			if got := strings.Count(doc, "Needs a passphrase:"); got != tc.wantStatements {
@@ -243,7 +243,7 @@ func TestRestoreDocMergesOneSeedHeldAtTwoSlots(t *testing.T) {
 		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
 		{kind: cardMK1, label: "mk1 key 1 of 3", summary: "key", strings: []string{"mk1a"}},
 	}
-	doc := strings.Join(buildPlateInventoryLines(cards, facts), "\n")
+	doc := strings.Join(buildPlateInventoryLines(cards, facts, seedCapacityMany), "\n")
 	t.Logf("Trace B restore doc:\n%s", doc)
 
 	if got := strings.Count(doc, "Needs a passphrase:"); got != 1 {
@@ -301,7 +301,7 @@ func TestRestoreDocSaysWhichSeedsNeedNoPassphrase(t *testing.T) {
 		{kind: cardMS1, label: "ms1 secret share 1 of 2", summary: "seed", strings: []string{"ms1a"}},
 		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
 	}
-	doc := strings.Join(buildPlateInventoryLines(cards, facts), "\n")
+	doc := strings.Join(buildPlateInventoryLines(cards, facts, seedCapacityMany), "\n")
 	t.Logf("mixed restore doc:\n%s", doc)
 
 	if strings.Count(doc, "Needs a passphrase:") != 1 {

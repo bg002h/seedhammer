@@ -359,7 +359,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// and deriving a master fingerprint here purely to print it would be another
 	// PBKDF2 pass over a mnemonic whose last consumer was step (6).
 	multisigRestoreDocFlow(ctx, th, tpl, keys,
-		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != "")))
+		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the
