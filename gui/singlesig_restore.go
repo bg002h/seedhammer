@@ -139,7 +139,8 @@ func restoreDocFlow(ctx *Context, th *Colors, xpub string, masterFP, parentFP ui
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return
 	}
-	restoreDocScreen(ctx, th, append(append([]string{status}, lines...), extra...))
+	head := append([]string{status}, verifyStatusScopeLines(status)...)
+	restoreDocScreen(ctx, th, append(append(head, lines...), extra...))
 }
 
 // restoreDocScreen is a plain, paged, read-only display of the restore lines

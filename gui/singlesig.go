@@ -179,21 +179,30 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	}
 
 	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
+	//
+	// THE RECORD IS DECLARED HERE, NOT INSIDE THE OFFER, so that a Skip leaves it
+	// at its zero value and the document below says the weakest true thing. This
+	// path has no retry loop -- the offer is a one-shot `if` -- so `rec` is written
+	// at most once, and statusVerifiedOnRetry is unreachable from it by
+	// construction rather than by an assertion.
+	var rec verifyRecord
 	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
 	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, full, template)
+		singleSigVerifyFlow(ctx, th, full, template, &rec)
 	}
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
 	//
-	// THE STATUS IS THE ZERO CELL UNTIL THE VERIFY IS WIRED (S6a step 7), AND
-	// THAT IS THE DIRECTION THIS HAS TO FAIL IN. The verify above records nothing
-	// yet, so the document claims nothing: verifyStatusNotFullyCheckedLine is
-	// byte-identical to what buildVerifyStatusLine renders for a record with
-	// neither bit set, which is exactly the run this path can currently describe.
-	// An empty string here would render as SILENCE, and silence is what reads as
-	// a pass to the stranger holding the steel -- an omission that STRENGTHENS
-	// the claim, which is the one failure direction S6a G2 forbids.
+	// THE STATUS IS WHAT THE VERIFY ABOVE RECORDED, and on a Skip that is the zero
+	// cell -- `rec` is untouched and buildVerifyStatusLine renders the weakest of
+	// the four lines. An empty string here would render as SILENCE, and silence is
+	// what reads as a pass to the stranger holding the steel: an omission that
+	// STRENGTHENS the claim, which is the one failure direction S6a G2 forbids.
+	//
+	// IT IS BUILT FROM THE RECORD, NOT FROM A STATUS. buildVerifyStatusLine
+	// derives the cell itself, because a verifyStatus has already lost the mode
+	// and the mode is what stops a watch-only pass line claiming an ms1
+	// comparison that never ran.
 	//
 	// AND IT CARRIES THIS RUN'S SET (F-198b). It passed nil, and the document was
 	// not one with a missing sentence -- it had no inventory AT ALL: four lines,
@@ -210,6 +219,6 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// carries no fingerprint because the single-seed arm renders none: with one
 	// seed there is nothing to tell apart.
 	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
-		verifyStatusNotFullyCheckedLine,
+		buildVerifyStatusLine(rec),
 		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
 }

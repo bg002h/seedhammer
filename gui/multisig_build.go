@@ -441,6 +441,14 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// IT DISPATCHES THROUGH multisigVerifyFn, the in-file test seam, for the same
 	// reason the supply path does: without it this loop is unreachable from any
 	// executing test and its row-to-index mapping is unpinned (B4).
+	//
+	// ONE RECORD FOR THE WHOLE LOOP, AND IT IS DECLARED OUTSIDE THE GATE ABOVE as
+	// well as outside the loop: the restore document below is drawn on runs that
+	// never entered the verify at all (a template, or a build holding no leg of
+	// its own), and on those the zero value is the truthful status. Sticky, for
+	// the supply path's reason -- an earlier attempt that found a bad plate is not
+	// erased by a later one that passed.
+	var rec verifyRecord
 	if !template && len(legs) > 0 {
 		lead, choices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
 		for {
@@ -449,7 +457,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 			if !ok || sel != 0 {
 				break
 			}
-			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)
+			res := multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1, &rec)
 			if res != verifyIncomplete && res != verifyFailed {
 				break
 			}
@@ -476,13 +484,12 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// WHICH seed, because a build holding three slots can carry three different
 		// passphrases and "keep the passphrase somewhere separate" has one referent.
 		//
-		// THE STATUS IS THE ZERO CELL UNTIL THE VERIFY IS WIRED (S6a step 7). The
-		// retry loop above records nothing yet, so this document claims nothing:
-		// verifyStatusNotFullyCheckedLine is what buildVerifyStatusLine renders for
-		// a record with neither bit set. An empty string would render as silence,
-		// and silence is what reads as a pass.
+		// THE STATUS IS WHAT THE LOOP ABOVE RECORDED. A run that skipped the verify,
+		// or never reached it, leaves `rec` at its zero value and this document
+		// claims nothing; an empty string would render as silence, and silence is
+		// what reads as a pass.
 		multisigRestoreDocFlow(ctx, th, tpl, keys,
-			verifyStatusNotFullyCheckedLine,
+			buildVerifyStatusLine(rec),
 			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany))
 	}
 }

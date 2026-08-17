@@ -110,5 +110,6 @@ func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return
 	}
-	restoreDocScreen(ctx, th, append(append([]string{status}, lines...), extra...))
+	head := append([]string{status}, verifyStatusScopeLines(status)...)
+	restoreDocScreen(ctx, th, append(append(head, lines...), extra...))
 }

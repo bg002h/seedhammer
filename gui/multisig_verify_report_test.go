@@ -35,7 +35,7 @@ func s5DriveVerifyStopAfterOneSeed(t *testing.T, records []string, expected []in
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		res = multisigVerifyFlow(ctx, &descriptorTheme, ms1 != "", expected, engravedMd1)
+		res = multisigVerifyFlow(ctx, &descriptorTheme, ms1 != "", expected, engravedMd1, &verifyRecord{})
 	})
 	defer quit()
 
@@ -345,7 +345,7 @@ func s5DriveVerifyFirstSeedRefused(t *testing.T, records []string, expected []in
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		res = multisigVerifyFlow(ctx, &descriptorTheme, full, expected, engravedMd1)
+		res = multisigVerifyFlow(ctx, &descriptorTheme, full, expected, engravedMd1, &verifyRecord{})
 		done = true
 	})
 	defer quit()
@@ -573,7 +573,7 @@ func s5DriveVerifyFullTwoSeeds(t *testing.T, records []string, expected []int,
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
 	frame, quit := runUI(ctx, func() {
-		res = multisigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, expected, engravedMd1)
+		res = multisigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, expected, engravedMd1, &verifyRecord{})
 	})
 	defer quit()
 
@@ -1076,9 +1076,9 @@ func TestSupplyAbortIsTheLastScreenOfTheProgram(t *testing.T) {
 func TestBothEngraveFlowsReOfferTheVerify(t *testing.T) {
 	for _, tc := range []struct{ file, fn, call string }{
 		{"multisig.go", "func supplyMultisigPolicyFlow(",
-			"multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1)"},
+			"multisigVerifyFn(ctx, th, full, engravedSlots, suppliedMd1, &rec)"},
 		{"multisig_build.go", "func buildMultisigPolicyFlow(",
-			"multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1)"},
+			"multisigVerifyFn(ctx, th, full, engravedSlots, engraveMd1, &rec)"},
 	} {
 		body := funcBody(t, tc.file, tc.fn)
 		if !strings.Contains(body, tc.call) {

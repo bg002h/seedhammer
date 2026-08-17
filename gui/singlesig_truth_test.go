@@ -6,6 +6,8 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/bip39"
 	"seedhammer.com/bundle"
 	"seedhammer.com/md"
 )
@@ -587,65 +589,79 @@ func TestRestoreDocPutsTheStatusFirstAndTheInventoryLast(t *testing.T) {
 	})
 }
 
-// TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument pins WHAT the four
-// call sites pass while steps 5 and 7 are still outstanding.
+// s6aCodeOf is readGuiFile with the COMMENTS STRIPPED.
 //
-// A SIGNATURE CHANGE LANDS AHEAD OF ITS VALUES, so for the length of this step
-// every restore document in the tree carries a placeholder -- and a placeholder
-// is a claim like any other. The rule it has to satisfy is S6a G2's direction:
-// if step 7 never arrived, the document must say LESS than the truth, never
-// more. verifyStatusNotFullyCheckedLine is the weakest of the four lines and is
-// byte-identical to what the builder renders for a record with neither bit set,
-// so wiring the real record in later can only ever strengthen a document that
-// earned it.
+// THE SEARCH HAS TO BE OVER CODE, AND THAT IS NOT A REFINEMENT. Every call site
+// this file asserts on carries a comment explaining, by name, the very thing
+// being asserted, so a site gutted to "" would leave its own justification
+// behind and a raw source search would keep passing over it. Measured at step 4
+// by running that row's own mutation, which is the only reason it is written
+// this way.
+func s6aCodeOf(t *testing.T, file string) string {
+	t.Helper()
+	var code []string
+	for _, line := range strings.Split(readGuiFile(t, file), "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code = append(code, line)
+	}
+	return strings.Join(code, "\n")
+}
+
+// s6aDocumentFlows are the THREE production flows that reach a restore document,
+// each named by the file its call site lives in. Not two: "wired into two of the
+// three and forgotten on the third" is not a hazard this cycle imagined, it is
+// the shape that let the multisig instance of the defect ship while single-sig
+// went without.
+var s6aDocumentFlows = []string{"singlesig.go", "multisig.go", "multisig_build.go"}
+
+// TestRestoreDocStatusIsBuiltFromTheRecordOnEveryFlow pins WHAT the production
+// call sites pass as the document's first line.
+//
+// IT WAS TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument UNTIL STEP
+// 7, and it is renamed rather than deleted because half of it is unchanged and
+// still load-bearing. Step 4 landed the signature ahead of its values and every
+// document in the tree carried verifyStatusNotFullyCheckedLine as a placeholder;
+// step 7 replaces those literals with buildVerifyStatusLine(rec). Part (a) is
+// what made that substitution safe to make and is what keeps it safe: on a run
+// that recorded nothing the two must be BYTE-IDENTICAL, so wiring the record in
+// can only ever strengthen a document that earned it. Part (b) moves from "every
+// site names the placeholder" to "every site builds from the record", which is
+// the same guard one step along.
 //
 // THE FAILURE THIS GUARDS IS "" AND IT IS NOT A HYPOTHETICAL. An empty status
 // still occupies index 0 and still compiles; it renders as SILENCE, and silence
 // about a verification is precisely what reads as a pass to a stranger years
 // later. That is an omission that STRENGTHENS a claim, and it is the one
 // direction the design does not allow a mistake in.
-func TestRestoreDocStatusPlaceholderCannotStrengthenTheDocument(t *testing.T) {
-	// (a) THE PLACEHOLDER IS THE ZERO CELL, exactly. Not "similar to": step 7
-	// replaces these literals with buildVerifyStatusLine(rec), and on a run that
-	// recorded nothing that substitution has to be a no-op on the page.
+func TestRestoreDocStatusIsBuiltFromTheRecordOnEveryFlow(t *testing.T) {
+	// (a) THE ZERO CELL IS WHAT AN UNRECORDED VERIFY RENDERS, exactly. Not
+	// "similar to": a Skip leaves the record at its zero value on all three
+	// flows, and the line those documents carry must be the weakest of the four.
 	if got := buildVerifyStatusLine(verifyRecord{}); got != verifyStatusNotFullyCheckedLine {
-		t.Errorf("the step-4 placeholder is not what an unrecorded verify renders, so "+
-			"wiring the record in at step 7 would silently change every document that "+
-			"recorded nothing\n  placeholder %q\n  zero cell   %q",
-			verifyStatusNotFullyCheckedLine, got)
+		t.Errorf("an unrecorded verify does not render the weakest line, so a skipped "+
+			"verify produces a document claiming more than the device observed\n"+
+			"  zero cell renders %q\n  weakest line      %q",
+			got, verifyStatusNotFullyCheckedLine)
 	}
 
-	// (b) AND EVERY PRODUCTION CALL SITE PASSES IT. Three flows reach a restore
-	// document and all three are wired the same way; a site left on "" is invisible
-	// to the compiler and to every rendering test, because an empty label draws
-	// nothing and asserting on nothing is what the whole cycle is about.
-	//
-	// THIS ROW IS EXPECTED TO GO RED AT STEP 7 and must be updated then, not
-	// loosened: that is the step where these literals become
-	// buildVerifyStatusLine(rec) and where T20 takes over the same duty on a
-	// rendered document.
-	//
-	// THE SEARCH IS OVER CODE, NOT SOURCE, and that is not a refinement: all
-	// three call sites carry a comment explaining the placeholder BY NAME, so a
-	// site edited to "" would leave its own justification behind and a raw
-	// readGuiFile would keep passing over it. Found by running this row's own
-	// mutation, which is the only reason it is written this way.
-	codeOf := func(t *testing.T, file string) string {
-		t.Helper()
-		var code []string
-		for _, line := range strings.Split(readGuiFile(t, file), "\n") {
-			if i := strings.Index(line, "//"); i >= 0 {
-				line = line[:i]
-			}
-			code = append(code, line)
+	// (b) AND EVERY PRODUCTION CALL SITE BUILDS FROM THE RECORD. A site left on a
+	// literal -- the step-4 placeholder, or "" -- is invisible to the compiler and
+	// to every rendering test that only ever drives a skipped verify, because a
+	// skipped verify renders that same literal. That is precisely the state a
+	// regression would leave behind.
+	for _, file := range s6aDocumentFlows {
+		src := s6aCodeOf(t, file)
+		if !strings.Contains(src, "buildVerifyStatusLine(rec)") {
+			t.Errorf("gui/%s reaches a restore document without building its status from "+
+				"the verify record. A hardcoded status is a claim about a run nobody "+
+				"observed, and on a skipped verify it renders identically to the correct "+
+				"one -- so nothing that drives only the skip path can see it", file)
 		}
-		return strings.Join(code, "\n")
-	}
-	for _, file := range []string{"singlesig.go", "multisig.go", "multisig_build.go"} {
-		if src := codeOf(t, file); !strings.Contains(src, "verifyStatusNotFullyCheckedLine") {
-			t.Errorf("gui/%s reaches a restore document but names no status placeholder. "+
-				"A restore-doc call site whose status is \"\" renders a blank first line, "+
-				"and a document silent about its verification is one a stranger reads as "+
+		if strings.Contains(src, "verifyStatusNotFullyCheckedLine") {
+			t.Errorf("gui/%s still passes the step-4 placeholder literal. The record is "+
+				"wired now, and a literal there reports the zero cell on a run that "+
 				"verified", file)
 		}
 	}
@@ -680,6 +696,13 @@ type s6aSingleSigOpts struct {
 	// watchOnly picks row 1 of the engrave-mode picker: mk1 + md1, no ms1 on
 	// steel.
 	watchOnly bool
+	// verify answers the post-engrave offer with "Verify now" and drives the REAL
+	// singleSigVerifyFlow to its success exit, instead of skipping it (S6a step
+	// 7). It is the only way a single-sig document gets a status this run earned:
+	// that path has no test seam, and substituting one would leave the production
+	// wiring -- the record's declaration, the flow's out-parameter, the pass write
+	// at the fall-through -- unexecuted by anything.
+	verify bool
 }
 
 // s6aSingleSigRun is what a walk observed, in the operator's own order.
@@ -763,6 +786,86 @@ func s6aDriveSingleSigToPolicyForm(t *testing.T, ctx *Context, frame func() (str
 	return mode
 }
 
+// s6aSingleSigBundle re-derives the bundle a walk with these options engraves,
+// so a test can present that run's own plates back to its verify.
+//
+// It uses the SAME inputs the walk presses: abandonAboutPhrase() typed at the
+// keyboard, the wallet picker's one-tap default, and the full policy md1. A
+// passphrase run is REFUSED here rather than guessed -- the walk takes its
+// passphrase from the payload, and a bundle derived without it is a different
+// wallet, so the verify would fail for a reason that has nothing to do with what
+// is under test and the failure would look like a defect in this step.
+func s6aSingleSigBundle(t *testing.T, opts s6aSingleSigOpts) bundle.Bundle {
+	t.Helper()
+	if opts.passphrase {
+		t.Fatal("s6aSingleSigBundle does not model a passphrase run: the readback it " +
+			"builds would be a different wallet's")
+	}
+	m, err := bip39.ParseMnemonic(abandonAboutPhrase())
+	if err != nil {
+		t.Fatalf("ParseMnemonic: %v", err)
+	}
+	b, _, _, _, err := deriveSingleSigBundle(m, "", &chaincfg.MainNetParams,
+		singleSigPath(singleSigDefault.purpose), singleSigDefault.script)
+	if err != nil {
+		t.Fatalf("deriveSingleSigBundle: %v", err)
+	}
+	return b
+}
+
+// s6aDriveSingleSigVerifyOK drives the REAL singleSigVerifyFlow from the offer to
+// its SUCCESS EXIT -- the fall-through at the closing brace, which is the only
+// exit that writes a pass record and the one an implementer told to "write the
+// record at each return site" never reaches at all.
+//
+// The screens are pressed in the flow's own order: the re-typed seed, the
+// wallet-type picker, the passphrase prompt, the NFC readback, and -- in full
+// mode only -- the hand-typed ms1. Every one is asserted on the way past, for
+// s5DriveVerify's reason: tapping through a screen that did not appear silently
+// answers the next one, and a walk that does that reports a status for a verify
+// nobody ran.
+func s6aDriveSingleSigVerifyOK(t *testing.T, ctx *Context, frame func() (string, bool),
+	opts s6aSingleSigOpts,
+) {
+	t.Helper()
+	if c, ok := pumpUntil(frame, "Choose number of words", 96); !ok {
+		t.Fatalf("the verify did not ask for the seed again; got %q", c)
+	}
+	click(&ctx.Router, Button3) // 12 WORDS
+	frame()
+	driveWords(&ctx.Router, abandonAboutPhrase())
+	if c, ok := pumpUntil(frame, "Wallet Type", 240); !ok {
+		t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
+	}
+	click(&ctx.Router, Button3) // the one-tap default, which is what the engrave took
+	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+		t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Skip
+	frame()
+	if c, ok := pumpUntil(frame, "mk1 keys:", 96); !ok {
+		t.Fatalf("the readback never reached the gatherer's tally; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Done adding cards
+	frame()
+	if !opts.watchOnly {
+		if c, ok := pumpUntil(frame, "Type ms1", 96); !ok {
+			t.Fatalf("full mode did not ask for the ms1; got %q", c)
+		}
+		runes(&ctx.Router, strings.ToLower(s6aSingleSigBundle(t, opts).MS1))
+		click(&ctx.Router, Button3)
+		frame()
+	}
+	if c, ok := pumpUntil(frame, "Verify OK", 128); !ok {
+		t.Fatalf("the single-sig verify did not pass over this run's OWN plates; the "+
+			"screen reads %q.\nAny other landing means the flow recorded something other "+
+			"than a pass, and the document below would then say so -- truthfully, and "+
+			"about a walk that proves nothing", c)
+	}
+	click(&ctx.Router, Button3) // dismiss the Verify OK notice
+	frame()
+}
+
 // s6aSingleSigWalk drives engraveSingleSigFlow end to end, THROUGH EVERY PLATE,
 // to the restore document.
 //
@@ -781,6 +884,16 @@ func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
 		ctx := NewContext(p)
 		if opts.passphrase {
 			ctx.sysw = sessionHolding(s5PassphraseRecord)
+		}
+		if opts.verify {
+			// THE PLATES THIS RUN IS ABOUT TO CUT, waiting on the gatherer's payload
+			// seam for the readback. They are DERIVED, not scraped off the engraver:
+			// the verify compares the cards it reads against a bundle it re-derives
+			// from the re-typed seed, so a readback built the same way as the engrave
+			// is the honest one to present. Every card enters through the same offer()
+			// a scanned card takes.
+			b := s6aSingleSigBundle(t, opts)
+			ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
 		}
 		done := false
 		frame, quit := runUI(ctx, func() {
@@ -824,18 +937,23 @@ func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
 					run.plates, c)
 			}
 		}
-		click(&ctx.Router, Down) // Skip
-		frame()
-		click(&ctx.Router, Button3)
-		frame()
-
-		if c, ok := pumpUntil(frame, "Descriptor:", 96); !ok {
-			t.Fatalf("the restore doc was not shown; got %q", c)
+		if opts.verify {
+			click(&ctx.Router, Button3) // Verify now (row 0)
+			frame()
+			s6aDriveSingleSigVerifyOK(t, ctx, frame, opts)
+		} else {
+			click(&ctx.Router, Down) // Skip
+			frame()
+			click(&ctx.Router, Button3)
+			frame()
 		}
+
 		// THE DOCUMENT IS A PAGER and the inventory is appended at the TAIL, after
 		// the descriptor chunks and both addresses, so a single-frame assertion
-		// misses every line this step adds.
-		run.doc, _ = s5PageForNeedle(t, ctx, frame, "\x00never matches\x00", 24)
+		// misses every line this step adds. The document is found by its TITLE
+		// rather than by a body line: a long status line pushes "Descriptor:" off
+		// page 1, and two of the four are long.
+		run.doc = s6aRestoreDocPages(t, ctx, frame)
 		click(&ctx.Router, Button3) // done with the restore doc
 		for i := 0; i < 256 && !done; i++ {
 			if _, ok := frame(); !ok {
@@ -1079,9 +1197,22 @@ func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
 	})
 }
 
-// TestSeedHandlingRulingMatchesEachPathsCapacity is T7c, and it is the row that
-// covers the one thing no compiler and no other test can see: WHICH capacity
-// each of the three call sites hands over.
+// TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds is T7c, and from
+// step 7 also T20, T11, T23 and T24.
+//
+// IT WAS TestSeedHandlingRulingMatchesEachPathsCapacity, and the rename is the
+// honest half of a consolidation forced by arithmetic. This function already
+// walked all three production flows to a rendered restore document -- 129s of
+// the gui package's DEFAULT 10-MINUTE test timeout, against 401s already on the
+// clock. Step 7's status rows need exactly the same three walks. Given their
+// own, the package died at 600s mid-engrave with every assertion passing, so
+// each walk now carries every row that can observe it, and each row's block
+// below names itself. No row lost an assertion; each still fails against its own
+// mutation. Leaving the old name on it would have made the name the false
+// comment.
+//
+// T7c is the row that covers the one thing no compiler and no other test can
+// see: WHICH capacity each of the three call sites hands over.
 //
 // buildPlateInventoryLines takes a seedCapacity, and T7 asserts it produces the
 // right text WHEN HANDED a given one. That says nothing about whether any call
@@ -1098,7 +1229,7 @@ func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
 // THE ARMS ARE WHOLE-CLAUSE AND MUTUALLY EXCLUSIVE: each asserts its own subject
 // is present AND the other absent, so swapping either call site's argument fails
 // on both halves rather than on a needle that happens to survive.
-func TestSeedHandlingRulingMatchesEachPathsCapacity(t *testing.T) {
+func TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds(t *testing.T) {
 	const (
 		oneSubject  = "The seed you entered"
 		manySubject = "Every seed you entered"
@@ -1121,10 +1252,26 @@ func TestSeedHandlingRulingMatchesEachPathsCapacity(t *testing.T) {
 	// Driven WATCH-ONLY, which is also the cheaper set -- two cards rather than
 	// three -- and which exercises the arm that drops the "plates are the secret"
 	// pair, so the ruling under test is the one this path most often prints.
+	//
+	// AND IT DRIVES A REAL VERIFY (T20, flow 1 of 3; T11's scope-absent arm). This
+	// path has NO test seam, so its status reaches its document by a real verify or
+	// not at all -- and every other single-sig walk in the tree skips the verify,
+	// which renders the same literal the step-4 placeholder did. Nothing that
+	// drives only the skip path can tell a wired document from an unwired one.
+	//
+	// WATCH-ONLY ALSO PUTS THE MODE-GENERATED HALF OF THE PASS LINE UNDER TEST: a
+	// watch-only pass line must say NO SECRET WAS COMPARED rather than merely leave
+	// the ms1 clause off. T27 drives the full-mode single-sig pass line.
 	t.Run("single-sig", func(t *testing.T) {
-		run := s6aSingleSigWalk(t, s6aSingleSigOpts{watchOnly: true})
-		t.Logf("the watch-only single-sig run cut %d plate(s)", run.plates)
+		run := s6aSingleSigWalk(t, s6aSingleSigOpts{watchOnly: true, verify: true})
+		t.Logf("the verified watch-only single-sig run cut %d plate(s)", run.plates)
 		check(t, "single-sig", run.doc, oneSubject, manySubject)
+
+		// T20 (flow 1 of 3) and T11.
+		pass := buildVerifyPassLine(passRecord{full: false, legs: 1, suppliedCosigners: 0})
+		s6aAssertOneStatusLine(t, "single-sig", run.doc, "statusVerified", pass,
+			s6aStatusCells(pass))
+		s6aAssertStatusFirstAndScope(t, "single-sig", run.doc, pass, "Master fp:", false)
 		// The watch-only document must not contradict itself about the one thing
 		// it exists to settle: it says no plate holds the seed, so it may not also
 		// say the plates ARE the secret.
@@ -1142,55 +1289,944 @@ func TestSeedHandlingRulingMatchesEachPathsCapacity(t *testing.T) {
 	// MULTISIG SUPPLY: also one seed seam, and this document CHANGES -- it said
 	// "this build can hold several" today, which S5 wired to a path it does not
 	// fit.
+	//
+	// AND IT CARRIES T20 (flow 2 of 3), T11's scope-PRESENT arm, and T23.
+	//
+	// T23 -- STICKINESS -- IS A REGRESSION TEST AGAINST THE PLAN ITSELF. Its
+	// mutation is not hypothetical: "implement the status as last-wins" is what an
+	// earlier fold specified in writing, and it silently downgrades a check that
+	// FAILED to "these plates were not fully checked" -- the weaker line, on the
+	// run where the device has evidence against the steel. Concretely: clear the
+	// record before each attempt in gui/multisig.go and the second attempt starts
+	// clean, erasing what the first observed. It compiles, and nothing else in the
+	// tree notices.
+	//
+	// Attempt 1 finds something adverse and reports INCOMPLETE, so the loop
+	// re-offers. Attempt 2 is a clean ABANDON -- the operator walked out of the
+	// gather -- which records nothing at all. Sticky means attempt 1 still decides.
 	t.Run("multisig-supply", func(t *testing.T) {
-		_, doc := s5SupplyPassphraseWalk(t)
+		doc := s6aSupplyDocWalk(t,
+			s6aVerifyStep{res: verifyIncomplete, adverse: true},
+			s6aVerifyStep{res: verifyAbandoned},
+		)
 		check(t, "multisig supply", doc, oneSubject, manySubject)
+
+		cells := s6aStatusCells(buildVerifyPassLine(passRecord{full: true, legs: 1}))
+		s6aAssertOneStatusLine(t, "multisig supply", doc,
+			"statusCheckDidNotPass", t21DidNotPassLine, cells)
+		// "Type:" is multisigRestoreLines' own first line on the expandOK branch,
+		// which every assembled full policy lands on.
+		s6aAssertStatusFirstAndScope(t, "multisig supply", doc, t21DidNotPassLine, "Type:", true)
+		if uiContains(doc, t21ZeroCellLine) {
+			t.Errorf("the document reports \"these plates were not fully checked\" over a "+
+				"run where a check RAN AND DID NOT PASS. A later attempt that observed "+
+				"nothing has erased what an earlier one observed, and the weaker line is "+
+				"the one that reached the steel's only paperwork:\n%q", doc)
+		}
 	})
 
 	// MULTISIG BUILD: the registry, one seed per held slot across distinct
 	// masters. Its document must stay byte-identical to the S5-reviewed sentence.
+	//
+	// AND IT CARRIES T20 (flow 3 of 3) and T24.
+	//
+	// T24 -- P2 ON THE RETRY PATH. The mutation is "drop the && adverseRecorded
+	// arm" -- a two-state collapse. A clean retry after a failed check is a real
+	// and common operator story, and the document it produces must say so: the
+	// plates verify NOW, and an earlier attempt on the same set did not.
+	// Collapsing the two loses the class of failure a later success cannot
+	// retro-explain -- a plate that read wrong once and right the next time is a
+	// plate to re-cut, and this document is the only place that fact survives.
 	t.Run("multisig-build", func(t *testing.T) {
-		records := cosignerCardRecords(t, 4) // A@0, B@0, C@0, A@1
-		synctest.Test(t, func(t *testing.T) {
-			e := newEngraver()
-			p := newPlatform()
-			p.display = sh2DisplaySize
-			p.engraver = e
-			ctx := NewContext(p)
-			ctx.sysw = sessionHolding(records...)
-			done := false
-			// THE RASTER HARNESS, for s5EngraveEveryPlate's measured reason: the
-			// frames a plate takes depend on which harness pumps them.
-			frame, _, _, quit := runUITouchRaster(ctx, func() {
-				buildMultisigPolicyFlow(ctx, &descriptorTheme)
-				done = true
-			})
-			defer quit()
+		p := passRecord{full: true, legs: 2, suppliedCosigners: 1}
+		pass := buildVerifyPassLine(p)
+		doc := s6aBuildDocWalk(t,
+			s6aVerifyStep{res: verifyIncomplete, adverse: true},
+			s6aVerifyStep{res: verifyComplete, pass: &p},
+		)
+		check(t, "multisig build", doc, manySubject, oneSubject)
 
-			s5DriveBuildToEngravePicker(t, ctx, frame)
-			t.Logf("the build run cut %d plate(s)", s5EngraveEveryPlate(t, ctx, frame, e))
+		cells := s6aStatusCells(pass)
+		s6aAssertOneStatusLine(t, "multisig build", doc,
+			"statusVerifiedOnRetry", cells["statusVerifiedOnRetry"], cells)
+		s6aAssertStatusFirstAndScope(t, "multisig build", doc,
+			cells["statusVerifiedOnRetry"], "Type:", false)
+		if !uiContains(doc, t21RetrySuffix) {
+			t.Errorf("the document reports a bare pass over a set an earlier check did "+
+				"not pass:\n%q", doc)
+		}
+	})
+}
 
-			if c, ok := pumpUntil(frame, "Verify the engraved plates?", 96); !ok {
-				t.Fatalf("the verify offer was not reached after the engrave; got %q", c)
+// ─── S6a step 7: the verify status, through the flows that record it ─────────
+//
+// These are T11, T20, T23, T24, T25 and T27. Every one of them needs something
+// step 2 could not build: a RENDERED DOCUMENT carrying a status a flow actually
+// recorded. Asserted on buildVerifyStatusLine alone they would all pass on a
+// tree where no flow writes a record at all, which is the state steps 2 through
+// 6 left behind and exactly the state this step exists to leave.
+//
+// FOUR TESTS, THREE WALKS, AND THE ARITHMETIC IS THE REASON. A walk that reaches
+// a restore document must cut every plate first, and the gui package's test
+// binary runs under `go test`'s DEFAULT 10-MINUTE TIMEOUT with 401s already on
+// the clock. A first draft of this section gave each row its own walk -- seven
+// of them, 435s -- and the package died at 600s mid-engrave, with every
+// assertion passing. So each walk carries every row it can OBSERVE, and each
+// row's block below names itself:
+//
+//	single-sig walk  statusVerified        T20 (flow 1 of 3), T11 (absent arm)
+//	supply walk      statusCheckDidNotPass T20 (flow 2 of 3), T11 (present arm), T23
+//	build walk       statusVerifiedOnRetry T20 (flow 3 of 3), T24
+//
+// That is not a weakening: no row lost an assertion, and each still fails
+// against its own mutation. It is the same consolidation the tree already makes
+// where one walk carries T1 and T2.
+//
+// TWO KINDS OF DRIVING, AND THE SPLIT IS DELIBERATE.
+//
+//   - WHAT THE RECORD CONTAINS is driven through the REAL verify flows (T27, and
+//     the two exit-mapping rows at the end of this file): suppliedCosigners is
+//     computed from the policy keys and the covered slots, and no stub can tell
+//     you whether that computation is right.
+//   - WHERE THE RECORD GOES is driven through the real engrave flows with the
+//     verify substituted at the multisigVerifyFn seam. The stub replaces the
+//     verdict source and the record's contents; the offer screens, the retry
+//     loop, the record's DECLARATION SITE -- outside the loop, which is the whole
+//     of stickiness -- and the call that turns it into the document's first line
+//     are all production code under the test. A real second attempt would mean
+//     driving an entire readback twice inside a walk that has already cut nine
+//     plates. The single-sig path has NO seam, so its status reaches its document
+//     by a REAL verify or not at all, and that is how this file drives it.
+
+// s6aVerifyStep is one attempt at the verify, as the seam reports it: the
+// verdict the callers' retry loop reads, and the two facts the document is
+// generated from.
+type s6aVerifyStep struct {
+	res     multisigVerifyResult
+	adverse bool
+	pass    *passRecord
+}
+
+// s6aRecordingStub substitutes multisigVerifyFn and WRITES THE RECORD, which is
+// the one thing s5StubVerifyFn does not do and the only thing this step is
+// about. `steps` is consumed one per call; the last one repeats.
+func s6aRecordingStub(t *testing.T, steps ...s6aVerifyStep) *int {
+	t.Helper()
+	if len(steps) == 0 {
+		t.Fatal("s6aRecordingStub needs at least one step")
+	}
+	calls := 0
+	prev := multisigVerifyFn
+	multisigVerifyFn = func(ctx *Context, th *Colors, full bool, expectedSlots []int,
+		engravedMd1 []string, rec *verifyRecord,
+	) multisigVerifyResult {
+		s := steps[min(calls, len(steps)-1)]
+		calls++
+		if rec == nil {
+			t.Error("the caller dispatched the verify with a NIL record, so nothing it " +
+				"observed can reach the restore document")
+			return s.res
+		}
+		if s.adverse {
+			rec.adverse = true
+		}
+		if s.pass != nil {
+			p := *s.pass
+			rec.pass = &p
+		}
+		return s.res
+	}
+	t.Cleanup(func() { multisigVerifyFn = prev })
+	return &calls
+}
+
+// s6aAnswerVerifyOffers presses through the post-engrave verify offer and every
+// re-offer the retry loop makes, one attempt per step, and leaves the flow on
+// its restore document.
+//
+// It presses THE ROW THAT SAYS WHAT IT WANTS, not a row number, for
+// s5RowIndexOf's reason: the loop keys on the index Choose returns and looks up
+// no label anywhere.
+func s6aAnswerVerifyOffers(t *testing.T, ctx *Context, frame func() (string, bool),
+	steps []s6aVerifyStep,
+) {
+	t.Helper()
+	offer, ok := pumpUntil(frame, "Verify the engraved plates?", 128)
+	if !ok {
+		t.Fatalf("the verify offer was not reached after the engrave; got %q", offer)
+	}
+	s5ChooseRowLabelled(t, ctx, frame, offer, []string{"Verify now", "Skip"}, "Verify now")
+	for i, s := range steps {
+		if s.res != verifyIncomplete && s.res != verifyFailed {
+			return // this verdict leaves the loop; the document is next
+		}
+		retry, ok := pumpUntil(frame, multisigVerifyRetryLead, 256)
+		if !ok {
+			t.Fatalf("attempt %d returned a verdict the loop re-offers on, and the offer "+
+				"was not made again; the screen reads %q", i+1, retry)
+		}
+		want := "VERIFY AGAIN"
+		if i == len(steps)-1 {
+			want = "CONTINUE"
+		}
+		s5ChooseRowLabelled(t, ctx, frame, retry, []string{"VERIFY AGAIN", "CONTINUE"}, want)
+	}
+}
+
+// s6aRestoreDocPages returns EVERY PAGE of the restore document the flow is
+// currently on, joined in page order.
+//
+// IT WAITS ON THE TITLE, NOT ON A BODY LINE. "Descriptor:" is on page 1 under a
+// short status and is pushed off it by a long one, so a walk that waits for a
+// body line reports "the document was never shown" for a document that is on
+// the display -- and the two longest of the four status lines are the two this
+// step exists to render.
+func s6aRestoreDocPages(t *testing.T, ctx *Context, frame func() (string, bool)) string {
+	t.Helper()
+	if c, ok := pumpUntil(frame, "Restore Doc", 256); !ok {
+		t.Fatalf("the restore document was not reached; the screen reads %q", c)
+	}
+	doc, _ := s5PageForNeedle(t, ctx, frame, "\x00never matches\x00", 32)
+	return doc
+}
+
+// s6aSupplyDocWalk drives supplyMultisigPolicyFlow end to end -- every plate,
+// the verify offer, the retry loop -- and returns every page of the restore
+// document it ends on.
+//
+// IT SUPPLIES THE 2-OF-2 FIXTURE, not Trace B, and the difference is 14 plates
+// against 4. Both reach the same screen by the same code; the only thing the
+// bigger policy buys this row is 40 seconds of the package's timeout budget.
+func s6aSupplyDocWalk(t *testing.T, steps ...s6aVerifyStep) string {
+	t.Helper()
+	md1, _ := s5PassphrasedSupplyPolicy(t)
+	var doc string
+	synctest.Test(t, func(t *testing.T) {
+		s6aRecordingStub(t, steps...)
+		e := newEngraver()
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		p.engraver = e
+		ctx := NewContext(p)
+		// The session holds the PASSPHRASE this policy was built with; the md1
+		// arrives on the bundle seam. Without the passphrase the typed seed fills no
+		// slot and the walk dies on the cross-match instead.
+		ctx.sysw = sessionHolding(s5PassphraseRecord)
+		ctx.syswBundleSeeds = append([]string(nil), md1...)
+		done := false
+		frame, quit := runUI(ctx, func() {
+			supplyMultisigPolicyFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+
+		if c, ok := pumpUntil(frame, "md1 descriptors: 1", 64); !ok {
+			t.Fatalf("the supplied md1 never reached the gatherer's tally; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Done adding cards
+		frame()
+		if c, ok := pumpUntil(frame, "Choose number of words", 64); !ok {
+			t.Fatalf("the gather did not hand off to seed entry; got %q", c)
+		}
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, fixtureMasterA)
+		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 240); !ok {
+			t.Fatalf("the passphrase prompt was not reached; got %q", c)
+		}
+		click(&ctx.Router, Down) // "Add passphrase"
+		frame()
+		click(&ctx.Router, Button3)
+		frame()
+		if c, ok := pumpUntil(frame, "Password from where?", 64); !ok {
+			t.Fatalf("the payload's passphrase was not offered; got %q", c)
+		}
+		click(&ctx.Router, Button3) // FROM PAYLOAD
+		frame()
+		if c, ok := pumpUntil(frame, "What to engrave?", 96); !ok {
+			t.Fatalf("the engrave-mode choice was not reached; got %q", c)
+		}
+		click(&ctx.Router, Button3) // the FULL row
+		frame()
+		if c, ok := pumpUntil(frame, "Plates To Cut", 96); !ok {
+			t.Fatalf("the plate census was not shown; got %q", c)
+		}
+		click(&ctx.Router, Button3)
+		frame()
+
+		plates := 0
+		for {
+			if _, ok := pumpUntil(frame, "Choose engraving", 96); !ok {
+				break
 			}
-			click(&ctx.Router, Down) // Skip
+			click(&ctx.Router, Button3) // first variant
 			frame()
-			click(&ctx.Router, Button3)
-			frame()
-			if c, ok := pumpUntil(frame, "Descriptor:", 128); !ok {
-				t.Fatalf("the restore doc was not shown; got %q", c)
+			s5EngraveOnePlate(t, ctx, frame, e)
+			plates++
+			if plates > 24 {
+				t.Fatal("the engrave loop did not terminate")
 			}
-			doc, _ := s5PageForNeedle(t, ctx, frame, "\x00never matches\x00", 32)
-			check(t, "multisig build", doc, manySubject, oneSubject)
-			click(&ctx.Router, Button3) // done with the restore doc
-			for i := 0; i < 256 && !done; i++ {
+		}
+		if plates == 0 {
+			t.Fatal("no plate was cut, so this walk never reached the post-engrave surfaces")
+		}
+		t.Logf("the supply run cut %d plate(s)", plates)
+
+		s6aAnswerVerifyOffers(t, ctx, frame, steps)
+		doc = s6aRestoreDocPages(t, ctx, frame)
+		click(&ctx.Router, Button3) // done with the restore doc
+		for i := 0; i < 256 && !done; i++ {
+			if _, ok := frame(); !ok {
+				break
+			}
+		}
+		if !done {
+			t.Error("the supply flow did not return after the restore doc")
+		}
+	})
+	return doc
+}
+
+// s6aBuildDocWalk is the same for buildMultisigPolicyFlow.
+func s6aBuildDocWalk(t *testing.T, steps ...s6aVerifyStep) string {
+	t.Helper()
+	records := cosignerCardRecords(t, 4) // A@0, B@0, C@0, A@1
+	var doc string
+	synctest.Test(t, func(t *testing.T) {
+		s6aRecordingStub(t, steps...)
+		e := newEngraver()
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		p.engraver = e
+		ctx := NewContext(p)
+		ctx.sysw = sessionHolding(records...)
+		done := false
+		// THE RASTER HARNESS, for s5EngraveEveryPlate's measured reason: the frames
+		// a plate takes depend on which harness pumps them.
+		frame, _, _, quit := runUITouchRaster(ctx, func() {
+			buildMultisigPolicyFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+
+		s5DriveBuildToEngravePicker(t, ctx, frame)
+		t.Logf("the build run cut %d plate(s)", s5EngraveEveryPlate(t, ctx, frame, e))
+		s6aAnswerVerifyOffers(t, ctx, frame, steps)
+		doc = s6aRestoreDocPages(t, ctx, frame)
+		click(&ctx.Router, Button3) // done with the restore doc
+		for i := 0; i < 256 && !done; i++ {
+			if _, ok := frame(); !ok {
+				break
+			}
+		}
+		if !done {
+			t.Error("the build flow did not return after the restore doc")
+		}
+	})
+	return doc
+}
+
+// s6aStatusCells is the four §4.7c lines for one pass record, in cell order.
+// The two pass cells are GENERATED, so they are assembled from the clause
+// constants rather than pasted.
+func s6aStatusCells(passLine string) map[string]string {
+	return map[string]string{
+		"statusNotFullyChecked": t21ZeroCellLine,
+		"statusCheckDidNotPass": t21DidNotPassLine,
+		"statusVerified":        passLine,
+		"statusVerifiedOnRetry": passLine + " " + t21RetrySuffix,
+	}
+}
+
+// s6aAssertOneStatusLine asserts a rendered document carries `want` and no OTHER
+// status line.
+//
+// THE FOUR LINES ARE NOT PAIRWISE DISJOINT AND THAT IS BY DESIGN: the retry
+// cell's line is the pass cell's line plus one sentence. So "exactly one" is
+// measured as "the ones present are exactly the ones `want` contains", which is
+// the strongest statement that is true of the design -- and a document carrying
+// the pass line where the retry line belongs still fails it, because the retry
+// sentence is then missing.
+func s6aAssertOneStatusLine(t *testing.T, path, doc, wantName, want string, cells map[string]string) {
+	t.Helper()
+	if want == "" {
+		t.Fatalf("%s: the expected status line is empty, so this assertion says nothing", path)
+	}
+	if !uiContains(doc, want) {
+		t.Errorf("the %s restore document does not carry its status line.\n  want %s\n  %q\n"+
+			"A document silent about its verification is one a stranger reads as verified:\n%q",
+			path, wantName, want, doc)
+	}
+	for name, line := range cells {
+		if strings.Contains(want, line) {
+			continue // `want` itself, or the pass line the retry cell extends
+		}
+		if uiContains(doc, line) {
+			t.Errorf("the %s restore document carries %s as well as %s. Exactly one status "+
+				"line belongs on a document, and two of the four cells cannot both be true "+
+				"of one run:\n  also present %q\n%q", path, name, wantName, line, doc)
+		}
+	}
+}
+
+// s6aUIIndex is uiContains' answer to WHERE, normalised the same way: the space
+// glyph inks nothing, so a needle carrying a space matches nothing at all.
+func s6aUIIndex(content, needle string) int {
+	return strings.Index(strings.ToLower(content),
+		strings.ReplaceAll(strings.ToLower(needle), " ", ""))
+}
+
+// s6aAssertStatusFirstAndScope is T11, applied to one rendered document.
+//
+// POSITION IS THE WHOLE CLAIM, and it is the one a compiler is perfectly happy
+// to lose. restoreDocScreen is a PAGER: append(lines, status) puts the status
+// after the descriptor and both addresses, several pages into a screen whose
+// Page button the reader has to know to press, and a verification status the
+// reader has to page to is one the reader does not have. That is T11's mutation
+// -- "pass it via the trailing extra parameter, as the round-1 fold specified" --
+// and it changes nothing a build or a unit test would notice.
+//
+// THE SCOPE LINE IS THE OTHER HALF. Under a check that RAN AND DID NOT PASS,
+// nothing below the status is conditioned on it -- the descriptor, the addresses
+// and the plate inventory all describe what the run INTENDED to cut -- so a
+// reader who takes the wallet details as confirmed by the page they are printed
+// on has read it exactly as laid out. It is deliberately NOT widened to the
+// other cells, whose own lines already say what to do and whose modal occupant
+// skipped the verify on a backup that is probably fine.
+//
+// `firstDocLine` is the first line the DOCUMENT ITSELF contributes, so "the
+// status is at slice index 0" is checkable as "the status is drawn before it".
+func s6aAssertStatusFirstAndScope(t *testing.T, path, doc, status, firstDocLine string, wantScope bool) {
+	t.Helper()
+	si := s6aUIIndex(doc, status)
+	if si < 0 {
+		t.Fatalf("the %s restore document does not carry its status line at all:\n%q", path, doc)
+	}
+	di := s6aUIIndex(doc, firstDocLine)
+	if di < 0 {
+		t.Fatalf("the %s restore document does not carry %q, so this test cannot say what "+
+			"the status precedes:\n%q", path, firstDocLine, doc)
+	}
+	if si > di {
+		t.Errorf("the %s restore document draws its status AFTER %q, so it is not at slice "+
+			"index 0. A trailing parameter cannot reach index 0, and a status the reader "+
+			"has to page to is one the reader does not have:\n%q", path, firstDocLine, doc)
+	}
+	gi := s6aUIIndex(doc, verifyStatusScopeLine)
+	switch {
+	case wantScope && gi < 0:
+		t.Errorf("the %s restore document reports a check that RAN AND DID NOT PASS and "+
+			"does not scope the page beneath it. Everything below describes what the run "+
+			"intended to engrave, and nothing on the page says so:\n%q", path, doc)
+	case wantScope && (gi < si || gi > di):
+		t.Errorf("the %s restore document carries the scoping line, but not between the "+
+			"status and the wallet it scopes (status@%d scope@%d %q@%d):\n%q",
+			path, si, gi, firstDocLine, di, doc)
+	case !wantScope && gi >= 0:
+		t.Errorf("the %s restore document carries the scoping line under a status that is "+
+			"not \"a check ran and did not pass\". Its own line already tells the reader "+
+			"what to do, and a second warning on a backup that is probably fine teaches "+
+			"operators to tap past modals:\n%q", path, doc)
+	}
+}
+
+// T20(a) -- THE 2x2 RENDERS FOUR DISTINCT, NON-EMPTY, BYTE-EXACT LINES.
+//
+// The mutations are "return the same string for two cells" -- caught by the
+// distinctness check -- and "return an empty slice", which on a document is a
+// blank first line: caught here by the emptiness check and on all three flows by
+// the three walks below.
+func TestVerifyStatusCellsRenderFourDistinctLines(t *testing.T) {
+	pass := passRecord{full: true, legs: 1, suppliedCosigners: 0}
+	cells := s6aStatusCells(t22OneKeyPlateClause + " " + t22MS1Clause)
+	rendered := map[string]string{
+		"statusNotFullyChecked": buildVerifyStatusLine(verifyRecord{}),
+		"statusCheckDidNotPass": buildVerifyStatusLine(verifyRecord{adverse: true}),
+		"statusVerified":        buildVerifyStatusLine(verifyRecord{pass: &pass}),
+		"statusVerifiedOnRetry": buildVerifyStatusLine(verifyRecord{pass: &pass, adverse: true}),
+	}
+	seen := map[string]string{}
+	for name, want := range cells {
+		got := rendered[name]
+		if got != want {
+			t.Errorf("%s renders\n  got  %q\n  want %q", name, got, want)
+		}
+		if got == "" {
+			t.Errorf("%s renders the empty string. A status that is absent renders as "+
+				"SILENCE, and silence is the one thing this line exists to stop being "+
+				"mistakable for a pass", name)
+		}
+		if prev, dup := seen[got]; dup {
+			t.Errorf("%s and %s render the SAME line, so two cells of the 2x2 are "+
+				"indistinguishable on the document:\n  %q", name, prev, got)
+		}
+		seen[got] = name
+	}
+}
+
+// T25 -- NO VERDICT IS READ.
+//
+// The status is derived from TWO RECORDED BOOLEANS and from nothing else. A
+// verdict is a summary of a flow rather than a record of what it observed, and
+// keying a pass arm on `res == verifyComplete` is the proxy two review rounds
+// proved unsound: verifyComplete is returned by a run whose earlier attempt
+// failed, and verifyFailed is returned at a site where the device observed
+// nothing about the plates at all (a re-typed seed that will not derive).
+//
+// THE SEARCH IS OVER CODE WITH THE COMMENTS STRIPPED, and that is measured
+// rather than tidy: at step 4 a guard searching raw source passed with the code
+// gutted, because the name it sought appeared in a nearby comment. The
+// derivation's own comment says it names no verdict "deliberately not even in
+// this comment" -- which is a promise, and this is the check.
+func TestVerifyStatusDerivationReadsNoVerdict(t *testing.T) {
+	code := s6aCodeOf(t, "verify_status.go")
+
+	// (a) THE DERIVATION NAMES NO VERDICT. Not the result type, and not one of
+	// its five constants. Whole-file, because a derivation split across two
+	// helpers must not be able to hide a verdict in the other one.
+	for _, name := range []string{
+		"multisigVerifyResult", "verifyComplete", "verifyIncomplete",
+		"verifyFailed", "verifyRefused", "verifyAbandoned",
+	} {
+		if strings.Contains(code, name) {
+			t.Errorf("gui/verify_status.go names %s. The status is derived from what the "+
+				"flow RECORDED, never from the verdict it returned: verifyComplete is "+
+				"returned by a run whose earlier attempt failed, and verifyFailed is "+
+				"returned where the device observed nothing about the plates at all", name)
+		}
+	}
+	// `res` is the name both callers give the verdict; searched with enough
+	// context that "restore" and "result" do not match it.
+	for _, tok := range []string{" res ", " res.", "res ==", "res !=", "= res\n", "(res)"} {
+		if strings.Contains(code, tok) {
+			t.Errorf("gui/verify_status.go reads %q -- the callers' verdict variable", tok)
+		}
+	}
+
+	// (b) AND IT DOES READ BOTH RECORDED BOOLEANS. Without this half the file
+	// could satisfy (a) by deriving nothing at all, which is the wholesale
+	// deletion a bare negative always admits.
+	for _, want := range []string{"rec.pass", "rec.adverse"} {
+		if !strings.Contains(code, want) {
+			t.Errorf("gui/verify_status.go never reads %s, so the cell it derives is not "+
+				"the 2x2 of the two recorded facts", want)
+		}
+	}
+
+	// (c) AND THE CELL IS THE ONE THE TWO BOOLEANS NAME, driven rather than read:
+	// a verdict-keyed arm that happened to spell its constants differently would
+	// still have to get these four wrong.
+	p := passRecord{full: true, legs: 1}
+	for _, c := range []struct {
+		name string
+		rec  verifyRecord
+		want verifyStatus
+	}{
+		{"neither", verifyRecord{}, statusNotFullyChecked},
+		{"adverse only", verifyRecord{adverse: true}, statusCheckDidNotPass},
+		{"pass only", verifyRecord{pass: &p}, statusVerified},
+		{"both", verifyRecord{pass: &p, adverse: true}, statusVerifiedOnRetry},
+	} {
+		if got := verifyStatusFor(c.rec); got != c.want {
+			t.Errorf("the %s record derived %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// s6aMultisigFullOneSlotVerify drives the REAL multisigVerifyFlow in FULL mode
+// over a run that engraved ONE plate of a THREE-key policy, and returns what the
+// flow recorded plus the policy's key count.
+//
+// THIS IS T27'S NON-VACUITY FIXTURE AND IT IS NAMED RATHER THAN ASSUMED. The
+// cosigner clause renders iff suppliedCosigners > 0, and the obvious multisig
+// fixture -- the self-multisig where the operator holds every slot -- covers
+// every key, records 0, and lets T27 pass while asserting nothing. Here the
+// expectation is ONE slot of THREE, so two policy keys are never covered by a
+// verified leg and the count the flow computes is 2. The test asserts that,
+// rather than trusting this comment.
+//
+// FULL MODE ON BOTH HALVES OF T27, deliberately: a single-sig full verify and a
+// one-slot multisig full verify both record {full: true, legs: 1}, and their
+// truthful lines still differ. That identity is the defect this field exists to
+// fix, so it is the fixture the test is built on.
+func s6aMultisigFullOneSlotVerify(t *testing.T) (rec verifyRecord, policyKeys int) {
+	t.Helper()
+	md1, plates, _ := s5TraceBEngraved(t, true)
+	m, err := bip39.ParseMnemonic(fixtureMasterA)
+	if err != nil {
+		t.Fatalf("ParseMnemonic: %v", err)
+	}
+	_, keys, err := md.ExpandWalletPolicyChunks(md1)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+	idx, origin, ok := findUserSlot(m, "", &chaincfg.MainNetParams, keys)
+	if !ok {
+		t.Fatal("findUserSlot: master A matches no slot of Trace B")
+	}
+	b, err := deriveMultisigLeg(m, "", &chaincfg.MainNetParams, origin, md1, true)
+	if err != nil {
+		t.Fatalf("deriveMultisigLeg(@%d): %v", idx, err)
+	}
+	if b.MS1 == "" {
+		t.Fatal("the full-mode leg carries no ms1, so this walk cannot drive full mode")
+	}
+	plate := plates[s5PlateFor(t, plates, verifyLeg{Slot: idx, B: b})]
+	records := append(append([]string(nil), md1...), plate...)
+
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	ctx.syswBundleSeeds = records
+	frame, quit := runUI(ctx, func() {
+		multisigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, []int{idx}, md1, &rec)
+	})
+	defer quit()
+
+	if c, ok := pumpUntil(frame, "mk1 keys:", 64); !ok {
+		t.Fatalf("the readback never reached the gatherer's tally; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Done adding cards
+	frame()
+	if c, ok := pumpUntil(frame, "Choose number of words", 64); !ok {
+		t.Fatalf("the gather did not hand off to seed entry; got %q", c)
+	}
+	click(&ctx.Router, Button3) // 12 WORDS
+	frame()
+	driveWords(&ctx.Router, fixtureMasterA)
+	if c, ok := pumpUntil(frame, "passphrase", 240); !ok {
+		t.Fatalf("the passphrase prompt was not reached; got %q", c)
+	}
+	click(&ctx.Router, Button3) // Skip
+	frame()
+	if c, ok := pumpUntil(frame, "Type ms1", 96); !ok {
+		t.Fatalf("full mode did not ask for the ms1; got %q", c)
+	}
+	runes(&ctx.Router, strings.ToLower(b.MS1))
+	click(&ctx.Router, Button3)
+	frame()
+	if c, ok := pumpUntil(frame, "Verify OK", 128); !ok {
+		t.Fatalf("the one-slot full multisig verify did not pass over its own plate; the "+
+			"screen reads %q", c)
+	}
+	return rec, len(keys)
+}
+
+// s6aSingleSigFullVerify drives the REAL singleSigVerifyFlow in FULL mode over
+// the bundle a bare walk engraves, and returns what it recorded.
+func s6aSingleSigFullVerify(t *testing.T) verifyRecord {
+	t.Helper()
+	opts := s6aSingleSigOpts{} // full mode, no passphrase
+	b := s6aSingleSigBundle(t, opts)
+	var rec verifyRecord
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
+	frame, quit := runUI(ctx, func() {
+		singleSigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, false, &rec)
+	})
+	defer quit()
+	s6aDriveSingleSigVerifyOK(t, ctx, frame, opts)
+	return rec
+}
+
+// T27 -- THE PATH AXIS.
+//
+// A single-sig full pass line OMITS "Other cosigners' keys are taken as
+// supplied."; a multisig full pass line INCLUDES it. Both records say
+// {full: true, legs: 1}, so nothing about the mode or the plate count separates
+// them: the only thing that can is the count of policy keys this run took as
+// supplied rather than checked, which is why the record carries a COUNT and not
+// a flow identifier.
+//
+// BOTH HALVES COME FROM REAL FLOWS. The multisig count is computed inside
+// multisigVerifyFlow from the policy keys and the covered slots, and no stub can
+// say whether that computation is right -- its mutation, "leave suppliedCosigners
+// unwritten", leaves a zero value that makes the clause vanish EVERYWHERE and
+// that no other test in the tree notices.
+//
+// NON-VACUITY IS ASSERTED, NOT ASSUMED. A fixture where the operator holds every
+// slot covers every key, records 0, and would let this test pass while observing
+// the clause's PRESENT arm never once.
+func TestVerifyPassLineNamesCosignersOnlyWhereThereAreSome(t *testing.T) {
+	msRec, policyKeys := s6aMultisigFullOneSlotVerify(t)
+	if msRec.pass == nil {
+		t.Fatal("the multisig verify passed on screen and recorded no pass, so the " +
+			"document it feeds would report a run that never happened")
+	}
+	if msRec.pass.suppliedCosigners <= 0 {
+		t.Fatalf("the multisig fixture covered every one of its %d policy keys, so "+
+			"suppliedCosigners is %d and the cosigner clause renders nowhere. This test "+
+			"would then pass while never once observing the clause PRESENT, which is the "+
+			"regression it exists for", policyKeys, msRec.pass.suppliedCosigners)
+	}
+	if got, want := msRec.pass.suppliedCosigners, policyKeys-msRec.pass.legs; got != want {
+		t.Errorf("the flow counted %d supplied cosigners over a %d-key policy in which %d "+
+			"leg(s) were verified, want %d. The count is the policy keys NOT covered by a "+
+			"verified leg", got, policyKeys, msRec.pass.legs, want)
+	}
+
+	ssRec := s6aSingleSigFullVerify(t)
+	if ssRec.pass == nil {
+		t.Fatal("the single-sig verify passed on screen and recorded no pass. The " +
+			"success exit is the fall-through at the end of the flow, not a return, and " +
+			"it is the one an enumeration of return sites misses")
+	}
+	if ssRec.pass.suppliedCosigners != 0 {
+		t.Errorf("a single-sig run recorded %d supplied cosigners. That path derives and "+
+			"compares every key in its own descriptor; there is no cosigner key for the "+
+			"count to describe", ssRec.pass.suppliedCosigners)
+	}
+
+	msLine := buildVerifyStatusLine(msRec)
+	ssLine := buildVerifyStatusLine(ssRec)
+	// The fixture's own numbers, logged so a reader of the output can see that
+	// the PRESENT arm was observed rather than take this test's word for it.
+	t.Logf("multisig: %d policy keys, %d leg(s) verified, %d taken as supplied\n  %q",
+		policyKeys, msRec.pass.legs, msRec.pass.suppliedCosigners, msLine)
+	t.Logf("single-sig: %d leg verified, %d taken as supplied\n  %q",
+		ssRec.pass.legs, ssRec.pass.suppliedCosigners, ssLine)
+	if !strings.Contains(msLine, t22CosignerClause) {
+		t.Errorf("the multisig pass line does not scope itself to the keys this run "+
+			"checked. Two of its policy's keys were taken as supplied and the document "+
+			"vouches for the wallet without saying so:\n  %q", msLine)
+	}
+	if strings.Contains(ssLine, t22CosignerClause) {
+		t.Errorf("the single-sig pass line names cosigners. This wallet has none, and "+
+			"a document describing a different wallet shape is the misdescription G1 "+
+			"forbids:\n  %q", ssLine)
+	}
+
+	// AND THE TWO DIFFER BY EXACTLY THAT CLAUSE. Both records are {full: true,
+	// legs: 1}, so if the path axis were dropped the two lines would be identical
+	// -- which is the Critical this field closed, stated as an equation.
+	if msRec.pass.full != ssRec.pass.full || msRec.pass.legs != ssRec.pass.legs {
+		t.Fatalf("the two fixtures no longer agree on mode and leg count (multisig "+
+			"{full:%v legs:%d}, single-sig {full:%v legs:%d}), so a difference between "+
+			"their lines no longer isolates the path axis",
+			msRec.pass.full, msRec.pass.legs, ssRec.pass.full, ssRec.pass.legs)
+	}
+	if want := ssLine + " " + t22CosignerClause; msLine != want {
+		t.Errorf("the multisig and single-sig pass lines differ by more than the cosigner "+
+			"clause\n  multisig   %q\n  single-sig %q\n  want       %q", msLine, ssLine, want)
+	}
+}
+
+// TestSingleSigVerifyRecordsWhatItObserved drives THREE of the eleven exits of
+// singleSigVerifyFlow and asserts which of the two booleans each one writes.
+//
+// IT IS NOT A ROW OF THE PLAN'S TEST TABLE AND IT IS HERE ON PURPOSE. The
+// eleven-exit mapping is the step-1 artifact this step implements, and every
+// other test in this file observes it through the SUCCESS exit alone: delete
+// both `rec.adverse = true` writes from gui/singlesig_verify.go and the whole
+// suite stays green, while a single-sig verify that FAILED produces a document
+// reading "these plates were not fully checked" -- the weaker line, over steel
+// the device has evidence against. A mutation nothing notices is a line nothing
+// tests.
+//
+// Three exits, one per class the mapping defines:
+//
+//	:117 ADVERSE -- cards were read and could not be ACCOUNTED for
+//	:146 ADVERSE -- the comparator RAN and disagreed
+//	:69  BENIGN  -- Back at the seed keyboard, before any plate is touched
+//
+// THE BENIGN ARM IS THE ONE THAT KEEPS THE OTHER TWO HONEST. "Set adverse at
+// every return" passes both adverse arms and is a G2 violation: it prints "a
+// verification check ran and did not pass" over a run where the operator pressed
+// Back before the device read anything, which is a false statement about the
+// device's own behaviour.
+func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
+	opts := s6aSingleSigOpts{watchOnly: true} // no ms1 to type on any arm
+	b := s6aSingleSigBundle(t, opts)
+	foreign := func(t *testing.T) []string {
+		t.Helper()
+		m, err := bip39.ParseMnemonic(fixtureMasterA)
+		if err != nil {
+			t.Fatalf("ParseMnemonic: %v", err)
+		}
+		// Another wallet's key plate: a different seed at a different purpose.
+		fb, _, _, _, err := deriveSingleSigBundle(m, "", &chaincfg.MainNetParams,
+			singleSigPath(44), md.ScriptPkh)
+		if err != nil {
+			t.Fatalf("deriving a foreign mk1: %v", err)
+		}
+		return fb.MK1
+	}
+
+	// drive runs the flow over `records` and returns the record it wrote. `back`
+	// presses Back at the seed keyboard instead of typing.
+	drive := func(t *testing.T, records []string, back bool) (verifyRecord, string) {
+		t.Helper()
+		var rec verifyRecord
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.syswBundleSeeds = append([]string(nil), records...)
+		done := false
+		frame, quit := runUI(ctx, func() {
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, &rec)
+			done = true
+		})
+		defer quit()
+
+		if c, ok := pumpUntil(frame, "Choose number of words", 96); !ok {
+			t.Fatalf("the verify did not ask for the seed; got %q", c)
+		}
+		if back {
+			click(&ctx.Router, Button1) // Back, before a plate has been touched
+			for i := 0; i < 96 && !done; i++ {
 				if _, ok := frame(); !ok {
 					break
 				}
 			}
 			if !done {
-				t.Error("the build flow did not return after the restore doc")
+				t.Fatal("Back at the seed keyboard did not leave the verify")
 			}
+			return rec, ""
+		}
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, abandonAboutPhrase())
+		if c, ok := pumpUntil(frame, "Wallet Type", 240); !ok {
+			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
+		}
+		click(&ctx.Router, Button3) // the one-tap default
+		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Skip
+		frame()
+		if c, ok := pumpUntil(frame, "mk1 keys:", 96); !ok {
+			t.Fatalf("the readback never reached the gatherer's tally; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Done adding cards
+		last := ""
+		for i := 0; i < 128 && !done; i++ {
+			c, ok := frame()
+			if !ok {
+				break
+			}
+			last = c
+		}
+		return rec, last
+	}
+
+	// :117 -- TWO key cards. The gather returned complete cards and the accounting
+	// over them failed, which is "a plate could not be read or accounted for".
+	t.Run("readback-not-accounted-for", func(t *testing.T) {
+		records := append(append(append([]string(nil), b.MK1...), b.MD1...), foreign(t)...)
+		rec, last := drive(t, records, false)
+		if !uiContains(last, "Need one key card") {
+			t.Fatalf("an ambiguous readback did not reach the accounting refusal; the "+
+				"screen reads %q", last)
+		}
+		if !rec.adverse {
+			t.Error("cards came off the plates, the device could not account for them, and " +
+				"the record says nothing adverse. The document then reports \"not fully " +
+				"checked\" over a pile the device could not make sense of")
+		}
+		if rec.pass != nil {
+			t.Error("a refused readback recorded a PASS")
+		}
+	})
+
+	// :146 -- the comparator ran and disagreed.
+	t.Run("comparator-disagreed", func(t *testing.T) {
+		records := append(append([]string(nil), foreign(t)...), b.MD1...)
+		rec, last := drive(t, records, false)
+		if !uiContains(last, "Verify Failed") {
+			t.Fatalf("a foreign key plate did not FAIL the verify; the screen reads %q", last)
+		}
+		if !rec.adverse {
+			t.Error("the comparator ran, disagreed, and the record says nothing adverse. " +
+				"The restore document then says these plates were merely not fully checked, " +
+				"which is the weaker line over the run where the device has evidence AGAINST " +
+				"the steel")
+		}
+		if rec.pass != nil {
+			t.Error("a failed comparison recorded a PASS")
+		}
+	})
+
+	// :69 -- Back at the seed keyboard. NEITHER bit: the zero cell, from INSIDE
+	// the flow.
+	t.Run("back-before-any-plate-is-read", func(t *testing.T) {
+		records := append(append([]string(nil), b.MK1...), b.MD1...)
+		rec, _ := drive(t, records, true)
+		if rec.adverse {
+			t.Error("pressing Back at the seed keyboard recorded something ADVERSE. No " +
+				"plate had been touched -- the readback is 40 lines further on -- so the " +
+				"document would claim a verification check ran and did not pass, which is a " +
+				"false statement about what this device did")
+		}
+		if rec.pass != nil {
+			t.Error("an abandoned verify recorded a PASS")
+		}
+		if got := buildVerifyStatusLine(rec); got != t21ZeroCellLine {
+			t.Errorf("a benign exit does not land in the zero cell\n  got  %q\n  want %q",
+				got, t21ZeroCellLine)
+		}
+	})
+}
+
+// TestMultisigVerifyRecordsWhatItObserved is the multisig twin of the row above,
+// and it exists for the same reason: every other multisig assertion in this file
+// drives the record through the multisigVerifyFn STUB, so deleting the real
+// flow's writes leaves them all green.
+//
+// Two arms, one per class. The adverse one is the comparator disagreeing over a
+// foreign key plate; the benign one is a structural refusal taken BEFORE the
+// operator is asked to present anything, which observes nothing about any plate
+// and must therefore write neither bit.
+func TestMultisigVerifyRecordsWhatItObserved(t *testing.T) {
+	t.Run("comparator-disagreed", func(t *testing.T) {
+		_, md1, _, slot := s5OneSlotReadback(t)
+		m, err := bip39.ParseMnemonic(fixtureMasterA)
+		if err != nil {
+			t.Fatalf("ParseMnemonic: %v", err)
+		}
+		foreign, _, _, _, err := deriveSingleSigBundle(m, "", &chaincfg.MainNetParams,
+			singleSigPath(44), md.ScriptPkh)
+		if err != nil {
+			t.Fatalf("deriving a foreign mk1: %v", err)
+		}
+		records := append(append([]string(nil), md1...), foreign.MK1...)
+		var rec verifyRecord
+		last, _ := s5DriveVerifyRec(t, records, []int{slot}, md1, fixtureMasterA, &rec)
+		if !uiContains(last, "Verify Failed") {
+			t.Fatalf("a foreign key plate did not FAIL the verify; the screen reads %q", last)
+		}
+		if !rec.adverse {
+			t.Error("the comparator ran, disagreed, and the record says nothing adverse. " +
+				"The restore document then reports these plates as merely not fully checked")
+		}
+		if rec.pass != nil {
+			t.Error("a failed comparison recorded a PASS")
+		}
+	})
+
+	t.Run("refused-before-any-plate-is-read", func(t *testing.T) {
+		records, md1, _, _ := s5OneSlotReadback(t)
+		var rec verifyRecord
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.syswBundleSeeds = append([]string(nil), records...)
+		frame, quit := runUI(ctx, func() {
+			multisigVerifyFlow(ctx, &descriptorTheme, false, nil, md1, &rec)
 		})
+		defer quit()
+		if c, ok := pumpUntil(frame, "nothing to verify", 16); !ok {
+			t.Fatalf("a verify handed NO engraved slot did not refuse; got %q", c)
+		}
+		if rec.adverse {
+			t.Error("a refusal taken BEFORE the gather recorded something adverse. Nothing " +
+				"was read, compared or accounted for, so the document would claim a check " +
+				"ran and did not pass over plates this run never looked at")
+		}
+		if rec.pass != nil {
+			t.Error("a refusal recorded a PASS")
+		}
 	})
 }

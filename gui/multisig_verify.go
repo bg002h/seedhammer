@@ -659,7 +659,48 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // reassigns it.
 var multisigVerifyFn = multisigVerifyFlow
 
-func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string) multisigVerifyResult {
+// countUncoveredPolicyKeys counts the policy keys this run did NOT verify a leg
+// for -- the cosigners whose keys the document takes as SUPPLIED rather than
+// checked.
+//
+// IT ITERATES THE KEYS AND ASKS WHETHER EACH IS COVERED, never the other way
+// round, and the direction is the whole of it. `len(keys) - len(covered)` is
+// arithmetically the same number today and fails in the WRONG DIRECTION: a
+// stray or out-of-range entry in `covered` SHRINKS it, so a defect in the map
+// would under-report what went unchecked. This form ignores entries outside
+// [0, len(keys)) and counts a wrongly-cleared one as uncovered, so every defect
+// can only inflate the count -- and an inflated count renders a clause saying
+// LESS was checked, which is the direction S6a G2 allows.
+func countUncoveredPolicyKeys(keys []md.ExpandedKey, covered map[int]bool) int {
+	n := 0
+	for i := range keys {
+		if !covered[i] {
+			n++
+		}
+	}
+	return n
+}
+
+// `rec` IS AN OUT-PARAMETER, and the verdict return is deliberately unchanged
+// (S6a §4.7b-seam). The two facts the restore document needs -- was a pass
+// recorded, was anything adverse recorded -- are written HERE, at the return
+// sites where they are in scope, and NOT inferred downstream from the verdict:
+// a verdict is a summary of the flow rather than a record of what it observed,
+// and two review rounds proved it unsound as a proxy for either bit. Widening
+// the return instead would have broken three shipped tests, one of them a source
+// assertion, for no gain the callers can use.
+//
+// THE CALLERS' RECORD OUTLIVES THE LOOP, which is what makes `adverse` sticky
+// across a retry: both engrave callers declare one verifyRecord OUTSIDE their
+// re-offer loop and pass it to every attempt, so a first attempt that failed and
+// a second that passed report statusVerifiedOnRetry rather than a bare pass.
+func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int, engravedMd1 []string, rec *verifyRecord) multisigVerifyResult {
+	// A NIL RECORD IS DISCARDED, NOT DEREFERENCED. Every caller passes one and
+	// this is unreachable today; it is here because the alternative failure is a
+	// panic on the device, mid-verify, on the paths that are already the bad news.
+	if rec == nil {
+		rec = &verifyRecord{}
+	}
 	// THE ENGRAVER'S OBLIGATION LIST ARRIVES FROM THE CALLER, and an empty one is
 	// refused BEFORE the operator is asked to present anything. A verify with no
 	// slot to prove cannot be satisfied by any readback, so sending them to the
@@ -697,6 +738,11 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	}
 	readbackMd1, readbackMk1s, ok := extractReadbackMd1AndMk1s(cards)
 	if !ok {
+		// ADVERSE: cards came off the plates and could not be accounted for. The
+		// gather returned ok, so complete cards were read; the filter then could not
+		// find one md1 and the key card(s) among them. "A plate could not be read or
+		// accounted for" is a literal description of this state.
+		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card(s) (mk1).")
 		return verifyRefused
 	}
@@ -715,11 +761,15 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// re-chunked or re-encoded descriptor that is not the plate the operator is
 	// holding, which is the one thing this check exists to notice.
 	if !slices.Equal(readbackMd1, engravedMd1) {
+		// ADVERSE: the plate presented carries a policy this run did not engrave.
+		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", multisigVerifyForeignPolicyBody)
 		return verifyFailed
 	}
 	_, keys, err := md.ExpandWalletPolicyChunks(readbackMd1)
 	if err != nil {
+		// ADVERSE: a plate was read and would not decode.
+		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", "Couldn't decode the read-back wallet policy.")
 		return verifyFailed
 	}
@@ -730,6 +780,10 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// moment it fails: an operator who has mislaid a plate, or brought one from an
 	// earlier run, learns it before typing a seed rather than after.
 	if len(readbackMk1s) != len(expectedSlots) {
+		// ADVERSE: the plates were read and counted, and the count is not the one
+		// this run cut. A plate from another run, or one this run cut and nobody can
+		// find, is inside this world-set.
+		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", fmt.Sprintf(
 			"Read back %s, but this run engraved %s. Present exactly the plates this "+
 				"run cut.",
@@ -959,6 +1013,9 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// early does not make that provisional.
 	if len(legs) < len(expectedSlots) {
 		if _, err := verifyMultisigLegsPartial(legs, readbackMk1s, readbackMd1); err != nil {
+			// ADVERSE: the comparator ran over the plates that WERE presented and
+			// disagreed. Stopping early does not make a bad plate provisional.
+			rec.adverse = true
 			showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
 			return verifyFailed
 		}
@@ -980,8 +1037,21 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	}
 
 	if err := verifyMultisigLegs(legs, readbackMk1s, readbackMd1); err != nil {
+		// ADVERSE: the comparator ran over every expected plate and disagreed. All
+		// eleven of bundle.Verify's errors classify identically here -- the
+		// provenance distinction inside it is one nothing on the document consumes.
+		rec.adverse = true
 		showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
 		return verifyFailed
+	}
+	// THE SUCCESS RETURN, AND THE ONLY PLACE A PASS IS RECORDED. `full` is the
+	// flow's own parameter and is captured HERE, where it is in scope, so a
+	// watch-only run cannot produce a document claiming an ms1 comparison that
+	// never ran. `legs` is what was compared, not what was expected.
+	rec.pass = &passRecord{
+		full:              full,
+		legs:              len(legs),
+		suppliedCosigners: countUncoveredPolicyKeys(keys, covered),
 	}
 	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKMessage(len(legs), full))
 	return verifyComplete

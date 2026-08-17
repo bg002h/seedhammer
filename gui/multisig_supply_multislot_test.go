@@ -268,7 +268,9 @@ func s5DriveVerifyTolerant(t *testing.T, records []string, expected []int, engra
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append([]string(nil), records...)
 
-	frame, quit := runUI(ctx, func() { multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1) })
+	frame, quit := runUI(ctx, func() {
+		multisigVerifyFlow(ctx, &descriptorTheme, false, expected, engravedMd1, &verifyRecord{})
+	})
 	defer quit()
 
 	if c, ok := pumpUntil(frame, "mk1 keys:", 64); !ok {

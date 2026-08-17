@@ -154,7 +154,44 @@ const (
 	verifyStatusNoMS1Clause = "No secret seed share was read back or compared."
 	// verifyStatusCosignerClause is entitled by suppliedCosigners > 0.
 	verifyStatusCosignerClause = "Other cosigners' keys are taken as supplied."
+	// verifyStatusScopeLine SCOPES THE PAGE BENEATH IT, and it renders under
+	// statusCheckDidNotPass alone. Everything below the status line -- the
+	// descriptor, the addresses, the plate inventory -- describes what this run
+	// INTENDED to cut, and nothing on the page is conditioned on the check having
+	// passed. A reader who takes the wallet details as confirmed by the document
+	// they are printed on has read it exactly as it was laid out.
+	//
+	// IT IS NOT WIDENED TO statusNotFullyChecked. That cell's own line already
+	// says "confirm before relying", and its modal occupant is an operator who
+	// skipped the verify on a backup that is probably fine; a second warning there
+	// cries wolf, and an operator who learns to tap past one modal taps past the
+	// next.
+	verifyStatusScopeLine = "Everything below describes what this run INTENDED to " +
+		"engrave. Until the check above is resolved, do not assume the plates match it."
 )
+
+// verifyStatusScopeLines returns the scoping line that belongs immediately after
+// `status` on a restore document, or nothing.
+//
+// IT IS DERIVED INSIDE THE DOCUMENT RATHER THAN PASSED IN, and that is the whole
+// reason it is a function. THREE production flows reach a restore document, and
+// "wired into two of the three and forgotten on the third" is not a hypothetical
+// here -- it is the exact shape that let this cycle's Critical ship on the
+// multisig side while the single-sig side went without. A parameter can be
+// omitted at a call site and the compiler is happy; a line the document builds
+// for itself cannot be.
+//
+// THE TEST IS IDENTITY, NOT INFERENCE. verifyStatusDidNotPassLine is the one
+// string buildVerifyStatusLine emits for statusCheckDidNotPass and it is a
+// package constant, so the two cannot drift apart: rewording the status reworks
+// this comparison in the same edit. Nothing here reads a verdict, and nothing
+// here re-derives a cell.
+func verifyStatusScopeLines(status string) []string {
+	if status != verifyStatusDidNotPassLine {
+		return nil
+	}
+	return []string{verifyStatusScopeLine}
+}
 
 // buildVerifyPassLine generates the pass line FROM THE RECORD. It is not a
 // literal, and that is the whole point: it names exactly the comparisons this
