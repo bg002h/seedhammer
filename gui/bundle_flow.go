@@ -420,7 +420,7 @@ func bundlePlateMark(kind bundleCardKind, title, footer string) (string, string)
 // just said produced no usable backup.
 //
 // markTitle and markFooter are S6b spec 1.2/1.3's plate marking, applied to
-// every plate but a cardMS1's (bundlePlateMark). Only gui/singlesig.go:177
+// every plate but a cardMS1's (bundlePlateMark). Only engraveSingleSigFlow (gui/singlesig.go)
 // passes non-empty values, computed there from R-A's predicate; every other
 // caller passes "", "" -- Go has no default parameters, and a variadic tail is
 // PROHIBITED (spec 1.3): it would leave order and arity unchecked on the value

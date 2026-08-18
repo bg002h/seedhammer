@@ -52,7 +52,7 @@ func TestValidateMdmkMarkingRendersInEveryVariant(t *testing.T) {
 }
 
 // TestSingleSigPlateMark pins spec S6b §1.2's exact strings for all four
-// (full, hasPassphrase) combinations -- the composition gui/singlesig.go:177
+// (full, hasPassphrase) combinations -- the composition engraveSingleSigFlow (gui/singlesig.go)
 // calls, upstream of validateMdmk. R-A's predicate ("the set contains a
 // seed") is exactly `full` for this flow: watch-only never carries the ms1.
 func TestSingleSigPlateMark(t *testing.T) {
@@ -97,7 +97,7 @@ func TestBundlePlateMarkSuppressesMS1(t *testing.T) {
 
 // TestOnlySingleSigMarksPlates is GATE 1.3's other half, a SOURCE fact: spec
 // S6b §1.3's table names every validateMdmk / bundleEngrave call path, and
-// only gui/singlesig.go:177 passes non-empty marking. Asserted on raw source,
+// only engraveSingleSigFlow (gui/singlesig.go) passes non-empty marking. Asserted on raw source,
 // the same idiom TestBothEngraveFlowsGateOnACompletedSet
 // (multisig_verify_report_test.go) and
 // TestMs1ReminderIsTitledForTheProgramThatShowedIt (bundle_abort_prose_test.go)

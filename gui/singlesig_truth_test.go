@@ -2278,7 +2278,7 @@ func TestBundleAbortJustificationNamesEveryTailCarryingCaller(t *testing.T) {
 	// WHICH callers leaves the next reader exactly where the last one was.
 	doc := guiDocComment(t, file, "func bundleAbortWarningText(")
 	for _, caller := range []string{
-		"engraveSingleSigFlow",     // gui/singlesig.go:177 -- gated by S6a step 5
+		"engraveSingleSigFlow",     // gui/singlesig.go:191 -- gated by S6a step 5
 		"supplyMultisigPolicyFlow", // gui/multisig.go:291   -- gated by S5's I-12
 		"buildMultisigPolicyFlow",  // gui/multisig_build.go:402 -- gated by S5's I-12
 	} {

@@ -2291,7 +2291,7 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 // enforced at the CALLER, not here) -- it just carries whatever the caller
 // supplies into every variant's backup.Text, which is what makes the marking
 // render identically in TEXT+QR, TEXT ONLY and QR ONLY (title/footer are plate
-// rows, not paragraph content). Every caller but gui/singlesig.go:177 passes
+// rows, not paragraph content). Every caller but engraveSingleSigFlow (gui/singlesig.go) passes
 // "", "" -- Go has no default parameters.
 func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, error) {
 	params := pl.EngraverParams()
