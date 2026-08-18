@@ -813,12 +813,11 @@ func buildFingerprintContradictsMessage(e errBuildFingerprintContradicts, origin
 			break
 		}
 	}
-	return fmt.Sprintf("Slot @%d%s carries the key your seed derives, but the card says "+
-		"its master fingerprint is %s and this seed's is %s. Nothing was engraved.\n\n"+
-		"A fingerprint is written on a card by whoever made it and is not bound to the "+
-		"key, so the two can disagree. Most often the card was made under a different "+
-		"passphrase.\n\n"+
-		"Re-enter the seed with that passphrase. Reassigning the slot only stops the "+
-		"check. If the card is stale, rewrite the payload with `me sysw pack`.",
+	return fmt.Sprintf("Slot @%d%s's key derives from your seed, but the card's "+
+		"fingerprint is %s and your seed's is %s. Nothing was engraved.\n\n"+
+		"A fingerprint is written by whoever made the card and is not bound to the "+
+		"key, so they can disagree, often from a different passphrase.\n\n"+
+		"Re-enter the seed with that passphrase. Reassigning only stops the check. "+
+		"If the card is stale, rewrite the payload with `me sysw pack`.",
 		e.Slot, who, e.Declared, e.Derived)
 }
