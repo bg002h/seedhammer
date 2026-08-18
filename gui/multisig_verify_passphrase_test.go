@@ -61,18 +61,27 @@ func TestVerifyNamesThePassphraseBeforeCondemningTheSeed(t *testing.T) {
 		}
 	}
 
-	// The certain arm says the thing that is certain: this seed IS a cosigner.
-	// Getting this right is the whole value -- it converts the scariest screen on
-	// the device into a typo report.
-	if !strings.Contains(strings.ToLower(certain), "is a cosigner") {
+	// The certain arm says the thing that is certain: these plates MATCH this
+	// seed. Getting this right is the whole value -- it converts the scariest
+	// screen on the device into a typo report.
+	//
+	// R-M (S6b spec §3.2a) replaced this arm's wording wholesale -- "these
+	// plates match this seed with NO passphrase" is the new affirmative claim,
+	// where the arm used to say "That seed IS a cosigner of this policy". The
+	// substring pinned here moved with it, verbatim-mandated text and all: R-M's
+	// body is fixed and is asserted byte-for-byte elsewhere
+	// (TestProvedInnocentBodyIsRMsAdoptedWording, multisig_verify_provedinnocent_test.go),
+	// so this test's job stays what F-191 wrote it for -- confirming the CERTAIN
+	// arm alone makes the affirmative claim, and the unsure/skipped arms do not.
+	if !strings.Contains(strings.ToLower(certain), "match this seed") {
 		t.Errorf("the certain arm does not tell the operator their seed IS in the "+
 			"policy, which is the one fact the re-derivation proved:\n%s", certain)
 	}
 	// And the unsure arms do NOT claim it, because they have not proved it.
 	for name, msg := range map[string]string{"unsure": unsure, "skipped": skipped} {
-		if strings.Contains(strings.ToLower(msg), "is a cosigner") {
-			t.Errorf("%s: claims the seed is a cosigner without having derived a slot "+
-				"for it:\n%s", name, msg)
+		if strings.Contains(strings.ToLower(msg), "match this seed") {
+			t.Errorf("%s: claims the plates match this seed without having derived a "+
+				"slot for it:\n%s", name, msg)
 		}
 	}
 

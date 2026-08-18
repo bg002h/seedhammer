@@ -79,9 +79,21 @@ const (
 // Only verifyComplete may fall through to the restore document. Incomplete and
 // Failed must be RE-OFFERED, since both are states an operator can act on with
 // the plates in front of them. Refused and Abandoned must not be: a structural
-// refusal (no obligation, no policy, an unreadable readback) says nothing the
-// operator can fix by trying again with the same inputs, and an abandon is them
-// choosing to stop.
+// refusal (no obligation, no policy) says nothing the operator can fix by trying
+// again with the SAME inputs, and an abandon is them choosing to stop.
+//
+// AN UNREADABLE READBACK IS NOT IN THAT LIST (F-199, S6b spec §3.1), even
+// though it too is a refusal before any comparison ran. Presenting the plates
+// again is exactly the retry a refusal-class outcome is defined to forbid, so
+// that site returns verifyIncomplete instead -- correctly, even though no
+// comparison ran there: verifyIncomplete's obligation is "the operator can still
+// fix this with what is in their hand", not "a comparison that matched". Of the
+// FOUR return sites that used to share verifyRefused, only two remain
+// programmer-error refusals (no obligation, no policy) plus one defensive
+// re-check of the first that S6b's spec proves unreachable in-process
+// (verifyFreshSlots' only error path re-tests len(expectedSlots)==0, and
+// expectedSlots is never reassigned in this function) -- see the source
+// assertion next to it.
 //
 // THE HEADLINE SAID "FOUR" UNTIL S6a STEP 8, while the paragraph under it named
 // all five and the const block below declares all five. Three obligations over
@@ -94,8 +106,10 @@ const (
 	// verifyComplete is the only clean pass: every expected slot got a leg, every
 	// leg found its plate, and the bijection closed.
 	verifyComplete multisigVerifyResult = iota
-	// verifyIncomplete is a partial verify: what was compared MATCHED, and slots
-	// remain unproved.
+	// verifyIncomplete is a verify the operator can still act on: EITHER a
+	// comparison ran and MATCHED with slots left unproved, OR (F-199, S6b §3.1)
+	// the readback itself could not be gathered into a comparison at all --
+	// re-presenting the plates might succeed where the extraction did not.
 	verifyIncomplete
 	// verifyFailed is a comparison that ran and disagreed.
 	verifyFailed
@@ -145,7 +159,14 @@ func multisigVerifySeedIsInnocent(m bip39.Mnemonic, passphrase string, net *chai
 //
 //   - PROVED INNOCENT: a passphrase was typed and the seed fills a slot without
 //     it. The device can say outright that the seed IS a cosigner, which turns
-//     the scariest screen it draws into a typo report.
+//     the scariest screen it draws into a typo report -- and tells the operator
+//     this is NOT a passphrase-protected wallet, per R-M (S6b spec §3.2a,
+//     REQUIREMENTS §2bis): the operator struck the original's "skip the
+//     passphrase" advice (it reads as a procedural workaround and buries the
+//     finding) and ruled that the fact itself -- not a skip instruction -- is
+//     what resolves their confusion. "A passphrase will be necessary to use the
+//     key" is FORBIDDEN in this arm: it fires precisely because the plates
+//     match the seed with NO passphrase, so no passphrase is needed to use it.
 //   - PASSPHRASE TYPED, still nothing: it cannot tell a wrong seed from a wrong
 //     passphrase, and says so rather than picking the frightening one.
 //   - NO PASSPHRASE TYPED: still not certain. The wallet may have been built with
@@ -157,9 +178,17 @@ func multisigVerifySeedIsInnocent(m bip39.Mnemonic, passphrase string, net *chai
 func multisigVerifyNoSlotBody(passphraseTyped, provedInnocent bool) string {
 	switch {
 	case provedInnocent:
-		return "That seed IS a cosigner of this policy, but not with the passphrase you " +
-			"typed: this wallet's keys come from the seed with no passphrase. Your " +
-			"plates are fine. Try again and skip the passphrase."
+		// R-M's ADOPTED WORDING, verbatim (REQUIREMENTS §2bis, operator
+		// 2026-08-17: "b wording you suggested is great"). Pre-measured: 251
+		// characters, every rune drawable, NO EM DASH -- gui/multisig_build.go
+		// once shipped an em dash in a modal body that meant the body did not
+		// draw AT ALL, so this is a hard constraint, not a style note. Do not
+		// reword it; GATE 3.2a in the test suite pins it against the class check
+		// and against the forbidden "necessary to use the key" claim.
+		return "These plates match this seed with NO passphrase. This is not a " +
+			"passphrase-protected wallet. If you meant to use one, these plates are not " +
+			"that wallet: try the password again. If you continue without a passphrase, " +
+			"these plates are complete as they are."
 	case passphraseTyped:
 		return "No slot matches that seed with the passphrase you typed. Check the " +
 			"passphrase before you doubt the plates: one wrong character derives a " +
@@ -748,9 +777,19 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		// gather returned ok, so complete cards were read; the filter then could not
 		// find one md1 and the key card(s) among them. "A plate could not be read or
 		// accounted for" is a literal description of this state.
+		//
+		// verifyIncomplete, NOT verifyRefused (F-199, S6b spec §3.1). This screen
+		// names exactly what the operator should re-present, and unlike the
+		// programmer-error refusals above (empty expectedSlots, empty engravedMd1)
+		// the operator CAN fix this by trying again with the same plates read more
+		// carefully, or the right ones found. Widening verifyRefused itself to
+		// re-offer was considered and rejected: three other return sites still
+		// share that verdict and must never loop (two programmer errors plus one
+		// unreachable defensive re-check), so the fix is PER-SITE -- this site
+		// alone moves to the verdict the callers already re-offer on.
 		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", "Read back one wallet-policy md1 AND the operator key card(s) (mk1).")
-		return verifyRefused
+		return verifyIncomplete
 	}
 	// THE POLICY IDENTITY, CHECKED FIRST AND ON THE BYTES.
 	//
@@ -814,10 +853,12 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// It exists because the verdict alone cannot tell those apart once `legs` is
 	// empty, and the two callers branch their retry loop on the verdict. A
 	// first-seed failure broke out with no legs and returned verifyAbandoned, so
-	// "add the passphrase and try again", "Your plates are fine. Try again and
-	// skip the passphrase." and "That isn't an ms1 secret share." were each
-	// followed by the restore document and no retry offer -- the exact shape I-4
-	// existed to remove, in the three places I-4 did not look.
+	// "add the passphrase and try again", the provedInnocent arm's remedy
+	// (superseded by R-M, S6b spec §3.2a -- at the time this was "Your plates
+	// are fine. Try again and skip the passphrase.") and "That isn't an ms1
+	// secret share." were each followed by the restore document and no retry
+	// offer -- the exact shape I-4 existed to remove, in the three places I-4
+	// did not look.
 	//
 	// IT IS SET INSIDE THE FLOW RATHER THAN WIDENING THE CALLERS' GATE. Making
 	// the callers re-offer on verifyAbandoned would also re-offer after a Back at
@@ -850,6 +891,14 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		slots := allUserSlots(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
 		fresh, ferr := verifyFreshSlots(expectedSlots, slots, covered)
 		if ferr != nil {
+			// UNREACHABLE IN-PROCESS (F-199, S6b spec §3.1), and left as
+			// verifyRefused deliberately -- it stays non-looping IN CASE it ever
+			// does fire, rather than being upgraded alongside :753's genuinely
+			// correctable readback failure. verifyFreshSlots' only error is
+			// errVerifyNoExpectedSlots on len(expected)==0 (:324-336), and
+			// expectedSlots is a parameter this function never reassigns (see the
+			// source assertion pinning that), so this is a defensive re-check of
+			// the SAME condition :717 already refused before any seed was typed.
 			showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
 			return verifyRefused
 		}
@@ -910,12 +959,13 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 			// than the one being fixed.
 			//
 			// AND ALL THREE ARMS PRESCRIBE A REMEDY (B3), which is why this is set
-			// unconditionally here rather than per arm: "add it and try again",
-			// "Your plates are fine. Try again and skip the passphrase.", "Check the
-			// passphrase before you doubt the plates", and both covered-seed arms
-			// tell the operator to change an input. A screen that says try again and
-			// is followed by the restore document is worse than one that says
-			// nothing.
+			// unconditionally here rather than per arm: "add it and try again", "try
+			// the password again" (R-M's provedInnocent wording, S6b spec §3.2a --
+			// superseding this comment's earlier "skip the passphrase" quote, struck
+			// by the same ruling), "Check the passphrase before you doubt the
+			// plates", and both covered-seed arms tell the operator to change an
+			// input. A screen that says try again and is followed by the restore
+			// document is worse than one that says nothing.
 			correctable = true
 			break
 		}
