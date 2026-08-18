@@ -179,7 +179,25 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	if err := verifySingleSig(reDerived, ms1Readback, mk1, md1); err != nil {
 		// ADVERSE. The comparator ran and disagreed.
 		rec.adverse = true
-		showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
+		// F-204 (S6b spec §3.2): THE COPY IS CONDITIONAL, NOT A STRING SWAP. The
+		// multisig sibling (multisigVerifyNoSlotBody, gui/multisig_verify.go)
+		// suspects the PASSPHRASE before the plates -- one wrong character re-types
+		// a whole different wallet -- and this screen used to blame the plates
+		// unconditionally. `passphrase` is in scope from the prompt above (:108-112)
+		// and is exactly what decides which lead is TRUE:
+		//
+		//   - a passphrase was entered: the mismatch is at least as likely a
+		//     mistyped passphrase as a bad plate, so suspect it FIRST.
+		//   - no passphrase was entered: there is no passphrase to blame, and
+		//     saying so would be a false lead. The original wording stays true of
+		//     this arm and is left alone rather than churned for its own sake.
+		if passphrase != "" {
+			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. "+
+				"Check the passphrase before you doubt the plates: one wrong character "+
+				"derives a different wallet.")
+		} else {
+			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
+		}
 		return
 	}
 	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
