@@ -41,7 +41,26 @@ jobs:
     # oracle/pins.json binds each to the SHA-256 of a binary built on the
     # maintainer's machine, so a `cargo install` here produces a different
     # binary, a different hash, and a hard resolution failure.
-    - run: CGO_ENABLED=0 go test ./...
+    # -timeout 20m RAISES A CEILING; IT SKIPS NOTHING. Go's default is 10m PER
+    # PACKAGE, and `gui` is ~93% of this suite on one core -- it has no
+    # t.Parallel() anywhere, so extra cores do not help it. Measured on the
+    # maintainer's 24-core box at the S6b merge, exactly as CI invokes it:
+    #
+    #   $ CGO_ENABLED=0 go test ./gui/ -count=1
+    #   ok  seedhammer.com/gui  476.309s      <- 79% of the 600s default
+    #
+    # This runner is slower per core, so the default was odds-on to expire here
+    # -- and a package killed by the timeout is not a small failure. It reports
+    # a panic over a suite whose assertions had all been passing, which reads
+    # like a code defect and is not one. The 10m default is not a budget anyone
+    # chose for this suite; it is what Go picks when nobody says.
+    #
+    # If this number ever needs raising again, the answer is probably not a
+    # bigger number: `gui` grew 440.6s -> 496.8s in a single S6b phase. Shard it
+    # (scripts/gui-shard-test.sh in mnemonic-engrave partitions it from
+    # `go test -list` and ASSERTS the partition is exhaustive before running)
+    # or give its tests t.Parallel().
+    - run: CGO_ENABLED=0 go test -timeout 20m ./...
     # A COMPILE CHECK, and deliberately only that. The live re-derivation against
     # the pinned md/mk/ms is not a test that skips here — under the `oraclelive`
     # tag it does not exist in this build at all, and a maintainer runs it by
