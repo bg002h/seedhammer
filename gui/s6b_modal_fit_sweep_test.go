@@ -51,6 +51,13 @@ package gui
 //     readable from one file rather than split across phases.
 //   - the F-204 "passphrase entered" arm, 143 characters
 //     (gui/singlesig_verify.go). NEW text this cycle (P1, spec §3.2).
+//   - the "engraved WITH a passphrase, none typed just now" arm, 177
+//     characters (gui/singlesig_verify.go). NEW text this cycle, added in P9
+//     as the failure-states review's F3 fix, which turned this switch from two
+//     arms into three. Added to this table AFTER the P9 fold verification
+//     recorded its absence as Minor N1 -- the same file that states its own
+//     gating rule had grown a third arm meeting that rule and not listed it.
+//     Fits with room: 146 drawn, 418 headroom.
 //   - the F-204 "no passphrase" arm, 72 characters (gui/singlesig_verify.go).
 //     The BYTES are the pre-existing "Check the engraved plates." wording
 //     (spec §3.2 quotes it as what already shipped), but the SITE is new --
@@ -159,6 +166,12 @@ func TestS6bModalFitSweep(t *testing.T) {
 			"The read-back bundle does NOT match the seed. " +
 				"Check the passphrase before you doubt the plates: one wrong character " +
 				"derives a different wallet.",
+		},
+		{
+			"F3's 'engraved with a passphrase, none typed' arm (gui/singlesig_verify.go)",
+			"The read-back bundle does NOT match the seed. " +
+				"This set was engraved WITH a passphrase, and none was typed just now. Add " +
+				"the passphrase and try again before you doubt the plates.",
 		},
 		{
 			"F-204 'no passphrase' arm (gui/singlesig_verify.go)",
