@@ -343,7 +343,16 @@ type ConfirmWarningScreen struct {
 type Warning struct {
 	scroll  int
 	txtclip int
-	inp     InputTracker
+
+	// F-208 / R-I: the on-screen scroll arrows. Bound to Up/Down so they
+	// inherit pointer routing (gui/widget.go:70) and press-and-hold
+	// auto-repeat (gui/widget.go:48) for free -- "Scrolling itself needs no
+	// new machinery" (SPEC_s6b_pre_flash_cycle.md §5 point 4). The SH2 has no
+	// directional buttons (gui/modal_fits_test.go), so these Clickables' own
+	// op.Input regions, drawn in Layout, are the only way an Up/Down event
+	// can ever originate on real hardware.
+	arrowUp   Clickable
+	arrowDown Clickable
 }
 
 type ConfirmResult int
@@ -378,34 +387,81 @@ func (c *ConfirmDelay) Progress(ctx *Context) float32 {
 const confirmDelay = 1 * time.Second
 
 func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt string) op.Op {
-	for {
-		e, ok := w.inp.Next(ctx, ButtonFilter(Up), ButtonFilter(Down))
-		if !ok {
-			break
-		}
-		if e, ok := e.AsButton(); ok {
-			switch e.Button {
-			case Up:
-				if e.Pressed {
-					w.scroll -= w.txtclip / 2
-				}
-			case Down:
-				if e.Pressed {
-					w.scroll += w.txtclip / 2
-				}
-			}
-		}
-	}
-	const btnMargin = 4
-	const boxMargin = 6
-
-	btnOff := assets.NavBtnPrimary.Bounds().Dx() + btnMargin
-	bodyClip := image.Rectangle{
-		Min: image.Pt(boxMargin, leadingSize),
-		Max: image.Pt(dims.X-btnOff, dims.Y-boxMargin),
-	}
+	bodyClip := warningBodyClip(dims)
 	body, bodysz := widget.Labelw(&ctx.B, ctx.Styles.body, bodyClip.Dx(), th.Text, txt)
 	w.txtclip = bodyClip.Dy()
+
+	// GATE 5.1 / R-E, R-D: checked against the PANEL (dims.Y), not
+	// bodyClip.Dy(). fadeClip stays a stubbed no-op in this cycle (R-E), so
+	// the body is not actually clipped to bodyClip -- `maxScroll > 0` and
+	// `bodysz.Y > bodyClip.Dy()` both disagree with what the panel really
+	// shows (REQUIREMENTS_s6b_pre_flash_cycle.md R-E,
+	// SPEC_s6b_pre_flash_cycle.md §5.1).
+	//
+	// ONE PREDICATE PER DIRECTION, not one for both (§5.1, normative): a
+	// single shared predicate renders an arrow pointing at content that does
+	// not exist on its own side -- the up arrow at scroll==0, the down arrow
+	// at max scroll -- a false claim under R-D, and it is the same failure
+	// that killed the original arrow proposal. Tapping the up arrow at
+	// scroll==0 also visibly does nothing (scroll clamps to 0), teaching the
+	// operator the arrows don't work, which discredits the down arrow at the
+	// moment it matters.
+	//
+	// showUp needs no geometry and so cannot drift with the fadeClip stub.
+	// showDown is COUPLED to that stub and must be revisited when the real
+	// clip mask is restored.
+	showUp := scrollArrowUpVisible(w.scroll)
+	showDown := scrollArrowDownVisible(bodyClip, bodysz, dims, w.scroll)
+
+	w.arrowUp.Button = Up
+	w.arrowDown.Button = Down
+	// Each handler is gated on its OWN direction's predicate, exactly as
+	// P5 gated both handlers on the shared one -- unlike Button1-3/Center,
+	// Up/Down have no physical button on this hardware to route around the
+	// gate, so there is no SeedScreen-style "guard the handler, not only the
+	// layout" hazard here (gui.go, SeedScreen.Draw's editBtn comment) for
+	// this Button pair.
+	if showUp && w.arrowUp.Clicked(ctx) {
+		w.scroll -= w.txtclip / 2
+	}
+	if showDown && w.arrowDown.Clicked(ctx) {
+		w.scroll += w.txtclip / 2
+	}
+	// I1 (S6b whole-diff review): when a direction hides, this frame's op
+	// tree carries no input region for it (the `if showX { ... }` guards
+	// below), so the router can never again deliver that Clickable's
+	// release -- EventRouter.Events looks up the pressed tag's bounds in
+	// THIS frame, finds nothing (the region is gone), nils the tag, and
+	// Reset() discards the eventual release event because no filter is
+	// left to protect it (gui/event.go). Without this, w.arrowDown.Pressed
+	// stays true forever, and press-and-hold's own auto-repeat
+	// (gui/widget.go's Clickable.Next) later fires with no finger on the
+	// panel the moment the arrow reappears -- pinning every overflowing
+	// safety modal at full scroll
+	// (TestI1StaleArrowPressGhostRepeatsWithNoFinger, scroll_arrows_test.go).
+	//
+	// BOTH fields, not just Pressed: Next's own repeat-check reads c.repeat
+	// (the next scheduled auto-repeat wakeup) as soon as Pressed is next
+	// true, with no requirement that IT was the call that set Pressed --
+	// clearing only Pressed here left c.repeat holding the ORIGINAL hold's
+	// wakeup, long since passed, so the very next GENUINE tap on the
+	// recovered arrow (a real press then a quick release, not a hold) read
+	// that stale, overdue wakeup on the press and fired once immediately as
+	// an "overdue repeat", then fired AGAIN on its own release -- one tap,
+	// two scrolls (TestI1FreshTapAfterRecoveryScrollsExactlyOnce). Zeroing
+	// c.repeat here is the same invariant Next() itself restores after a
+	// REAL release (`if !c.Pressed { c.repeat = time.Time{} }`) -- this is
+	// that invariant, applied where Next() cannot reach because it is never
+	// called while hidden.
+	if !showUp {
+		w.arrowUp.Pressed = false
+		w.arrowUp.repeat = time.Time{}
+	}
+	if !showDown {
+		w.arrowDown.Pressed = false
+		w.arrowDown.repeat = time.Time{}
+	}
+
 	maxScroll := bodysz.Y - (bodyClip.Dy() - 2*scrollFadeDist)
 	if w.scroll > maxScroll {
 		w.scroll = maxScroll
@@ -417,10 +473,100 @@ func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt 
 	body = fadeClip(&ctx.B, body, image.Rectangle(bodyClip))
 
 	titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
+
+	var arrows op.Op
+	if showUp || showDown {
+		centerX := bodyClip.Min.X + bodyClip.Dx()/2
+		var arrowOps []op.Op
+		if showUp {
+			topChip := image.Rectangle{
+				Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
+				Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
+			}
+			arrowOps = append(arrowOps, scrollArrow(&ctx.B, th, topChip, &w.arrowUp, assets.ArrowUp))
+		}
+		if showDown {
+			bottomChip := image.Rectangle{
+				Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Max.Y-scrollFadeDist),
+				Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Max.Y),
+			}
+			arrowOps = append(arrowOps, scrollArrow(&ctx.B, th, bottomChip, &w.arrowDown, assets.ArrowDown))
+		}
+		arrows = op.Layer(arrowOps...)
+	}
+
 	return op.Layer(
+		arrows,
 		body,
 		titleOp,
 		op.Color(&ctx.B, th.Background),
+	)
+}
+
+// warningBodyClip is Warning.Layout's body clip rectangle, factored out so it
+// has a name a test can call directly. P5 (SPEC_s6b_pre_flash_cycle.md §5
+// point 2, IMPLEMENTATION_PLAN_s6b.md "must not change body width from 417")
+// must not change its width: R-I's decoupling of F-192's modal-fit sweep from
+// the arrows depends on it staying 417, and a change here would void that
+// sweep's measurements.
+func warningBodyClip(dims image.Point) image.Rectangle {
+	const btnMargin = 4
+	const boxMargin = 6
+	btnOff := assets.NavBtnPrimary.Bounds().Dx() + btnMargin
+	return image.Rectangle{
+		Min: image.Pt(boxMargin, leadingSize),
+		Max: image.Pt(dims.X-btnOff, dims.Y-boxMargin),
+	}
+}
+
+// arrowChipWidth is the visible background chip's width (SPEC_s6b_pre_flash_-
+// cycle.md §5 point 3: "The chip is opaque and mandatory"). Its height is
+// exactly scrollFadeDist:
+// GATE 5.3 depends on the chip never reaching past the fade band into the
+// window where legitimate body text draws (bodyClip.Min.Y+scrollFadeDist ..
+// bodyClip.Max.Y-scrollFadeDist).
+const arrowChipWidth = 36
+
+// arrowTouchPad grows the invisible touch target past the visible chip on
+// every side -- R-I constraint 2: "a 15x9 icon needs a finger-sized target
+// behind it," the same way op.Input(buf, t).Clip(...) already separates a nav
+// button's touch region from its drawn mask.
+const arrowTouchPad = 12
+
+// scrollArrowUpVisible is GATE 5.1's UP predicate (SPEC_s6b_pre_flash_cycle.md
+// §5.1, normative): `w.scroll > 0`. There is content above the drawn body
+// iff the body has been scrolled down from the top at all -- true regardless
+// of the fadeClip stub, which is why this needs no geometry input and cannot
+// drift with it (unlike scrollArrowDownVisible below).
+func scrollArrowUpVisible(scroll int) bool {
+	return scroll > 0
+}
+
+// scrollArrowDownVisible is GATE 5.1's DOWN predicate
+// (SPEC_s6b_pre_flash_cycle.md §5.1, normative):
+// `bodyClip.Min.Y + scrollFadeDist + bodysz.Y - w.scroll > dims.Y`, i.e.
+// content is off the PANEL, not merely past bodyClip. See the R-E comment at
+// its call site in Warning.Layout: this predicate is COUPLED to the
+// stubbed-no-op fadeClip and must be revisited when the real clip mask is
+// restored.
+func scrollArrowDownVisible(bodyClip image.Rectangle, bodysz, dims image.Point, scroll int) bool {
+	return bodyClip.Min.Y+scrollFadeDist+bodysz.Y-scroll > dims.Y
+}
+
+// scrollArrow draws one F-208 scroll arrow: an opaque background chip (R-I:
+// "without a background they can land on a glyph"), the icon centred in it,
+// and an invisible touch target larger than either. NOT routed through
+// layoutNavigation -- Up and Down sort before Button1 in the Button enum, and
+// layoutNavigation indexes clk.Button-Button1 into a [3]int, which goes
+// negative for either.
+func scrollArrow(buf *op.Buffer, th *Colors, chip image.Rectangle, clk *Clickable, icon image.Image) op.Op {
+	touch := chip.Inset(-arrowTouchPad)
+	iconSz := icon.Bounds().Size()
+	iconPos := chip.Min.Add(image.Pt((chip.Dx()-iconSz.X)/2, (chip.Dy()-iconSz.Y)/2))
+	return op.Layer(
+		op.Input(buf, clk).Clip(touch),
+		op.Compose(op.Color(buf, th.Text), op.Mask(buf, icon).Offset(iconPos)),
+		op.Compose(op.Color(buf, th.Background), op.RoundedRect2(buf, chip, cornerRadius)),
 	)
 }
 
@@ -2285,7 +2431,15 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 // test alike, and the platform is also who gui/engraved_hook.go offers the
 // rendered text to. Passing both would have made the second derivable from the
 // first and let them disagree.
-func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
+//
+// title and footer are S6b spec 1.1/1.3's plate marking, PLUMBED THROUGH
+// VERBATIM: validateMdmk learns nothing about flows or predicates (R-A/R-B are
+// enforced at the CALLER, not here) -- it just carries whatever the caller
+// supplies into every variant's backup.Text, which is what makes the marking
+// render identically in TEXT+QR, TEXT ONLY and QR ONLY (title/footer are plate
+// rows, not paragraph content). Every caller but engraveSingleSigFlow (gui/singlesig.go) passes
+// "", "" -- Go has no default parameters.
+func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, error) {
 	params := pl.EngraverParams()
 	qrc, err := qr.Encode(s, qr.L)
 	if err != nil {
@@ -2308,6 +2462,8 @@ func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
 		plate := backup.Text{
 			Paragraphs: []backup.Paragraph{e.Paragraph},
 			Font:       sh.Font,
+			Title:      title,
+			Footer:     footer,
 		}
 		plan := backup.EngraveText(params, plate)
 		p, err := toPlate(plan, params)
@@ -2341,7 +2497,7 @@ func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
 // engraving. md1 behaviour is unchanged until T2c.
 func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 	str := string(s)
-	labels, engravings, err := validateMdmk(ctx.Platform, str)
+	labels, engravings, err := validateMdmk(ctx.Platform, str, "", "")
 	if err != nil {
 		// Only reached if no engraving variant fits a plate (rare for an md1/mk1
 		// string). Return silently — like backupSeedStringFlow, NOT like

@@ -491,7 +491,7 @@ func stubZeroWarning(ctx *Context, th *Colors) bool {
 func multiPlateEngrave(ctx *Context, th *Colors, strs []string) {
 	total := len(strs)
 	for i, s := range strs {
-		labels, plates, err := validateMdmk(ctx.Platform, s)
+		labels, plates, err := validateMdmk(ctx.Platform, s, "", "")
 		if err != nil || len(plates) == 0 {
 			showError(ctx, th, "Account Xpub", "This key card doesn't fit a plate.")
 			return

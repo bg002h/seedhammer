@@ -36,7 +36,7 @@ func bundleFlow(ctx *Context, th *Colors) {
 			// which also don't persist a half-built set across Back).
 			continue
 		}
-		bundleEngrave(ctx, th, "Engrave Bundle", cards)
+		bundleEngrave(ctx, th, "Engrave Bundle", cards, "", "")
 		return
 	}
 }
@@ -344,12 +344,13 @@ func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 // bundlePlate is one plate in the cross-card engrave plan: the verbatim card
 // string to engrave, plus the "Card X of Y | Plate P of Q" guidance context.
 type bundlePlate struct {
-	cardIdx    int    // 1-based card position
-	cardTotal  int    // total cards in the bundle
-	plateIdx   int    // 1-based plate position within this card
-	plateTotal int    // total plates for this card
-	str        string // the VERBATIM gathered chunk string (I-4)
-	label      string // the card label, for the abort warning
+	cardIdx    int            // 1-based card position
+	cardTotal  int            // total cards in the bundle
+	plateIdx   int            // 1-based plate position within this card
+	plateTotal int            // total plates for this card
+	str        string         // the VERBATIM gathered chunk string (I-4)
+	label      string         // the card label, for the abort warning
+	kind       bundleCardKind // the card's kind (S6b spec 1.3), for bundlePlateMark
 }
 
 // bundlePlatePlan flattens the verified cards into a per-plate engrave plan, in
@@ -366,10 +367,26 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 				plateTotal: len(c.strings),
 				str:        s,
 				label:      c.label,
+				kind:       c.kind,
 			})
 		}
 	}
 	return plan
+}
+
+// bundlePlateMark decides the title/footer bundleEngrave applies to ONE plate
+// in its plan (S6b spec 1.2/1.3): every kind but cardMS1 gets the caller's
+// marking verbatim; a cardMS1 plate is NEVER marked. A secret ms1 share must
+// not carry a wallet's fingerprint -- it would tie a secret to a specific
+// wallet on an artifact whose whole design posture (singleSigEngraveCards'
+// own comment) is that it never leaves owner-held steel, and ms1 is
+// passphrase-INDEPENDENT besides, so a combined fingerprint would not even
+// describe what that plate encodes.
+func bundlePlateMark(kind bundleCardKind, title, footer string) (string, string) {
+	if kind == cardMS1 {
+		return "", ""
+	}
+	return title, footer
 }
 
 // bundleEngrave is the Phase-3 guided verbatim engrave. It is a SIBLING of
@@ -401,10 +418,18 @@ func bundlePlatePlan(cards []bundleCard) []bundlePlate {
 // is missing, this backup is incomplete." -- the artifact this diff itself says
 // is read years later, alone, presented as the last word of a run the device had
 // just said produced no usable backup.
-func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard) bundleEngraveResult {
+//
+// markTitle and markFooter are S6b spec 1.2/1.3's plate marking, applied to
+// every plate but a cardMS1's (bundlePlateMark). Only engraveSingleSigFlow (gui/singlesig.go)
+// passes non-empty values, computed there from R-A's predicate; every other
+// caller passes "", "" -- Go has no default parameters, and a variadic tail is
+// PROHIBITED (spec 1.3): it would leave order and arity unchecked on the value
+// deciding whether a plate says PASSWORD REQUIRED.
+func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard, markTitle, markFooter string) bundleEngraveResult {
 	plan := bundlePlatePlan(cards)
 	for _, p := range plan {
-		labels, plates, err := validateMdmk(ctx.Platform, p.str)
+		plateTitle, plateFooter := bundlePlateMark(p.kind, markTitle, markFooter)
+		labels, plates, err := validateMdmk(ctx.Platform, p.str, plateTitle, plateFooter)
 		if err != nil || len(plates) == 0 {
 			// A verified card whose string can't fit a plate is unexpected; abort
 			// the whole set rather than engrave a partial bundle.

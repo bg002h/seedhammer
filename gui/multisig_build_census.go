@@ -56,8 +56,17 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // THE ORDER IS what-it-is, what-it-is-NOT, how-to-handle-it: the plate list and
 // its completeness claim, then what the set does and does not contain (the seed
 // statement, then the passphrase statement), then the ruling.
+//
+// passphrasePlateCut is S6b spec §6/§6a: whether THIS RUN actually cut a
+// separate passphrase plate -- CUT, not offered. It is read only by
+// buildPassphraseInventoryLines, below, and NEVER by the plate list built
+// here: spec §6.1 forbids the passphrase plate from entering `plan` (it is
+// not a bundleCard) or appearing under "If any of them is missing", because
+// either would tell a reader it travels WITH the set. Every caller but
+// engraveSingleSigFlow passes false -- the multisig paths have no
+// passphrase-plate offer at all (R-B).
 func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact,
-	capacity seedCapacity) []string {
+	capacity seedCapacity, passphrasePlateCut bool) []string {
 	plan := bundlePlatePlan(cards)
 	lines := []string{
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
@@ -68,7 +77,7 @@ func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact,
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
 	lines = append(lines, buildSeedInventoryLines(cards)...)
-	lines = append(lines, buildPassphraseInventoryLines(seeds)...)
+	lines = append(lines, buildPassphraseInventoryLines(seeds, passphrasePlateCut)...)
 	lines = append(lines, buildSeedHandlingRuling(capacity, bundleSetCarriesASecret(cards)))
 	return lines
 }
@@ -255,7 +264,26 @@ func buildSeedInventoryLines(cards []bundleCard) []string {
 // backup" -- both in the first draft of this text -- are false there. The claim is
 // about the PASSPHRASE and is phrased to stay true in both modes; what the set
 // does and does not contain is the inventory's job, immediately above.
-func buildPassphraseInventoryLines(seeds []seedPassphraseFact) []string {
+//
+// passphrasePlateCut is S6b spec §6/§6a (P4): whether THIS RUN cut a SEPARATE
+// passphrase plate. Before S6b "nothing this device engraves carries a
+// passphrase" was true unconditionally; S6b's own passphrase-plate offer
+// (engraveSingleSigFlow) can make it false, on the SAME predicate that shows
+// the offer -- so R-D forbids leaving it unconditional. The condition reads
+// CUT, never "was the offer shown": a declined offer or an aborted engrave
+// must render the shipped two lines exactly as they always did.
+//
+// WHEN CUT, THE REPLACEMENT DOES TWO JOBS AT ONCE, per spec §6.1: it retracts
+// the false "nothing carries a passphrase" claim (§6), AND it says the
+// passphrase plate is not one of the plates enumerated above and is not
+// counted in this backup (§6.1) -- because the nearest alternative mechanism,
+// giving it a bundleCard, would put it INSIDE that count and under "If any of
+// them is missing", the exact inverse of the separation instruction this
+// function already carries. "Keep it somewhere separate" is repeated
+// verbatim rather than paraphrased, so the two arms read as one instruction
+// applied twice: once to the passphrase itself, once to the plate that now
+// carries it.
+func buildPassphraseInventoryLines(seeds []seedPassphraseFact, passphrasePlateCut bool) []string {
 	var passphrased, bare []seedPassphraseFact
 	for _, s := range seeds {
 		if s.Uses {
@@ -270,15 +298,27 @@ func buildPassphraseInventoryLines(seeds []seedPassphraseFact) []string {
 				"this wallet.",
 		}
 	}
-	lines := []string{
-		"A BIP-39 passphrase WAS used. It is not on these plates and cannot be " +
-			"recovered from them: nothing this device engraves carries a passphrase.",
-		"Without it, these plates do not reach the money. Keep it somewhere " +
-			"separate, and make sure whoever needs this backup can also get the " +
-			"passphrase.",
+	var lines []string
+	if passphrasePlateCut {
+		lines = []string{
+			"A BIP-39 passphrase WAS used. It is not on these plates: this device " +
+				"also cut a separate passphrase plate, engraved this run.",
+			"That passphrase plate is not one of the plates listed above and is not " +
+				"counted in this backup. Keep it somewhere separate, and make sure " +
+				"whoever needs this backup can also get it.",
+		}
+	} else {
+		lines = []string{
+			"A BIP-39 passphrase WAS used. It is not on these plates and cannot be " +
+				"recovered from them: nothing this device engraves carries a passphrase.",
+			"Without it, these plates do not reach the money. Keep it somewhere " +
+				"separate, and make sure whoever needs this backup can also get the " +
+				"passphrase.",
+		}
 	}
-	// ONE SEED: the shipped two lines, unchanged. Everything in them is singular
-	// and everything singular is true, so a build with one master reads exactly as
+	// ONE SEED: the shipped two lines (or, when a passphrase plate was cut this
+	// run, their §6/§6.1 counterpart). Everything in them is singular and
+	// everything singular is true, so a build with one master reads exactly as
 	// it always did.
 	if len(seeds) < 2 {
 		return lines

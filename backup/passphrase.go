@@ -24,9 +24,25 @@ type Passphrase struct {
 	// Passphrase is engraved VERBATIM. Never uppercase it.
 	Passphrase string
 	// SeedFP and CombinedFP are canonical 8-hex-digit fingerprints, or empty.
-	// Both are user-typed and unverified (spec D1).
 	SeedFP     string
 	CombinedFP string
+	// PolicyID is the canonical 8-hex-digit wallet-policy-id / WDT-id stub
+	// (S6b spec 2.4), pre-formatted by the caller, or empty. backup takes no
+	// dependency on md: the caller passes hex, exactly as it already does for
+	// the fingerprints. Rendered only on the DERIVED footer (R-H); the
+	// standalone/typed path has no descriptor and never sets this.
+	PolicyID string
+	// Derived records the PROVENANCE of SeedFP/CombinedFP: true when this
+	// device derived them itself, false (the zero value) when the operator
+	// typed them. This is what SELECTS the footer text (S6b R-D, spec
+	// 2.3d) -- NEVER PolicyID's presence. Keying on PolicyID instead would
+	// let a future path that preloads fingerprints without a descriptor
+	// print "DERIVED" over values it never checked, and would let a policy
+	// id reaching this struct without Derived set silently annex itself
+	// onto the typed footer -- the "never co-occur" case R-H's band-budget
+	// arithmetic depends on (50 against a 42-character band, with no
+	// refusal in band()).
+	Derived bool
 	// QR includes a machine-readable copy of the passphrase. Opt-in (spec D8).
 	QR   bool
 	Font *vector.Face
@@ -151,9 +167,72 @@ func passphraseAdvance(font *vector.Face, em int) int {
 // mark glyph so the reader matches shapes, not descriptions.
 const passphraseLegend = string(SpaceMark) + " = SPACE"
 
-// passphraseFooter is engraved whenever either fingerprint is present. Both are
-// user-typed claims (spec D1); nothing on this device has checked them.
+// passphraseFooter is engraved whenever either fingerprint is present AND was
+// TYPED by the operator (Passphrase.Derived is false, the zero value). Both
+// are then user-typed claims (spec D1); nothing on this device has checked
+// them. Unchanged by S6b (R-H: "standalone path ... unchanged") -- the
+// standalone/preloaded split is structural, not a rewording of this string.
 const passphraseFooter = "FINGERPRINTS TYPED, NOT VERIFIED"
+
+// passphraseFooterDerivedPrefix and passphraseFooterDerivedSuffix build the
+// PRELOADED path's footer (S6b R-H, WITH A MEASURED CORRECTION -- see
+// below): "POLICY <8 hex, grouped>  DERIVED", 25 characters. The policy id
+// rides IN this line because R-H rejected every alternative that would need
+// a third band line: a free band slot cannot be relied on (present
+// unpredictably, keyed to whether the passphrase has a space), and every
+// other option was worse.
+//
+// CORRECTION TO R-H'S LITERAL STRING (S6b P3 implementation finding).
+// R-H specified "POLICY 1A2B 3C4D  DERIVED, NOT TYPED" (36 chars, 72mm) as
+// fitting "the 42-character band" per SPIKE_s6b_q2_results.md §3b. That
+// figure measures a DIFFERENT, LOOSER bound than the one this file already
+// enforces: §3b's "42 characters" is the point text run off the 85mm
+// PLATE'S edges entirely (537600 device units); this file's own
+// PRE-EXISTING TestPassphraseBandBudget pins a tighter, independently-
+// derived cap from "spec 4.3: no metadata line may exceed 64mm" (409600
+// units), sized to clear the 10mm corner screw-hole bands by 0.5mm on each
+// side -- a 2-D geometric constraint, not merely "does it fall off the
+// plate". SPIKE §3b's own table lists the EXISTING 32-char
+// "FINGERPRINTS TYPED, NOT VERIFIED" line at exactly 409600 units -- i.e.
+// already AT the 64mm ceiling with zero spare -- but the spike's narrative
+// framed 42 characters as the budget without cross-checking that number
+// against this file's own test. R-H's 36-character string measures 460800
+// units: 51200 units (8mm) OVER the 64mm cap, into the screw-hole zone,
+// confirmed by actually running TestPassphraseBandBudget against it (RED).
+//
+// This 25-character form keeps R-H's chosen prefix format (POLICY + the
+// grouped hex, the same double-space separator SPIKE's own table uses
+// elsewhere) and drops only ", NOT TYPED": "DERIVED" is already a positive,
+// true claim on this path, and the acceptance screen preceding it already
+// states the source in those words (S6b spec 2.2: "this session's own
+// derivation"). It is NOT an operator-approved wording the way R-M's arm
+// was -- flagged in the P3 report for confirmation at the phase gate,
+// exactly as a spec defect found in implementation is supposed to be.
+const (
+	passphraseFooterDerivedPrefix = "POLICY "
+	passphraseFooterDerivedSuffix = "  DERIVED"
+)
+
+// PassphraseFooterFor selects S6b's footer TEXT. It reads plate.Derived, a
+// recorded PROVENANCE -- NEVER plate.PolicyID's presence (spec 2.3d, R-D):
+// see the field doc on Passphrase.Derived for why that distinction is
+// normative rather than stylistic.
+//
+// EXPORTED (whole-diff review GATE 2.3e fold, 2026-08-18) so a test outside
+// this package can drive the PLATE'S OWN footer wording from the same
+// `derived` flag it drives gui.ppConfirmBody's confirm-screen wording from,
+// and assert the two agree -- gui already imports backup, so the coupling
+// test that closes GATE 2.3e (spec 2.3a: "the confirm screen's provenance
+// clause agrees with the footer's on both paths") can only live in gui,
+// and it needs the REAL function on this side, not a re-typed copy of its
+// two string forms that could drift from it unnoticed. No behaviour change:
+// same body, same one production call site below.
+func PassphraseFooterFor(plate Passphrase) string {
+	if !plate.Derived {
+		return passphraseFooter
+	}
+	return passphraseFooterDerivedPrefix + passphrase.GroupFingerprint(plate.PolicyID) + passphraseFooterDerivedSuffix
+}
 
 // passphraseLayoutFor lays out plate, reserving room for a qrDim-module QR.
 // qrDim of 0 means no QR.
@@ -183,7 +262,7 @@ func passphraseLayoutFor(params engrave.Params, plate Passphrase, qrDim int) pas
 		l.bottomLines = append(l.bottomLines, passphraseLegend)
 	}
 	if plate.SeedFP != "" || plate.CombinedFP != "" {
-		l.bottomLines = append(l.bottomLines, passphraseFooter)
+		l.bottomLines = append(l.bottomLines, PassphraseFooterFor(plate))
 	}
 	gap := 0
 	if qrDim > 0 {

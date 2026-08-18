@@ -249,3 +249,100 @@ func TestEmptyParagraphAdvancesNoRow(t *testing.T) {
 		t.Errorf("a blank line advanced the next paragraph by %d, want one full row of %d", oneBlank-empty, fontSize)
 	}
 }
+
+// ─── S6b GATE 1.2b: Title is plate row 0, Footer the last plate row ─────────
+
+// textRowBand is rowBand's Text-mechanism twin (freetext_test.go): Text has
+// ONE fixed size, plateFontSizeUR, not a ladder, so unlike the free-text
+// plate's rowBand this takes no size parameter.
+func textRowBand(row int) (top, bottom int) {
+	y := prodParams.I(outerMargin) + row*prodParams.F(plateFontSizeUR)
+	return y, y + prodParams.F(plateFontSizeUR)
+}
+
+// TestTextTitleFooterAreAbsoluteRows pins spec 1.1.2/1.2b: the title is plate
+// row 0, the footer is plate row LinesPerPlate-1 -- absolute, not "after the
+// text" -- and the body drops exactly one row when, and only when, a title is
+// present. The mk1/md1 twin of freetext_test.go's TestFreeTextRowsAreAbsolute,
+// for the OTHER title/footer mechanism this cycle adds (backup.Text, not
+// Fitted).
+func TestTextTitleFooterAreAbsoluteRows(t *testing.T) {
+	rows := LinesPerPlate(prodParams, plateFontSizeUR)
+
+	title := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: "TITLE", Font: sh.Font}))
+	top, bottom := textRowBand(0)
+	if title.Min.Y < top || title.Max.Y > bottom {
+		t.Errorf("title inks y[%d,%d], outside row 0's band [%d,%d]", title.Min.Y, title.Max.Y, top, bottom)
+	}
+
+	footer := inkBounds(t, prodParams, EngraveText(prodParams, Text{Footer: "FOOTER", Font: sh.Font}))
+	top, bottom = textRowBand(rows - 1)
+	if footer.Min.Y < top || footer.Max.Y > bottom {
+		t.Errorf("footer inks y[%d,%d], outside row %d's band [%d,%d]", footer.Min.Y, footer.Max.Y, rows-1, top, bottom)
+	}
+
+	// The body drops a row when -- and only when -- a title is present.
+	noTitle := inkBounds(t, prodParams, EngraveText(prodParams, Text{Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	withTitle := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: "T", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	if got, want := withTitle.Max.Y-noTitle.Max.Y, prodParams.F(plateFontSizeUR); got != want {
+		t.Errorf("a title moved the body by %d, want exactly one row of %d", got, want)
+	}
+	// A footer must not move the body at all: its row is absolute, anchored
+	// from the plate's bottom rather than "after the text".
+	withFooter := inkBounds(t, prodParams, EngraveText(prodParams, Text{Footer: "F", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	if withFooter.Min.Y != noTitle.Min.Y {
+		t.Errorf("a footer moved the body's top from %d to %d", noTitle.Min.Y, withFooter.Min.Y)
+	}
+}
+
+// ─── S6b GATE 1.2a: the Title/Footer budget, layout-based ───────────────────
+
+// TestTextTitleFooterBudget pins the LAYOUT-BASED budget for backup.Text's
+// Title/Footer at plateFontSizeUR, driven through the REAL layout
+// (textLayout, via EngraveText) rather than raw string width. The mk1/md1
+// twin of freetext_test.go's TestTitleCapFitsAtEveryRung, but for backup.Text's
+// ONE rung (plateFontSizeUR is fixed, not a ladder).
+//
+// THE MEASURED BUDGET IS 28, NOT SPIKE_s6b_q2_results.md §3c's 25. The spike
+// computed 25 from raw string width against the inset span and flagged its own
+// method caveat -- "raw width UNDER-reports... 25 at 3.8mm is conservative
+// rather than optimistic... the implementation's gate must be the
+// layout-based form" -- and that is exactly what happened: bisecting through
+// EngraveText (not raw width) finds 28 'W's fit and 29 do not. This is GATE
+// 1.2a working as specified, not a defect: every string this cycle
+// introduces (<=18 chars) clears either number with room to spare, so the
+// discrepancy changes no pass/fail outcome. Reported as a finding rather than
+// silently reconciled with the spike.
+//
+// ON THE BUDGET, NOT TODAY'S STRINGS (GATE 1.2a's own wording): the
+// 'W'-repeat cap pins the (measured) budget itself; the second half checks
+// every title/footer this cycle introduces is within it, by length -- exact
+// for a fixed-pitch face (fixedCharWidth's doc comment: every font/sh advance
+// is equal, so any N-character string inks the same width as N 'W's).
+func TestTextTitleFooterBudget(t *testing.T) {
+	lo := prodParams.I(innerMargin)
+	hi := prodParams.F(plateSize) - prodParams.I(innerMargin)
+	const budget = 28 // measured; see doc comment -- SPIKE §3c's 25 was raw-width, not layout-based
+	capStr := strings.Repeat("W", budget)
+	b := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: capStr, Footer: capStr, Font: sh.Font}))
+	if b.Min.X < lo || b.Max.X > hi {
+		t.Errorf("%d-character title/footer inks x[%.3f,%.3f]mm, outside the screw-hole-free span [%.1f,%.1f]mm",
+			budget, float64(b.Min.X)/mm, float64(b.Max.X)/mm, float64(lo)/mm, float64(hi)/mm)
+	}
+	// budget+1 must NOT fit -- pinning the budget rather than merely a safe
+	// value.
+	over := strings.Repeat("W", budget+1)
+	if bOver := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: over, Font: sh.Font})); bOver.Min.X >= lo && bOver.Max.X <= hi {
+		t.Errorf("a %d-character title fits the screw-hole-free span; the %d-character budget has stopped binding", budget+1, budget)
+	}
+	// Every title/footer S6b introduces (spec 1.2), on the budget:
+	for _, s := range []string{
+		"PASSWORD REQUIRED",  // 17
+		"COMB FP: FC60 C6DF", // 18
+		"SEED FP: 73C5 DA0A", // 18
+	} {
+		if len(s) > budget {
+			t.Errorf("%q is %d characters, over the %d-character budget", s, len(s), budget)
+		}
+	}
+}

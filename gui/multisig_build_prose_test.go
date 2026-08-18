@@ -366,7 +366,7 @@ func TestSeedResidencyRulingDescribesTheMultiSeedReality(t *testing.T) {
 		{kind: cardMS1, label: "ms1 share", summary: "seed", strings: []string{"ms1"}},
 		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1"}},
 	}
-	ruling := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), seedCapacityMany), "\n")
+	ruling := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), seedCapacityMany, false), "\n")
 	low := strings.ToLower(ruling)
 
 	if !strings.Contains(low, "does not time out") {
@@ -421,8 +421,8 @@ func TestRestoreDocSaysThePassphraseIsNotOnThePlates(t *testing.T) {
 		{kind: cardMS1, label: "ms1 share", summary: "seed", strings: []string{"ms1"}},
 		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1"}},
 	}
-	with := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(true), seedCapacityMany), "\n")
-	without := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), seedCapacityMany), "\n")
+	with := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(true), seedCapacityMany, false), "\n")
+	without := strings.Join(buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), seedCapacityMany, false), "\n")
 
 	lowWith := strings.ToLower(with)
 	if !strings.Contains(lowWith, "passphrase") {

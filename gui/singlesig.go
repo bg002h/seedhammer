@@ -1,9 +1,14 @@
 package gui
 
 import (
+	"fmt"
+
 	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/bip32"
 	"seedhammer.com/bip39"
+	"seedhammer.com/bundle"
 	"seedhammer.com/md"
+	"seedhammer.com/passphrase"
 )
 
 // ─── T6a-2: the single-sig flagship orchestrator ─────────────────────────────
@@ -174,22 +179,71 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// The two multisig callers gained this gate at S5's I-12 and this one did
 	// not, so a fix described as covering every engraving caller covered two of
 	// the three that carry a post-engrave tail.
-	if bundleEngrave(ctx, th, "Engrave Single-Sig", cards) != bundleEngraveDone {
+	//
+	// PLATE MARKING (S6b spec 1.2/1.3, R2/R3/R4). Computed here because this is
+	// the ONLY call site allowed to mark -- multisig marking is a later phase,
+	// R-B -- and because everything the predicate needs is already in scope:
+	// full (:107's "the set contains a seed", R-A's predicate) and passphrase
+	// (:72). masterFP is already the COMBINED fingerprint when a passphrase
+	// was entered (deriveSingleSigBundle derived WITH it) and the bare-seed
+	// one otherwise, so no extra derivation is needed for THIS marking --
+	// unlike the passphrase plate's own SEED FP (S6b's P3), which needs a
+	// second KDF when a passphrase WAS entered.
+	plateTitle, plateFooter := singleSigPlateMark(full, passphrase != "", masterFP)
+	if bundleEngrave(ctx, th, "Engrave Single-Sig", cards, plateTitle, plateFooter) != bundleEngraveDone {
 		return
 	}
 
-	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
+	// Offer the verify-bundle (re-type seed → re-derive → read back → compare),
+	// AND RE-OFFER IT on either adverse arm (S6b P9, F2).
 	//
-	// THE RECORD IS DECLARED HERE, NOT INSIDE THE OFFER, so that a Skip leaves it
-	// at its zero value and the document below says the weakest true thing. This
-	// path has no retry loop -- the offer is a one-shot `if` -- so `rec` is written
-	// at most once, and statusVerifiedOnRetry is unreachable from it by
-	// construction rather than by an assertion.
+	// THE RECORD IS DECLARED OUTSIDE THE LOOP, so that a Skip (never entering
+	// the loop body) leaves it at its zero value and the document below says
+	// the weakest true thing, and so the adverse bit stays STICKY across
+	// retries: a first attempt that failed and a second that passed is
+	// statusVerifiedOnRetry on the document, not a bare pass -- exactly the
+	// multisig callers' own reasoning (gui/multisig.go).
+	//
+	// UNTIL P9 THIS WAS A ONE-SHOT `if`, and the comment here said so on
+	// purpose: a FAILED comparison or an unreadable readback dead-ended
+	// straight past the passphrase-plate offer to the restore document, over
+	// steel that was often fine, with no route back except re-cutting the
+	// entire set -- the exact class F-199 fixed on the multisig side in this
+	// same diff. singleSigVerifyFn's bool return is "can the operator still
+	// act on this with what's in their hand"; true only at its two ADVERSE
+	// return sites (gui/singlesig_verify.go).
 	var rec verifyRecord
-	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, full, template, &rec)
+	verifyLead, verifyChoices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+	for {
+		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: verifyLead, Choices: verifyChoices}
+		sel, ok := verifyChoice.Choose(ctx, th)
+		if !ok || sel != 0 {
+			break
+		}
+		if !singleSigVerifyFn(ctx, th, full, template, passphrase != "", &rec) {
+			break
+		}
+		// multisigVerifyRetryLead (gui/multisig_verify.go) is now drawn by
+		// THREE call sites, not two -- see that constant's own comment.
+		verifyLead = multisigVerifyRetryLead
+		verifyChoices = []string{"VERIFY AGAIN", "CONTINUE"}
 	}
+
+	// PASSPHRASE PLATE OFFER (S6b spec 2.6, R2/R5/R6/R7). After the verify
+	// offer (a plate is offered only for a set already known good) and
+	// before restoreDocFlow (the document must be able to report whether
+	// one was cut). mnemonic is still LIVE here: this function's top-level
+	// scrub defer, registered right after seedEntryFlow returns, only fires
+	// when engraveSingleSigFlow itself returns, and nothing between there
+	// and here consumes the mnemonic again.
+	//
+	// THE RETURN IS READ BELOW (S6b spec 6/6a, P4): whether the restore
+	// document may say a passphrase plate exists conditions on whether one
+	// was actually CUT, not on whether this offer was merely shown --
+	// singleSigPassphrasePlateOffer already collapses "declined" and
+	// "backed out mid-engrave" to the same passphrasePlateNotCut a bare
+	// void return could not have distinguished from "cut".
+	plateResult := singleSigPassphrasePlateOffer(ctx, th, mnemonic, passphrase, masterFP, path, b)
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
 	//
@@ -218,7 +272,129 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// one seed the device is holding rather than the BUILD path's registry. It
 	// carries no fingerprint because the single-seed arm renders none: with one
 	// seed there is nothing to tell apart.
+	//
+	// plateResult == passphrasePlateCut is S6b spec 6/6a's condition: CUT, not
+	// offered. buildPassphraseInventoryLines reads exactly this bool, never
+	// "was the offer shown" -- see the comment at the call above.
 	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
 		buildVerifyStatusLine(rec),
-		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
+		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne,
+			plateResult == passphrasePlateCut))
+}
+
+// singleSigPlateMark computes S6b spec 1.2's mk1/md1 title and footer for
+// engraveSingleSigFlow, the ONLY caller allowed to mark (R-B moved every
+// multisig path to a later phase). Keyed on R-A's predicate -- "the set
+// contains a seed" -- which for this flow is exactly full: watch-only mode
+// never carries the ms1 (singleSigEngraveCards), so R-A leaves it unmarked.
+//
+// masterFP must already be the fingerprint this run's cards were derived
+// with: the COMBINED one when hasPassphrase, the bare-seed one otherwise --
+// exactly what deriveSingleSigBundle returns at gui/singlesig.go:107. That is
+// the mechanism R4 exploits: restoring the words alone yields a fingerprint
+// that does not match what the mk1/md1 plates encode, so a wrong-wallet
+// restore self-diagnoses instead of failing silently.
+func singleSigPlateMark(full, hasPassphrase bool, masterFP uint32) (title, footer string) {
+	if !full {
+		return "", ""
+	}
+	fp := passphrase.GroupFingerprint(fmt.Sprintf("%.8X", masterFP))
+	if hasPassphrase {
+		return "PASSWORD REQUIRED", "COMB FP: " + fp
+	}
+	return "", "SEED FP: " + fp
+}
+
+// singleSigBareSeedFPHook is a test-only seam observing whether/when the
+// LAZY bare-seed fingerprint derivation (S6b R-K, spec 2.6) actually ran.
+// GATE 2.6 requires proving the ~31s KDF does NOT run when no passphrase
+// plate is engraved; on the machine running this suite that derivation
+// completes in well under a second (31s is the real device's cost, not this
+// runner's), so a test cannot tell "ran" from "didn't" by timing it and
+// instead counts invocations through this hook. Fired immediately before the
+// derivation, so it counts attempts, not successes. nil in production;
+// mirrors singleSigSeedHook.
+var singleSigBareSeedFPHook func()
+
+// singleSigPassphrasePlateOffer implements S6b spec 2.6: the passphrase-
+// plate offer, and the lazy bare-seed derivation it gates. Factored out of
+// engraveSingleSigFlow so GATE 2.6 -- "the offer appears only when
+// passphrase != '' [and] the ~31s derivation does NOT run when no
+// passphrase plate is engraved" -- can be driven directly rather than only
+// through the whole orchestrator.
+//
+// mnemonic must still be LIVE (not yet scrubbed) when this is called: the
+// bare-seed derivation reads it. masterFP must already be the COMBINED
+// fingerprint (deriveSingleSigBundle derived WITH the passphrase whenever
+// pass != "", which is the only case this function does anything) --
+// exactly what singleSigPlateMark's own doc records about the same value.
+// b must be the FINAL bundle, post-templateizeBundle if that branch was
+// taken: the policy id is computed from b.MD1 (spec 2.4c).
+//
+// PARAMETER NAMED "pass", not "passphrase" (whole-diff review C2 fold,
+// 2026-08-18): this function calls the passphrase PACKAGE
+// (ValidatePassphrase, below), and a parameter named "passphrase" shadows
+// the package identifier for this function's entire body -- the review's
+// own proposed one-liner (`passphrase.ValidatePassphrase(passphrase)`)
+// does not compile as written, for exactly this reason.
+//
+// RETURNS whether the plate was CUT (S6b spec 6/6a, P4): passphrasePlateNotCut
+// when pass == "" (no offer reached at all), when pass does not fit a plate
+// (C2 below), when the offer is declined, when the bare-seed derivation
+// errors, or whatever engravePassphraseFlowPreloaded itself reports (a
+// declined offer and an aborted engrave are indistinguishable to the
+// caller, on purpose -- both leave the restore document's shipped sentence
+// unchanged).
+func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, pass string, masterFP uint32, path bip32.Path, b bundle.Bundle) passphrasePlateResult {
+	if pass == "" {
+		return passphrasePlateNotCut
+	}
+	// C2 (S6b whole-diff review): the wallet passphrase itself is
+	// unbounded -- neither passphraseFlowTitled (gui.go, the keyboard) nor
+	// the payload branch of syswPassphraseFlowTitled (sysw_source.go)
+	// validates it, because any length and any byte is fine for
+	// DERIVATION. It is not fine for THIS PLATE:
+	// engravePassphraseFlowPreloaded's buffer is exactly passphrase.MaxLen
+	// bytes and its copy() truncates silently -- and the plate it then
+	// builds would still carry the FULL passphrase's fingerprints and
+	// policy id, stamped DERIVED, over a passphrase it mutilated. Catch it
+	// HERE, before the offer even asks, rather than let it reach
+	// engravePassphraseFlowPreloaded: ValidatePassphrase also catches a
+	// non-ASCII payload passphrase, earlier and more truthfully than the
+	// entry step's own refusal loop would.
+	if err := passphrase.ValidatePassphrase(pass); err != nil {
+		showError(ctx, th, "Passphrase Plate", ppEntryError(err))
+		return passphrasePlateNotCut
+	}
+	offer := &ChoiceScreen{Title: "Passphrase Plate", Lead: "Engrave a passphrase plate?", Choices: []string{"Skip", "Engrave"}}
+	sel, ok := offer.Choose(ctx, th)
+	if !ok || sel != 1 {
+		return passphrasePlateNotCut
+	}
+	// LAZY (R-K/spec 2.6): the bare-seed fingerprint costs a second ~31s
+	// KDF (gui/gui.go's and gui/unlock_platelist.go's own uses of the same
+	// derivation document that cost) and is paid ONLY by a run that
+	// actually wants this plate -- never merely because the offer was
+	// shown or a passphrase was entered. The combined fingerprint (masterFP)
+	// is free: it already fell out of deriveSingleSigBundle's derivation.
+	if singleSigBareSeedFPHook != nil {
+		singleSigBareSeedFPHook()
+	}
+	_, seedFP, derr := deriveAccountXpub(mnemonic, "", &chaincfg.MainNetParams, path)
+	if derr != nil {
+		showError(ctx, th, "Passphrase Plate", "Couldn't derive the bare-seed fingerprint.")
+		return passphrasePlateNotCut
+	}
+	// S6b spec 2.4: "wallet policy id" is md.FormAwareStubChunks -- NOT
+	// md.WalletPolicyIDStub, the keyed-only branch reached through
+	// FormAwareStub. "Template-only md1" is a reachable choice on this same
+	// flow, and the keyed function would mint 4 bytes matching no card this
+	// run cut. b is the caller's FINAL bundle (post-templateizeBundle if
+	// chosen), so this is computed from the post-template md1 (spec 2.4c).
+	var policyID string
+	if stub, serr := md.FormAwareStubChunks(b.MD1); serr == nil {
+		policyID = fmt.Sprintf("%X", stub[:])
+	}
+	return engravePassphraseFlowPreloaded(ctx, th, []byte(pass),
+		fmt.Sprintf("%.8X", seedFP), fmt.Sprintf("%.8X", masterFP), policyID)
 }

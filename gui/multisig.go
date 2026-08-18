@@ -288,7 +288,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (the md1 is emitted last, so the readback dies reading as "your plates are
 	// unreadable"), and the restore document headed "This backup is N plates". The
 	// abort modal is the operator's last screen, and it says so.
-	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut) != bundleEngraveDone {
+	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut, "", "") != bundleEngraveDone { // unmarked: multisig plate marking is R-B, a later phase
 		return
 	}
 
@@ -373,7 +373,9 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// string would render as silence, and silence is what reads as a pass.
 	multisigRestoreDocFlow(ctx, th, tpl, keys,
 		buildVerifyStatusLine(rec),
-		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
+		// false: this path has no passphrase-plate offer at all -- R-B, a
+		// later phase -- so it can never have cut one (S6b spec 6/6a).
+		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne, false))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

@@ -12,6 +12,8 @@ func syswSourceName(src syswSource) string {
 		return "an NFC tag"
 	case srcPayload:
 		return "the systemwide payload"
+	case srcDerived:
+		return "this session's own derivation"
 	default:
 		return "the keyboard"
 	}

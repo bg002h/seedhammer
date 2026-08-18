@@ -75,7 +75,7 @@ func TestBundleEngraveGuidedTitles(t *testing.T) {
 	}
 
 	ctx := NewContext(newPlatform())
-	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards) })
+	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards, "", "") })
 	defer quit()
 	c, ok := pumpUntil(frame, "Card 1 of 2", 48)
 	if !ok {
@@ -112,7 +112,7 @@ func TestBundleEngraveSetAbort(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
-	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards) })
+	frame, quit := runUI(ctx, func() { bundleEngrave(ctx, &descriptorTheme, "Engrave Bundle", cards, "", "") })
 	defer quit()
 	if c, ok := pumpUntil(frame, "Card 1 of 2", 48); !ok {
 		t.Fatalf("guided title not shown; got %q", c)
@@ -143,7 +143,7 @@ func TestBundlePlanValidatesEachPlate(t *testing.T) {
 	offerAll(t, g, md1CardA(t))
 	pl := newPlatform()
 	for _, p := range bundlePlatePlan(g.cards) {
-		labels, plates, err := validateMdmk(pl, p.str)
+		labels, plates, err := validateMdmk(pl, p.str, "", "")
 		if err != nil || len(plates) == 0 || len(labels) == 0 {
 			t.Fatalf("plate %q does not fit any engraving variant: err=%v plates=%d", p.str, err, len(plates))
 		}

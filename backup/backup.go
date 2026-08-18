@@ -38,6 +38,19 @@ type Text struct {
 	// constructs, and is why their goldens are unaffected by the
 	// free-text plate's size ladder.
 	FontSize float32
+
+	// Title and Footer are OPTIONAL screw-hole rows (S6b spec 1.1): Title is
+	// plate row 0, Footer the last plate row. Both are rendered through the
+	// SAME layout helpers the paragraph body uses -- textLayout and
+	// qrPlaceAt, in wrap.go -- so the hole-band inset a title/footer centers
+	// against is computed the one place every row on this plate computes it.
+	//
+	// EMPTY IS NORMATIVE, NOT AN OPTIMISATION (R-F, R-G). An empty Title or
+	// Footer renders no row and consumes no vertical budget: EngraveText must
+	// produce byte-identical output to before these fields existed, which is
+	// what backup/testdata/text-{0,1,2}-shards-1.bin pin and what lets the
+	// caller -- never validateMdmk -- decide whether a plate is marked.
+	Title, Footer string
 }
 
 // fontMM resolves FontSize, applying the zero-means-plateFontSizeUR rule in one
@@ -358,7 +371,39 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 			X: params.F(plateSize),
 			Y: params.F(plateSize),
 		}
+
+		// centerRow engraves s, verbatim, centered in the screw-hole-free
+		// inset span of one plate row at y -- the same arithmetic
+		// EngraveFitted's title/footer use (freetext.go's centerInset):
+		// textLayout's holeChars*charWidth, at THIS plate's one face and
+		// size. s=="" is a no-op: no Yield call, so an unmarked plate is
+		// untouched by this closure existing at all (R-F, R-G).
+		centerRow := func(s string, y int) {
+			if s == "" {
+				return
+			}
+			lay := textLayout(params, fnt, fontSize, y, nil)
+			cmd := engrave.String(fnt, fontSize, s)
+			w, _ := cmd.Measure()
+			inset := lay.holeChars * lay.charWidth
+			t.Offset(margin+inset+(plateDims.X-2*margin-2*inset-w)/2, y)
+			cmd.Engrave(t.Yield)
+		}
+
 		offy := params.I(outerMargin)
+		centerRow(plate.Title, offy)
+		if plate.Title != "" {
+			// Row 0 is spoken for; the body starts on row 1 (spec 1.2b,
+			// pinned by TestTextTitleFooterAreAbsoluteRows).
+			offy += fontSize
+		}
+		if plate.Footer != "" {
+			// The LAST plate row, anchored from the bottom -- not "after the
+			// body" -- so a short body never leaves the footer sitting
+			// mid-plate, inside the QR keep-out band (spec 1.1.2).
+			centerRow(plate.Footer, footerRowY(params, plate.fontMM()))
+		}
+
 		for i, p := range plate.Paragraphs {
 			qrScale := p.QRScale
 			if qrScale == 0 {

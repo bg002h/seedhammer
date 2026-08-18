@@ -40,9 +40,14 @@ const (
 	t21RetrySuffix = "An earlier check did not pass; a later full check passed."
 
 	t22OneKeyPlateClause = "1 key plate was read back and matched what this run engraved."
-	t22MS1Clause         = "The ms1 secret you typed matched this seed."
-	t22NoMS1Clause       = "No secret seed share was read back or compared."
-	t22CosignerClause    = "Other cosigners' keys are taken as supplied."
+	// t22MS1Clause was "The ms1 secret you typed matched this seed." until F-206
+	// (S6b spec §3.3) made it count-free: the old singular wording is false at
+	// "1 seed filling 2 legs" (a plural over legs would ALSO be false there --
+	// one seed typed one ms1) and passRecord cannot distinguish that from
+	// "2 seeds filling 2 legs" to pick between the two anyway.
+	t22MS1Clause      = "The ms1 you typed for each seed matched."
+	t22NoMS1Clause    = "No secret seed share was read back or compared."
+	t22CosignerClause = "Other cosigners' keys are taken as supplied."
 )
 
 // T21 -- THE ZERO CELL IS THE DEFAULT.
@@ -328,7 +333,7 @@ func TestRestoreDocSaysWhetherTheSetContainsASeed(t *testing.T) {
 	}
 	doc := func(cards []bundleCard, capacity seedCapacity) string {
 		return strings.Join(
-			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity), "\n")
+			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity, false), "\n")
 	}
 
 	watch := doc(singleSigEngraveCards(b, false), seedCapacityOne)
@@ -426,7 +431,7 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		{kind: cardMD1, label: "md1 descriptor", summary: "policy", strings: []string{"md1a"}},
 	}
 	doc := strings.Join(buildPlateInventoryLines(
-		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne), "\n")
+		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne, false), "\n")
 	if strings.Contains(doc, "the plates are the secret") {
 		t.Errorf("a watch-only document says the plates are the secret, on a set whose "+
 			"own inventory says no plate in it holds the seed:\n%s", doc)
@@ -459,14 +464,19 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		{kind: cardMS1, label: "ms1 secret share 1 of 2", summary: "seed", strings: []string{"ms1a"}},
 		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
 	}
+	// plateCut ranges over S6b P4's new dimension too: its replacement text
+	// (spec §6/§6.1) is new prose no earlier sweep could have covered, and it
+	// is reachable only when uses is also true.
 	for _, cards := range [][]bundleCard{watchOnly, oneMS1, twoMS1} {
 		for _, capacity := range []seedCapacity{seedCapacityOne, seedCapacityMany} {
 			for _, uses := range []bool{false, true} {
-				for _, line := range buildPlateInventoryLines(
-					cards, oneSeedPassphraseFact(uses), capacity) {
-					if strings.ContainsAny(line, "—–·‘’“”…") {
-						t.Errorf("an inventory line carries a glyph the body face lacks, "+
-							"so it does not draw:\n%q", line)
+				for _, plateCut := range []bool{false, true} {
+					for _, line := range buildPlateInventoryLines(
+						cards, oneSeedPassphraseFact(uses), capacity, plateCut) {
+						if strings.ContainsAny(line, "—–·‘’“”…") {
+							t.Errorf("an inventory line carries a glyph the body face lacks, "+
+								"so it does not draw:\n%q", line)
+						}
 					}
 				}
 			}
@@ -948,6 +958,18 @@ func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
 			frame()
 		}
 
+		// S6b spec 2.6: the passphrase-plate offer, shown only when
+		// opts.passphrase left a non-empty passphrase in scope. This walk
+		// declines it (Skip, row 0, the default) -- exercising the offer
+		// itself is s6b_passphrase_plate_test.go's job.
+		if opts.passphrase {
+			if c, ok := pumpUntil(frame, "Passphrase Plate", 32); !ok {
+				t.Fatalf("the S6b passphrase-plate offer was not reached; got %q", c)
+			}
+			click(&ctx.Router, Button3) // Skip (row 0, the default)
+			frame()
+		}
+
 		// THE DOCUMENT IS A PAGER and the inventory is appended at the TAIL, after
 		// the descriptor chunks and both addresses, so a single-frame assertion
 		// misses every line this step adds. The document is found by its TITLE
@@ -1068,7 +1090,7 @@ func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
 	}
 
 	// THE DOCUMENT HALF. A bare run must SAY so, not go quiet.
-	bare := strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false)), " ")
+	bare := strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false), false), " ")
 	if !strings.Contains(bare, "No BIP-39 passphrase was used") {
 		t.Errorf("the bare arm of the inventory does not answer the reader's question, so "+
 			"a complete backup is indistinguishable from one missing a factor:\n%s", bare)
@@ -1924,7 +1946,7 @@ func s6aSingleSigFullVerify(t *testing.T) verifyRecord {
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
 	frame, quit := runUI(ctx, func() {
-		singleSigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, false, &rec)
+		singleSigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, false, false /* engraved without a passphrase */, &rec)
 	})
 	defer quit()
 	s6aDriveSingleSigVerifyOK(t, ctx, frame, opts)
@@ -2065,7 +2087,7 @@ func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
 		ctx.syswBundleSeeds = append([]string(nil), records...)
 		done := false
 		frame, quit := runUI(ctx, func() {
-			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, &rec)
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, false /* engraved without a passphrase */, &rec)
 			done = true
 		})
 		defer quit()
@@ -2273,7 +2295,7 @@ func TestBundleAbortJustificationNamesEveryTailCarryingCaller(t *testing.T) {
 	// WHICH callers leaves the next reader exactly where the last one was.
 	doc := guiDocComment(t, file, "func bundleAbortWarningText(")
 	for _, caller := range []string{
-		"engraveSingleSigFlow",     // gui/singlesig.go:177 -- gated by S6a step 5
+		"engraveSingleSigFlow",     // gui/singlesig.go:191 -- gated by S6a step 5
 		"supplyMultisigPolicyFlow", // gui/multisig.go:291   -- gated by S5's I-12
 		"buildMultisigPolicyFlow",  // gui/multisig_build.go:402 -- gated by S5's I-12
 	} {

@@ -440,7 +440,7 @@ func ppFingerprintClaim(label, canonical string) string {
 // marked is the passphrase with spaces already replaced by ppSpaceMark; it is
 // passed as a []byte and rendered with a %s verb, which text.Formatter accepts
 // directly -- no string copy of the secret is made here.
-func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, seedFP, combinedFP string, qr, hasSpace bool) (op.Op, image.Point) {
+func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, seedFP, combinedFP string, qr, hasSpace, derived bool) (op.Op, image.Point) {
 	var rt richText
 	// The passphrase itself, revealed: a masked readout cannot be proof-read,
 	// and this is the last moment before a permanent plate (spec 5.1).
@@ -462,7 +462,11 @@ func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, s
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppFingerprintClaim("Expected comb FP", combinedFP))
 	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, "QR: "+ppYesNo(qr))
 	rt.Y += 4
-	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, ppConfirmWarning)
+	warning := ppConfirmWarning
+	if derived {
+		warning = ppConfirmWarningDerived
+	}
+	rt.Add(&ctx.B, ctx.Styles.body, width, th.Text, warning)
 	return rt.Content, image.Pt(width, rt.Y)
 }
 
@@ -475,9 +479,22 @@ func ppConfirmBody(ctx *Context, th *Colors, width int, marked []byte, counts, s
 const ppConfirmWarning = "Fingerprints are typed, not verified. " +
 	"A wrong passphrase does not fail: it opens a DIFFERENT wallet."
 
+// ppConfirmWarningDerived is ppConfirmWarning's PRELOADED-path counterpart
+// (S6b R-D). ppConfirmWarning's own doc says the fingerprint clause
+// "deliberately echoes the plate's own footer ... so the screen and the
+// steel say the same thing" -- backup.passphraseFooter changed to a
+// provenance-selected string for exactly this device state (S6b spec 2.3),
+// so this screen must change with it or that documented invariant breaks:
+// the confirm screen would claim "typed, not verified" for fingerprints the
+// device just derived, which is the same class of falsehood §2.3 exists to
+// fix on the plate. The second sentence is unchanged: a wrong passphrase
+// opens a different wallet regardless of how the fingerprints got here.
+const ppConfirmWarningDerived = "Fingerprints are derived by this device. " +
+	"A wrong passphrase does not fail: it opens a DIFFERENT wallet."
+
 // ppConfirmFlow is step 5 of spec 5: the last checkpoint before a permanent
 // plate. It returns true to engrave, false to go back.
-func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP string, qr bool) bool {
+func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP string, qr, derived bool) bool {
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
 	hookPPWidget("back", backBtn)
@@ -499,7 +516,7 @@ func ppConfirmFlow(ctx *Context, th *Colors, secret []byte, seedFP, combinedFP s
 		}
 		dims := ctx.Platform.DisplaySize()
 		area := ppConfirmArea(dims)
-		body, _ := ppConfirmBody(ctx, th, area.Dx(), marked, counts, seedFP, combinedFP, qr, hasSpace)
+		body, _ := ppConfirmBody(ctx, th, area.Dx(), marked, counts, seedFP, combinedFP, qr, hasSpace, derived)
 		body = body.Offset(image.Point(area.Min))
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
@@ -541,9 +558,16 @@ var passphrasePlateHook func(secret []byte, seedFP, combinedFP string, qr bool)
 // not an excuse: RAM is volatile, the device is air-gapped, and it powers down
 // between uses.
 //
-// SeedFP and CombinedFP arrive canonical from fingerprintEntryFlow, which is
-// the precondition backup.Passphrase documents but does not check.
-func ppBuildPlate(params engrave.Params, secret []byte, seedFP, combinedFP string, qr bool) (Plate, error) {
+// SeedFP and CombinedFP arrive canonical from fingerprintEntryFlow (typed
+// path) or already canonical from the caller (preloaded path), which is the
+// precondition backup.Passphrase documents but does not check.
+//
+// policyID and derived carry S6b spec 2.4's policy id and spec 2.3d's
+// provenance flag straight through to backup.Passphrase. The typed path's
+// one caller (engravePassphraseFlowFrom) passes "", false, byte-identical to
+// pre-S6b behaviour; the preloaded path's one caller
+// (engravePassphraseFlowPreloaded) passes the values it was handed.
+func ppBuildPlate(params engrave.Params, secret []byte, seedFP, combinedFP string, qr bool, policyID string, derived bool) (Plate, error) {
 	if passphrasePlateHook != nil {
 		passphrasePlateHook(secret, seedFP, combinedFP, qr)
 	}
@@ -551,6 +575,8 @@ func ppBuildPlate(params engrave.Params, secret []byte, seedFP, combinedFP strin
 		Passphrase: string(secret),
 		SeedFP:     seedFP,
 		CombinedFP: combinedFP,
+		PolicyID:   policyID,
+		Derived:    derived,
 		QR:         qr,
 		Font:       constant.Font,
 	}
@@ -684,12 +710,12 @@ func engravePassphraseFlowFrom(ctx *Context, th *Colors, body []byte, src syswSo
 			}
 			qr = add
 		case ppStepConfirm:
-			if !ppConfirmFlow(ctx, th, secret[:n], seedFP, combinedFP, qr) {
+			if !ppConfirmFlow(ctx, th, secret[:n], seedFP, combinedFP, qr, false) {
 				step -= 2
 				break
 			}
 		case ppStepEngrave:
-			plate, err := ppBuildPlate(ctx.Platform.EngraverParams(), secret[:n], seedFP, combinedFP, qr)
+			plate, err := ppBuildPlate(ctx.Platform.EngraverParams(), secret[:n], seedFP, combinedFP, qr, "", false)
 			if err != nil {
 				// The message names no part of the passphrase.
 				showError(ctx, th, "Passphrase", "This passphrase does not fit a plate.")
@@ -704,4 +730,221 @@ func engravePassphraseFlowFrom(ctx *Context, th *Colors, body []byte, src syswSo
 		}
 		step++
 	}
+}
+
+// ppPreloadedStep is the step sequence for the PRELOADED path (S6b spec 2,
+// R-C/R-J): entry, QR choice, confirm, engrave. It is a SEPARATE, SHORTER
+// type from ppStep, not the same sequence with two cases skipped -- spec
+// 2.1.2 is explicit that the fingerprint steps must be ELIDED, not
+// present-but-short-circuited. The reason is ppStep's own Back transition:
+// every case falls through to an unconditional `step++`, so "go back one" is
+// implemented as `step -= 2` before it. If the fingerprint cases stayed
+// present in this switch but auto-advanced with no screen, Back from the QR
+// step would land on the (still-present) combined-fingerprint case, which
+// would instantly re-execute and fall through BACK to QR -- a silent bounce
+// with no visible screen in between, GATE 2.1's whole failure mode. A type
+// that cannot even NAME those two steps makes that bounce impossible rather
+// than merely untested.
+type ppPreloadedStep int
+
+const (
+	ppPLStepEntry ppPreloadedStep = iota
+	ppPLStepQR
+	ppPLStepConfirm
+	ppPLStepEngrave
+)
+
+// passphrasePlateResult reports whether engravePassphraseFlowPreloaded
+// actually CUT the plate.
+//
+// S6b spec 6/6a: the restore document's claim about where the passphrase
+// lives may condition ONLY on this -- a declined offer and an aborted
+// engrave both leave the shipped sentence unchanged, so both collapse to
+// passphrasePlateNotCut. A bool would do; a named type is what the call
+// site needs, for the same reason bundleEngraveResult (gui/bundle_flow.go)
+// is named rather than bool -- the caller is deciding what a document read
+// years later may claim.
+type passphrasePlateResult int
+
+const (
+	// passphrasePlateNotCut: the offer was never reached (no passphrase this
+	// run), was declined, or the flow was backed out of at any step before
+	// the plate was engraved and accepted -- including ctx.Done.
+	passphrasePlateNotCut passphrasePlateResult = iota
+	// passphrasePlateCut: the plate was engraved and accepted
+	// (NewEngraveScreen.Engrave returned true).
+	passphrasePlateCut
+)
+
+// engravePassphraseFlowPreloaded is the PRELOADED form of the
+// engravePassphrase program (S6b spec 2, R-C/R-J): the passphrase, the seed
+// and combined fingerprints, and the wallet-policy id are ALL already in
+// hand -- derived or held by THIS SESSION, never typed -- so there is no
+// fingerprint-entry step at all. The operator still reviews the passphrase,
+// chooses the QR, and confirms before the permanent plate; only the two
+// fingerprint screens are gone.
+//
+// seedFP and combinedFP must arrive canonical (the same precondition
+// ppBuildPlate documents); policyID is the pre-formatted 8-hex wallet-
+// policy-id/WDT-id stub (spec 2.4), or "" if the caller has none. Every one
+// of the three is a PARAMETER, never a package variable or a field on
+// Context (spec 2.1.3): either would let a secret-adjacent value outlive
+// this one flow.
+//
+// The source is always srcDerived (spec 2.2): this entry point exists ONLY
+// for the preloaded path, so there is no provenance to select, and
+// syswSourceAccept always shows its acceptance screen (srcDerived is never
+// srcTyped) -- R-C.3/R-D: "the acceptance screen RUNS".
+//
+// RETURNS whether the plate was CUT, not whether the offer reached this far
+// (S6b spec 6a): the restore document reads this, not "was this function
+// called". Every exit before the engrave-and-accept step -- Back out of
+// entry, Back out of QR/confirm repeatedly until ctx.Done -- is
+// passphrasePlateNotCut.
+func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedFP, combinedFP, policyID string) passphrasePlateResult {
+	secret := make([]byte, passphrase.MaxLen)
+	// The only scrub defer, and so the last to run: it zeroes the backing
+	// array after every other defer, on every return path. Mirrors
+	// engravePassphraseFlowFrom.
+	defer wipeBytes(secret)
+	if passphraseSecretHook != nil {
+		passphraseSecretHook(secret)
+	}
+	n := copy(secret, body)
+
+	if !syswSourceAccept(ctx, th, "BIP-39 Password", sysw.ClassPassphrase, srcDerived) {
+		return passphrasePlateNotCut
+	}
+
+	// S6b P9 F1: latched the moment the Engrave screen is entered (see the
+	// ppPLStepEngrave case below), never cleared. EngraveScreen.Engrave's own
+	// bool return collapses "never started", "stopped mid-cut" and "cut in
+	// full but rejected at the checkmark" into the same false
+	// (gui/gui.go:3111-3187), so this is the only signal this caller has that
+	// SOME steel may exist that nothing downstream accounts for. Mirrors
+	// bundleAbortWarning's footing for the main set (gui/bundle_flow.go),
+	// which fires on the same conservative basis.
+	attempted := false
+
+	qr := false
+	step := ppPLStepEntry
+	for !ctx.Done {
+		switch step {
+		case ppPLStepEntry:
+			// loadProof is nil here, deliberately: the pass-proof pattern
+			// (see passphrase_passproof.go) exists to test the FIELDS this
+			// flow no longer has -- the two fingerprint screens. Wiring it
+			// into the one remaining field would let PASSPROOF! silently
+			// replace REAL, derived fingerprints with the fixed test
+			// pattern while still claiming Derived=true, on the one path
+			// where the footer's truthfulness is normative (R-D).
+			m, ok := passphraseEntryFlow(ctx, th, secret, n, nil)
+			if !ok {
+				// S6b P9 F1: `attempted` is true only if this is a return trip --
+				// the operator reached the Engrave step at least once and backed
+				// all the way back out to here. The operator is still at the
+				// device (ctx.Done has not fired), so a dismissible warning is
+				// both reachable and the only place left to say it.
+				if attempted {
+					passphraseAbortWarning(ctx, th)
+				}
+				return passphrasePlateNotCut // Back out of the first step leaves the program.
+			}
+			// C1 (S6b whole-diff review): passphraseEntryFlow's keyboard is
+			// the same fully EDITABLE one the typed path uses -- editing is
+			// its whole function. On THIS path there is nothing to correct:
+			// body is the passphrase this wallet was actually derived with,
+			// and every downstream screen (QR, Confirm, the footer) claims
+			// DERIVED using the ORIGINAL seedFP/combinedFP/policyID, never
+			// re-checked against whatever the operator just typed. An
+			// unchecked edit would engrave a DIFFERENT passphrase under
+			// THIS wallet's fingerprints, permanently, recording the true
+			// one nowhere -- spec 2.1's founding argument for preloading at
+			// all: "the preloaded passphrase is the one the device
+			// actually derived with." Refuse the edit and reload the true
+			// passphrase, rather than either silently accepting it or
+			// forcing a re-type: R-C's whole point is that the operator
+			// does not re-type. secret[:m] is what the keyboard returned
+			// (already written into secret by passphraseEntryFlow's own
+			// copy); body is untouched since function entry, so this
+			// compares the edited value against the derivation-true one,
+			// not two copies of the same buffer.
+			if !bytes.Equal(secret[:m], body) {
+				showError(ctx, th, "Passphrase",
+					"The passphrase was changed. A passphrase plate must record the exact passphrase this wallet was derived with.")
+				// Reload the true passphrase (safe: the sole production
+				// caller, singleSigPassphrasePlateOffer, validates body
+				// against passphrase.MaxLen before this function is ever
+				// called -- C2's fix -- so this copy cannot truncate).
+				n = copy(secret, body)
+				step-- // net zero after the loop's step++: stay on entry.
+				break
+			}
+			n = m
+		case ppPLStepQR:
+			add, ok := ppQRChoiceFlow(ctx, th, qr)
+			if !ok {
+				step -= 2
+				break
+			}
+			qr = add
+		case ppPLStepConfirm:
+			if !ppConfirmFlow(ctx, th, secret[:n], seedFP, combinedFP, qr, true) {
+				step -= 2
+				break
+			}
+		case ppPLStepEngrave:
+			plate, err := ppBuildPlate(ctx.Platform.EngraverParams(), secret[:n], seedFP, combinedFP, qr, policyID, true)
+			if err != nil {
+				// The message names no part of the passphrase.
+				showError(ctx, th, "Passphrase", "This passphrase does not fit a plate.")
+				step -= 2
+				break
+			}
+			// S6b P9 F1: set BEFORE the call, not after -- Engrave() can leave
+			// steel behind even when it returns false (a partial cut, or a
+			// complete one rejected at the checkmark), and the caller has no
+			// other way to learn that happened.
+			attempted = true
+			if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+				return passphrasePlateCut
+			}
+			// Backed out of the engrave: return to the confirm screen.
+			step -= 2
+		}
+		step++
+	}
+	// ctx.Done fired mid-flow, before the plate was engraved and accepted. No
+	// warning is shown here even when `attempted`: showModal's own loop
+	// condition is `for !ctx.Done` (gui/slip39_polish.go), so a call reached
+	// only after ctx.Done fired is a silent no-op -- and there is no operator
+	// at the device to read it either (S6b failure-states review §3 item 5:
+	// mid-engrave power loss produces no restore document that run, so
+	// nothing downstream vouches for a set that does not exist).
+	return passphrasePlateNotCut
+}
+
+// passphraseAbortWarningText is S6b P9's F1 fix: the passphrase-plate sibling
+// of bundleAbortWarningText (gui/bundle_flow.go), shown when the operator
+// backs all the way out of engravePassphraseFlowPreloaded after having
+// reached the Engrave step at least once.
+//
+// NO CARD COUNT AND NO "secret bool" PARAMETER, unlike bundleAbortWarningText:
+// this flow ever produces exactly one plate, and that plate always carries
+// the passphrase -- there is no public variant to distinguish.
+//
+// HEDGED, NOT ASSERTED: "if any of it was cut" is true and actionable
+// whether nothing was cut yet, a partial cut was stopped, or a complete plate
+// was cut and then rejected at the checkmark -- Engrave()'s bool return
+// cannot tell those apart (see `attempted`'s comment above), so the wording
+// must be true in all three worlds, including the one where no steel exists
+// at all.
+const passphraseAbortWarningText = "This attempt is not counted anywhere as a backup. " +
+	"If any of the passphrase plate was cut, it must be DESTROYED, not binned: cut it up " +
+	"or grind the words off. It would carry the wallet's spending passphrase in the clear."
+
+// passphraseAbortWarning shows passphraseAbortWarningText as a dismiss-only
+// modal, mirroring bundleAbortWarning's shape for the main set.
+func passphraseAbortWarning(ctx *Context, th *Colors) {
+	showError(ctx, th, "Passphrase Plate", passphraseAbortWarningText)
 }

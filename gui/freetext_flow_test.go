@@ -877,8 +877,9 @@ func ftWidestSettingsNote(ctx *Context) string {
 // op regardless of where they landed, so an overflowing screen reads as fully
 // present. Before the fix the worst case measured 637px (no QR) and 701px (with
 // one) against 270px of area: the size line and every warning were off-panel,
-// and the codebase's only scroller is bound to buttons SeedHammer II does not
-// have.
+// and this screen has no scroller to reach them with. (The codebase's one
+// scroller is Warning, which S6b P5 gave touchable arrows -- but the freetext
+// confirm screen is not a Warning, so that does not help here.)
 //
 // Every PAGE is measured, not just the first: a pager that fits page 0 and
 // overflows page 3 is the same defect one tap later.

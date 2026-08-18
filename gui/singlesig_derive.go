@@ -25,7 +25,17 @@ import (
 // canonical), and the base58 account xpub.
 //
 // Order (recon Topic-4): xpub → md.EncodeSingleSig(md1) →
-// md.WalletPolicyIDStubChunks(md1) → mk.Encode(stub). ms1 = EncodeMS1(entropy).
+// md.FormAwareStubChunks(md1) → mk.Encode(stub). ms1 = EncodeMS1(entropy).
+//
+// CORRECTED (S6b spec 2.4/§8): this comment named
+// md.WalletPolicyIDStubChunks -- the KEYED-only branch -- while step (4)
+// below, "Form-aware policy-id stub", has always called
+// md.FormAwareStubChunks, the form-aware selector. Left stale, this is the
+// likely origin of the wrong-function defect S6b's §2.4 guards against
+// elsewhere: WalletPolicyIDStub is reached through FormAwareStub only for a
+// keyed wallet policy, and "Template-only md1" is a reachable choice on this
+// very flow (gui/singlesig.go) that produces a KEYLESS md1, for which the
+// keyed function mints a stub matching no card the run cut.
 //
 // SECURITY: the seed/master/intermediates are scrubbed INSIDE deriveAccountXpub.
 // The entropy buffer is gated on mnemonic validity, then wiped on every exit
