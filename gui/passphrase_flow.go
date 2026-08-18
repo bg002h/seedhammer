@@ -816,6 +816,16 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 		return passphrasePlateNotCut
 	}
 
+	// S6b P9 F1: latched the moment the Engrave screen is entered (see the
+	// ppPLStepEngrave case below), never cleared. EngraveScreen.Engrave's own
+	// bool return collapses "never started", "stopped mid-cut" and "cut in
+	// full but rejected at the checkmark" into the same false
+	// (gui/gui.go:3111-3187), so this is the only signal this caller has that
+	// SOME steel may exist that nothing downstream accounts for. Mirrors
+	// bundleAbortWarning's footing for the main set (gui/bundle_flow.go),
+	// which fires on the same conservative basis.
+	attempted := false
+
 	qr := false
 	step := ppPLStepEntry
 	for !ctx.Done {
@@ -830,6 +840,14 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 			// where the footer's truthfulness is normative (R-D).
 			m, ok := passphraseEntryFlow(ctx, th, secret, n, nil)
 			if !ok {
+				// S6b P9 F1: `attempted` is true only if this is a return trip --
+				// the operator reached the Engrave step at least once and backed
+				// all the way back out to here. The operator is still at the
+				// device (ctx.Done has not fired), so a dismissible warning is
+				// both reachable and the only place left to say it.
+				if attempted {
+					passphraseAbortWarning(ctx, th)
+				}
 				return passphrasePlateNotCut // Back out of the first step leaves the program.
 			}
 			// C1 (S6b whole-diff review): passphraseEntryFlow's keyboard is
@@ -883,6 +901,11 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 				step -= 2
 				break
 			}
+			// S6b P9 F1: set BEFORE the call, not after -- Engrave() can leave
+			// steel behind even when it returns false (a partial cut, or a
+			// complete one rejected at the checkmark), and the caller has no
+			// other way to learn that happened.
+			attempted = true
 			if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
 				return passphrasePlateCut
 			}
@@ -891,6 +914,37 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 		}
 		step++
 	}
-	// ctx.Done fired mid-flow, before the plate was engraved and accepted.
+	// ctx.Done fired mid-flow, before the plate was engraved and accepted. No
+	// warning is shown here even when `attempted`: showModal's own loop
+	// condition is `for !ctx.Done` (gui/slip39_polish.go), so a call reached
+	// only after ctx.Done fired is a silent no-op -- and there is no operator
+	// at the device to read it either (S6b failure-states review §3 item 5:
+	// mid-engrave power loss produces no restore document that run, so
+	// nothing downstream vouches for a set that does not exist).
 	return passphrasePlateNotCut
+}
+
+// passphraseAbortWarningText is S6b P9's F1 fix: the passphrase-plate sibling
+// of bundleAbortWarningText (gui/bundle_flow.go), shown when the operator
+// backs all the way out of engravePassphraseFlowPreloaded after having
+// reached the Engrave step at least once.
+//
+// NO CARD COUNT AND NO "secret bool" PARAMETER, unlike bundleAbortWarningText:
+// this flow ever produces exactly one plate, and that plate always carries
+// the passphrase -- there is no public variant to distinguish.
+//
+// HEDGED, NOT ASSERTED: "if any of it was cut" is true and actionable
+// whether nothing was cut yet, a partial cut was stopped, or a complete plate
+// was cut and then rejected at the checkmark -- Engrave()'s bool return
+// cannot tell those apart (see `attempted`'s comment above), so the wording
+// must be true in all three worlds, including the one where no steel exists
+// at all.
+const passphraseAbortWarningText = "This attempt is not counted anywhere as a backup. " +
+	"If any of the passphrase plate was cut, it must be DESTROYED, not binned: cut it up " +
+	"or grind the words off. It would carry the wallet's spending passphrase in the clear."
+
+// passphraseAbortWarning shows passphraseAbortWarningText as a dismiss-only
+// modal, mirroring bundleAbortWarning's shape for the main set.
+func passphraseAbortWarning(ctx *Context, th *Colors) {
+	showError(ctx, th, "Passphrase Plate", passphraseAbortWarningText)
 }
