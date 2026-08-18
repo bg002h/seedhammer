@@ -49,11 +49,23 @@ jobs:
     #   $ CGO_ENABLED=0 go test ./gui/ -count=1
     #   ok  seedhammer.com/gui  476.309s      <- 79% of the 600s default
     #
-    # This runner is slower per core, so the default was odds-on to expire here
-    # -- and a package killed by the timeout is not a small failure. It reports
-    # a panic over a suite whose assertions had all been passing, which reads
-    # like a code defect and is not one. The 10m default is not a budget anyone
-    # chose for this suite; it is what Go picks when nobody says.
+    # THEN MEASURED HERE, and the prediction was WRONG. This flag was added
+    # arguing the runner is slower per core and the default was "odds-on to
+    # expire". Run 32155309524, the first push carrying it:
+    #
+    #   ok  seedhammer.com/gui  386.065s      <- 64% of the default
+    #
+    # The runner is FASTER than the maintainer's box for this workload -- 90s
+    # faster -- so the default would have held, with 214s to spare. Recorded
+    # rather than quietly deleted: the number a future reader needs is the one
+    # from THIS machine, and the guess it replaces was off by the wrong sign.
+    #
+    # The flag stays, on the weaker and honest ground: `gui` grew 440.6s ->
+    # 496.8s in a SINGLE S6b phase, so 214s of headroom is a cycle or two, not
+    # a margin. And a package killed by the timeout is not a small failure --
+    # it reports a panic over a suite whose assertions had all been passing,
+    # which reads like a code defect and is not one. The 10m default is not a
+    # budget anyone chose for this suite; it is what Go picks when nobody says.
     #
     # If this number ever needs raising again, the answer is probably not a
     # bigger number: `gui` grew 440.6s -> 496.8s in a single S6b phase. Shard it
