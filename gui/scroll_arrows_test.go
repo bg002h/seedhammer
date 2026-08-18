@@ -37,13 +37,17 @@ func TestBodyClipWidthStaysAt417(t *testing.T) {
 	}
 }
 
-// ─── GATE 5.1 -- the visibility predicate, unit-level ──────────────────────
+// ─── GATE 5.1 -- the visibility predicates, unit-level ─────────────────────
 //
-// Pins scrollArrowsVisible's exact formula against both predicates the spec
-// names and rejects: `maxScroll > 0` (false positive -- fires while content is
-// still entirely on the panel) and `bodysz.Y > bodyClip.Dy()` (false negative
-// -- fires 10px late, hiding content with no arrow, "F-185's own harm").
-func TestGate51VisibilityPredicateFormula(t *testing.T) {
+// One predicate per direction (§5.1, normative). TestGate51VisibilityPredic-
+// ateFormulaDown pins scrollArrowDownVisible's exact formula (at scroll=0,
+// where it is numerically identical to the pre-P5b shared predicate) against
+// both predicates the spec names and rejects: `maxScroll > 0` (false
+// positive -- fires while content is still entirely on the panel) and
+// `bodysz.Y > bodyClip.Dy()` (false negative -- fires 10px late, hiding
+// content with no arrow, "F-185's own harm"). TestGate51VisibilityPredicate-
+// FormulaUp pins scrollArrowUpVisible's formula, which needs no geometry.
+func TestGate51VisibilityPredicateFormulaDown(t *testing.T) {
 	dims := image.Pt(480, 320)
 	bodyClip := warningBodyClip(dims)
 	if got := bodyClip.Dx(); got != 417 {
@@ -78,31 +82,54 @@ func TestGate51VisibilityPredicateFormula(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := scrollArrowsVisible(bodyClip, image.Pt(0, c.bodyszY), dims)
+			// scroll=0: at scroll=0 this formula is numerically identical to
+			// the pre-P5b shared predicate the cases above were derived
+			// against.
+			got := scrollArrowDownVisible(bodyClip, image.Pt(0, c.bodyszY), dims, 0)
 			if got != c.want {
-				t.Errorf("scrollArrowsVisible(bodysz.Y=%d) = %v, want %v", c.bodyszY, got, c.want)
+				t.Errorf("scrollArrowDownVisible(bodysz.Y=%d, scroll=0) = %v, want %v", c.bodyszY, got, c.want)
 			}
 		})
 	}
 }
 
+// TestGate51VisibilityPredicateFormulaUp pins scrollArrowUpVisible's formula:
+// `w.scroll > 0`, exactly. No geometry fixture to re-derive -- that is the
+// point (§5.1: "needs no geometry and cannot drift with the fadeClip stub").
+func TestGate51VisibilityPredicateFormulaUp(t *testing.T) {
+	cases := []struct {
+		scroll int
+		want   bool
+	}{
+		{-1, false}, // never occurs in practice (w.scroll clamps at 0), but the formula is total
+		{0, false},  // the exact boundary GATE 5.1's extended assertion depends on
+		{1, true},
+		{1000, true},
+	}
+	for _, c := range cases {
+		if got := scrollArrowUpVisible(c.scroll); got != c.want {
+			t.Errorf("scrollArrowUpVisible(%d) = %v, want %v", c.scroll, got, c.want)
+		}
+	}
+}
+
 // ─── GATE 5.1 -- wired up, integration-level ───────────────────────────────
 //
-// Proves the FORMULA above is what actually gates the DRAWN pixels, not just
-// an isolated fact. Renders ConfirmWarningScreen (the Warning.Layout shape
-// behind every hold-to-confirm modal) and looks for the arrow ICON's own
-// colour (th.Text) inside the expected top-chip rectangle -- present only
-// when an arrow was actually drawn there.
+// Proves the FORMULAS above are what actually gate the DRAWN pixels, not
+// just an isolated fact. Renders ConfirmWarningScreen (the Warning.Layout
+// shape behind every hold-to-confirm modal) and looks for the arrow ICON's
+// own colour (th.Text) inside EITHER chip rectangle -- present only when an
+// arrow was actually drawn there. Checking both (not just the top) matters
+// post-P5b: at the fresh scroll==0 state a long body draws only the DOWN
+// arrow (TestGate51UpArrowAbsentAtZeroScroll below asserts the up arrow is
+// specifically absent there), so a top-only check would now read "no arrow
+// drawn" for a body that overflows and correctly shows one.
 func scrollArrowsDrawnFor(t *testing.T, body string) bool {
 	t.Helper()
 	dst := gate53Frame(t, "Modal Fit", body)
 	bodyClip := image.Rectangle{Min: image.Pt(6, 44), Max: image.Pt(423, 314)}
-	centerX := bodyClip.Min.X + bodyClip.Dx()/2
-	topChip := image.Rectangle{
-		Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
-		Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
-	}
-	return rectHasColor(dst, topChip, descriptorTheme.Text)
+	top, bottom := arrowChips(bodyClip)
+	return arrowChipInkPresent(dst, top) || arrowChipInkPresent(dst, bottom)
 }
 
 func TestGate51ArrowsDrawnOnlyWhenContentOverflowsThePanel(t *testing.T) {
@@ -114,6 +141,116 @@ func TestGate51ArrowsDrawnOnlyWhenContentOverflowsThePanel(t *testing.T) {
 	if drawn := scrollArrowsDrawnFor(t, long); !drawn {
 		t.Errorf("the scroll arrow did NOT draw for a body that overflows the panel " +
 			"(modalFiller(700), well past the 260-char/px threshold)")
+	}
+}
+
+// ─── GATE 5.1 EXTENDED -- per-direction absence ────────────────────────────
+//
+// SPEC_s6b_pre_flash_cycle.md §5.1, normative: "one predicate PER DIRECTION,
+// not one for both." TestGate51ArrowsDrawnOnlyWhenContentOverflowsThePanel
+// above is the exact test the spec calls out by name as passing the defect:
+// it only asks "does *an* arrow show", and a single shared predicate answers
+// yes even though the up arrow at scroll==0 (or the down arrow at max
+// scroll) points at content that is not there -- under R-D that is a false
+// claim, and it is the same failure that killed the original arrow proposal.
+// Worse for the up arrow specifically: tapping it at scroll==0 visibly does
+// nothing (scroll clamps to 0), teaching the operator the arrows don't work,
+// which discredits the down arrow at the moment it matters.
+//
+// arrowChips/arrowChipInkPresent re-derive the same chip geometry
+// scrollArrowsDrawnFor already hardcodes (bodyClip = (6,44)-(423,314)), split
+// so each direction can be checked independently instead of only the top.
+
+// arrowChips returns the top (UP) and bottom (DOWN) chip rectangles for a
+// given bodyClip -- the same geometry Warning.Layout computes at its two
+// arrow call sites (gui.go).
+func arrowChips(bodyClip image.Rectangle) (top, bottom image.Rectangle) {
+	centerX := bodyClip.Min.X + bodyClip.Dx()/2
+	top = image.Rectangle{
+		Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
+		Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
+	}
+	bottom = image.Rectangle{
+		Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Max.Y-scrollFadeDist),
+		Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Max.Y),
+	}
+	return top, bottom
+}
+
+// arrowChipInkPresent reports whether the arrow ICON's own colour (th.Text)
+// appears anywhere inside chip -- present only when scrollArrow actually drew
+// there (same technique as scrollArrowsDrawnFor).
+func arrowChipInkPresent(dst *image.RGBA, chip image.Rectangle) bool {
+	return rectHasColor(dst, chip, descriptorTheme.Text)
+}
+
+// TestGate51UpArrowAbsentAtZeroScroll: at scroll==0 (Warning's zero value,
+// entered on the very first frame), the up arrow must be ABSENT -- there is
+// nothing above the body's first line to point at. The body is long enough
+// (modalFiller(700)) that the DOWN arrow is present, so a failure here is
+// about the up arrow specifically, not merely "no arrows drew at all".
+func TestGate51UpArrowAbsentAtZeroScroll(t *testing.T) {
+	long := modalFiller(700)
+	dst := gate53Frame(t, "Modal Fit", long)
+	bodyClip := image.Rectangle{Min: image.Pt(6, 44), Max: image.Pt(423, 314)}
+	top, bottom := arrowChips(bodyClip)
+
+	if !arrowChipInkPresent(dst, bottom) {
+		t.Fatalf("INCONCLUSIVE: the down arrow is not drawn either, at scroll==0 on a body " +
+			"long enough to overflow (modalFiller(700)) -- this proves nothing about the up " +
+			"arrow specifically")
+	}
+	if arrowChipInkPresent(dst, top) {
+		t.Errorf("the up arrow is drawn at scroll==0, pointing at content that does not exist " +
+			"above it (SPEC_s6b_pre_flash_cycle.md §5.1, R-D) -- the shared-predicate defect " +
+			"P5 flagged")
+	}
+}
+
+// TestGate51DownArrowAbsentAtFullScroll: at the real maxScroll for this body
+// (reached by forcing scroll past its own ceiling and letting Warning.Layout's
+// own clamp -- gui.go -- reduce it, the same value press-and-hold Down
+// converges to), the down arrow must be ABSENT -- there is nothing below the
+// body's last line to point at. The up arrow must be present, so a failure
+// here is about the down arrow specifically.
+func TestGate51DownArrowAbsentAtFullScroll(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	s := &ConfirmWarningScreen{Title: "Modal Fit", Body: modalFiller(700), Icon: assets.IconHammer}
+	dims := ctx.Platform.DisplaySize()
+
+	// First call: force scroll past its own ceiling so the clamp reduces it
+	// to the REAL maxScroll for this body. Discard this frame's pixels; only
+	// the resulting scroll matters.
+	s.warning.scroll = 1 << 30
+	_, _ = s.Layout(ctx, &descriptorTheme, dims)
+	if s.warning.scroll <= 0 {
+		t.Fatalf("INCONCLUSIVE: maxScroll clamped to %d -- modalFiller(700) does not overflow "+
+			"enough to reach a nonzero maximum", s.warning.scroll)
+	}
+
+	// Second call: scroll now ENTERS this frame already at the exact
+	// maximum, so the check below is against the genuine reachable boundary,
+	// not a mid-transition value.
+	o, _ := s.Layout(ctx, &descriptorTheme, dims)
+	r := image.Rectangle{Max: dims}
+	dst := image.NewRGBA(r)
+	mask := image.NewRGBA(r)
+	d := new(op.Drawer)
+	d.Draw(dst, mask, o)
+
+	bodyClip := image.Rectangle{Min: image.Pt(6, 44), Max: image.Pt(423, 314)}
+	top, bottom := arrowChips(bodyClip)
+
+	if !arrowChipInkPresent(dst, top) {
+		t.Fatalf("INCONCLUSIVE: the up arrow is not drawn either, at full scroll -- this " +
+			"proves nothing about the down arrow specifically")
+	}
+	if arrowChipInkPresent(dst, bottom) {
+		t.Errorf("the down arrow is drawn at full scroll (w.scroll=%d), pointing at content "+
+			"that does not exist below it (SPEC_s6b_pre_flash_cycle.md §5.1, R-D) -- the "+
+			"shared-predicate defect P5 flagged", s.warning.scroll)
 	}
 }
 
@@ -180,7 +317,12 @@ func TestGate51bMaxScrollAgreesWithVisibility(t *testing.T) {
 	for y := lo; y <= hi; y++ {
 		maxScroll := y - (bodyClip.Dy() - 2*scrollFadeDist)
 		oldPredicate := maxScroll > 0
-		newPredicate := scrollArrowsVisible(bodyClip, image.Pt(0, y), dims)
+		// scroll=0: this probe compares against the RESTING state, exactly as
+		// the pre-P5b single scrollArrowsVisible(bodyClip, bodysz, dims) did
+		// (it took no scroll argument at all) -- scrollArrowDownVisible at
+		// scroll=0 is numerically identical, so this rename does not change
+		// this gate's output.
+		newPredicate := scrollArrowDownVisible(bodyClip, image.Pt(0, y), dims, 0)
 		if oldPredicate != newPredicate {
 			diverged++
 			lines = append(lines, fmt.Sprintf("bodysz.Y=%d: maxScroll=%d (>0=%v) vs GATE-5.1=%v",

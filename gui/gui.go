@@ -391,29 +391,41 @@ func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt 
 	body, bodysz := widget.Labelw(&ctx.B, ctx.Styles.body, bodyClip.Dx(), th.Text, txt)
 	w.txtclip = bodyClip.Dy()
 
-	// GATE 5.1 / R-E: checked against the PANEL (dims.Y), not bodyClip.Dy().
-	// fadeClip stays a stubbed no-op in this cycle (R-E), so the body is not
-	// actually clipped to bodyClip -- `maxScroll > 0` and
+	// GATE 5.1 / R-E, R-D: checked against the PANEL (dims.Y), not
+	// bodyClip.Dy(). fadeClip stays a stubbed no-op in this cycle (R-E), so
+	// the body is not actually clipped to bodyClip -- `maxScroll > 0` and
 	// `bodysz.Y > bodyClip.Dy()` both disagree with what the panel really
 	// shows (REQUIREMENTS_s6b_pre_flash_cycle.md R-E,
-	// SPEC_s6b_pre_flash_cycle.md §5.1). This predicate is COUPLED to that
-	// stub and must be revisited when the real clip mask is restored.
-	showArrows := scrollArrowsVisible(bodyClip, bodysz, dims)
+	// SPEC_s6b_pre_flash_cycle.md §5.1).
+	//
+	// ONE PREDICATE PER DIRECTION, not one for both (§5.1, normative): a
+	// single shared predicate renders an arrow pointing at content that does
+	// not exist on its own side -- the up arrow at scroll==0, the down arrow
+	// at max scroll -- a false claim under R-D, and it is the same failure
+	// that killed the original arrow proposal. Tapping the up arrow at
+	// scroll==0 also visibly does nothing (scroll clamps to 0), teaching the
+	// operator the arrows don't work, which discredits the down arrow at the
+	// moment it matters.
+	//
+	// showUp needs no geometry and so cannot drift with the fadeClip stub.
+	// showDown is COUPLED to that stub and must be revisited when the real
+	// clip mask is restored.
+	showUp := scrollArrowUpVisible(w.scroll)
+	showDown := scrollArrowDownVisible(bodyClip, bodysz, dims, w.scroll)
 
 	w.arrowUp.Button = Up
 	w.arrowDown.Button = Down
-	// The click handlers are gated the same as the drawing, not just the
-	// drawing alone -- unlike Button1-3/Center, Up/Down have no physical
-	// button on this hardware to route around the gate, so there is no
-	// SeedScreen-style "guard the handler, not only the layout" hazard here
-	// (gui.go, SeedScreen.Draw's editBtn comment) for this Button pair.
-	if showArrows {
-		if w.arrowUp.Clicked(ctx) {
-			w.scroll -= w.txtclip / 2
-		}
-		if w.arrowDown.Clicked(ctx) {
-			w.scroll += w.txtclip / 2
-		}
+	// Each handler is gated on its OWN direction's predicate, exactly as
+	// P5 gated both handlers on the shared one -- unlike Button1-3/Center,
+	// Up/Down have no physical button on this hardware to route around the
+	// gate, so there is no SeedScreen-style "guard the handler, not only the
+	// layout" hazard here (gui.go, SeedScreen.Draw's editBtn comment) for
+	// this Button pair.
+	if showUp && w.arrowUp.Clicked(ctx) {
+		w.scroll -= w.txtclip / 2
+	}
+	if showDown && w.arrowDown.Clicked(ctx) {
+		w.scroll += w.txtclip / 2
 	}
 
 	maxScroll := bodysz.Y - (bodyClip.Dy() - 2*scrollFadeDist)
@@ -429,20 +441,24 @@ func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt 
 	titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
 
 	var arrows op.Op
-	if showArrows {
+	if showUp || showDown {
 		centerX := bodyClip.Min.X + bodyClip.Dx()/2
-		topChip := image.Rectangle{
-			Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
-			Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
+		var arrowOps []op.Op
+		if showUp {
+			topChip := image.Rectangle{
+				Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
+				Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
+			}
+			arrowOps = append(arrowOps, scrollArrow(&ctx.B, th, topChip, &w.arrowUp, assets.ArrowUp))
 		}
-		bottomChip := image.Rectangle{
-			Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Max.Y-scrollFadeDist),
-			Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Max.Y),
+		if showDown {
+			bottomChip := image.Rectangle{
+				Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Max.Y-scrollFadeDist),
+				Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Max.Y),
+			}
+			arrowOps = append(arrowOps, scrollArrow(&ctx.B, th, bottomChip, &w.arrowDown, assets.ArrowDown))
 		}
-		arrows = op.Layer(
-			scrollArrow(&ctx.B, th, topChip, &w.arrowUp, assets.ArrowUp),
-			scrollArrow(&ctx.B, th, bottomChip, &w.arrowDown, assets.ArrowDown),
-		)
+		arrows = op.Layer(arrowOps...)
 	}
 
 	return op.Layer(
@@ -483,11 +499,24 @@ const arrowChipWidth = 36
 // button's touch region from its drawn mask.
 const arrowTouchPad = 12
 
-// scrollArrowsVisible is GATE 5.1's predicate (SPEC_s6b_pre_flash_cycle.md
-// §5.1): content is off the PANEL, not merely past bodyClip. See the R-E
-// comment at its call site in Warning.Layout.
-func scrollArrowsVisible(bodyClip image.Rectangle, bodysz, dims image.Point) bool {
-	return bodyClip.Min.Y+scrollFadeDist+bodysz.Y > dims.Y
+// scrollArrowUpVisible is GATE 5.1's UP predicate (SPEC_s6b_pre_flash_cycle.md
+// §5.1, normative): `w.scroll > 0`. There is content above the drawn body
+// iff the body has been scrolled down from the top at all -- true regardless
+// of the fadeClip stub, which is why this needs no geometry input and cannot
+// drift with it (unlike scrollArrowDownVisible below).
+func scrollArrowUpVisible(scroll int) bool {
+	return scroll > 0
+}
+
+// scrollArrowDownVisible is GATE 5.1's DOWN predicate
+// (SPEC_s6b_pre_flash_cycle.md §5.1, normative):
+// `bodyClip.Min.Y + scrollFadeDist + bodysz.Y - w.scroll > dims.Y`, i.e.
+// content is off the PANEL, not merely past bodyClip. See the R-E comment at
+// its call site in Warning.Layout: this predicate is COUPLED to the
+// stubbed-no-op fadeClip and must be revisited when the real clip mask is
+// restored.
+func scrollArrowDownVisible(bodyClip image.Rectangle, bodysz, dims image.Point, scroll int) bool {
+	return bodyClip.Min.Y+scrollFadeDist+bodysz.Y-scroll > dims.Y
 }
 
 // scrollArrow draws one F-208 scroll arrow: an opaque background chip (R-I:
