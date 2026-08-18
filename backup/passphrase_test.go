@@ -526,6 +526,14 @@ func TestPassphraseBandBudget(t *testing.T) {
 		{Passphrase: "a b", CombinedFP: "5E6F7A8B", Font: constant.Font},
 		{Passphrase: strings.Repeat("a b", 33) + "a", SeedFP: "FFFFFFFF", CombinedFP: "00000000",
 			QR: true, Font: constant.Font},
+		// S6b GATE 2.3: the preloaded (derived+policy-id) footer, 25
+		// characters (the P3 measured correction -- see
+		// passphraseFooterDerivedSuffix's doc in passphrase.go; R-H's
+		// literal 36-character form does NOT clear this budget, which is
+		// the finding that forced the correction) -- must clear the same
+		// 64mm/2-line budget as the typed one.
+		{Passphrase: strings.Repeat("a b", 33) + "a", SeedFP: "FFFFFFFF", CombinedFP: "00000000",
+			PolicyID: "1A2B3C4D", Derived: true, QR: true, Font: constant.Font},
 	}
 	for _, p := range plates {
 		dim := 0
@@ -698,6 +706,26 @@ func TestPassphraseGolden(t *testing.T) {
 			QR:         true,
 			Font:       constant.Font,
 		}},
+		// S6b (GATE 2.3/2.3c/R-H, with the P3 measured correction -- see
+		// passphraseFooterDerivedSuffix): the PRELOADED path. Both
+		// fingerprints were DERIVED by the device, not typed, so the
+		// footer carries the policy id instead of the typed-provenance
+		// string -- "POLICY 1A2B 3C4D  DERIVED", not "FINGERPRINTS TYPED,
+		// NOT VERIFIED". This is a NEW golden (R-G: "marked states get new
+		// golden files"), not a rewrite of 0-plain/1-qr/3-max-qr above --
+		// those three keep Derived at its zero value (false) and stay
+		// byte-identical, pinning that the untouched typed/standalone path
+		// (R-H: "standalone path ... unchanged") is still reachable and
+		// still renders the old 32-character string.
+		{"4-preloaded", Passphrase{
+			Passphrase: words,
+			SeedFP:     "A1B2C3D4",
+			CombinedFP: "5E6F7A8B",
+			PolicyID:   "1A2B3C4D",
+			Derived:    true,
+			QR:         true,
+			Font:       constant.Font,
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -772,6 +800,120 @@ func TestPassphraseQRTooLong(t *testing.T) {
 // that ignored trailing data would pass while the modules differed. Identical
 // module grids is the strongest available statement: the fingerprints changed
 // nothing about what gets engraved.
+// TestPassphraseQRIgnoresPolicyID is GATE 2.5's S6b extension:
+// TestPassphraseQRIgnoresFingerprints already pins that the QR carries the
+// passphrase and nothing else; this proves the same of the two fields P3
+// adds, PolicyID and Derived. Same module-level comparison, for the same
+// reason: a decoder that ignored trailing data would pass while the
+// modules differed.
+func TestPassphraseQRIgnoresPolicyID(t *testing.T) {
+	const secret = "correct horse battery staple"
+	base, err := passphraseQRCode(Passphrase{Passphrase: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := passphraseQRCode(Passphrase{
+		Passphrase: secret, SeedFP: "DEADBEEF", CombinedFP: "CAFEBABE",
+		PolicyID: "1A2B3C4D", Derived: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Size != base.Size {
+		t.Fatalf("QR size changed from %d to %d -- the policy id or provenance is being encoded", base.Size, got.Size)
+	}
+	diff := 0
+	for y := 0; y < base.Size; y++ {
+		for x := 0; x < base.Size; x++ {
+			if base.Black(x, y) != got.Black(x, y) {
+				diff++
+			}
+		}
+	}
+	if diff != 0 {
+		t.Errorf("%d of %d QR modules differ from the passphrase-only code -- "+
+			"the policy id/provenance is reaching the QR, which must carry the passphrase alone",
+			diff, base.Size*base.Size)
+	}
+}
+
+// TestPassphraseFooterProvenance is S6b GATES 2.3, 2.3b, 2.3c and 2.3d.
+//
+// R-D/spec 2.3d: the footer TEXT is selected by the recorded PROVENANCE
+// (Derived), never by whether PolicyID is set. "typed, policy id present"
+// is the case that would fail if the code were keyed on PolicyID != ""
+// instead: a future path preloading fingerprints without a descriptor must
+// not print "DERIVED" over values it did not derive, and conversely a
+// caller that happens to hold a policy id without having derived anything
+// must not have it silently annexed onto the typed footer (which is also
+// R-H's "never co-occur" requirement -- the two forms are asserted mutually
+// exclusive below, in every case).
+//
+// 2.3c: "derived, policy id present" proves the policy id actually RENDERS
+// -- the footer line is gated on a non-empty fingerprint
+// (SeedFP/CombinedFP), an ORTHOGONAL condition that could vanish it
+// silently if this case were only asserted negatively.
+//
+// 2.3b: "typed, no policy id" is the byte-for-byte pre-S6b behaviour --
+// fingerprintEntryFlow's own path -- and must still say "TYPED, NOT
+// VERIFIED", never "DERIVED".
+func TestPassphraseFooterProvenance(t *testing.T) {
+	const (
+		seedFP = "A1B2C3D4"
+		combFP = "5E6F7A8B"
+		policy = "1A2B3C4D"
+	)
+	const (
+		typedFooter = "FINGERPRINTS TYPED, NOT VERIFIED"
+		// 25 chars, NOT R-H's literal 36-char "...DERIVED, NOT TYPED": see
+		// the P3 measured-correction comment on passphraseFooterDerivedSuffix
+		// in passphrase.go. R-H's string measures 460800 units against this
+		// same band's pre-existing 409600-unit (64mm) cap -- TestPassphraseBandBudget
+		// below is the gate that caught it.
+		derivedFooter = "POLICY 1A2B 3C4D  DERIVED"
+	)
+	if got := len(derivedFooter); got != 25 {
+		t.Fatalf("test is void: the derived footer literal is %d chars, want 25", got)
+	}
+	if got := len(typedFooter); got != 32 {
+		t.Fatalf("test is void: the typed footer literal is %d chars, want 32", got)
+	}
+
+	cases := []struct {
+		name       string
+		derived    bool
+		policyID   string
+		wantFooter string
+	}{
+		{"typed, no policy id", false, "", typedFooter},
+		{"typed, policy id present (must be ignored, 2.3d)", false, policy, typedFooter},
+		{"derived, policy id present (must render, 2.3c)", true, policy, derivedFooter},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := Passphrase{
+				Passphrase: "hunter2",
+				SeedFP:     seedFP,
+				CombinedFP: combFP,
+				PolicyID:   tc.policyID,
+				Derived:    tc.derived,
+				Font:       constant.Font,
+			}
+			l := passphraseLayoutFor(params, p, 0)
+			if !slices.Contains(l.bottomLines, tc.wantFooter) {
+				t.Errorf("bottom band %q does not contain %q", l.bottomLines, tc.wantFooter)
+			}
+			other := typedFooter
+			if tc.wantFooter == typedFooter {
+				other = derivedFooter
+			}
+			if slices.Contains(l.bottomLines, other) {
+				t.Errorf("bottom band %q ALSO contains %q -- the typed and derived forms must never co-occur (R-H)", l.bottomLines, other)
+			}
+		})
+	}
+}
+
 func TestPassphraseQRIgnoresFingerprints(t *testing.T) {
 	const secret = "correct horse battery staple"
 	base, err := passphraseQRCode(Passphrase{Passphrase: secret})
