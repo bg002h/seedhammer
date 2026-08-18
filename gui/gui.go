@@ -427,6 +427,40 @@ func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt 
 	if showDown && w.arrowDown.Clicked(ctx) {
 		w.scroll += w.txtclip / 2
 	}
+	// I1 (S6b whole-diff review): when a direction hides, this frame's op
+	// tree carries no input region for it (the `if showX { ... }` guards
+	// below), so the router can never again deliver that Clickable's
+	// release -- EventRouter.Events looks up the pressed tag's bounds in
+	// THIS frame, finds nothing (the region is gone), nils the tag, and
+	// Reset() discards the eventual release event because no filter is
+	// left to protect it (gui/event.go). Without this, w.arrowDown.Pressed
+	// stays true forever, and press-and-hold's own auto-repeat
+	// (gui/widget.go's Clickable.Next) later fires with no finger on the
+	// panel the moment the arrow reappears -- pinning every overflowing
+	// safety modal at full scroll
+	// (TestI1StaleArrowPressGhostRepeatsWithNoFinger, scroll_arrows_test.go).
+	//
+	// BOTH fields, not just Pressed: Next's own repeat-check reads c.repeat
+	// (the next scheduled auto-repeat wakeup) as soon as Pressed is next
+	// true, with no requirement that IT was the call that set Pressed --
+	// clearing only Pressed here left c.repeat holding the ORIGINAL hold's
+	// wakeup, long since passed, so the very next GENUINE tap on the
+	// recovered arrow (a real press then a quick release, not a hold) read
+	// that stale, overdue wakeup on the press and fired once immediately as
+	// an "overdue repeat", then fired AGAIN on its own release -- one tap,
+	// two scrolls (TestI1FreshTapAfterRecoveryScrollsExactlyOnce). Zeroing
+	// c.repeat here is the same invariant Next() itself restores after a
+	// REAL release (`if !c.Pressed { c.repeat = time.Time{} }`) -- this is
+	// that invariant, applied where Next() cannot reach because it is never
+	// called while hidden.
+	if !showUp {
+		w.arrowUp.Pressed = false
+		w.arrowUp.repeat = time.Time{}
+	}
+	if !showDown {
+		w.arrowDown.Pressed = false
+		w.arrowDown.repeat = time.Time{}
+	}
 
 	maxScroll := bodysz.Y - (bodyClip.Dy() - 2*scrollFadeDist)
 	if w.scroll > maxScroll {

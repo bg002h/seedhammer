@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
@@ -282,6 +284,213 @@ func TestGate51ArrowActuallyScrolls(t *testing.T) {
 	if w.scroll >= before {
 		t.Errorf("clicking the up arrow's button did not retreat w.scroll (got %d, was %d)", w.scroll, before)
 	}
+}
+
+// ─── S6b whole-diff review I1 -- a hidden arrow's stale press state ────────
+//
+// TestI1StaleArrowPressGhostRepeatsWithNoFinger closes I1
+// (design/agent-reports/s6b-whole-diff-review.md): Warning.Layout gates BOTH
+// the arrow's input region AND the event pull on its visibility predicate
+// (`if showDown { ... }` / `if showDown && w.arrowDown.Clicked(ctx)`), but
+// GATE 5.1 itself REQUIRES the down arrow to disappear at full scroll --
+// which press-and-hold auto-repeat (gui/widget.go:48-68, a designed
+// feature) reaches with the finger still down. When that happens, the
+// EventRouter's capture (gui/event.go:281-309) looks up the pressed tag's
+// bounds in the frame that just drew it gone, finds nothing, nils the tag,
+// and the eventual release is discarded at Reset() with no filter left to
+// protect it -- so w.arrowDown.Pressed is never cleared. THIS TEST DOES NOT
+// USE click(&ctx.Router, Down): a synthesized ButtonEvent never touches
+// EventRouter.Events' tag-bounds bookkeeping (it takes the AsButton() path
+// in Clickable.Next, and Events() only walks tag bounds for AsPointer()
+// events) -- exactly the same "button event, not the hardware's own touch
+// event" blind spot gui/start_screen_touch_test.go's own header documents,
+// and exactly why GATE 5.1's own click(&ctx.Router, Down)-driven
+// TestGate51ArrowActuallyScrolls above cannot see this bug. Real PointerEvents,
+// routed against the real Drawer of the frame that drew (or did not draw)
+// the arrow, are the only way to reach it.
+//
+// synctest supplies a real, advanceable clock: Clickable.Next's auto-repeat
+// (gui/widget.go) is gated on time.Now() vs a recorded wakeup, and the
+// defect requires REAL elapsed time between "the arrow hides, still
+// pressed" and "the operator notices and scrolls back up" -- exactly what
+// happens on real hardware and exactly what a same-tick unit test would
+// not otherwise reproduce.
+func TestI1StaleArrowPressGhostRepeatsWithNoFinger(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		dims := ctx.Platform.DisplaySize()
+		w := &Warning{}
+		long := modalFiller(700)
+		bodyClip := image.Rectangle{Min: image.Pt(6, 44), Max: image.Pt(423, 314)}
+		_, bottom := arrowChips(bodyClip)
+		downPos := bottom.Min.Add(bottom.Max).Div(2)
+
+		// frame renders one Warning.Layout pass exactly the way
+		// Context.Frame's own real callers do it (extract, THEN
+		// ctx.Reset(), THEN ctx.B.Reset() -- gui.go's Frame/Reset, mirrored
+		// by every runUITouch-style harness in this package) and returns
+		// the Drawer so pointer events can be routed against what was
+		// actually drawn.
+		frame := func() *op.Drawer {
+			o := w.Layout(ctx, &descriptorTheme, dims, "Modal Fit", long)
+			d := new(op.Drawer)
+			d.ExtractText(image.Rectangle{Max: dims}, o)
+			ctx.Reset()
+			ctx.B.Reset()
+			return d
+		}
+
+		d1 := frame()
+		if w.scroll != 0 {
+			t.Fatalf("INCONCLUSIVE: scroll is %d before any input", w.scroll)
+		}
+		if _, _, hit := d1.Hit(downPos); !hit {
+			t.Fatalf("INCONCLUSIVE: the down arrow is not hit-testable at scroll==0")
+		}
+
+		// Press (not release): the finger goes down on the arrow and STAYS
+		// down -- press-and-hold, exactly what GATE 5.1's auto-repeat
+		// exists for.
+		ctx.Router.Events(d1, PointerEvent{Pressed: true, Entered: true, Pos: downPos}.Event())
+		frame()
+		if !w.arrowDown.Pressed {
+			t.Fatalf("INCONCLUSIVE: the down arrow press was not registered")
+		}
+
+		// The content reaches the bottom of the panel WHILE THE FINGER IS
+		// STILL DOWN -- GATE 5.1 requires the down arrow to hide there. No
+		// release event has been generated; the operator's finger has not
+		// left the panel.
+		w.scroll = 1 << 30
+		d3 := frame()
+		if _, _, hit := d3.Hit(downPos); hit {
+			t.Fatalf("test setup did not hide the down arrow at max scroll")
+		}
+
+		// The finger now lifts. On real hardware this generates a release
+		// PointerEvent at the same position; routed here against d3 -- the
+		// frame where the arrow's own hit region is already gone, exactly
+		// as it is on the real panel.
+		ctx.Router.Events(d3, PointerEvent{Pressed: false, Entered: true, Pos: downPos}.Event())
+		frame()
+
+		// The operator notices the down arrow is gone and, a while later,
+		// scrolls back up (e.g. via the up arrow) -- real elapsed time,
+		// well past repeatStartDelay (400ms, gui/widget.go). No further
+		// pointer event ever names the down arrow again before this.
+		time.Sleep(2 * time.Second)
+		w.scroll = 0
+		d5 := frame()
+		if _, _, hit := d5.Hit(downPos); !hit {
+			t.Fatalf("INCONCLUSIVE: the down arrow did not reappear at scroll==0")
+		}
+
+		// GHOST CHECK: w.scroll was forced to 0 immediately before the frame
+		// above, with NO pointer event delivered this frame at all. If the
+		// stale press auto-repeated, Warning.Layout added w.txtclip/2 to it
+		// on its own.
+		if w.scroll != 0 {
+			t.Fatalf("the down arrow scrolled to %d with NO finger on the panel -- a stale "+
+				"Pressed state from the earlier, dropped release auto-repeated (I1, "+
+				"s6b-whole-diff-review.md)", w.scroll)
+		}
+	})
+}
+
+// TestI1FreshTapAfterRecoveryScrollsExactlyOnce is the adversarial check on
+// the fix above, not on the original bug: clearing w.arrowDown.Pressed when
+// the arrow hides leaves Clickable.repeat (gui/widget.go) untouched, still
+// holding the wakeup time from the ORIGINAL hold session. Clickable.Next's
+// own repeat-check reads that field the moment Pressed next becomes true --
+// and if real time has since passed repeatStartDelay (as it must have, for
+// the arrow to have been hidden long enough to matter), the very next
+// GENUINE tap on the recovered arrow, a single unhurried press-then-release,
+// would immediately register as an overdue "repeat" AND THEN a second click
+// on its own release -- scrolling twice for one tap. This reproduces the
+// exact sequence TestI1StaleArrowPressGhostRepeatsWithNoFinger does, through
+// the same recovery point, then drives one real press+release instead of
+// leaving the finger off the panel, and requires exactly one scroll step.
+func TestI1FreshTapAfterRecoveryScrollsExactlyOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		dims := ctx.Platform.DisplaySize()
+		w := &Warning{}
+		// MUCH longer than TestI1StaleArrowPressGhostRepeatsWithNoFinger's
+		// fixture, and on purpose: a single scroll step is a fixed
+		// w.txtclip/2 (panel geometry, not body length), but maxScroll DOES
+		// grow with the body, and gui.go clamps w.scroll to it. A short
+		// body puts maxScroll below two steps, so a genuine single click
+		// and an undetected double-fire land on the SAME clamped value and
+		// this test could not tell them apart -- modalFiller(20000) leaves
+		// comfortable headroom, checked below rather than assumed.
+		long := modalFiller(20000)
+		bodyClip := image.Rectangle{Min: image.Pt(6, 44), Max: image.Pt(423, 314)}
+		_, bottom := arrowChips(bodyClip)
+		downPos := bottom.Min.Add(bottom.Max).Div(2)
+
+		frame := func() *op.Drawer {
+			o := w.Layout(ctx, &descriptorTheme, dims, "Modal Fit", long)
+			d := new(op.Drawer)
+			d.ExtractText(image.Rectangle{Max: dims}, o)
+			ctx.Reset()
+			ctx.B.Reset()
+			return d
+		}
+
+		// Measure this fixture's real maxScroll, TestGate51DownArrowAbsentAtFullScroll's
+		// own technique: force scroll past its own ceiling and read back
+		// what Layout's clamp reduces it to. showDown is false throughout
+		// this measurement (w.scroll is astronomically past any real
+		// content), so arrowDown.Clicked is never invoked and neither
+		// Pressed nor repeat are touched by it.
+		w.scroll = 1 << 30
+		frame()
+		maxScroll, step := w.scroll, w.txtclip/2
+		w.scroll = 0
+		if maxScroll < 2*step {
+			t.Fatalf("INCONCLUSIVE: maxScroll=%d leaves less than two steps (%d) of headroom -- "+
+				"grow the fixture", maxScroll, 2*step)
+		}
+
+		// Exactly TestI1StaleArrowPressGhostRepeatsWithNoFinger's setup: an
+		// earlier hold whose release was dropped while the arrow was
+		// hidden, then real elapsed time, then the arrow reappears.
+		d1 := frame()
+		ctx.Router.Events(d1, PointerEvent{Pressed: true, Entered: true, Pos: downPos}.Event())
+		frame()
+		w.scroll = 1 << 30
+		d3 := frame()
+		ctx.Router.Events(d3, PointerEvent{Pressed: false, Entered: true, Pos: downPos}.Event())
+		frame()
+		time.Sleep(2 * time.Second)
+		w.scroll = 0
+		d5 := frame()
+		if w.scroll != 0 {
+			t.Fatalf("INCONCLUSIVE: I1's own ghost-repeat fired (scroll=%d) before this test's "+
+				"own fresh tap -- run TestI1StaleArrowPressGhostRepeatsWithNoFinger", w.scroll)
+		}
+
+		// Now a real, unhurried single tap: press, a short real dwell (well
+		// under repeatStartDelay, so this is an ordinary tap, not a hold),
+		// release. Exactly one scroll step is correct.
+		ctx.Router.Events(d5, PointerEvent{Pressed: true, Entered: true, Pos: downPos}.Event())
+		frame()
+		time.Sleep(50 * time.Millisecond)
+		d7 := frame()
+		ctx.Router.Events(d7, PointerEvent{Pressed: false, Entered: true, Pos: downPos}.Event())
+		frame()
+
+		if got, want := w.scroll, step; got != want {
+			t.Fatalf("one tap on the down arrow scrolled to %d, want exactly %d (one step, "+
+				"maxScroll=%d so this is not the clamp) -- a stale Clickable.repeat from the "+
+				"earlier recovered hold made this fresh tap register as an overdue auto-repeat "+
+				"as well as a click", got, want, maxScroll)
+		}
+	})
 }
 
 // ─── GATE 5.1b -- R-E's maxScroll divergence probe ─────────────────────────
