@@ -40,9 +40,14 @@ const (
 	t21RetrySuffix = "An earlier check did not pass; a later full check passed."
 
 	t22OneKeyPlateClause = "1 key plate was read back and matched what this run engraved."
-	t22MS1Clause         = "The ms1 secret you typed matched this seed."
-	t22NoMS1Clause       = "No secret seed share was read back or compared."
-	t22CosignerClause    = "Other cosigners' keys are taken as supplied."
+	// t22MS1Clause was "The ms1 secret you typed matched this seed." until F-206
+	// (S6b spec §3.3) made it count-free: the old singular wording is false at
+	// "1 seed filling 2 legs" (a plural over legs would ALSO be false there --
+	// one seed typed one ms1) and passRecord cannot distinguish that from
+	// "2 seeds filling 2 legs" to pick between the two anyway.
+	t22MS1Clause      = "The ms1 you typed for each seed matched."
+	t22NoMS1Clause    = "No secret seed share was read back or compared."
+	t22CosignerClause = "Other cosigners' keys are taken as supplied."
 )
 
 // T21 -- THE ZERO CELL IS THE DEFAULT.

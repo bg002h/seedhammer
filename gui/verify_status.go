@@ -152,7 +152,21 @@ const (
 	// something adverse was also recorded in the same run.
 	verifyStatusRetryClause = "An earlier check did not pass; a later full check passed."
 	// verifyStatusMS1Clause is entitled by passRecord.full, and by nothing else.
-	verifyStatusMS1Clause = "The ms1 secret you typed matched this seed."
+	//
+	// F-206 (S6b spec §3.3): COUNT-FREE, DELIBERATELY. The filed remedy proposed
+	// pluralising over passRecord.legs, and that is unsound: legs is len(legs),
+	// one leg per FILLED SLOT, not one per seed -- one seed fills several slots
+	// of a policy that puts it at several accounts. Singular text at 2 legs from
+	// ONE typed seed would already be wrong; pluralising it would be wrong the
+	// OTHER way at 2 legs from TWO seeds, where the operator typed one ms1 per
+	// seed, not "ms1 secrets" plural in the sense that phrase implies. The
+	// record cannot distinguish "1 seed filling 2 legs" from "2 seeds filling 2
+	// legs" (passRecord carries only {full, legs, suppliedCosigners}), so no
+	// wording keyed on legs can be honest at every count. This clause is true at
+	// ANY seed count and requires none -- the same shape the device's own
+	// success notice already uses (multisigVerifyOKMessage, "the ms1 you typed
+	// for each seed").
+	verifyStatusMS1Clause = "The ms1 you typed for each seed matched."
 	// verifyStatusNoMS1Clause is the same field's other arm, and it is the
 	// "states what was not read" half of a watch-only pass line. Omission must
 	// WEAKEN a claim, so watch-only says out loud that no secret was compared
