@@ -343,7 +343,16 @@ type ConfirmWarningScreen struct {
 type Warning struct {
 	scroll  int
 	txtclip int
-	inp     InputTracker
+
+	// F-208 / R-I: the on-screen scroll arrows. Bound to Up/Down so they
+	// inherit pointer routing (gui/widget.go:70) and press-and-hold
+	// auto-repeat (gui/widget.go:48) for free -- "Scrolling itself needs no
+	// new machinery" (SPEC_s6b_pre_flash_cycle.md §5 point 4). The SH2 has no
+	// directional buttons (gui/modal_fits_test.go), so these Clickables' own
+	// op.Input regions, drawn in Layout, are the only way an Up/Down event
+	// can ever originate on real hardware.
+	arrowUp   Clickable
+	arrowDown Clickable
 }
 
 type ConfirmResult int
@@ -378,34 +387,35 @@ func (c *ConfirmDelay) Progress(ctx *Context) float32 {
 const confirmDelay = 1 * time.Second
 
 func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt string) op.Op {
-	for {
-		e, ok := w.inp.Next(ctx, ButtonFilter(Up), ButtonFilter(Down))
-		if !ok {
-			break
-		}
-		if e, ok := e.AsButton(); ok {
-			switch e.Button {
-			case Up:
-				if e.Pressed {
-					w.scroll -= w.txtclip / 2
-				}
-			case Down:
-				if e.Pressed {
-					w.scroll += w.txtclip / 2
-				}
-			}
-		}
-	}
-	const btnMargin = 4
-	const boxMargin = 6
-
-	btnOff := assets.NavBtnPrimary.Bounds().Dx() + btnMargin
-	bodyClip := image.Rectangle{
-		Min: image.Pt(boxMargin, leadingSize),
-		Max: image.Pt(dims.X-btnOff, dims.Y-boxMargin),
-	}
+	bodyClip := warningBodyClip(dims)
 	body, bodysz := widget.Labelw(&ctx.B, ctx.Styles.body, bodyClip.Dx(), th.Text, txt)
 	w.txtclip = bodyClip.Dy()
+
+	// GATE 5.1 / R-E: checked against the PANEL (dims.Y), not bodyClip.Dy().
+	// fadeClip stays a stubbed no-op in this cycle (R-E), so the body is not
+	// actually clipped to bodyClip -- `maxScroll > 0` and
+	// `bodysz.Y > bodyClip.Dy()` both disagree with what the panel really
+	// shows (REQUIREMENTS_s6b_pre_flash_cycle.md R-E,
+	// SPEC_s6b_pre_flash_cycle.md §5.1). This predicate is COUPLED to that
+	// stub and must be revisited when the real clip mask is restored.
+	showArrows := scrollArrowsVisible(bodyClip, bodysz, dims)
+
+	w.arrowUp.Button = Up
+	w.arrowDown.Button = Down
+	// The click handlers are gated the same as the drawing, not just the
+	// drawing alone -- unlike Button1-3/Center, Up/Down have no physical
+	// button on this hardware to route around the gate, so there is no
+	// SeedScreen-style "guard the handler, not only the layout" hazard here
+	// (gui.go, SeedScreen.Draw's editBtn comment) for this Button pair.
+	if showArrows {
+		if w.arrowUp.Clicked(ctx) {
+			w.scroll -= w.txtclip / 2
+		}
+		if w.arrowDown.Clicked(ctx) {
+			w.scroll += w.txtclip / 2
+		}
+	}
+
 	maxScroll := bodysz.Y - (bodyClip.Dy() - 2*scrollFadeDist)
 	if w.scroll > maxScroll {
 		w.scroll = maxScroll
@@ -417,10 +427,83 @@ func (w *Warning) Layout(ctx *Context, th *Colors, dims image.Point, title, txt 
 	body = fadeClip(&ctx.B, body, image.Rectangle(bodyClip))
 
 	titleOp, _ := layoutTitle(ctx, dims.X, th.Text, title)
+
+	var arrows op.Op
+	if showArrows {
+		centerX := bodyClip.Min.X + bodyClip.Dx()/2
+		topChip := image.Rectangle{
+			Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Min.Y),
+			Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Min.Y+scrollFadeDist),
+		}
+		bottomChip := image.Rectangle{
+			Min: image.Pt(centerX-arrowChipWidth/2, bodyClip.Max.Y-scrollFadeDist),
+			Max: image.Pt(centerX-arrowChipWidth/2+arrowChipWidth, bodyClip.Max.Y),
+		}
+		arrows = op.Layer(
+			scrollArrow(&ctx.B, th, topChip, &w.arrowUp, assets.ArrowUp),
+			scrollArrow(&ctx.B, th, bottomChip, &w.arrowDown, assets.ArrowDown),
+		)
+	}
+
 	return op.Layer(
+		arrows,
 		body,
 		titleOp,
 		op.Color(&ctx.B, th.Background),
+	)
+}
+
+// warningBodyClip is Warning.Layout's body clip rectangle, factored out so it
+// has a name a test can call directly. P5 (SPEC_s6b_pre_flash_cycle.md §5
+// point 2, IMPLEMENTATION_PLAN_s6b.md "must not change body width from 417")
+// must not change its width: R-I's decoupling of F-192's modal-fit sweep from
+// the arrows depends on it staying 417, and a change here would void that
+// sweep's measurements.
+func warningBodyClip(dims image.Point) image.Rectangle {
+	const btnMargin = 4
+	const boxMargin = 6
+	btnOff := assets.NavBtnPrimary.Bounds().Dx() + btnMargin
+	return image.Rectangle{
+		Min: image.Pt(boxMargin, leadingSize),
+		Max: image.Pt(dims.X-btnOff, dims.Y-boxMargin),
+	}
+}
+
+// arrowChipWidth is the visible background chip's width (SPEC_s6b_pre_flash_-
+// cycle.md §5 point 3: "The chip is opaque and mandatory"). Its height is
+// exactly scrollFadeDist:
+// GATE 5.3 depends on the chip never reaching past the fade band into the
+// window where legitimate body text draws (bodyClip.Min.Y+scrollFadeDist ..
+// bodyClip.Max.Y-scrollFadeDist).
+const arrowChipWidth = 36
+
+// arrowTouchPad grows the invisible touch target past the visible chip on
+// every side -- R-I constraint 2: "a 15x9 icon needs a finger-sized target
+// behind it," the same way op.Input(buf, t).Clip(...) already separates a nav
+// button's touch region from its drawn mask.
+const arrowTouchPad = 12
+
+// scrollArrowsVisible is GATE 5.1's predicate (SPEC_s6b_pre_flash_cycle.md
+// §5.1): content is off the PANEL, not merely past bodyClip. See the R-E
+// comment at its call site in Warning.Layout.
+func scrollArrowsVisible(bodyClip image.Rectangle, bodysz, dims image.Point) bool {
+	return bodyClip.Min.Y+scrollFadeDist+bodysz.Y > dims.Y
+}
+
+// scrollArrow draws one F-208 scroll arrow: an opaque background chip (R-I:
+// "without a background they can land on a glyph"), the icon centred in it,
+// and an invisible touch target larger than either. NOT routed through
+// layoutNavigation -- Up and Down sort before Button1 in the Button enum, and
+// layoutNavigation indexes clk.Button-Button1 into a [3]int, which goes
+// negative for either.
+func scrollArrow(buf *op.Buffer, th *Colors, chip image.Rectangle, clk *Clickable, icon image.Image) op.Op {
+	touch := chip.Inset(-arrowTouchPad)
+	iconSz := icon.Bounds().Size()
+	iconPos := chip.Min.Add(image.Pt((chip.Dx()-iconSz.X)/2, (chip.Dy()-iconSz.Y)/2))
+	return op.Layer(
+		op.Input(buf, clk).Clip(touch),
+		op.Compose(op.Color(buf, th.Text), op.Mask(buf, icon).Offset(iconPos)),
+		op.Compose(op.Color(buf, th.Background), op.RoundedRect2(buf, chip, cornerRadius)),
 	)
 }
 
