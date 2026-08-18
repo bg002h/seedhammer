@@ -3,12 +3,15 @@ package gui
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/backup"
+	"seedhammer.com/gui/op"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
 	"seedhammer.com/passphrase"
@@ -654,5 +657,83 @@ func TestPassphrasePlateOfferRefusesOverLengthPassphrase(t *testing.T) {
 	}
 	if secretCalls != 0 {
 		t.Errorf("engravePassphraseFlowPreloaded's own truncating buffer was allocated %d times -- the over-length passphrase reached it, want 0", secretCalls)
+	}
+}
+
+// ─── S6b whole-diff review I2: GATE 2.3e -- confirm screen agrees with the
+// footer ──────────────────────────────────────────────────────────────────
+
+// TestGate23eConfirmProvenanceAgreesWithFooter closes I2
+// (design/agent-reports/s6b-whole-diff-review.md): SPEC_s6b_pre_flash_cycle.md
+// §2.3a specifies GATE 2.3e -- "the confirm screen's provenance clause
+// agrees with the footer's on both paths. They are two renderings of one
+// fact and must not be able to disagree" -- but it never reached the
+// spec's own §7 gate table, the plan's P3 row, or a test:
+// `grep -rn "2.3e" gui/ backup/` returns nothing. ppConfirmFlow's `derived`
+// parameter (gui/passphrase_flow.go:497) and ppBuildPlate's `derived`
+// parameter (:569, which reaches backup.Passphrase.Derived, which
+// backup.PassphraseFooterFor keys on) are STRUCTURALLY INDEPENDENT --
+// nothing ties them together except every caller today happening to pass
+// the same literal to both.
+//
+// This drives the REAL confirm-screen renderer (ppConfirmBody) and the
+// REAL footer renderer (backup.PassphraseFooterFor, exported for exactly
+// this cross-package coupling test -- see its doc) from the SAME derived
+// flag and the SAME fingerprint/policy inputs, for both derived ∈
+// {false, true}, and asserts the two surfaces claim the SAME provenance.
+// It closes the WORDING half of GATE 2.3e (would a future edit to either
+// side's string make them disagree while both still compile); it does not
+// -- and does not need to, since every current caller is a passed-through
+// literal, not a variable that could diverge at runtime -- prove every
+// FUTURE call site threads one `derived` value into both parameters.
+func TestGate23eConfirmProvenanceAgreesWithFooter(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	area := ppConfirmArea(ctx.Platform.DisplaySize())
+
+	const seedFP, combinedFP, policyID = "A1B2C3D4", "5E6F7A8B", "1A2B3C4D"
+
+	for _, derived := range []bool{false, true} {
+		t.Run(fmt.Sprintf("derived=%v", derived), func(t *testing.T) {
+			secret := []byte("hunter2")
+			marked := make([]byte, len(secret))
+			ppMarkSpaces(marked, secret)
+
+			// The CONFIRM SCREEN's provenance clause.
+			body, _ := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
+				ppPassphraseCounts(secret), seedFP, combinedFP, false, false, derived)
+			d := new(op.Drawer)
+			confirmText := d.ExtractText(image.Rect(-2000, -2000, 2000, 2000), body)
+			confirmSaysDerived := uiContains(confirmText, "derived by this device")
+			confirmSaysTyped := uiContains(confirmText, "typed, not verified")
+			if confirmSaysDerived == confirmSaysTyped {
+				t.Fatalf("INCONCLUSIVE: confirm screen provenance is ambiguous (saysDerived=%v saysTyped=%v); got %q",
+					confirmSaysDerived, confirmSaysTyped, confirmText)
+			}
+
+			// The PLATE'S OWN FOOTER: the real production selector,
+			// backup.PassphraseFooterFor, given the identical derived flag
+			// and the identical fingerprint/policy data.
+			plate := backup.Passphrase{
+				Passphrase: string(secret),
+				SeedFP:     seedFP,
+				CombinedFP: combinedFP,
+				PolicyID:   policyID,
+				Derived:    derived,
+			}
+			footer := backup.PassphraseFooterFor(plate)
+			footerSaysDerived := strings.Contains(footer, "DERIVED")
+			footerSaysTyped := strings.Contains(footer, "TYPED")
+			if footerSaysDerived == footerSaysTyped {
+				t.Fatalf("INCONCLUSIVE: footer provenance is ambiguous; got %q", footer)
+			}
+
+			if confirmSaysDerived != footerSaysDerived {
+				t.Errorf("GATE 2.3e: derived=%v -- confirm screen says derived=%v (%q) but the "+
+					"footer says derived=%v (%q) -- they disagree", derived, confirmSaysDerived,
+					confirmText, footerSaysDerived, footer)
+			}
+		})
 	}
 }

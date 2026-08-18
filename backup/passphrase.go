@@ -213,11 +213,21 @@ const (
 	passphraseFooterDerivedSuffix = "  DERIVED"
 )
 
-// passphraseFooterFor selects S6b's footer TEXT. It reads plate.Derived, a
+// PassphraseFooterFor selects S6b's footer TEXT. It reads plate.Derived, a
 // recorded PROVENANCE -- NEVER plate.PolicyID's presence (spec 2.3d, R-D):
 // see the field doc on Passphrase.Derived for why that distinction is
 // normative rather than stylistic.
-func passphraseFooterFor(plate Passphrase) string {
+//
+// EXPORTED (whole-diff review GATE 2.3e fold, 2026-08-18) so a test outside
+// this package can drive the PLATE'S OWN footer wording from the same
+// `derived` flag it drives gui.ppConfirmBody's confirm-screen wording from,
+// and assert the two agree -- gui already imports backup, so the coupling
+// test that closes GATE 2.3e (spec 2.3a: "the confirm screen's provenance
+// clause agrees with the footer's on both paths") can only live in gui,
+// and it needs the REAL function on this side, not a re-typed copy of its
+// two string forms that could drift from it unnoticed. No behaviour change:
+// same body, same one production call site below.
+func PassphraseFooterFor(plate Passphrase) string {
 	if !plate.Derived {
 		return passphraseFooter
 	}
@@ -252,7 +262,7 @@ func passphraseLayoutFor(params engrave.Params, plate Passphrase, qrDim int) pas
 		l.bottomLines = append(l.bottomLines, passphraseLegend)
 	}
 	if plate.SeedFP != "" || plate.CombinedFP != "" {
-		l.bottomLines = append(l.bottomLines, passphraseFooterFor(plate))
+		l.bottomLines = append(l.bottomLines, PassphraseFooterFor(plate))
 	}
 	gap := 0
 	if qrDim > 0 {
