@@ -304,19 +304,44 @@ var singleSigBareSeedFPHook func()
 // mnemonic must still be LIVE (not yet scrubbed) when this is called: the
 // bare-seed derivation reads it. masterFP must already be the COMBINED
 // fingerprint (deriveSingleSigBundle derived WITH the passphrase whenever
-// passphrase != "", which is the only case this function does anything) --
+// pass != "", which is the only case this function does anything) --
 // exactly what singleSigPlateMark's own doc records about the same value.
 // b must be the FINAL bundle, post-templateizeBundle if that branch was
 // taken: the policy id is computed from b.MD1 (spec 2.4c).
 //
+// PARAMETER NAMED "pass", not "passphrase" (whole-diff review C2 fold,
+// 2026-08-18): this function calls the passphrase PACKAGE
+// (ValidatePassphrase, below), and a parameter named "passphrase" shadows
+// the package identifier for this function's entire body -- the review's
+// own proposed one-liner (`passphrase.ValidatePassphrase(passphrase)`)
+// does not compile as written, for exactly this reason.
+//
 // RETURNS whether the plate was CUT (S6b spec 6/6a, P4): passphrasePlateNotCut
-// when passphrase == "" (no offer reached at all), when the offer is
-// declined, when the bare-seed derivation errors, or whatever
-// engravePassphraseFlowPreloaded itself reports (a declined offer and an
-// aborted engrave are indistinguishable to the caller, on purpose -- both
-// leave the restore document's shipped sentence unchanged).
-func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, passphrase string, masterFP uint32, path bip32.Path, b bundle.Bundle) passphrasePlateResult {
-	if passphrase == "" {
+// when pass == "" (no offer reached at all), when pass does not fit a plate
+// (C2 below), when the offer is declined, when the bare-seed derivation
+// errors, or whatever engravePassphraseFlowPreloaded itself reports (a
+// declined offer and an aborted engrave are indistinguishable to the
+// caller, on purpose -- both leave the restore document's shipped sentence
+// unchanged).
+func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, pass string, masterFP uint32, path bip32.Path, b bundle.Bundle) passphrasePlateResult {
+	if pass == "" {
+		return passphrasePlateNotCut
+	}
+	// C2 (S6b whole-diff review): the wallet passphrase itself is
+	// unbounded -- neither passphraseFlowTitled (gui.go, the keyboard) nor
+	// the payload branch of syswPassphraseFlowTitled (sysw_source.go)
+	// validates it, because any length and any byte is fine for
+	// DERIVATION. It is not fine for THIS PLATE:
+	// engravePassphraseFlowPreloaded's buffer is exactly passphrase.MaxLen
+	// bytes and its copy() truncates silently -- and the plate it then
+	// builds would still carry the FULL passphrase's fingerprints and
+	// policy id, stamped DERIVED, over a passphrase it mutilated. Catch it
+	// HERE, before the offer even asks, rather than let it reach
+	// engravePassphraseFlowPreloaded: ValidatePassphrase also catches a
+	// non-ASCII payload passphrase, earlier and more truthfully than the
+	// entry step's own refusal loop would.
+	if err := passphrase.ValidatePassphrase(pass); err != nil {
+		showError(ctx, th, "Passphrase Plate", ppEntryError(err))
 		return passphrasePlateNotCut
 	}
 	offer := &ChoiceScreen{Title: "Passphrase Plate", Lead: "Engrave a passphrase plate?", Choices: []string{"Skip", "Engrave"}}
@@ -348,6 +373,6 @@ func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnem
 	if stub, serr := md.FormAwareStubChunks(b.MD1); serr == nil {
 		policyID = fmt.Sprintf("%X", stub[:])
 	}
-	return engravePassphraseFlowPreloaded(ctx, th, []byte(passphrase),
+	return engravePassphraseFlowPreloaded(ctx, th, []byte(pass),
 		fmt.Sprintf("%.8X", seedFP), fmt.Sprintf("%.8X", masterFP), policyID)
 }

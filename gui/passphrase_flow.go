@@ -832,6 +832,36 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 			if !ok {
 				return passphrasePlateNotCut // Back out of the first step leaves the program.
 			}
+			// C1 (S6b whole-diff review): passphraseEntryFlow's keyboard is
+			// the same fully EDITABLE one the typed path uses -- editing is
+			// its whole function. On THIS path there is nothing to correct:
+			// body is the passphrase this wallet was actually derived with,
+			// and every downstream screen (QR, Confirm, the footer) claims
+			// DERIVED using the ORIGINAL seedFP/combinedFP/policyID, never
+			// re-checked against whatever the operator just typed. An
+			// unchecked edit would engrave a DIFFERENT passphrase under
+			// THIS wallet's fingerprints, permanently, recording the true
+			// one nowhere -- spec 2.1's founding argument for preloading at
+			// all: "the preloaded passphrase is the one the device
+			// actually derived with." Refuse the edit and reload the true
+			// passphrase, rather than either silently accepting it or
+			// forcing a re-type: R-C's whole point is that the operator
+			// does not re-type. secret[:m] is what the keyboard returned
+			// (already written into secret by passphraseEntryFlow's own
+			// copy); body is untouched since function entry, so this
+			// compares the edited value against the derivation-true one,
+			// not two copies of the same buffer.
+			if !bytes.Equal(secret[:m], body) {
+				showError(ctx, th, "Passphrase",
+					"The passphrase was changed. A passphrase plate must record the exact passphrase this wallet was derived with.")
+				// Reload the true passphrase (safe: the sole production
+				// caller, singleSigPassphrasePlateOffer, validates body
+				// against passphrase.MaxLen before this function is ever
+				// called -- C2's fix -- so this copy cannot truncate).
+				n = copy(secret, body)
+				step-- // net zero after the loop's step++: stay on entry.
+				break
+			}
 			n = m
 		case ppPLStepQR:
 			add, ok := ppQRChoiceFlow(ctx, th, qr)

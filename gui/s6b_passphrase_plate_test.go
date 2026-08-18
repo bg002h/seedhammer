@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
+	"seedhammer.com/passphrase"
 	"seedhammer.com/sysw"
 )
 
@@ -512,5 +514,145 @@ func TestPreloadedConfirmScreenNamesDerivedProvenance(t *testing.T) {
 	}
 	if !uiContains(h.content, "derived by this device") {
 		t.Fatalf("the preloaded confirm screen does not claim the fingerprints were derived; got %q", h.content)
+	}
+}
+
+// ─── S6b whole-diff review C1: an edit at the preloaded entry step must
+// never reach the plate ──────────────────────────────────────────────────
+
+// TestPreloadedEntryEditIsRefusedNotEngraved closes C1
+// (design/agent-reports/s6b-whole-diff-review.md): engravePassphraseFlowPreloaded's
+// entry step hands the preloaded passphrase to the same fully EDITABLE
+// keyboard the typed path uses -- editing is its whole function -- and
+// nothing downstream re-checks the operator's answer against what the
+// wallet was actually derived with: every claim on the plate (seedFP,
+// combinedFP, policyID, the DERIVED footer) is for the ORIGINAL
+// derivation, unconditionally. This drives a real edit -- backspace one
+// character, type a different one, exactly the "fix a typo that wasn't
+// there" gesture the finding describes -- and proves, via
+// passphrasePlateHook (the only place the flow's own actual argument to
+// ppBuildPlate is visible), what would really reach the plate.
+//
+// Before the fix this reaches ppBuildPlate with the EDITED bytes, under
+// the ORIGINAL wallet's fingerprints, stamped DERIVED -- the wallet's
+// TRUE passphrase recorded nowhere. After the fix, the edit is refused
+// with a truthful message, the buffer is reloaded with the true
+// passphrase (R-C: the operator does not have to retype it), and only
+// THAT reaches ppBuildPlate.
+func TestPreloadedEntryEditIsRefusedNotEngraved(t *testing.T) {
+	var gotSecret []byte
+	var hookCalls int
+	passphrasePlateHook = func(secret []byte, seedFP, combinedFP string, qr bool) {
+		gotSecret = bytes.Clone(secret)
+		hookCalls++
+	}
+	t.Cleanup(func() { passphrasePlateHook = nil })
+
+	body := []byte("hunter2")
+	h := newPPHarness(t)
+	h.start(func() {
+		engravePassphraseFlowPreloaded(h.ctx, &descriptorTheme, body, "A1B2C3D4", "5E6F7A8B", "1A2B3C4D")
+	})
+	h.mustReach("Source:")
+	h.tapNav(Button3) // accept srcDerived
+	h.mustReach("7/100")
+
+	// The operator "corrects" a character that was never wrong:
+	// "hunter2" -> "hunter3".
+	h.backspace(1)
+	h.typeRune('3')
+	h.mustReach("7/100")
+	h.tapWidget("ok")
+
+	// The edit must be caught HERE, with a truthful explanation -- not
+	// silently carried forward to the QR step.
+	h.mustReach("changed")
+	if uiContains(h.content, "QR Code") {
+		t.Fatalf("the edited passphrase reached the QR step instead of being refused; got %q", h.content)
+	}
+	h.tapNav(Button3) // dismiss the refusal
+
+	// The buffer must be back to the TRUE passphrase, not left holding the
+	// edit.
+	h.mustReach("7/100")
+	h.tapWidget("ok") // accept the restored, correct passphrase this time
+	h.mustReach("QR Code")
+	h.tapNav(Button3) // QR default (off)
+	h.mustReach("Confirm")
+	h.tapWidget("ok")
+	for i := 0; i < 8 && hookCalls == 0; i++ {
+		h.step()
+	}
+	if hookCalls == 0 {
+		t.Fatal("ppBuildPlate was never called")
+	}
+	if !bytes.Equal(gotSecret, body) {
+		t.Fatalf("the plate would carry %q under this wallet's OWN fingerprints, stamped DERIVED -- want the passphrase it was actually derived with, %q", gotSecret, body)
+	}
+}
+
+// ─── S6b whole-diff review C2: an over-length wallet passphrase never
+// reaches the preloaded plate builder, truncated or otherwise ───────────
+
+// TestPassphrasePlateOfferRefusesOverLengthPassphrase closes C2
+// (design/agent-reports/s6b-whole-diff-review.md): the wallet-derivation
+// passphrase itself is unbounded -- passphraseFlowTitled (gui.go) and the
+// payload branch of syswPassphraseFlowTitled (sysw_source.go) accept any
+// length, because any length is fine for DERIVATION.
+// engravePassphraseFlowPreloaded's buffer is exactly passphrase.MaxLen
+// bytes, and its copy() truncates SILENTLY -- so, pre-fix, a >100-char
+// wallet passphrase would derive the real wallet, then engrave a
+// TRUNCATED passphrase under the FULL passphrase's fingerprints, stamped
+// DERIVED. This proves the offer refuses BEFORE any of that: neither the
+// ~31s bare-seed KDF nor engravePassphraseFlowPreloaded's own
+// buffer/plate builder is ever reached, and the operator sees a truthful
+// reason instead of a plate offer it cannot honestly fulfil.
+func TestPassphrasePlateOfferRefusesOverLengthPassphrase(t *testing.T) {
+	m := abandonAboutMnemonic()
+	path := singleSigPath(84)
+	long := strings.Repeat("a", passphrase.MaxLen+1)
+	full, masterFP, _, _, err := deriveSingleSigBundle(m, long, &chaincfg.MainNetParams, path, md.ScriptWpkh)
+	if err != nil {
+		t.Fatalf("deriveSingleSigBundle: %v", err)
+	}
+
+	var bareSeedCalls, secretCalls int
+	singleSigBareSeedFPHook = func() { bareSeedCalls++ }
+	passphraseSecretHook = func(secret []byte) { secretCalls++ }
+	t.Cleanup(func() {
+		singleSigBareSeedFPHook = nil
+		passphraseSecretHook = nil
+	})
+
+	ctx := NewContext(newPlatform())
+	var result passphrasePlateResult
+	done := false
+	frame, quit := runUI(ctx, func() {
+		result = singleSigPassphrasePlateOffer(ctx, &descriptorTheme, m, long, masterFP, path, full)
+		done = true
+	})
+	defer quit()
+	// The refusal must reach the operator WITHOUT the "Engrave a
+	// passphrase plate?" offer ever being shown -- there is nothing a
+	// Skip/Engrave choice could mean for a passphrase that cannot fit a
+	// plate at all.
+	if c, ok := pumpUntil(frame, "100 characters", 32); !ok {
+		t.Fatalf("no refusal reached the operator; got %q", c)
+	}
+	click(&ctx.Router, Button3) // dismiss
+	for i := 0; i < 16 && !done; i++ {
+		frame()
+	}
+	if !done {
+		t.Fatal("singleSigPassphrasePlateOffer never returned")
+	}
+	if result != passphrasePlateNotCut {
+		t.Fatalf("result = %v, want passphrasePlateNotCut", result)
+	}
+	if bareSeedCalls != 0 {
+		t.Errorf("the ~31s bare-seed derivation ran %d times for a passphrase that can never reach a plate, want 0", bareSeedCalls)
+	}
+	if secretCalls != 0 {
+		t.Errorf("engravePassphraseFlowPreloaded's own truncating buffer was allocated %d times -- the over-length passphrase reached it, want 0", secretCalls)
 	}
 }
