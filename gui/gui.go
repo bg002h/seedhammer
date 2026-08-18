@@ -2285,7 +2285,15 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 // test alike, and the platform is also who gui/engraved_hook.go offers the
 // rendered text to. Passing both would have made the second derivable from the
 // first and let them disagree.
-func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
+//
+// title and footer are S6b spec 1.1/1.3's plate marking, PLUMBED THROUGH
+// VERBATIM: validateMdmk learns nothing about flows or predicates (R-A/R-B are
+// enforced at the CALLER, not here) -- it just carries whatever the caller
+// supplies into every variant's backup.Text, which is what makes the marking
+// render identically in TEXT+QR, TEXT ONLY and QR ONLY (title/footer are plate
+// rows, not paragraph content). Every caller but gui/singlesig.go:177 passes
+// "", "" -- Go has no default parameters.
+func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, error) {
 	params := pl.EngraverParams()
 	qrc, err := qr.Encode(s, qr.L)
 	if err != nil {
@@ -2308,6 +2316,8 @@ func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
 		plate := backup.Text{
 			Paragraphs: []backup.Paragraph{e.Paragraph},
 			Font:       sh.Font,
+			Title:      title,
+			Footer:     footer,
 		}
 		plan := backup.EngraveText(params, plate)
 		p, err := toPlate(plan, params)
@@ -2341,7 +2351,7 @@ func validateMdmk(pl Platform, s string) ([]string, []Plate, error) {
 // engraving. md1 behaviour is unchanged until T2c.
 func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 	str := string(s)
-	labels, engravings, err := validateMdmk(ctx.Platform, str)
+	labels, engravings, err := validateMdmk(ctx.Platform, str, "", "")
 	if err != nil {
 		// Only reached if no engraving variant fits a plate (rare for an md1/mk1
 		// string). Return silently — like backupSeedStringFlow, NOT like

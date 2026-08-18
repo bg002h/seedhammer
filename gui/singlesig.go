@@ -1,9 +1,12 @@
 package gui
 
 import (
+	"fmt"
+
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 	"seedhammer.com/md"
+	"seedhammer.com/passphrase"
 )
 
 // ─── T6a-2: the single-sig flagship orchestrator ─────────────────────────────
@@ -174,7 +177,18 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// The two multisig callers gained this gate at S5's I-12 and this one did
 	// not, so a fix described as covering every engraving caller covered two of
 	// the three that carry a post-engrave tail.
-	if bundleEngrave(ctx, th, "Engrave Single-Sig", cards) != bundleEngraveDone {
+	//
+	// PLATE MARKING (S6b spec 1.2/1.3, R2/R3/R4). Computed here because this is
+	// the ONLY call site allowed to mark -- multisig marking is a later phase,
+	// R-B -- and because everything the predicate needs is already in scope:
+	// full (:107's "the set contains a seed", R-A's predicate) and passphrase
+	// (:72). masterFP is already the COMBINED fingerprint when a passphrase
+	// was entered (deriveSingleSigBundle derived WITH it) and the bare-seed
+	// one otherwise, so no extra derivation is needed for THIS marking --
+	// unlike the passphrase plate's own SEED FP (S6b's P3), which needs a
+	// second KDF when a passphrase WAS entered.
+	plateTitle, plateFooter := singleSigPlateMark(full, passphrase != "", masterFP)
+	if bundleEngrave(ctx, th, "Engrave Single-Sig", cards, plateTitle, plateFooter) != bundleEngraveDone {
 		return
 	}
 
@@ -221,4 +235,27 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
 		buildVerifyStatusLine(rec),
 		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
+}
+
+// singleSigPlateMark computes S6b spec 1.2's mk1/md1 title and footer for
+// engraveSingleSigFlow, the ONLY caller allowed to mark (R-B moved every
+// multisig path to a later phase). Keyed on R-A's predicate -- "the set
+// contains a seed" -- which for this flow is exactly full: watch-only mode
+// never carries the ms1 (singleSigEngraveCards), so R-A leaves it unmarked.
+//
+// masterFP must already be the fingerprint this run's cards were derived
+// with: the COMBINED one when hasPassphrase, the bare-seed one otherwise --
+// exactly what deriveSingleSigBundle returns at gui/singlesig.go:107. That is
+// the mechanism R4 exploits: restoring the words alone yields a fingerprint
+// that does not match what the mk1/md1 plates encode, so a wrong-wallet
+// restore self-diagnoses instead of failing silently.
+func singleSigPlateMark(full, hasPassphrase bool, masterFP uint32) (title, footer string) {
+	if !full {
+		return "", ""
+	}
+	fp := passphrase.GroupFingerprint(fmt.Sprintf("%.8X", masterFP))
+	if hasPassphrase {
+		return "PASSWORD REQUIRED", "COMB FP: " + fp
+	}
+	return "", "SEED FP: " + fp
 }

@@ -399,7 +399,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// document headed "This backup is N plates ... If any of them is missing, this
 	// backup is incomplete." An operator who just read "Bundle Incomplete: this
 	// set is not a usable backup yet" must not be shown either.
-	if bundleEngrave(ctx, th, "Build Policy", cardsOut) != bundleEngraveDone {
+	if bundleEngrave(ctx, th, "Build Policy", cardsOut, "", "") != bundleEngraveDone { // unmarked: multisig plate marking is R-B, a later phase
 		return
 	}
 

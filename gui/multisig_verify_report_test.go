@@ -937,9 +937,9 @@ func TestVerifyCoveredSeedBodyDoesNotAssertAForeignSeed(t *testing.T) {
 func TestBothEngraveFlowsGateOnACompletedSet(t *testing.T) {
 	for _, tc := range []struct{ file, fn, want string }{
 		{"multisig.go", "func supplyMultisigPolicyFlow(",
-			`if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut) != bundleEngraveDone {`},
+			`if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut, "", "") != bundleEngraveDone {`},
 		{"multisig_build.go", "func buildMultisigPolicyFlow(",
-			`if bundleEngrave(ctx, th, "Build Policy", cardsOut) != bundleEngraveDone {`},
+			`if bundleEngrave(ctx, th, "Build Policy", cardsOut, "", "") != bundleEngraveDone {`},
 	} {
 		body := funcBody(t, tc.file, tc.fn)
 		if !strings.Contains(body, "bundleEngrave(") {

@@ -288,7 +288,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (the md1 is emitted last, so the readback dies reading as "your plates are
 	// unreadable"), and the restore document headed "This backup is N plates". The
 	// abort modal is the operator's last screen, and it says so.
-	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut) != bundleEngraveDone {
+	if bundleEngrave(ctx, th, "Engrave Multisig", cardsOut, "", "") != bundleEngraveDone { // unmarked: multisig plate marking is R-B, a later phase
 		return
 	}
 

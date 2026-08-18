@@ -52,7 +52,7 @@ func TestValidateMdmkAnnouncesOneIdPerVariant(t *testing.T) {
 	const md1 = "md1yqpqqxqq8xtwhw4xwn4qh"
 	p := newEngravedAwarePlatform()
 
-	labels, plates, err := validateMdmk(p, md1)
+	labels, plates, err := validateMdmk(p, md1, "", "")
 	if err != nil {
 		t.Fatalf("validateMdmk: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestValidateMdmkAnnouncesOneIdPerVariant(t *testing.T) {
 		}
 		seen[pl.id] = true
 	}
-	_, more, err := validateMdmk(p, "mk1yqpqqxqq8xtwhw4xwn4qh")
+	_, more, err := validateMdmk(p, "mk1yqpqqxqq8xtwhw4xwn4qh", "", "")
 	if err == nil {
 		for _, pl := range more {
 			if seen[pl.id] {
@@ -105,7 +105,7 @@ func TestValidateMdmkAnnouncesOneIdPerVariant(t *testing.T) {
 func TestNothingIsEngravedUntilItIsAccepted(t *testing.T) {
 	p := newEngravedAwarePlatform()
 
-	if _, _, err := validateMdmk(p, "md1yqpqqxqq8xtwhw4xwn4qh"); err != nil {
+	if _, _, err := validateMdmk(p, "md1yqpqqxqq8xtwhw4xwn4qh", "", ""); err != nil {
 		t.Fatalf("validateMdmk: %v", err)
 	}
 	if len(p.engraved) != 0 {
@@ -127,7 +127,7 @@ func TestNothingIsEngravedUntilItIsAccepted(t *testing.T) {
 func TestAnUnannouncedPlateIsIgnored(t *testing.T) {
 	p := newEngravedAwarePlatform()
 
-	if _, _, err := validateMdmk(p, "md1yqpqqxqq8xtwhw4xwn4qh"); err != nil {
+	if _, _, err := validateMdmk(p, "md1yqpqqxqq8xtwhw4xwn4qh", "", ""); err != nil {
 		t.Fatalf("validateMdmk: %v", err)
 	}
 	// The seed plate finishes: id 0, never announced.
@@ -175,7 +175,7 @@ func TestEngraveScreenReportsTheStringItEngraved(t *testing.T) {
 		p.engraver = e
 		ctx := NewContext(p)
 
-		_, plates, err := validateMdmk(p, md1)
+		_, plates, err := validateMdmk(p, md1, "", "")
 		if err != nil || len(plates) == 0 {
 			t.Fatalf("validateMdmk(%q): %v, %d plates", md1, err, len(plates))
 		}
