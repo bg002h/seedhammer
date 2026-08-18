@@ -953,6 +953,18 @@ func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
 			frame()
 		}
 
+		// S6b spec 2.6: the passphrase-plate offer, shown only when
+		// opts.passphrase left a non-empty passphrase in scope. This walk
+		// declines it (Skip, row 0, the default) -- exercising the offer
+		// itself is s6b_passphrase_plate_test.go's job.
+		if opts.passphrase {
+			if c, ok := pumpUntil(frame, "Passphrase Plate", 32); !ok {
+				t.Fatalf("the S6b passphrase-plate offer was not reached; got %q", c)
+			}
+			click(&ctx.Router, Button3) // Skip (row 0, the default)
+			frame()
+		}
+
 		// THE DOCUMENT IS A PAGER and the inventory is appended at the TAIL, after
 		// the descriptor chunks and both addresses, so a single-frame assertion
 		// misses every line this step adds. The document is found by its TITLE

@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/bip32"
 	"seedhammer.com/bip39"
+	"seedhammer.com/bundle"
 	"seedhammer.com/md"
 	"seedhammer.com/passphrase"
 )
@@ -205,6 +207,16 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 		singleSigVerifyFlow(ctx, th, full, template, &rec)
 	}
 
+	// PASSPHRASE PLATE OFFER (S6b spec 2.6, R2/R5/R6/R7). After the verify
+	// offer (a plate is offered only for a set already known good) and
+	// before restoreDocFlow (the document must be able to report whether
+	// one was cut -- P4's work, not this phase's). mnemonic is still LIVE
+	// here: this function's top-level scrub defer, registered right after
+	// seedEntryFlow returns, only fires when engraveSingleSigFlow itself
+	// returns, and nothing between there and here consumes the mnemonic
+	// again.
+	singleSigPassphrasePlateOffer(ctx, th, mnemonic, passphrase, masterFP, path, b)
+
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
 	//
 	// THE STATUS IS WHAT THE VERIFY ABOVE RECORDED, and on a Skip that is the zero
@@ -258,4 +270,66 @@ func singleSigPlateMark(full, hasPassphrase bool, masterFP uint32) (title, foote
 		return "PASSWORD REQUIRED", "COMB FP: " + fp
 	}
 	return "", "SEED FP: " + fp
+}
+
+// singleSigBareSeedFPHook is a test-only seam observing whether/when the
+// LAZY bare-seed fingerprint derivation (S6b R-K, spec 2.6) actually ran.
+// GATE 2.6 requires proving the ~31s KDF does NOT run when no passphrase
+// plate is engraved; on the machine running this suite that derivation
+// completes in well under a second (31s is the real device's cost, not this
+// runner's), so a test cannot tell "ran" from "didn't" by timing it and
+// instead counts invocations through this hook. Fired immediately before the
+// derivation, so it counts attempts, not successes. nil in production;
+// mirrors singleSigSeedHook.
+var singleSigBareSeedFPHook func()
+
+// singleSigPassphrasePlateOffer implements S6b spec 2.6: the passphrase-
+// plate offer, and the lazy bare-seed derivation it gates. Factored out of
+// engraveSingleSigFlow so GATE 2.6 -- "the offer appears only when
+// passphrase != '' [and] the ~31s derivation does NOT run when no
+// passphrase plate is engraved" -- can be driven directly rather than only
+// through the whole orchestrator.
+//
+// mnemonic must still be LIVE (not yet scrubbed) when this is called: the
+// bare-seed derivation reads it. masterFP must already be the COMBINED
+// fingerprint (deriveSingleSigBundle derived WITH the passphrase whenever
+// passphrase != "", which is the only case this function does anything) --
+// exactly what singleSigPlateMark's own doc records about the same value.
+// b must be the FINAL bundle, post-templateizeBundle if that branch was
+// taken: the policy id is computed from b.MD1 (spec 2.4c).
+func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, passphrase string, masterFP uint32, path bip32.Path, b bundle.Bundle) {
+	if passphrase == "" {
+		return
+	}
+	offer := &ChoiceScreen{Title: "Passphrase Plate", Lead: "Engrave a passphrase plate?", Choices: []string{"Skip", "Engrave"}}
+	sel, ok := offer.Choose(ctx, th)
+	if !ok || sel != 1 {
+		return
+	}
+	// LAZY (R-K/spec 2.6): the bare-seed fingerprint costs a second ~31s
+	// KDF (gui/gui.go's and gui/unlock_platelist.go's own uses of the same
+	// derivation document that cost) and is paid ONLY by a run that
+	// actually wants this plate -- never merely because the offer was
+	// shown or a passphrase was entered. The combined fingerprint (masterFP)
+	// is free: it already fell out of deriveSingleSigBundle's derivation.
+	if singleSigBareSeedFPHook != nil {
+		singleSigBareSeedFPHook()
+	}
+	_, seedFP, derr := deriveAccountXpub(mnemonic, "", &chaincfg.MainNetParams, path)
+	if derr != nil {
+		showError(ctx, th, "Passphrase Plate", "Couldn't derive the bare-seed fingerprint.")
+		return
+	}
+	// S6b spec 2.4: "wallet policy id" is md.FormAwareStubChunks -- NOT
+	// md.WalletPolicyIDStub, the keyed-only branch reached through
+	// FormAwareStub. "Template-only md1" is a reachable choice on this same
+	// flow, and the keyed function would mint 4 bytes matching no card this
+	// run cut. b is the caller's FINAL bundle (post-templateizeBundle if
+	// chosen), so this is computed from the post-template md1 (spec 2.4c).
+	var policyID string
+	if stub, serr := md.FormAwareStubChunks(b.MD1); serr == nil {
+		policyID = fmt.Sprintf("%X", stub[:])
+	}
+	engravePassphraseFlowPreloaded(ctx, th, []byte(passphrase),
+		fmt.Sprintf("%.8X", seedFP), fmt.Sprintf("%.8X", masterFP), policyID)
 }

@@ -416,7 +416,7 @@ func TestPassProofTriggersFromEveryField(t *testing.T) {
 func TestPassProofBuildsAPlate(t *testing.T) {
 	for _, qr := range []bool{false, true} {
 		plate, err := ppBuildPlate(engraverParams, []byte(ppPassProofPassphrase),
-			ppPassProofSeedFP, ppPassProofCombFP, qr)
+			ppPassProofSeedFP, ppPassProofCombFP, qr, "", false)
 		if err != nil {
 			t.Fatalf("qr=%v: the pass-proof pattern does not build a plate: %v", qr, err)
 		}
@@ -516,11 +516,11 @@ func TestPassProofPlateExcludesResidualPastN(t *testing.T) {
 
 	// Require it to equal the plate built from the reference, not just the
 	// bytes: this is the artifact that would actually be engraved.
-	plate1, err := ppBuildPlate(engraverParams, gotSecret, gotSeedFP, gotCombinedFP, gotQR)
+	plate1, err := ppBuildPlate(engraverParams, gotSecret, gotSeedFP, gotCombinedFP, gotQR, "", false)
 	if err != nil {
 		t.Fatalf("building the plate from the flow's own (captured) buffer failed: %v", err)
 	}
-	plate2, err := ppBuildPlate(engraverParams, []byte(ppPassProofPassphrase), ppPassProofSeedFP, ppPassProofCombFP, gotQR)
+	plate2, err := ppBuildPlate(engraverParams, []byte(ppPassProofPassphrase), ppPassProofSeedFP, ppPassProofCombFP, gotQR, "", false)
 	if err != nil {
 		t.Fatalf("building the reference plate failed: %v", err)
 	}

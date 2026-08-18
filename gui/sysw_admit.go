@@ -55,6 +55,17 @@ const (
 	srcTyped syswSource = iota
 	srcNFC
 	srcPayload
+	// srcDerived is "carried from this session's own derivation" (S6b spec
+	// 2.2, R-C/R-J): a value this device itself computed moments ago --
+	// never typed, scanned or loaded from a payload. It is neither
+	// srcNFC nor srcPayload, so syswFlags' two payload-plaintext checks and
+	// its NFC-integrity check never fire for it; it is not srcTyped, so
+	// flagSource DOES fire and the acceptance screen names it (R-C.3/R-D).
+	// See syswSourceName's switch for the case this value REQUIRES: the
+	// `default:` arm resolves to "the keyboard", so a value added without
+	// its own case there becomes a printed falsehood with no compile error
+	// and no failing test (R-D).
+	srcDerived
 )
 
 // syswFlag is a screen-level warning. NONE of these refuses anything: the

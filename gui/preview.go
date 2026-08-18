@@ -213,7 +213,7 @@ func seedPreview(params engrave.Params, o PreviewOpts) (Preview, error) {
 }
 
 func passphrasePreview(params engrave.Params, o PreviewOpts) (Preview, error) {
-	p, err := ppBuildPlate(params, []byte(previewPassphrase), "", "", o.QR)
+	p, err := ppBuildPlate(params, []byte(previewPassphrase), "", "", o.QR, "", false)
 	if err != nil {
 		return Preview{}, err
 	}

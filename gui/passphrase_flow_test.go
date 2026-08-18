@@ -650,7 +650,12 @@ func startPPConfirm(t *testing.T, secret string, seedFP, combinedFP string, qr b
 	h := newPPHarness(t)
 	r := new(ppConfirmRun)
 	h.start(func() {
-		r.ok = ppConfirmFlow(h.ctx, &descriptorTheme, []byte(secret), seedFP, combinedFP, qr)
+		// derived=false: every caller of this helper exercises the TYPED
+		// path (fingerprintEntryFlow's own screens). The preloaded/derived
+		// confirm screen has its own coverage -- see
+		// TestPreloadedConfirmScreenNamesDerivedProvenance in
+		// s6b_passphrase_plate_test.go.
+		r.ok = ppConfirmFlow(h.ctx, &descriptorTheme, []byte(secret), seedFP, combinedFP, qr, false)
 		r.done = true
 	})
 	return h, r
@@ -777,15 +782,21 @@ func TestConfirmFitsPanel(t *testing.T) {
 	worst := []byte(strings.Repeat("ab c", 25))
 	marked := make([]byte, len(worst))
 	ppMarkSpaces(marked, worst)
-	_, sz := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
-		ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true, true)
-	if sz.Y > area.Dy() {
-		t.Errorf("the confirm screen needs %dpx of height but only %dpx is available on a %v panel; "+
-			"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
-			sz.Y, area.Dy(), dims)
-	}
-	if sz.X > area.Dx() {
-		t.Errorf("the confirm screen is %dpx wide in a %dpx area", sz.X, area.Dx())
+	// derived=true is checked too: ppConfirmWarningDerived (S6b) is three
+	// characters longer than ppConfirmWarning, which a wrapped, width-bound
+	// label can turn into an extra line -- the panel fit is not provably the
+	// same for both without measuring both.
+	for _, derived := range []bool{false, true} {
+		_, sz := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
+			ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true, true, derived)
+		if sz.Y > area.Dy() {
+			t.Errorf("derived=%v: the confirm screen needs %dpx of height but only %dpx is available on a %v panel; "+
+				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
+				derived, sz.Y, area.Dy(), dims)
+		}
+		if sz.X > area.Dx() {
+			t.Errorf("derived=%v: the confirm screen is %dpx wide in a %dpx area", derived, sz.X, area.Dx())
+		}
 	}
 }
 
@@ -1131,12 +1142,22 @@ func TestPassphrasePlateBuildsWorstCase(t *testing.T) {
 		t.Fatalf("test vector is %d chars, want %d", len(secret), passphrase.MaxLen)
 	}
 	for _, qr := range []bool{false, true} {
-		plate, err := ppBuildPlate(engraverParams, secret, "A1B2C3D4", "99887766", qr)
+		plate, err := ppBuildPlate(engraverParams, secret, "A1B2C3D4", "99887766", qr, "", false)
 		if err != nil {
 			t.Fatalf("qr=%v: the worst case the flow accepts does not build: %v", qr, err)
 		}
 		if plate.Duration == 0 {
 			t.Fatalf("qr=%v: built an empty plate", qr)
+		}
+		// S6b: the preloaded/derived worst case (policy id + derived
+		// provenance) must also build -- this is the shape
+		// engravePassphraseFlowPreloaded's engrave step actually produces.
+		plate, err = ppBuildPlate(engraverParams, secret, "A1B2C3D4", "99887766", qr, "1A2B3C4D", true)
+		if err != nil {
+			t.Fatalf("qr=%v derived=true: the worst case does not build: %v", qr, err)
+		}
+		if plate.Duration == 0 {
+			t.Fatalf("qr=%v derived=true: built an empty plate", qr)
 		}
 	}
 }
@@ -1146,30 +1167,40 @@ func TestPassphrasePlateBuildsWorstCase(t *testing.T) {
 // length, so a field that changed nothing about the plan would be a field that
 // was dropped on the way.
 func TestPassphrasePlateCarriesEveryField(t *testing.T) {
-	build := func(t *testing.T, secret, seedFP, combFP string, qr bool) uint64 {
+	build := func(t *testing.T, secret, seedFP, combFP string, qr bool, policyID string, derived bool) uint64 {
 		t.Helper()
-		p, err := ppBuildPlate(engraverParams, []byte(secret), seedFP, combFP, qr)
+		p, err := ppBuildPlate(engraverParams, []byte(secret), seedFP, combFP, qr, policyID, derived)
 		if err != nil {
-			t.Fatalf("build(%q, %q, %q, qr=%v): %v", secret, seedFP, combFP, qr, err)
+			t.Fatalf("build(%q, %q, %q, qr=%v, policy=%q, derived=%v): %v", secret, seedFP, combFP, qr, policyID, derived, err)
 		}
 		return p.Duration
 	}
-	base := build(t, "hunter2", "", "", false)
-	if d := build(t, "hunter2xy", "", "", false); d == base {
+	base := build(t, "hunter2", "", "", false, "", false)
+	if d := build(t, "hunter2xy", "", "", false, "", false); d == base {
 		t.Error("a longer passphrase engraves identically: the passphrase is not reaching the plate")
 	}
-	if d := build(t, "hunter2", "A1B2C3D4", "", false); d == base {
+	if d := build(t, "hunter2", "A1B2C3D4", "", false, "", false); d == base {
 		t.Error("the seed fingerprint is not reaching the plate")
 	}
-	if d := build(t, "hunter2", "", "99887766", false); d == base {
+	if d := build(t, "hunter2", "", "99887766", false, "", false); d == base {
 		t.Error("the combined fingerprint is not reaching the plate")
 	}
-	if d := build(t, "hunter2", "", "", true); d == base {
+	if d := build(t, "hunter2", "", "", true, "", false); d == base {
 		t.Error("the QR choice is not reaching the plate")
 	}
 	// The two fingerprints are distinct fields, not one written twice.
-	if a, b := build(t, "hunter2", "A1B2C3D4", "", false), build(t, "hunter2", "", "A1B2C3D4", false); a == b {
+	if a, b := build(t, "hunter2", "A1B2C3D4", "", false, "", false), build(t, "hunter2", "", "A1B2C3D4", false, "", false); a == b {
 		t.Error("the two fingerprint fields produce the same plate: they are wired to the same slot")
+	}
+	// S6b GATE 2.4b/2.4c support, 2.3d: PolicyID and Derived each reach the
+	// plate, independently. Both need a fingerprint present -- the footer
+	// line they render into is gated on SeedFP/CombinedFP.
+	fpBase := build(t, "hunter2", "A1B2C3D4", "", false, "", false)
+	if d := build(t, "hunter2", "A1B2C3D4", "", false, "", true); d == fpBase {
+		t.Error("the Derived flag is not reaching the plate")
+	}
+	if d := build(t, "hunter2", "A1B2C3D4", "", false, "1A2B3C4D", true); d == fpBase {
+		t.Error("the policy id is not reaching the plate")
 	}
 }
 
@@ -1199,7 +1230,7 @@ func TestConfirmLegendGatesOnRealSpaces(t *testing.T) {
 		ppMarkSpaces(marked, secret)
 		body, _ := ppConfirmBody(ctx, &descriptorTheme, area.Dx(), marked,
 			ppPassphraseCounts(secret), "", "", false,
-			bytes.IndexByte(secret, ' ') >= 0)
+			bytes.IndexByte(secret, ' ') >= 0, false)
 		// The body is returned un-offset, so extract over a generous rect
 		// rather than the panel -- otherwise text drawn outside it is missed
 		// and every case reads as "no legend", which would pass the two cases
