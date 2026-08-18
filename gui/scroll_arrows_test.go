@@ -712,3 +712,45 @@ func TestGate53ChipDoesNotOverlapDrawnTextRows(t *testing.T) {
 		}
 	}
 }
+
+// ─── the fit gate's own premise, checked once ────────────────────────────────
+//
+// TestErrorScreenModalCarriesTheScrollArrows exists because P5 changed a fact
+// that another gate's failure message asserts. assertModalBodyFits
+// (gui/modal_fits_test.go) told the reader an over-long modal body is lost
+// silently "because this modal's scroller is bound to buttons the SH2 does not
+// have" -- true when F-185 wrote it, and false the moment P5 gave Warning its
+// own touchable arrows. ErrorScreen embeds Warning by value (gui/gui.go:317)
+// and delegates its whole body to it, so showError's modal inherits them; that
+// is an embed away from being obvious and nothing asserted it.
+//
+// This is the "can a user do the thing" shape one level up from
+// TestGate51ArrowActuallyScrolls, which drives Warning DIRECTLY. Components
+// tested, joining call untested, is how this project shipped an inert feature
+// once already.
+func TestErrorScreenModalCarriesTheScrollArrows(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	s := &ErrorScreen{Title: "Modal Fit", Body: modalFiller(700)}
+	dims := ctx.Platform.DisplaySize()
+
+	s.Layout(ctx, &descriptorTheme, dims)
+	if s.w.scroll != 0 {
+		t.Fatalf("INCONCLUSIVE: scroll is %d before any input", s.w.scroll)
+	}
+	click(&ctx.Router, Down)
+	s.Layout(ctx, &descriptorTheme, dims)
+	if s.w.scroll <= 0 {
+		t.Errorf("the down arrow does not scroll ErrorScreen's body (scroll=%d). "+
+			"If this is intended, assertModalBodyFits' failure message is the thing "+
+			"to fix, not this test.", s.w.scroll)
+	}
+	before := s.w.scroll
+	click(&ctx.Router, Up)
+	s.Layout(ctx, &descriptorTheme, dims)
+	if s.w.scroll >= before {
+		t.Errorf("the up arrow does not scroll ErrorScreen's body back (scroll=%d, was %d)",
+			s.w.scroll, before)
+	}
+}

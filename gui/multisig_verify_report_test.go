@@ -291,9 +291,10 @@ func TestVerifyIncompleteInstructionCanBeObeyed(t *testing.T) {
 					"the wallet, which is the only instruction that is safe whatever they "+
 					"do next:\n%s", body)
 			}
-			// AND IT STILL DRAWS. This body grew by the reword, and the SH2's modal
-			// scroller is bound to buttons the device does not have: a body that
-			// overflows is a body whose tail the operator is never told about.
+			// AND IT STILL DRAWS. This body grew by the reword. Since S6b P5 an
+			// overflowing tail is reachable -- Warning draws touchable arrows --
+			// but "do not fund this wallet" must not be a sentence the operator
+			// has to scroll to find, so this still gates on FIRST-FRAME fit.
 			assertModalBodyFits(t, "the verify's incomplete report ("+tc.name+")",
 				errorScreenBody, body)
 		})

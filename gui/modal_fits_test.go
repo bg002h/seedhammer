@@ -203,9 +203,13 @@ func assertModalBodyFits(t *testing.T, what string, r modalRenderer, body string
 	drawn := r(t, body)
 	ok, drew, want := bodyDrawnFully(drawn, body)
 	if !ok {
-		t.Errorf("%s: the screen draws %d of the body's %d characters. The operator is "+
-			"told nothing about the missing %d, because this modal's scroller is bound "+
-			"to buttons the SH2 does not have.\ncut after: ...%s\nlost:      %s",
+		t.Errorf("%s: the screen draws %d of the body's %d characters on its FIRST "+
+			"FRAME. Since S6b P5 the missing %d are reachable -- Warning now draws "+
+			"touchable scroll arrows, and both renderers here embed it "+
+			"(TestErrorScreenModalCarriesTheScrollArrows) -- so this is no longer "+
+			"text lost in silence. It is still a defect: a funds-critical modal must "+
+			"not require the operator to scroll to reach a warning they may act "+
+			"without.\ncut after: ...%s\nlost:      %s",
 			what, drew, want, want-drew,
 			tailOf(normalizeDrawn(body)[:drew], 48),
 			headOf(normalizeDrawn(body)[drew:], 96))

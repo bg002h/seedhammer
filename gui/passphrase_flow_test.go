@@ -791,7 +791,7 @@ func TestConfirmFitsPanel(t *testing.T) {
 			ppPassphraseCounts(worst), "A1B2C3D4", "99887766", true, true, derived)
 		if sz.Y > area.Dy() {
 			t.Errorf("derived=%v: the confirm screen needs %dpx of height but only %dpx is available on a %v panel; "+
-				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
+				"the overflow would be unreadable: this screen has no scroller at all (the arrows S6b P5 added are Warning's, and this is not one)",
 				derived, sz.Y, area.Dy(), dims)
 		}
 		if sz.X > area.Dx() {

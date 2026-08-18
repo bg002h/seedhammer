@@ -395,12 +395,16 @@ func TestUnauthenticatedWarningConfirmProceeds(t *testing.T) {
 //
 // Fitting the PHYSICAL panel (fact 3's accident) was therefore not the real
 // guarantee: restoring fadeClip's real clip mask without ALSO closing fact 1
-// would silently cut the instruction with no way to scroll to it. F-95 closed
-// fact 1 by shortening the copy so maxScroll <= 0 -- the body fits within the
-// fade-visible window, not merely within the panel, so the scroll affordance
-// this hardware does not have is no longer needed at all. Both checks are kept:
-// the panel check as the physical backstop, the maxScroll check as the real
-// requirement.
+// would silently cut the instruction, which at the time there was no way to
+// scroll to. F-95 closed fact 1 by shortening the copy so maxScroll <= 0 -- the
+// body fits within the fade-visible window, not merely within the panel, so no
+// scroll affordance is needed at all. Both checks are kept: the panel check as
+// the physical backstop, the maxScroll check as the real requirement.
+//
+// S6b P5 has since given Warning touchable scroll arrows, so a tail is no
+// longer unreachable. That WEAKENS the original argument without dissolving
+// this gate: a warning saying "Do not continue." must be on the first frame,
+// not one tap below it.
 func TestUnauthenticatedWarningFitsThePanel(t *testing.T) {
 	pf := newPlatform()
 	pf.display = sh2DisplaySize
@@ -445,16 +449,21 @@ func TestUnauthenticatedWarningFitsThePanel(t *testing.T) {
 
 			// F-95: fitting the PHYSICAL panel is not enough. Warning.Layout's own
 			// maxScroll must be <= 0 too, or the widget still believes part of the
-			// body is scrolled out of view -- reachable only via ButtonFilter(Up)/
-			// Down, which the SH2 does not have. Today that is invisible only
-			// because fadeClip (gui.go) is a no-op stub; restoring the real clip
-			// mask without this holding first would silently cut the tail of "Do
-			// not continue." with no way to scroll to it (F-95's own warning about
-			// fix ordering).
+			// body is scrolled out of view. Today that is invisible only because
+			// fadeClip (gui.go) is a no-op stub; restoring the real clip mask
+			// without this holding first would cut the tail of "Do not continue."
+			// below the fold (F-95's own warning about fix ordering).
+			//
+			// F-95 argued this from unreachability -- scrolling was ButtonFilter
+			// (Up)/Down only, and the SH2 has no directional buttons. S6b P5 ended
+			// that: Warning now draws its own touchable arrows, so a tail IS
+			// reachable. The gate stands on the weaker but sufficient ground that
+			// "Do not continue." belongs on the first frame.
 			if maxScroll > 0 {
-				t.Errorf("§10.2.3's body needs %d px of scroll the operator cannot perform "+
-					"(maxScroll=%d): Warning has no touch scroll, only ButtonFilter(Up)/Down, "+
-					"which the SeedHammer II does not have", maxScroll, maxScroll)
+				t.Errorf("§10.2.3's body needs %d px of scroll to read in full "+
+					"(maxScroll=%d): the operator can now perform it via P5's arrows, but "+
+					"a do-not-continue warning must not be one tap below the fold",
+					maxScroll, maxScroll)
 			}
 		})
 	}

@@ -1105,7 +1105,7 @@ func TestProofPromptFitsPanel(t *testing.T) {
 		}
 		if sz.Y > area.Dy() {
 			t.Errorf("%s: the prompt needs %dpx of height but only %dpx is available on a %v panel; "+
-				"the overflow would be unreadable, because the scroller is bound to buttons the machine does not have",
+				"the overflow would be unreadable: this screen has no scroller at all (the arrows S6b P5 added are Warning's, and this is not one)",
 				pr.Plan.Name(), sz.Y, area.Dy(), dims)
 		}
 		if sz.X > area.Dx() {
