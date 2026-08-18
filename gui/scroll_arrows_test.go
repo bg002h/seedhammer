@@ -495,13 +495,46 @@ func TestI1FreshTapAfterRecoveryScrollsExactlyOnce(t *testing.T) {
 
 // ─── GATE 5.1b -- R-E's maxScroll divergence probe ─────────────────────────
 //
-// EXPECTED TO FAIL, per plan (IMPLEMENTATION_PLAN_s6b.md, "GATE 5.1b is
-// expected to FAIL and does not gate") and per spec
-// (SPEC_s6b_pre_flash_cycle.md §7 gate table: "R-E's maxScroll divergence
-// probe -- failures expected, files findings, does not gate"). DO NOT loosen
-// this assertion to make it pass -- a green result here before fadeClip's
-// real clip mask is restored would be masking the exact gap R-E documents,
-// not closing it.
+// THIS TEST PINS A KNOWN GAP. It passes today, and it fails the moment the gap
+// MOVES in either direction. Read the next three paragraphs before changing
+// it, because two earlier instructions in this repo say the opposite and both
+// were superseded on 2026-08-18 by operator ruling.
+//
+// WHAT IT USED TO DO, AND WHY THAT WAS WRONG. It used to assert `diverged ==
+// 0` and therefore failed on every run, deliberately -- "EXPECTED TO FAIL, per
+// plan (IMPLEMENTATION_PLAN_s6b.md, 'GATE 5.1b is expected to FAIL and does
+// not gate') and per spec (SPEC_s6b_pre_flash_cycle.md §7 gate table: 'R-E's
+// maxScroll divergence probe -- failures expected, files findings, does not
+// gate')", with the instruction "DO NOT loosen this assertion to make it pass
+// -- a green result here before fadeClip's real clip mask is restored would be
+// masking the exact gap R-E documents, not closing it."
+//
+// THE CONFLICT THAT RESOLVED IT. Both quoted sources say this probe DOES NOT
+// GATE. But .github/workflows/test.yml runs `go test` on every push and skips
+// nothing (operator directive 2026-08-15, stated in that file's header), so a
+// permanently failing test gates everything -- it makes `main` red forever,
+// and the next REAL failure arrives invisible inside an already-red run. The
+// old shape did not implement "does not gate"; it implemented the opposite,
+// while citing the rule it broke.
+//
+// WHY PINNING IS NOT LOOSENING. The old assertion said "they disagree" -- a
+// fact already known, already written down in R-E, and re-proved on every run
+// at the cost of the whole suite's signal. This one says HOW they disagree,
+// and is strictly MORE sensitive:
+//
+//   - fadeClip's real clip mask restored  -> divergence vanishes  -> FAILS,
+//     telling you to delete this gate. The old test went green silently and
+//     you would learn nothing.
+//   - the geometry drifts, or the gap widens -> FAILS with the new numbers.
+//     The old test could not distinguish 22 divergences from 200; both were
+//     just "red", which is the state it was already in.
+//
+// So the gap is not masked. It is asserted, by value, and it is the only
+// arrangement under which a CHANGE to it is detectable at all.
+//
+// The three assertions together also prove the diverging set is CONTIGUOUS
+// without a fourth check: 260-239+1 == 22, so a count of 22 spanning exactly
+// [239,260] leaves no room for a hole inside or a stray outside.
 //
 // `maxScroll` (gui.go:409) reserves 2*scrollFadeDist=32px of margin that
 // fadeClip (a stubbed no-op, R-E) never actually renders as fade. So
@@ -522,6 +555,7 @@ func TestGate51bMaxScrollAgreesWithVisibility(t *testing.T) {
 
 	var lines []string
 	diverged := 0
+	divergeLo, divergeHi := -1, -1
 	const lo, hi = 0, 320
 	for y := lo; y <= hi; y++ {
 		maxScroll := y - (bodyClip.Dy() - 2*scrollFadeDist)
@@ -534,6 +568,10 @@ func TestGate51bMaxScrollAgreesWithVisibility(t *testing.T) {
 		newPredicate := scrollArrowDownVisible(bodyClip, image.Pt(0, y), dims, 0)
 		if oldPredicate != newPredicate {
 			diverged++
+			if divergeLo < 0 {
+				divergeLo = y
+			}
+			divergeHi = y
 			lines = append(lines, fmt.Sprintf("bodysz.Y=%d: maxScroll=%d (>0=%v) vs GATE-5.1=%v",
 				y, maxScroll, oldPredicate, newPredicate))
 		}
@@ -543,13 +581,26 @@ func TestGate51bMaxScrollAgreesWithVisibility(t *testing.T) {
 	if len(lines) > 0 {
 		t.Logf("diverging range:\n%s", strings.Join(lines, "\n"))
 	}
-	if diverged > 0 {
-		t.Errorf("maxScroll>0 disagrees with GATE 5.1's predicate on %d of %d bodysz.Y "+
-			"values in [%d,%d] -- see the log above for the exact range. EXPECTED (R-E): "+
-			"fadeClip is a stubbed no-op, so maxScroll's reserved fade margin is never "+
-			"actually rendered as fade. This is a FINDING against the deferred "+
-			"honest-geometry work that restores fadeClip (R-E), not a defect in this phase.",
-			diverged, hi-lo+1, lo, hi)
+	// The gap as measured on 2026-08-18, at the S6b merge. Nothing derives these
+	// -- they are the observed values, pasted from the run, and that is the
+	// point: a hand-derived expectation would move with the same edit it is
+	// meant to catch.
+	const wantDiverged, wantLo, wantHi = 22, 239, 260
+
+	if diverged != wantDiverged || divergeLo != wantLo || divergeHi != wantHi {
+		t.Errorf("R-E's maxScroll/GATE-5.1 divergence MOVED.\n"+
+			"  got:  %d values spanning [%d,%d]\n"+
+			"  want: %d values spanning [%d,%d]\n"+
+			"See the log above for the exact set. TWO WAYS TO READ THIS:\n"+
+			"(a) got 0 divergences -- fadeClip's real clip mask was restored, the "+
+			"honest-geometry work R-E deferred is DONE, and this gate has served its "+
+			"purpose: delete it, and delete R-E's carve-out with it.\n"+
+			"(b) got a different non-zero gap -- the geometry drifted. maxScroll "+
+			"(gui.go) reserves 2*scrollFadeDist of margin that the stubbed fadeClip "+
+			"never renders; if that arithmetic or scrollArrowDownVisible changed, this "+
+			"is a real defect and NOT the known R-E gap. Do not re-pin the numbers to "+
+			"whatever it prints -- find out which of the two predicates moved first.",
+			diverged, divergeLo, divergeHi, wantDiverged, wantLo, wantHi)
 	}
 }
 
