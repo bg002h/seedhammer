@@ -490,7 +490,9 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// what reads as a pass.
 		multisigRestoreDocFlow(ctx, th, tpl, keys,
 			buildVerifyStatusLine(rec),
-			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany))
+			// false: this path has no passphrase-plate offer at all -- R-B, a
+			// later phase -- so it can never have cut one (S6b spec 6/6a).
+			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany, false))
 	}
 }
 

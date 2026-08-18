@@ -333,7 +333,7 @@ func TestRestoreDocSaysWhetherTheSetContainsASeed(t *testing.T) {
 	}
 	doc := func(cards []bundleCard, capacity seedCapacity) string {
 		return strings.Join(
-			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity), "\n")
+			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity, false), "\n")
 	}
 
 	watch := doc(singleSigEngraveCards(b, false), seedCapacityOne)
@@ -431,7 +431,7 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		{kind: cardMD1, label: "md1 descriptor", summary: "policy", strings: []string{"md1a"}},
 	}
 	doc := strings.Join(buildPlateInventoryLines(
-		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne), "\n")
+		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne, false), "\n")
 	if strings.Contains(doc, "the plates are the secret") {
 		t.Errorf("a watch-only document says the plates are the secret, on a set whose "+
 			"own inventory says no plate in it holds the seed:\n%s", doc)
@@ -464,14 +464,19 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		{kind: cardMS1, label: "ms1 secret share 1 of 2", summary: "seed", strings: []string{"ms1a"}},
 		{kind: cardMS1, label: "ms1 secret share 2 of 2", summary: "seed", strings: []string{"ms1b"}},
 	}
+	// plateCut ranges over S6b P4's new dimension too: its replacement text
+	// (spec §6/§6.1) is new prose no earlier sweep could have covered, and it
+	// is reachable only when uses is also true.
 	for _, cards := range [][]bundleCard{watchOnly, oneMS1, twoMS1} {
 		for _, capacity := range []seedCapacity{seedCapacityOne, seedCapacityMany} {
 			for _, uses := range []bool{false, true} {
-				for _, line := range buildPlateInventoryLines(
-					cards, oneSeedPassphraseFact(uses), capacity) {
-					if strings.ContainsAny(line, "—–·‘’“”…") {
-						t.Errorf("an inventory line carries a glyph the body face lacks, "+
-							"so it does not draw:\n%q", line)
+				for _, plateCut := range []bool{false, true} {
+					for _, line := range buildPlateInventoryLines(
+						cards, oneSeedPassphraseFact(uses), capacity, plateCut) {
+						if strings.ContainsAny(line, "—–·‘’“”…") {
+							t.Errorf("an inventory line carries a glyph the body face lacks, "+
+								"so it does not draw:\n%q", line)
+						}
 					}
 				}
 			}
@@ -1085,7 +1090,7 @@ func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
 	}
 
 	// THE DOCUMENT HALF. A bare run must SAY so, not go quiet.
-	bare := strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false)), " ")
+	bare := strings.Join(buildPassphraseInventoryLines(oneSeedPassphraseFact(false), false), " ")
 	if !strings.Contains(bare, "No BIP-39 passphrase was used") {
 		t.Errorf("the bare arm of the inventory does not answer the reader's question, so "+
 			"a complete backup is indistinguishable from one missing a factor:\n%s", bare)

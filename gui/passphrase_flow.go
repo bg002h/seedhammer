@@ -754,6 +754,28 @@ const (
 	ppPLStepEngrave
 )
 
+// passphrasePlateResult reports whether engravePassphraseFlowPreloaded
+// actually CUT the plate.
+//
+// S6b spec 6/6a: the restore document's claim about where the passphrase
+// lives may condition ONLY on this -- a declined offer and an aborted
+// engrave both leave the shipped sentence unchanged, so both collapse to
+// passphrasePlateNotCut. A bool would do; a named type is what the call
+// site needs, for the same reason bundleEngraveResult (gui/bundle_flow.go)
+// is named rather than bool -- the caller is deciding what a document read
+// years later may claim.
+type passphrasePlateResult int
+
+const (
+	// passphrasePlateNotCut: the offer was never reached (no passphrase this
+	// run), was declined, or the flow was backed out of at any step before
+	// the plate was engraved and accepted -- including ctx.Done.
+	passphrasePlateNotCut passphrasePlateResult = iota
+	// passphrasePlateCut: the plate was engraved and accepted
+	// (NewEngraveScreen.Engrave returned true).
+	passphrasePlateCut
+)
+
 // engravePassphraseFlowPreloaded is the PRELOADED form of the
 // engravePassphrase program (S6b spec 2, R-C/R-J): the passphrase, the seed
 // and combined fingerprints, and the wallet-policy id are ALL already in
@@ -773,7 +795,13 @@ const (
 // for the preloaded path, so there is no provenance to select, and
 // syswSourceAccept always shows its acceptance screen (srcDerived is never
 // srcTyped) -- R-C.3/R-D: "the acceptance screen RUNS".
-func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedFP, combinedFP, policyID string) {
+//
+// RETURNS whether the plate was CUT, not whether the offer reached this far
+// (S6b spec 6a): the restore document reads this, not "was this function
+// called". Every exit before the engrave-and-accept step -- Back out of
+// entry, Back out of QR/confirm repeatedly until ctx.Done -- is
+// passphrasePlateNotCut.
+func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedFP, combinedFP, policyID string) passphrasePlateResult {
 	secret := make([]byte, passphrase.MaxLen)
 	// The only scrub defer, and so the last to run: it zeroes the backing
 	// array after every other defer, on every return path. Mirrors
@@ -785,7 +813,7 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 	n := copy(secret, body)
 
 	if !syswSourceAccept(ctx, th, "BIP-39 Password", sysw.ClassPassphrase, srcDerived) {
-		return
+		return passphrasePlateNotCut
 	}
 
 	qr := false
@@ -802,7 +830,7 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 			// where the footer's truthfulness is normative (R-D).
 			m, ok := passphraseEntryFlow(ctx, th, secret, n, nil)
 			if !ok {
-				return // Back out of the first step leaves the program.
+				return passphrasePlateNotCut // Back out of the first step leaves the program.
 			}
 			n = m
 		case ppPLStepQR:
@@ -826,11 +854,13 @@ func engravePassphraseFlowPreloaded(ctx *Context, th *Colors, body []byte, seedF
 				break
 			}
 			if NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
-				return
+				return passphrasePlateCut
 			}
 			// Backed out of the engrave: return to the confirm screen.
 			step -= 2
 		}
 		step++
 	}
+	// ctx.Done fired mid-flow, before the plate was engraved and accepted.
+	return passphrasePlateNotCut
 }

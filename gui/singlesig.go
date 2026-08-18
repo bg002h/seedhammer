@@ -210,12 +210,18 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// PASSPHRASE PLATE OFFER (S6b spec 2.6, R2/R5/R6/R7). After the verify
 	// offer (a plate is offered only for a set already known good) and
 	// before restoreDocFlow (the document must be able to report whether
-	// one was cut -- P4's work, not this phase's). mnemonic is still LIVE
-	// here: this function's top-level scrub defer, registered right after
-	// seedEntryFlow returns, only fires when engraveSingleSigFlow itself
-	// returns, and nothing between there and here consumes the mnemonic
-	// again.
-	singleSigPassphrasePlateOffer(ctx, th, mnemonic, passphrase, masterFP, path, b)
+	// one was cut). mnemonic is still LIVE here: this function's top-level
+	// scrub defer, registered right after seedEntryFlow returns, only fires
+	// when engraveSingleSigFlow itself returns, and nothing between there
+	// and here consumes the mnemonic again.
+	//
+	// THE RETURN IS READ BELOW (S6b spec 6/6a, P4): whether the restore
+	// document may say a passphrase plate exists conditions on whether one
+	// was actually CUT, not on whether this offer was merely shown --
+	// singleSigPassphrasePlateOffer already collapses "declined" and
+	// "backed out mid-engrave" to the same passphrasePlateNotCut a bare
+	// void return could not have distinguished from "cut".
+	plateResult := singleSigPassphrasePlateOffer(ctx, th, mnemonic, passphrase, masterFP, path, b)
 
 	// Watch-only restore doc (display-only, PUBLIC — no secret).
 	//
@@ -244,9 +250,14 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// one seed the device is holding rather than the BUILD path's registry. It
 	// carries no fingerprint because the single-seed arm renders none: with one
 	// seed there is nothing to tell apart.
+	//
+	// plateResult == passphrasePlateCut is S6b spec 6/6a's condition: CUT, not
+	// offered. buildPassphraseInventoryLines reads exactly this bool, never
+	// "was the offer shown" -- see the comment at the call above.
 	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
 		buildVerifyStatusLine(rec),
-		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne))
+		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne,
+			plateResult == passphrasePlateCut))
 }
 
 // singleSigPlateMark computes S6b spec 1.2's mk1/md1 title and footer for
@@ -297,14 +308,21 @@ var singleSigBareSeedFPHook func()
 // exactly what singleSigPlateMark's own doc records about the same value.
 // b must be the FINAL bundle, post-templateizeBundle if that branch was
 // taken: the policy id is computed from b.MD1 (spec 2.4c).
-func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, passphrase string, masterFP uint32, path bip32.Path, b bundle.Bundle) {
+//
+// RETURNS whether the plate was CUT (S6b spec 6/6a, P4): passphrasePlateNotCut
+// when passphrase == "" (no offer reached at all), when the offer is
+// declined, when the bare-seed derivation errors, or whatever
+// engravePassphraseFlowPreloaded itself reports (a declined offer and an
+// aborted engrave are indistinguishable to the caller, on purpose -- both
+// leave the restore document's shipped sentence unchanged).
+func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, passphrase string, masterFP uint32, path bip32.Path, b bundle.Bundle) passphrasePlateResult {
 	if passphrase == "" {
-		return
+		return passphrasePlateNotCut
 	}
 	offer := &ChoiceScreen{Title: "Passphrase Plate", Lead: "Engrave a passphrase plate?", Choices: []string{"Skip", "Engrave"}}
 	sel, ok := offer.Choose(ctx, th)
 	if !ok || sel != 1 {
-		return
+		return passphrasePlateNotCut
 	}
 	// LAZY (R-K/spec 2.6): the bare-seed fingerprint costs a second ~31s
 	// KDF (gui/gui.go's and gui/unlock_platelist.go's own uses of the same
@@ -318,7 +336,7 @@ func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnem
 	_, seedFP, derr := deriveAccountXpub(mnemonic, "", &chaincfg.MainNetParams, path)
 	if derr != nil {
 		showError(ctx, th, "Passphrase Plate", "Couldn't derive the bare-seed fingerprint.")
-		return
+		return passphrasePlateNotCut
 	}
 	// S6b spec 2.4: "wallet policy id" is md.FormAwareStubChunks -- NOT
 	// md.WalletPolicyIDStub, the keyed-only branch reached through
@@ -330,6 +348,6 @@ func singleSigPassphrasePlateOffer(ctx *Context, th *Colors, mnemonic bip39.Mnem
 	if stub, serr := md.FormAwareStubChunks(b.MD1); serr == nil {
 		policyID = fmt.Sprintf("%X", stub[:])
 	}
-	engravePassphraseFlowPreloaded(ctx, th, []byte(passphrase),
+	return engravePassphraseFlowPreloaded(ctx, th, []byte(passphrase),
 		fmt.Sprintf("%.8X", seedFP), fmt.Sprintf("%.8X", masterFP), policyID)
 }
