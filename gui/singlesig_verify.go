@@ -63,30 +63,37 @@ func verifySingleSig(derived bundle.Bundle, ms1Readback string, mk1, md1 []strin
 // passed in), reads back the public cards over NFC, optionally hand-types the
 // ms1, and reports PASS/FAIL.
 //
-// `rec` IS AN OUT-PARAMETER (S6a §4.7b-seam). This flow is void and stays void:
-// its callers need no verdict, and what the restore document needs is not a
-// verdict but the two RECORDED facts -- was a pass observed, was anything
-// adverse observed.
+// `rec` IS AN OUT-PARAMETER (S6a §4.7b-seam): what the restore document needs
+// is not a verdict but the two RECORDED facts -- was a pass observed, was
+// anything adverse observed.
 //
-// ELEVEN EXITS, AND THE ELEVENTH IS NOT A `return`. Ten explicit returns plus
-// the fall-through at the closing brace, which is the ONLY success exit. An
-// implementer told to "write the record at each return site" writes ten and
-// never writes the pass at all, and the document then says NOT FULLY CHECKED on
-// a run that fully checked.
+// THE BOOL RETURN (S6b P9, F2) IS A DIFFERENT THING FROM `rec`: it answers
+// "can the caller offer a retry", not "what should the document say". Before
+// P9 this flow was void and its only caller was a one-shot `if` -- a FAILED
+// comparison or an unreadable readback dead-ended straight to the passphrase-
+// plate offer and the restore document, over steel that was often fine, with
+// no route back except re-cutting the entire set. The sibling multisig flow
+// (multisigVerifyFlow) solved this with a five-way result enum its two
+// callers loop on; this flow keeps the simpler two-way question its ONE
+// caller actually asks -- "is this a state the operator can still act on with
+// what's in their hand" -- as the return value, so `engraveSingleSigFlow` can
+// wrap the offer in the same escapable retry loop.
 //
-// TWO OF THE ELEVEN ARE ADVERSE and eight write NEITHER bit. The adverse line
-// this device prints says a check RAN and did not pass, so an exit may only set
-// it if the device READ, compared, or accounted for what came back off the
-// plates AND that step produced a negative result. Every other exit -- a Back, a
-// refusal, a re-derivation that never got as far as reading a plate -- observed
-// nothing about the steel, and claiming a check there would be a false statement
-// about this device's own behaviour. Those land in the zero cell by writing
-// nothing, which is how a prohibition fails safe.
+// ELEVEN EXITS, ALL OF THEM RETURNS NOW. TWO OF THE ELEVEN ARE ADVERSE
+// (return true: an accounting failure or a disagreeing comparator, both
+// states the operator can fix by re-presenting plates or retyping) and eight
+// write NEITHER bit and return false (a Back, a refusal, a re-derivation that
+// never got as far as reading a plate -- nothing about the steel was
+// observed, so recording a check there would be a false statement about this
+// device's own behaviour, and retrying would mean asking to re-answer a
+// question the operator already declined). The eleventh is the success
+// return: also false (nothing left to retry), and the ONLY site that writes
+// rec.pass.
 //
 // NO EXIT NAMES A verifyStatus. An exit that assigns a status has already lost
 // the mode, and the mode is exactly what the pass line must not lose; the cell
 // is derived once, downstream, from the two booleans.
-func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *verifyRecord) {
+func singleSigVerifyFlow(ctx *Context, th *Colors, full, template, engravedWithPassphrase bool, rec *verifyRecord) bool {
 	// A NIL RECORD IS DISCARDED, NOT DEREFERENCED -- multisigVerifyFlow's reason.
 	if rec == nil {
 		rec = &verifyRecord{}
@@ -94,7 +101,7 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	// Re-type the seed (fresh residency) and re-derive deterministically.
 	reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 	if !ok {
-		return
+		return false
 	}
 	defer func() {
 		for i := range reMnemonic {
@@ -103,7 +110,7 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	}()
 	purpose, script, ok := singleSigPickFlow(ctx, th)
 	if !ok {
-		return
+		return false
 	}
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
@@ -115,7 +122,7 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	reDerived, _, _, _, err := deriveSingleSigBundle(reMnemonic, passphrase, &chaincfg.MainNetParams, singleSigPath(purpose), script)
 	if err != nil {
 		showError(ctx, th, "Verify Bundle", "Couldn't re-derive the bundle from the seed.")
-		return
+		return false
 	}
 	// For a TEMPLATE engrave the readback plates are the keyless template; the
 	// re-derived comparator baseline must be templateized to match (C2).
@@ -123,7 +130,7 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 		reDerived, err = templateizeBundle(reDerived)
 		if err != nil {
 			showError(ctx, th, "Verify Bundle", "Couldn't re-build the template bundle.")
-			return
+			return false
 		}
 	}
 
@@ -137,19 +144,22 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	// The passphrase step above uses passphraseFlow for the same reason.
 	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 	if !ok {
-		return
+		return false
 	}
 	mk1, md1, ok := singleSigReadbackCards(cards)
 	if !ok {
-		// ADVERSE. bundleGatherFlow returned ok, so complete cards were read off the
-		// reader and the operator pressed Done; the accounting over them then failed
-		// -- two mk1s, two md1s, or a missing kind. "A plate could not be read or
-		// accounted for" is an exact description of it, on the innocent world as
-		// much as the guilty one, which is what separates this site from the ms1
-		// typing below: there, no check runs at all.
+		// ADVERSE, AND RETRYABLE (S6b P9 F2). bundleGatherFlow returned ok, so
+		// complete cards were read off the reader and the operator pressed Done;
+		// the accounting over them then failed -- two mk1s, two md1s, or a
+		// missing kind. "A plate could not be read or accounted for" is an exact
+		// description of it, on the innocent world as much as the guilty one,
+		// which is what separates this site from the ms1 typing below: there, no
+		// check runs at all. It is retryable because it names precisely what to
+		// re-present -- F-199's exact shape on the multisig side -- and the
+		// caller's loop re-offers rather than dead-ending.
 		rec.adverse = true
 		showError(ctx, th, "Verify Bundle", "Need one key card (mk1) and one descriptor (md1) read back.")
-		return
+		return true
 	}
 
 	// Hand-type the SECRET ms1 (full mode only; never NFC). Watch-only omits it.
@@ -157,12 +167,12 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 	if full {
 		obj, ok := inputCodex32Flow(ctx, th, "Type ms1")
 		if !ok {
-			return
+			return false
 		}
 		s, isStr := obj.(codex32.String)
 		if !isStr {
 			showError(ctx, th, "Verify Bundle", "That isn't an ms1 secret share.")
-			return
+			return false
 		}
 		// L1: capture + scrub the probe's secret entropy (codebase convention,
 		// gui/ms1_decode.go:29) — DecodeMS1 allocates a fresh entropy slice we
@@ -170,38 +180,56 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 		_, _, ent, err := codex32.DecodeMS1(s)
 		if err != nil {
 			showError(ctx, th, "Verify Bundle", "That isn't a valid ms1 secret share.")
-			return
+			return false
 		}
 		wipeBytes(ent)
 		ms1Readback = s.String()
 	}
 
 	if err := verifySingleSig(reDerived, ms1Readback, mk1, md1); err != nil {
-		// ADVERSE. The comparator ran and disagreed.
+		// ADVERSE, AND RETRYABLE (S6b P9 F2). The comparator ran and disagreed;
+		// a mistyped seed or passphrase is a state the operator can fix by
+		// retyping, so the caller's loop re-offers rather than dead-ending into
+		// the passphrase-plate offer and a permanently damning restore document
+		// over steel that may be fine.
 		rec.adverse = true
-		// F-204 (S6b spec §3.2): THE COPY IS CONDITIONAL, NOT A STRING SWAP. The
+		// F-204 (S6b spec §3.2), extended by S6b P9's F3: THE COPY IS
+		// CONDITIONAL, NOT A STRING SWAP, and now has THREE arms, not two. The
 		// multisig sibling (multisigVerifyNoSlotBody, gui/multisig_verify.go)
-		// suspects the PASSPHRASE before the plates -- one wrong character re-types
-		// a whole different wallet -- and this screen used to blame the plates
-		// unconditionally. `passphrase` is in scope from the prompt above (:108-112)
-		// and is exactly what decides which lead is TRUE:
+		// suspects the PASSPHRASE before the plates -- one wrong character
+		// re-types a whole different wallet -- and this screen used to blame the
+		// plates unconditionally. `passphrase` is in scope from the prompt above
+		// (:108-121) and `engravedWithPassphrase` is the caller's own fact
+		// (gui/singlesig.go: `passphrase != ""` at the engrave, S6b P9 F3) --
+		// together they decide which lead is TRUE:
 		//
-		//   - a passphrase was entered: the mismatch is at least as likely a
+		//   - a passphrase was TYPED here: the mismatch is at least as likely a
 		//     mistyped passphrase as a bad plate, so suspect it FIRST.
-		//   - no passphrase was entered: there is no passphrase to blame, and
-		//     saying so would be a false lead. The original wording stays true of
-		//     this arm and is left alone rather than churned for its own sake.
-		if passphrase != "" {
+		//   - no passphrase was typed here, but the engrave USED one: there is a
+		//     passphrase to blame -- the one just omitted -- and saying "check
+		//     the plates" is a false lead against steel that may be perfect. This
+		//     is F3: the caller holds this fact and previously plumbed none of it.
+		//   - no passphrase was typed here, and the engrave used none either:
+		//     there really is no passphrase to blame. The original wording stays
+		//     true of this arm and is left alone rather than churned for its own
+		//     sake.
+		switch {
+		case passphrase != "":
 			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. "+
 				"Check the passphrase before you doubt the plates: one wrong character "+
 				"derives a different wallet.")
-		} else {
+		case engravedWithPassphrase:
+			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. "+
+				"This set was engraved WITH a passphrase, and none was typed just now. Add "+
+				"the passphrase and try again before you doubt the plates.")
+		default:
 			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
 		}
-		return
+		return true
 	}
 	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
-	// THE SUCCESS EXIT, and it is the fall-through rather than a return.
+	// THE SUCCESS EXIT. `rec.pass` is written ONLY here, and nowhere else in
+	// the function.
 	//
 	// legs IS 1 ON A TEMPLATE ENGRAVE TOO. templateizeBundle strips the MD1 to a
 	// template and RE-STUBS the mk1 -- reStubMk1(b.MK1, stub) -- so the key plate
@@ -218,4 +246,18 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template bool, rec *ver
 		legs:              1,
 		suppliedCosigners: 0,
 	}
+	// NOTHING LEFT TO RETRY: a clean pass needs no further action from the
+	// caller's loop.
+	return false
 }
+
+// singleSigVerifyFn is the in-file test seam engraveSingleSigFlow's retry
+// loop dispatches through (S6b P9, F2) -- mirroring multisigVerifyFn
+// (gui/multisig_verify.go). A real second attempt means driving a whole
+// readback (gather, seed entry, passphrase, and for a full engrave the ms1)
+// twice, which is affordable for a targeted proof (see
+// TestSingleSigVerifyRetryProducesAnHonestStatusVerifiedOnRetryLine) but not
+// for a walk that also has to prove the generic loop/label mechanics this
+// flow now shares with both multisig callers -- substituting the verdict
+// source here is what makes that walk cheap.
+var singleSigVerifyFn = singleSigVerifyFlow

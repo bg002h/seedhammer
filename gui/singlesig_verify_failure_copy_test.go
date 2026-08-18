@@ -35,7 +35,7 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 		ctx := NewContext(p)
 		ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
 		frame, quit := runUI(ctx, func() {
-			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, &rec)
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, false /* engraved without a passphrase */, &rec)
 		})
 		defer quit()
 
@@ -94,7 +94,7 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 		ctx := NewContext(p)
 		ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
 		frame, quit := runUI(ctx, func() {
-			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, &rec)
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, false /* engraved without a passphrase */, &rec)
 		})
 		defer quit()
 
@@ -131,6 +131,79 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 		}
 		if !uiContains(body, "Check the engraved plates") {
 			t.Errorf("the no-passphrase arm must say something true of that case; got %q", body)
+		}
+		if !rec.adverse {
+			t.Error("the comparator ran and disagreed but the record says nothing adverse")
+		}
+	})
+
+	// S6b P9, F3: the engrave USED a passphrase and the verify re-type OMITS
+	// it. The comparator fails on CORRECT plates -- the derivation itself
+	// differs -- and pre-fix the `else` arm above blamed the plates, which is
+	// exactly the false lead F-204 exists to remove, now surviving on the one
+	// arm F-204 did not condition. Unlike the two subtests above (built off
+	// s6aSingleSigBundle, which REFUSES to model a passphrase run -- see its
+	// own doc comment), this bench is derived here, WITH a passphrase, because
+	// that is the one fact under test.
+	t.Run("engraved with passphrase, omitted at verify", func(t *testing.T) {
+		m, err := bip39.ParseMnemonic(abandonAboutPhrase())
+		if err != nil {
+			t.Fatalf("ParseMnemonic: %v", err)
+		}
+		wb, _, _, _, err := deriveSingleSigBundle(m, "hunter2", &chaincfg.MainNetParams,
+			singleSigPath(singleSigDefault.purpose), singleSigDefault.script)
+		if err != nil {
+			t.Fatalf("deriveSingleSigBundle: %v", err)
+		}
+
+		var rec verifyRecord
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.syswBundleSeeds = append(append([]string(nil), wb.MK1...), wb.MD1...)
+		frame, quit := runUI(ctx, func() {
+			// engravedWithPassphrase = true: the caller's own fact, F3's fix.
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, true, &rec)
+		})
+		defer quit()
+
+		if c, ok := pumpUntil(frame, "Choose number of words", 96); !ok {
+			t.Fatalf("the verify did not ask for the seed; got %q", c)
+		}
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, abandonAboutPhrase()) // the SAME seed as engraved
+		if c, ok := pumpUntil(frame, "Wallet Type", 240); !ok {
+			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
+		}
+		click(&ctx.Router, Button3) // BIP-84 default -- matches the engrave
+		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Skip -- the OMISSION under test
+		frame()
+		if c, ok := pumpUntil(frame, "mk1 keys:", 96); !ok {
+			t.Fatalf("the readback never reached the gatherer's tally; got %q", c)
+		}
+		click(&ctx.Router, Button3) // Done adding cards
+		frame()
+
+		body, ok := pumpUntil(frame, "Verify Failed", 96)
+		if !ok {
+			t.Fatalf("omitting the engrave-time passphrase at verify did not FAIL the "+
+				"comparator on CORRECT plates; got %q", body)
+		}
+		if uiContains(body, "Check the engraved plates.") {
+			t.Errorf("these plates are CORRECT -- the false lead F-204 exists to remove "+
+				"is back on the passphrase-omission arm (S6b P9 F3); got %q", body)
+		}
+		if uiContains(body, "Check the passphrase before you doubt") {
+			t.Errorf("no passphrase was TYPED at verify, so the F-204 arm (which reads "+
+				"only the typed passphrase) must not fire here; got %q", body)
+		}
+		if !uiContains(body, "engraved WITH a passphrase") {
+			t.Errorf("the screen does not say the set was engraved with a passphrase that "+
+				"was omitted at verify (S6b P9 F3); got %q", body)
 		}
 		if !rec.adverse {
 			t.Error("the comparator ran and disagreed but the record says nothing adverse")

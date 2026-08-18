@@ -1946,7 +1946,7 @@ func s6aSingleSigFullVerify(t *testing.T) verifyRecord {
 	ctx := NewContext(p)
 	ctx.syswBundleSeeds = append(append([]string(nil), b.MK1...), b.MD1...)
 	frame, quit := runUI(ctx, func() {
-		singleSigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, false, &rec)
+		singleSigVerifyFlow(ctx, &descriptorTheme, true /* FULL */, false, false /* engraved without a passphrase */, &rec)
 	})
 	defer quit()
 	s6aDriveSingleSigVerifyOK(t, ctx, frame, opts)
@@ -2087,7 +2087,7 @@ func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
 		ctx.syswBundleSeeds = append([]string(nil), records...)
 		done := false
 		frame, quit := runUI(ctx, func() {
-			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, &rec)
+			singleSigVerifyFlow(ctx, &descriptorTheme, false /* watch-only */, false, false /* engraved without a passphrase */, &rec)
 			done = true
 		})
 		defer quit()

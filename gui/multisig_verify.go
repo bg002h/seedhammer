@@ -50,14 +50,19 @@ const (
 	// does not draw at all (F-78/F-151).
 	multisigVerifyForeignPolicyBody = "The read-back wallet policy is NOT the wallet policy this run engraved. " +
 		"These plates belong to a different wallet. Present the md1 and the key plates this run cut."
-	// multisigVerifyRetryLead is the RE-offer both engraving callers make after a
-	// verify that ended short of a clean pass. ONE STRING, TWO SITES, so the build
-	// path and the supply path cannot drift into describing one state two ways --
-	// and so it stays a single production site for a walk needle.
+	// multisigVerifyRetryLead is the RE-offer all THREE engraving callers make
+	// (S6b P9, F2, added engraveSingleSigFlow to the two multisig callers below)
+	// after a verify that ended short of a clean pass. ONE STRING, THREE SITES,
+	// so no caller can drift into describing one state a different way -- and so
+	// it stays a single production site for a walk needle.
 	//
 	// It is the mechanism the "Verify Incomplete" screen's instruction refers to.
 	// Before it, that instruction named nothing: the verify was offered once and
 	// the device has no standalone bundle verify anywhere in its program table.
+	// The single-sig side had the identical gap (F2): a FAILED comparison or an
+	// unreadable readback dead-ended with no route back except re-cutting the
+	// whole set, and this text is generic enough ("plate", not "multisig") that
+	// reusing it rather than forking a near-duplicate is the smaller diff.
 	multisigVerifyRetryLead = "Not every plate is verified. Try again?"
 )
 

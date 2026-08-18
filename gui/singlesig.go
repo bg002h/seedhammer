@@ -194,17 +194,39 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 		return
 	}
 
-	// Offer the verify-bundle (re-type seed → re-derive → read back → compare).
+	// Offer the verify-bundle (re-type seed → re-derive → read back → compare),
+	// AND RE-OFFER IT on either adverse arm (S6b P9, F2).
 	//
-	// THE RECORD IS DECLARED HERE, NOT INSIDE THE OFFER, so that a Skip leaves it
-	// at its zero value and the document below says the weakest true thing. This
-	// path has no retry loop -- the offer is a one-shot `if` -- so `rec` is written
-	// at most once, and statusVerifiedOnRetry is unreachable from it by
-	// construction rather than by an assertion.
+	// THE RECORD IS DECLARED OUTSIDE THE LOOP, so that a Skip (never entering
+	// the loop body) leaves it at its zero value and the document below says
+	// the weakest true thing, and so the adverse bit stays STICKY across
+	// retries: a first attempt that failed and a second that passed is
+	// statusVerifiedOnRetry on the document, not a bare pass -- exactly the
+	// multisig callers' own reasoning (gui/multisig.go).
+	//
+	// UNTIL P9 THIS WAS A ONE-SHOT `if`, and the comment here said so on
+	// purpose: a FAILED comparison or an unreadable readback dead-ended
+	// straight past the passphrase-plate offer to the restore document, over
+	// steel that was often fine, with no route back except re-cutting the
+	// entire set -- the exact class F-199 fixed on the multisig side in this
+	// same diff. singleSigVerifyFn's bool return is "can the operator still
+	// act on this with what's in their hand"; true only at its two ADVERSE
+	// return sites (gui/singlesig_verify.go).
 	var rec verifyRecord
-	verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: "Verify the engraved plates?", Choices: []string{"Verify now", "Skip"}}
-	if sel, ok := verifyChoice.Choose(ctx, th); ok && sel == 0 {
-		singleSigVerifyFlow(ctx, th, full, template, &rec)
+	verifyLead, verifyChoices := "Verify the engraved plates?", []string{"Verify now", "Skip"}
+	for {
+		verifyChoice := &ChoiceScreen{Title: "Verify Bundle", Lead: verifyLead, Choices: verifyChoices}
+		sel, ok := verifyChoice.Choose(ctx, th)
+		if !ok || sel != 0 {
+			break
+		}
+		if !singleSigVerifyFn(ctx, th, full, template, passphrase != "", &rec) {
+			break
+		}
+		// multisigVerifyRetryLead (gui/multisig_verify.go) is now drawn by
+		// THREE call sites, not two -- see that constant's own comment.
+		verifyLead = multisigVerifyRetryLead
+		verifyChoices = []string{"VERIFY AGAIN", "CONTINUE"}
 	}
 
 	// PASSPHRASE PLATE OFFER (S6b spec 2.6, R2/R5/R6/R7). After the verify
