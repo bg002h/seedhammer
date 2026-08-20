@@ -83,15 +83,33 @@ func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int) []
 	}
 	// The shared loud warning + estimate.
 	lines = append(lines, templateWarningLines()...)
-	// The depth-≥2 taproot EXPERIMENTAL gate (S5).
+	// The depth-≥2 taproot gate (S5). REWORDED 2026-08-20: the blocker it named
+	// is FIXED, and a warning that names a fixed blocker is worse than none --
+	// it teaches the operator to discount the next one.
+	//
+	// What it used to say, and why each line had to go:
+	//
+	//   "The shipped toolkit CANNOT reconstruct this taptree"
+	//       False now. mnemonic-toolkit 0.97.0 restores depth->=2 taproot; the
+	//       refusal gate was lifted with the miniscript pin.
+	//   "Recovery needs an UNRELEASED rust-miniscript >13.1.0"
+	//       Misleading. PR #953 is merged but 13.1.0 was cut from a maintenance
+	//       line, so it is NEWER than the merge and will never contain it.
+	//       Waiting for a release was never a plan with a date.
+	//   "DO NOT use for real funds until that ships"
+	//       Conditioned on an event that will not happen.
+	//
+	// What remains TRUE, and is what an operator actually needs: recovery
+	// requires a build carrying #953. An older md or toolkit still cannot
+	// reconstruct this taptree, so the caveat becomes a MINIMUM VERSION rather
+	// than disappearing -- an operator's backup outlives the build that made it.
 	if tapDepth >= 2 {
 		lines = append(lines,
-			"EXPERIMENTAL: taproot depth >= 2",
-			"The shipped toolkit CANNOT reconstruct",
-			"this taptree (rust-miniscript PR #953).",
-			"Recovery needs an UNRELEASED",
-			"rust-miniscript >13.1.0.",
-			"DO NOT use for real funds until that ships.",
+			"Taproot depth >= 2",
+			"Recovery needs md 0.13+ / toolkit 0.97+",
+			"(rust-miniscript PR #953). OLDER builds",
+			"CANNOT reconstruct this taptree.",
+			"PROVE RECOVERY BEFORE FUNDING.",
 		)
 	}
 	return lines

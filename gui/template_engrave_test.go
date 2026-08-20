@@ -236,8 +236,25 @@ func TestTemplateConsentLines(t *testing.T) {
 	if !containsLineSubstr(lines4, "Key slots") {
 		t.Errorf("complex consent missing slot count: %v", lines4)
 	}
-	if !containsLineSubstr(lines4, "EXPERIMENTAL") || !containsLineSubstr(lines4, "13.1.0") || !containsLineSubstr(lines4, "953") {
-		t.Errorf("depth-2 consent missing the EXPERIMENTAL >13.1.0/PR#953 warning: %v", lines4)
+	// THE DEPTH-2 CAVEAT IS A MINIMUM VERSION NOW, not an impossibility claim
+	// (2026-08-20, with the miniscript pin move). It must still APPEAR -- an
+	// operator's backup outlives the build that made it, and an older md or
+	// toolkit genuinely cannot reconstruct this taptree.
+	if !containsLineSubstr(lines4, "depth >= 2") {
+		t.Errorf("depth-2 consent lost its taproot caveat entirely: %v", lines4)
+	}
+	if !containsLineSubstr(lines4, "953") {
+		t.Errorf("depth-2 caveat no longer names the upstream fix: %v", lines4)
+	}
+	if !containsLineSubstr(lines4, "md 0.13+") || !containsLineSubstr(lines4, "toolkit 0.97+") {
+		t.Errorf("depth-2 caveat must name the MINIMUM versions that can recover: %v", lines4)
+	}
+	// And it must no longer say the thing that stopped being true. A warning
+	// naming a fixed blocker teaches the operator to discount the next one.
+	for _, stale := range []string{"UNRELEASED", "until that ships", "shipped toolkit CANNOT"} {
+		if containsLineSubstr(lines4, stale) {
+			t.Errorf("depth-2 caveat still carries the superseded claim %q: %v", stale, lines4)
+		}
 	}
 }
 
