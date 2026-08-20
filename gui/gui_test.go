@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -11,6 +12,7 @@ import (
 	"iter"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -116,6 +118,16 @@ func dumpUI(t testing.TB, o op.Op, path string) {
 }
 
 func newTestEngraveScreen(t *testing.T, ctx *Context) *EngraveScreen {
+	return newTestEngraveScreenAt(t, ctx, 0)
+}
+
+// newTestEngraveScreenAt builds the same 2-of-3 descriptor and returns the
+// screen for plate index idx.
+//
+// Split out of newTestEngraveScreen so a test can engrave TWO DIFFERENT plates
+// and compare what was cut -- which is how the payload sink distinguishes "the
+// walk cut something" from "the walk cut THIS PLATE".
+func newTestEngraveScreenAt(t *testing.T, ctx *Context, idx int) *EngraveScreen {
 	desc := &bip380.Descriptor{
 		Script:    bip380.P2WSH,
 		Threshold: 2,
@@ -152,10 +164,11 @@ func newTestEngraveScreen(t *testing.T, ctx *Context) *EngraveScreen {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewEngraveScreen(
-		ctx,
-		engravings[0],
-	)
+	if idx < 0 || idx >= len(engravings) {
+		t.Fatalf("plate index %d out of range: descriptor yields %d engraving(s)",
+			idx, len(engravings))
+	}
+	return NewEngraveScreen(ctx, engravings[idx])
 }
 
 func TestEngraveScreenCancel(t *testing.T) {
@@ -471,6 +484,89 @@ type testEngraver struct {
 	ioErr  error
 	closes chan struct{}
 	opens  chan struct{}
+
+	// PAYLOAD SINK (P1, 2026-08-19). Write used to return len(steps) and drop
+	// the words on the floor, so every walk in this package engraved into a
+	// void: a test could observe that engraving was ATTEMPTED but never that
+	// anything was cut, nor that what was cut depended on the payload. The
+	// constellation recon named that as the reason no gui walk can carry the
+	// journey definition's functional assertion even in principle.
+	//
+	// A COUNT AND AN ORDER-SENSITIVE DIGEST, not the words themselves.
+	// Retaining the stream was tried first and measured: one plate of the
+	// package's own 2-of-3 test descriptor writes 20,331,184 words, i.e. ~81 MB
+	// held per engrave, which every one of the walk files would then pay. The
+	// digest answers both questions that were impossible before -- "did this
+	// walk cut anything at all" and "does the cut DEPEND on the payload" -- in
+	// constant memory.
+	//
+	// Decoding the stream to geometry would need the pin-layout constants,
+	// which are private to package stepper (see decodeTicks in
+	// stepper/resume_homing_invariant_test.go). That is the T4-sim decoder and
+	// is explicitly low priority; a test needing real geometry should keep its
+	// own words rather than making every walk hold 81 MB.
+	// spill, when non-nil, receives every stepper word as little-endian
+	// uint32. OFF by default and opt-in per test via keepWordsIn.
+	//
+	// A FILE under t.TempDir(), never memory and never the repo: one plate of
+	// this package's 2-of-3 descriptor is 20,331,184 words -- ~81 MB measured
+	// -- which is fine as a scratch file on a PC but is not something to hold
+	// in RAM, and is certainly not something to leave lying in the worktree.
+	// t.TempDir() lives under $TMPDIR and the test framework deletes it when
+	// the test ends, so a full-fidelity capture cleans up after itself.
+	//
+	// NONE of this reaches the machine. _test.go files are compiled by `go
+	// test` and never by the TinyGo firmware build, so the sink has no SH2
+	// footprint whatsoever -- this is purely a PC test-runner concern.
+	spill *os.File
+
+	mu     sync.Mutex
+	nwords int
+	digest uint64
+}
+
+// keepWordsIn starts spilling the raw stepper stream to a temp file.
+//
+// Call before the engrave runs. The file is created under t.TempDir(), so it is
+// removed automatically when the test finishes -- no cleanup for the caller and
+// nothing left behind if the test fails.
+func (p *testEngraver) keepWordsIn(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "engraved-*.u32")
+	if err != nil {
+		t.Fatalf("engrave sink: temp file: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
+	p.mu.Lock()
+	p.spill = f
+	p.mu.Unlock()
+}
+
+// engravedWordsFile is the spill path, or "" if keepWordsIn was never called.
+//
+// This is what a future geometry check would consume: decoding needs the
+// pin-layout constants, which are private to package stepper (see decodeTicks
+// in stepper/resume_homing_invariant_test.go). That decoder is the T4-sim work
+// and is explicitly low priority -- but the words are now recoverable by it.
+func (p *testEngraver) engravedWordsFile() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.spill == nil {
+		return ""
+	}
+	return p.spill.Name()
+}
+
+// engraved reports how many stepper words were written and an order-sensitive
+// digest of them.
+//
+// Read under the lock because the engrave job writes from its own goroutine
+// (gui/engraver.go runs the driver off the UI loop), so touching the fields
+// directly would race even though CI does not run -race today.
+func (p *testEngraver) engraved() (words int, digest uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.nwords, p.digest
 }
 
 func (p *testEngraver) Stats() EngraverStats {
@@ -481,8 +577,29 @@ func (p *testEngraver) Write(steps []uint32) (int, error) {
 	err := p.ioErr
 	p.ioErr = nil
 	if err != nil {
+		// A failed write engraved nothing; recording it would make the sink
+		// claim cuts the machine never made.
 		return 0, err
 	}
+	p.mu.Lock()
+	// FNV-1a-style mixing over whole words. Order-sensitive on purpose: two
+	// plates that cut the same moves in a different order are different cuts.
+	for _, w := range steps {
+		p.digest ^= uint64(w)
+		p.digest *= 1099511628211
+	}
+	p.nwords += len(steps)
+	if p.spill != nil {
+		buf := make([]byte, 4*len(steps))
+		for i, w := range steps {
+			binary.LittleEndian.PutUint32(buf[4*i:], w)
+		}
+		// Ignoring the error deliberately: the spill is diagnostic, and a full
+		// /tmp must not turn an engrave-walk assertion into a write failure.
+		// A short file shows up as a short read at the assertion site.
+		_, _ = p.spill.Write(buf)
+	}
+	p.mu.Unlock()
 	return len(steps), nil
 }
 
@@ -507,6 +624,7 @@ func newEngraver() *testEngraver {
 	t := &testEngraver{
 		closes: make(chan struct{}, 1),
 		opens:  make(chan struct{}, 1),
+		digest: 14695981039346656037, // FNV-1a 64-bit offset basis
 	}
 	return t
 }
