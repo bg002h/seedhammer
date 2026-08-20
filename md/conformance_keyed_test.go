@@ -14,7 +14,7 @@ import (
 type keyedConformanceRecord struct {
 	Name                       string  `json:"name"`
 	Template                   string  `json:"template"`
-	Path                       *string `json:"path"`
+	Path                       *string `json:"path"` // retained: names the elided-origin vectors F-212 was about
 	Md1EncodingID              string  `json:"md1_encoding_id"`
 	WalletDescriptorTemplateID string  `json:"wallet_descriptor_template_id"`
 	WalletPolicyID             string  `json:"wallet_policy_id"`
@@ -82,38 +82,21 @@ func TestKeyedConformanceAgreesWithRust(t *testing.T) {
 			}
 			gotHex := hex.EncodeToString(got[:])
 
-			// ── A PINNED GAP, NOT A SKIP (F-212) ────────────────────────────
+			// F-212 IS CLOSED (2026-08-20): every vector must agree, elided
+			// origin or not.
 			//
-			// This port and the Rust primary DISAGREE on WalletPolicyId when the
-			// origin is ELIDED, and agree when it is explicit. Measured on one
-			// wallet encoded both ways:
+			// This arm used to pin a GAP. Go and Rust disagreed here whenever the
+			// origin was elided -- rust c79039c5…, go 260f334a… for one wallet --
+			// because Rust canonical-fills an empty origin before hashing and this
+			// port hashed it as-is. The omission cited "R0-I2" as a deliberate
+			// divergence; R0-I2 is a different ruling (OriginPath's type shape),
+			// and R0-I1 REQUIRES the fallback. The port converged, per the
+			// Rust-primary rule.
 			//
-			//   explicit 84'/0'/0'  rust c79039c5…  go c79039c5…   agree
-			//   origin elided       rust c79039c5…  go 260f334a…   DIVERGE
-			//
-			// Rust canonical-fills an empty origin before hashing, so its
-			// policy id is "stable across origin-elision" (identity.rs, L14).
-			// This port hashes the empty origin AS-IS and documents that as
-			// deliberate (walletpolicyid.go: "NO canonicalOrigin fallback …
-			// R0-I2"). Both call their behaviour intentional; they cannot both
-			// be right, and under the Rust-primary rule Rust is normative.
-			//
-			// The gap is ASSERTED rather than skipped: an elided-origin vector
-			// must still diverge, and an explicit-origin one must still agree.
-			// So this fires the moment either changes — including the moment
-			// the divergence is FIXED, which is when it should be flipped.
-			elided := rec.Path == nil
-			switch {
-			case !elided && gotHex != rec.WalletPolicyID:
-				t.Errorf("%s: wallet_policy_id diverged on an EXPLICIT origin, "+
-					"which is outside the known gap\n  go:   %s\n  rust: %s",
-					name, gotHex, rec.WalletPolicyID)
-			case elided && gotHex == rec.WalletPolicyID:
-				t.Errorf("%s: the elided-origin policy-id gap (F-212) is CLOSED — "+
-					"go and rust now agree (%s). Delete this arm and require "+
-					"equality for every vector.", name, gotHex)
-			case elided:
-				t.Logf("%s: known gap F-212 — go %s != rust %s (origin elided)",
+			// The pinned-gap arm was written to fire when the divergence was
+			// FIXED, and it did. That is why it is gone rather than forgotten.
+			if gotHex != rec.WalletPolicyID {
+				t.Errorf("%s: wallet_policy_id\n  go:   %s\n  rust: %s",
 					name, gotHex, rec.WalletPolicyID)
 			}
 

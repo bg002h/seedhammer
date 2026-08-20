@@ -50,6 +50,25 @@ func WalletPolicyId(d *descriptor) ([16]byte, error) {
 		if err != nil {
 			return [16]byte{}, err
 		}
+		// CANONICAL-FILL AN ELIDED ORIGIN before hashing, mirroring Rust
+		// `identity.rs` (its L14 note). Without this the policy id CHANGES when
+		// the origin is elided, which broke the primary's documented "stable
+		// across origin-elision" invariant and made the two implementations
+		// disagree about the identity that binds mk1 cards to a wallet:
+		//
+		//   explicit 84'/0'/0'   rust c79039c5…   go c79039c5…   agreed
+		//   origin elided        rust c79039c5…   go 260f334a…   diverged
+		//
+		// The omission was labelled a deliberate divergence citing "R0-I2".
+		// R0-I2 is a different ruling — it says OriginPath is a bip32.Path with
+		// in-band hardening and drops an `OriginHardened []bool` field. The
+		// ruling about this fallback is R0-I1, and it REQUIRES it. So the
+		// divergence rested on a mis-citation rather than an argument. F-212.
+		if len(origin.components) == 0 {
+			if co, ok := canonicalOrigin(dc.tree); ok {
+				origin = co
+			}
+		}
 		us := resolveUseSiteRaw(dc, idx)
 
 		// Scratch-write origin + use-site to capture their unpadded bit lengths.
@@ -138,11 +157,11 @@ func WalletPolicyIDStubChunks(strs []string) ([4]byte, error) {
 
 // resolveOriginRaw mirrors expand_per_at_n's origin resolution for the id
 // preimage (canonicalize.rs:436-444): the per-@N OriginPathOverrides entry if
-// present, else the path_decl value (Divergent[idx] / Shared) AS-IS — NO
-// canonicalOrigin fallback (the deliberate divergence from the display accessor,
-// R0-I2). The returned originPath may be empty (depth 0): an elided shared path
-// under a wrapper that HAS a canonicalOrigin is a legitimate empty origin, and
-// is hashed AS-IS.
+// present, else the path_decl value (Divergent[idx] / Shared). It may return an
+// EMPTY origin (depth 0) for an elided shared path; the caller canonical-fills
+// that before hashing, which is what keeps the policy id stable across
+// origin-elision and in agreement with the Rust primary (F-212). This function
+// deliberately does not fill it itself, so the raw resolution stays inspectable.
 //
 // A decoded descriptor always carries either a shared or a divergent path_decl
 // (readPathDecl), so the final no-decl fallthrough is unreachable on the
