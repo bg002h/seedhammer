@@ -146,6 +146,33 @@ func seedEntryFlowTypedOnly(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
 // and therefore the one an operator is most likely to be looking at when they
 // lose track of which seed they are typing. It is short on purpose ("@0", not
 // the whole title): that line also carries the word counter.
+// seedEntryFlowResume is seedEntryFlow that RE-ENTERS with words already typed.
+//
+// Added 2026-08-19 for the operator directive "going back should lose nothing".
+// A step machine that sends Back to an earlier step is only honest if that step
+// comes back up holding what the operator put in it; re-offering a blank
+// keyboard would satisfy the control flow and lose the data anyway.
+//
+// prev == nil behaves exactly like seedEntryFlow, so callers that have nothing
+// to restore need no special case.
+//
+// The prefill works because inputWordsFlow fills its mnemonic IN PLACE: handing
+// it a populated slice resumes rather than restarts. The copy is deliberate --
+// the caller keeps ownership of its own buffer and its scrub, and a shared slice
+// would let this flow zero words the caller still needs.
+func seedEntryFlowResume(ctx *Context, th *Colors, prev bip39.Mnemonic) (bip39.Mnemonic, bool) {
+	if len(prev) == 0 {
+		return seedEntryFlow(ctx, th)
+	}
+	resume := make(bip39.Mnemonic, len(prev))
+	copy(resume, prev)
+	inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true})
+	if isEmptyMnemonic(resume) {
+		return nil, false
+	}
+	return resume, true
+}
+
 func seedEntryFlowTypedOnlyTitled(ctx *Context, th *Colors, title, wordPrefix string) (bip39.Mnemonic, bool) {
 	cs := &ChoiceScreen{Title: title, Lead: "Choose number of words", Choices: []string{"12 WORDS", "24 WORDS"}}
 	for {
