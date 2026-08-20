@@ -225,13 +225,31 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// ever live and unowned.
 	reg := &seedRegistry{}
 	defer reg.scrub()
-	seedIDs := make([]int, 0, len(p.SelfSlots))
-	for _, slot := range p.SelfSlots {
-		id, ok := buildSeedForSlot(ctx, th, reg, slot)
-		if !ok {
-			return
-		}
-		seedIDs = append(seedIDs, id)
+	// BACK STEPS BACK ACROSS HELD SLOTS (2026-08-19 operator directive: "going
+	// back should lose nothing"). This used to `return` on any Back, so an
+	// operator who mistyped the SECOND held slot's seed lost the FIRST one too
+	// and restarted the whole build. Of everything Back can discard on this
+	// path, entered seeds are the most expensive.
+	//
+	// Back on the first held slot still leaves, which is the directive's rule
+	// for a first step — and this is the first step that takes a seed.
+	//
+	// seedIDs is TRUNCATED when stepping back, not left to grow: the slot being
+	// re-entered must not keep its previous id, or buildSlotSources below would
+	// bind that slot to a seed the operator just replaced.
+	//
+	// NOT YET CONVERTED, and deliberately left alone: the two Backs EARLIER in
+	// this function (buildSelfSourceFlow and the cosigner gather) still leave
+	// the program. They sit inside conditionals over state derived from `p`, so
+	// stepping back to the param pick means retrying the whole prefix — and
+	// `chosen`, `cosigners` and `origins` are declared inside it and consumed
+	// after it, so that retry needs them hoisted first. Attempted and reverted
+	// rather than half-landed; see SPEC_back_button_loses_nothing.md.
+	seedIDs, gathered := gatherSlotSeeds(len(p.SelfSlots), func(i int) (int, bool) {
+		return buildSeedForSlot(ctx, th, reg, p.SelfSlots[i])
+	})
+	if !gathered {
+		return
 	}
 
 	// (4) THE SEED<->KEY GATE (SPEC 4.3), at construction time and before
@@ -516,6 +534,39 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 // -- and §4.1's duplicate-key refusal would then reject a legitimate
 // multi-account wallet. Trace B is that wallet: @0 = A account 0, @1 = A account
 // 1, @2 = B account 0.
+// gatherSlotSeeds asks for one seed per held slot, and lets Back STEP BACK to
+// the previous slot instead of abandoning the build (2026-08-19 operator
+// directive: "going back should lose nothing"). It previously returned on any
+// Back, so mistyping the SECOND held slot's seed also discarded the FIRST.
+//
+// Back on the first slot still leaves: that is the directive's rule for a first
+// step, and this is the first step that takes a seed.
+//
+// The returned ids are POSITIONAL -- ids[i] is the seed for SelfSlots[i], which
+// is the contract buildSlotSources relies on when it reads seedIDs[hi]. That is
+// why stepping back TRUNCATES rather than letting the slice grow: an untruncated
+// slice shifts every later slot's id by one, so the operator's re-entered seed
+// would silently bind to the NEXT slot and the discarded one would bind to this
+// slot. It is extracted from the flow so that aliasing is testable without
+// driving the GUI.
+func gatherSlotSeeds(n int, ask func(i int) (int, bool)) ([]int, bool) {
+	ids := make([]int, 0, n)
+	for i := 0; i < n; {
+		id, ok := ask(i)
+		if !ok {
+			if i == 0 {
+				return nil, false
+			}
+			i--
+			ids = ids[:i]
+			continue
+		}
+		ids = append(ids, id)
+		i++
+	}
+	return ids, true
+}
+
 func buildSlotSources(p buildPolicyParams, seedIDs []int, chosen []int, reg *seedRegistry) []slotSource {
 	out := make([]slotSource, p.N)
 	held := map[int]int{}

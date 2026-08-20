@@ -171,14 +171,26 @@ func TestBuildHoldingEverySlotReachesTheSeed(t *testing.T) {
 			t.Errorf("the second seed prompt does not name @1: %q", c)
 		}
 
-		// Leaving is Back out of the seed entry; the flow must return rather than
-		// leaving this test's goroutine parked.
+		// BACK NOW STEPS BACK (2026-08-19 operator directive: "going back should
+		// lose nothing"). Back at the SECOND held slot returns to the FIRST
+		// slot's seed entry instead of leaving — losing one slot's work, not
+		// both. This test leaves by backing out TWICE: once to @0, once more
+		// from the first seed entry, which is still an exit.
 		click(&ctx.Router, Button1)
-		for i := 0; i < 128 && !done; i++ {
+		c, ok = pumpUntil(frame, "@0", 128)
+		if !ok {
+			t.Fatalf("Back at the second seed entry did not return to @0's; got %q", c)
+		}
+		if done {
+			t.Fatal("Back at the SECOND seed entry LEFT the flow — the " +
+				"pre-2026-08-19 behaviour, which discarded @0's seed too")
+		}
+		click(&ctx.Router, Button1)
+		for i := 0; i < 192 && !done; i++ {
 			frame()
 		}
 		if !done {
-			t.Fatal("the flow did not return after Back at the second seed entry")
+			t.Fatal("Back at the FIRST seed entry did not leave the flow")
 		}
 	})
 }
