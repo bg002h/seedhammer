@@ -270,7 +270,7 @@ func TestBuildFlow_GatherBeforeSeed(t *testing.T) {
 		})
 	})
 
-	t.Run("with a payload the gather runs, and Back leaves before any seed", func(t *testing.T) {
+	t.Run("with a payload the gather runs, and backing out leaves before any seed", func(t *testing.T) {
 		records := cosignerCardRecords(t, 1)
 		synctest.Test(t, func(t *testing.T) {
 			seedTyped := false
@@ -288,14 +288,32 @@ func TestBuildFlow_GatherBeforeSeed(t *testing.T) {
 			if _, ok := pumpUntil(frame, "mk1 keys: 1", 16); !ok {
 				t.Fatal("the payload's card never reached the gather tally")
 			}
-			// Back LEAVES the gather -> bundleGatherFlow returns ok=false, so the
-			// flow returns without ever typing a seed.
+			// BACK STEPS BACK NOW (2026-08-19 operator directive, "going back
+			// should lose nothing"): the gather's Back returns to the screen
+			// before it instead of abandoning the build and every pick behind it.
+			//
+			// THE GUARANTEE THIS SUBTEST EXISTS FOR IS UNCHANGED, and is the
+			// seedTyped assertion below: the gather precedes seed entry, and no
+			// seed is typed on the way out. Only the number of presses moved, so
+			// the walk backs out until the flow leaves rather than pinning a count
+			// -- the parameter pickers are their own step machine and how many
+			// stages they hold is not this test's subject.
 			click(&ctx.Router, Button1)
 			for i := 0; i < 32 && !done; i++ {
 				frame()
 			}
+			if done {
+				t.Fatal("Back at the gather abandoned the build instead of " +
+					"stepping back to the screen before it")
+			}
+			for n := 0; n < 32 && !done; n++ {
+				click(&ctx.Router, Button1)
+				for i := 0; i < 16 && !done; i++ {
+					frame()
+				}
+			}
 			if !done {
-				t.Fatal("flow did not return after gather Back")
+				t.Fatal("backing out of every prefix screen never left the build")
 			}
 			if seedTyped {
 				t.Fatal("seed was typed BEFORE the cosigner gather; gather must precede seed entry")

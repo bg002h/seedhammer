@@ -37,28 +37,20 @@ import (
 // assert it is scrubbed on exit). nil in production. Mirrors multisigSeedHook.
 var buildMultisigSeedHook func(bip39.Mnemonic)
 
+// The three steps of the build prefix. Back moves between them rather than
+// abandoning the build; only buildStepParams' Back leaves.
+const (
+	buildStepParams = iota
+	buildStepSelfSource
+	buildStepGather
+)
+
 func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// (1) Bounded param pickers (template/n/k/@S/fp).
-	p, ok := buildParamPickFlow(ctx, th)
-	if !ok {
-		return
-	}
-	// The @S picker's FIRST screen is a mandatory pick, so this cannot fire today.
-	// (It used to read "the @S picker always sets exactly one held slot", which
-	// stopped being true at 4b10319 when the picker became a multi-select in this
-	// same branch -- and that stale premise is exactly what hid I-6: an operator
-	// CAN now hold every slot, so `open` can be 0.)
-	//
-	// It is here because every use of p.SelfSlots below would otherwise index an
-	// empty slice, and a panic partway through a flow that cuts steel is a worse
-	// outcome than a named refusal. buildEngraveTail's errBuildNoHeldSlot is the
-	// same guard at the other end of the flow.
-	if len(p.SelfSlots) == 0 {
-		showError(ctx, th, "Build Policy", "This build holds no key of its own, so there "+
-			"is nothing for this device to engrave. Start again and choose your slot.")
-		return
-	}
-
+	// COMPUTED ONCE, ABOVE THE PREFIX LOOP: neither depends on any parameter the
+	// operator picks, and buildCosignerSource is a pure read of the session
+	// despite `takeAll`'s name (sysw_session.go:158 filters, it does not consume),
+	// so re-running it per attempt would buy nothing.
 	// (2) THE PAYLOAD SUPPLIES THE WHOLE COSIGNER SET (S1). §3.3.2 admits
 	// ClassMDMK to this program; every such record is fed to the gather through
 	// the SAME offer() a scanned card takes, so all of them get identical dedup,
@@ -70,33 +62,6 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// ASSEMBLED set, in buildCosignerCards, below.
 	records, state := buildCosignerSource(ctx)
 	supply, incomplete := buildCosignerSupply(records)
-
-	// (2a) S4's ONE slot-source question (SPEC 4.3): is the operator's own key on
-	// a payload card as well as in their seed? That is the `both` assignment, and
-	// it is the only shape that triggers the gate.
-	//
-	// ASKED ONLY WHEN `both` IS ACHIEVABLE, which is this package's own rule
-	// rather than a new one: a picker with one possible answer is a tap that
-	// teaches nothing (syswSeedPicker says so in those words, and
-	// buildCosignerPickFlow short-circuits on the same principle). `both` puts a
-	// card in the operator's slot too, so it needs N cards where `derived` needs
-	// N-1; a payload that cannot supply N cannot offer the choice, and asking
-	// anyway would walk the operator into an under-supply refusal they caused by
-	// answering a question the device already knew the answer to.
-	selfSource := slotFromSeed
-	if state == cosignerSourceLoaded && len(supply) >= p.N {
-		src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlots)
-		if !ok {
-			return
-		}
-		selfSource = src
-	}
-	p.SelfFromCard = selfSource == slotFromBoth
-
-	open := p.N - len(p.SelfSlots)
-	if p.SelfFromCard {
-		open = p.N
-	}
 
 	// A BUILD THAT DEMANDS NOTHING TALKS TO NO PAYLOAD (I-6). An operator holding
 	// every slot of a 2-of-2 and typing both seeds on the keyboard needs a payload
@@ -124,87 +89,182 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 		// sets open = p.N), so every slot resolves to slotFromSeed with Card = -1.
 		chosen []int
 	)
-	if open > 0 {
-		if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
-			// Refuse BEFORE the gather. Walking the operator into a gather that
-			// cannot succeed and dead-ending them there is the defect this stage
-			// removes; the message names the only route this hardware has.
-			showError(ctx, th, "Build Policy",
-				buildSupplyRefusal(state, len(supply), open, incomplete))
-			return
-		}
-		ctx.syswBundleSeeds = records
-		cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
-		if !ok {
-			return
-		}
-		// md1 records ride along on a systemwide payload and must not fail the build
-		// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
-		// here rather than there.
-		mk1s = mk1CosignerCards(cards)
-		// Re-classified over what the GATHER produced, not over what the payload
-		// held: on reader-equipped hardware the operator may have added more.
-		//
-		// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
-		// is total, but leaving auto-fill as this switch's implicit default made the
-		// CALL SITE non-total: a fourth outcome, or any future disagreement between
-		// the two classify calls, would have taken the all-cards branch in silence.
-		// The ruling that forbids assuming `n-1` deserves a case analysis that says
-		// so at both ends.
-		outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
-		switch outcome {
-		case cosignerRefuse:
-			showError(ctx, th, "Build Policy",
-				buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
-			return
-		case cosignerAutoFill:
-			// Exactly enough: every card fills a slot, in payload record order.
-			chosen = make([]int, len(mk1s))
-			for i := range chosen {
-				chosen[i] = i
-			}
-		case cosignerSelect:
-			// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
-			// over-supply is the CHOICE. A picker with one possible answer is a tap
-			// that teaches nothing.
-			if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
-				return
-			}
-			chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+
+	// THE PREFIX IS THREE STEPS -- parameters, self-source, cosigner gather -- AND
+	// BACK MOVES BETWEEN THEM (2026-08-19 operator directive, "going back should
+	// lose nothing"). Both of the later two used a bare `return`, so a Back on
+	// either abandoned the whole build and discarded every pick behind it.
+	//
+	// Only the parameter step's Back leaves, and it leaves from
+	// buildParamPickFlowFrom's own first stage -- that flow is already a step
+	// machine, so Back walks template <- n <- k <- @S <- fp before it gives up.
+	// Re-entering it resumes at stageFp rather than restarting at the template,
+	// which is what makes stepping back one screen cost one screen.
+	var (
+		p               buildPolicyParams
+		open            int
+		paramStage      = stageTemplate
+		askedSelfSource bool
+		step            = buildStepParams
+	)
+prefix:
+	for {
+		switch step {
+		case buildStepParams:
+			var ok bool
+			p, ok = buildParamPickFlowFrom(ctx, th, p, paramStage)
 			if !ok {
 				return
 			}
-		default:
-			showError(ctx, th, "Build Policy",
-				"Couldn't work out how the payload's cards fit this policy.")
-			return
-		}
-		if outcome == cosignerAutoFill {
-			// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
-			// of what the payload supplied on this arm too. Before the fold their
-			// only such screen was the shared gather's "Scan a card, or Done." — a
-			// count and an instruction this hardware cannot perform.
-			if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+			// The @S picker's FIRST screen is a mandatory pick, so this cannot fire today.
+			// (It used to read "the @S picker always sets exactly one held slot", which
+			// stopped being true at 4b10319 when the picker became a multi-select in this
+			// same branch -- and that stale premise is exactly what hid I-6: an operator
+			// CAN now hold every slot, so `open` can be 0.)
+			//
+			// It is here because every use of p.SelfSlots below would otherwise index an
+			// empty slice, and a panic partway through a flow that cuts steel is a worse
+			// outcome than a named refusal. buildEngraveTail's errBuildNoHeldSlot is the
+			// same guard at the other end of the flow.
+			if len(p.SelfSlots) == 0 {
+				showError(ctx, th, "Build Policy", "This build holds no key of its own, so there "+
+					"is nothing for this device to engrave. Start again and choose your slot.")
 				return
 			}
+			// Every later re-entry resumes at the LAST stage, not the first.
+			paramStage = stageFp
+			step = buildStepSelfSource
+		case buildStepSelfSource:
+			// (2a) S4's ONE slot-source question (SPEC 4.3): is the operator's own key on
+			// a payload card as well as in their seed? That is the `both` assignment, and
+			// it is the only shape that triggers the gate.
+			//
+			// ASKED ONLY WHEN `both` IS ACHIEVABLE, which is this package's own rule
+			// rather than a new one: a picker with one possible answer is a tap that
+			// teaches nothing (syswSeedPicker says so in those words, and
+			// buildCosignerPickFlow short-circuits on the same principle). `both` puts a
+			// card in the operator's slot too, so it needs N cards where `derived` needs
+			// N-1; a payload that cannot supply N cannot offer the choice, and asking
+			// anyway would walk the operator into an under-supply refusal they caused by
+			// answering a question the device already knew the answer to.
+			selfSource := slotFromSeed
+			askedSelfSource = state == cosignerSourceLoaded && len(supply) >= p.N
+			if askedSelfSource {
+				src, ok := buildSelfSourceFlow(ctx, th, p.SelfSlots)
+				if !ok {
+					step = buildStepParams
+					continue
+				}
+				selfSource = src
+			}
+			p.SelfFromCard = selfSource == slotFromBoth
+
+			open = p.N - len(p.SelfSlots)
+			if p.SelfFromCard {
+				open = p.N
+			}
+			step = buildStepGather
+		case buildStepGather:
+			// RESET, because this step can run more than once now. Every name below
+			// is ASSIGNED rather than appended to, so a second pass overwrites what
+			// the first produced -- except when the retry lands on open == 0, where
+			// nothing below assigns at all and the last pass's cards would survive
+			// into a build that no longer wants any.
+			cosigners, origins, mk1s, chosen = nil, nil, nil, nil
+			if open > 0 {
+				if classifyCosignerSupply(state, len(supply), open) == cosignerRefuse {
+					// Refuse BEFORE the gather. Walking the operator into a gather that
+					// cannot succeed and dead-ending them there is the defect this stage
+					// removes; the message names the only route this hardware has.
+					showError(ctx, th, "Build Policy",
+						buildSupplyRefusal(state, len(supply), open, incomplete))
+					return
+				}
+				ctx.syswBundleSeeds = records
+				cards, ok := bundleGatherFlow(ctx, th, buildCosignerGatherTitle)
+				if !ok {
+					// BACK GOES TO THE SCREEN BEFORE THIS ONE, which is the
+					// self-source question when it was asked and the parameters when
+					// it was not -- that question is only put when the payload can
+					// supply `both`, so stepping onto it otherwise would be a Back
+					// that invents a step the operator never saw.
+					if askedSelfSource {
+						step = buildStepSelfSource
+					} else {
+						step = buildStepParams
+					}
+					continue
+				}
+				// md1 records ride along on a systemwide payload and must not fail the build
+				// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
+				// here rather than there.
+				mk1s = mk1CosignerCards(cards)
+				// Re-classified over what the GATHER produced, not over what the payload
+				// held: on reader-equipped hardware the operator may have added more.
+				//
+				// THE SWITCH IS EXHAUSTIVE ON PURPOSE (fold, N1). `classifyCosignerSupply`
+				// is total, but leaving auto-fill as this switch's implicit default made the
+				// CALL SITE non-total: a fourth outcome, or any future disagreement between
+				// the two classify calls, would have taken the all-cards branch in silence.
+				// The ruling that forbids assuming `n-1` deserves a case analysis that says
+				// so at both ends.
+				outcome := classifyCosignerSupply(cosignerSourceLoaded, len(mk1s), open)
+				switch outcome {
+				case cosignerRefuse:
+					showError(ctx, th, "Build Policy",
+						buildSupplyRefusal(cosignerSourceLoaded, len(mk1s), open, false))
+					return
+				case cosignerAutoFill:
+					// Exactly enough: every card fills a slot, in payload record order.
+					chosen = make([]int, len(mk1s))
+					for i := range chosen {
+						chosen[i] = i
+					}
+				case cosignerSelect:
+					// SPEC P0 item 6's review runs on BOTH arms (below); what is bounded to
+					// over-supply is the CHOICE. A picker with one possible answer is a tap
+					// that teaches nothing.
+					if !buildPayloadReviewFlow(ctx, th, mk1s, open, true) {
+						return
+					}
+					chosen, ok = buildCosignerPickFlow(ctx, th, mk1s, open)
+					if !ok {
+						return
+					}
+				default:
+					showError(ctx, th, "Build Policy",
+						"Couldn't work out how the payload's cards fit this policy.")
+					return
+				}
+				if outcome == cosignerAutoFill {
+					// SPEC P0 item 6, "ruled here, not deferred": the operator sees a review
+					// of what the payload supplied on this arm too. Before the fold their
+					// only such screen was the shared gather's "Scan a card, or Done." — a
+					// count and an instruction this hardware cannot perform.
+					if !buildPayloadReviewFlow(ctx, th, mk1s, open, false) {
+						return
+					}
+				}
+				picked := make([]bundleCard, 0, len(chosen))
+				for _, i := range chosen {
+					picked = append(picked, mk1s[i])
+				}
+				cosigners, ok = buildCosignerCards(picked, open)
+				if !ok {
+					// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
+					// length equals `open` on both arms, so the count arm of
+					// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
+					// with a rewrite-the-payload remedy would be two equal counts and a
+					// wrong instruction. What is left is a card that passed mk.Decode in the
+					// gatherer and failed it here, which is a read failure, so say that.
+					showError(ctx, th, "Build Policy",
+						"Couldn't read the cosigner key cards from the payload.")
+					return
+				}
+				origins = buildCosignerOrigins(p, chosen)
+			}
+			break prefix
 		}
-		picked := make([]bundleCard, 0, len(chosen))
-		for _, i := range chosen {
-			picked = append(picked, mk1s[i])
-		}
-		cosigners, ok = buildCosignerCards(picked, open)
-		if !ok {
-			// NOT an under-supply refusal (fold, N2). `picked` is all-mk1 and its
-			// length equals `open` on both arms, so the count arm of
-			// buildCosignerCards cannot fire here and printing "holds 2, needs 2"
-			// with a rewrite-the-payload remedy would be two equal counts and a
-			// wrong instruction. What is left is a card that passed mk.Decode in the
-			// gatherer and failed it here, which is a read failure, so say that.
-			showError(ctx, th, "Build Policy",
-				"Couldn't read the cosigner key cards from the payload.")
-			return
-		}
-		origins = buildCosignerOrigins(p, chosen)
 	}
 
 	// (3) The self seed(s), through the ONE seam, into the REGISTRY -- ONE PER HELD
@@ -1048,8 +1108,18 @@ const (
 // stages are (re-)entered, so changing n upstream correctly re-bounds them. Every
 // returned param is in-range by construction (no free-form widget exists).
 func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
-	var p buildPolicyParams
-	stage := stageTemplate
+	return buildParamPickFlowFrom(ctx, th, buildPolicyParams{}, stageTemplate)
+}
+
+// buildParamPickFlowFrom is buildParamPickFlow RE-ENTERED at a given stage with
+// the previous picks in hand, so that a Back from a screen AFTER the pickers
+// costs one screen instead of restarting the parameter walk (2026-08-19
+// directive, "going back should lose nothing").
+//
+// Back still steps back one stage from wherever it resumes, and Back from
+// stageTemplate still abandons -- the caller re-entering at stageFp does not
+// change where the flow gives up, only where it starts.
+func buildParamPickFlowFrom(ctx *Context, th *Colors, p buildPolicyParams, stage int) (buildPolicyParams, bool) {
 	for stage != stageDone {
 		switch stage {
 		case stageTemplate:
