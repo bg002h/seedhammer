@@ -569,7 +569,12 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0,
     throw new Error(`verify settled on a screen that claims nothing: ${JSON.stringify(String(settled))}`);
   }
   return {
-    ok: true,
+    // NO CENSUS HERE, AND THAT IS THE POINT: a verify walk cuts nothing, so its
+    // subject is the VERDICT rather than a plate count. `ok` is an expression
+    // over what the run actually observed rather than a literal `true` -- the
+    // throws above are the real assertions, and deriving this keeps the boolean
+    // and the verdict it is returned beside from being able to disagree.
+    ok: /verified/i.test(squashed) && !/mismatch|notverified|doesnotmatch|failed/i.test(squashed),
     verifyVerdict: String(settled).replace(/\s+/g, " ").slice(0, 200),
     verifyTrail: [...new Set(verdict)].slice(0, 10),
     readbackCards: publicCards.length,

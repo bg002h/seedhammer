@@ -83,7 +83,7 @@ func TestBuildParamPickBackNav(t *testing.T) {
 			done := false
 			var gotOK bool
 			frame, quit := runUI(ctx, func() {
-				_, gotOK = buildParamPickFlow(ctx, &descriptorTheme)
+				_, gotOK = buildParamPickFlow(ctx, &descriptorTheme, buildPolicyParams{}, stageTemplate)
 				done = true
 			})
 			defer quit()

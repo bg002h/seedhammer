@@ -386,10 +386,24 @@ func TestWalkOkContainsNoDriverSuppliedPlateCount(t *testing.T) {
 			continue
 		}
 		// A floor, so a regex that grabbed the wrong span cannot pass by reading
-		// something harmless. Every walk's verdict is about the census.
-		if !strings.Contains(expr, "census") {
-			t.Errorf("INCONCLUSIVE: the `ok:` expression extracted from %s does not mention "+
-				"the census, so the wrong span was read:\n%s", f, expr)
+		// something harmless: the span has to name what the walk is ABOUT.
+		//
+		// For an engraving walk that is the census. NOT EVERY WALK ENGRAVES,
+		// though -- walk_verify drives bundle.Verify and cuts nothing, so it has
+		// no census to name and its subject is the verdict. Requiring "census"
+		// of it was demanding a count from a walk that has none, which is a guard
+		// asserting its own premise rather than the walk's honesty.
+		//
+		// The check that matters runs on BOTH kinds and is unchanged: `ok` must
+		// not contain a caller-supplied plate count.
+		// THE EXACT KEY, not a substring like "erdict". The loose form was
+		// satisfied by `verifyTrail: [...new Set(verdict)]` -- an incidental
+		// mention of a local VARIABLE -- so a walk could rename its verdict key
+		// away and still clear the floor on a word it happened to use elsewhere.
+		// A floor that any nearby identifier satisfies is not a floor.
+		if !strings.Contains(expr, "census") && !strings.Contains(expr, "verifyVerdict") {
+			t.Errorf("INCONCLUSIVE: the `ok:` expression extracted from %s reports neither a "+
+				"`census` nor a `verifyVerdict`, so the wrong span was read:\n%s", f, expr)
 			continue
 		}
 		checked++

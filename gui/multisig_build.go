@@ -96,7 +96,7 @@ func buildMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// either abandoned the whole build and discarded every pick behind it.
 	//
 	// Only the parameter step's Back leaves, and it leaves from
-	// buildParamPickFlowFrom's own first stage -- that flow is already a step
+	// buildParamPickFlow's own first stage -- that flow is already a step
 	// machine, so Back walks template <- n <- k <- @S <- fp before it gives up.
 	// Re-entering it resumes at stageFp rather than restarting at the template,
 	// which is what makes stepping back one screen cost one screen.
@@ -112,7 +112,7 @@ prefix:
 		switch step {
 		case buildStepParams:
 			var ok bool
-			p, ok = buildParamPickFlowFrom(ctx, th, p, paramStage)
+			p, ok = buildParamPickFlow(ctx, th, p, paramStage)
 			if !ok {
 				return
 			}
@@ -1107,19 +1107,21 @@ const (
 // (ok==false). k's and @S's ranges depend on n and are re-derived whenever those
 // stages are (re-)entered, so changing n upstream correctly re-bounds them. Every
 // returned param is in-range by construction (no free-form widget exists).
-func buildParamPickFlow(ctx *Context, th *Colors) (buildPolicyParams, bool) {
-	return buildParamPickFlowFrom(ctx, th, buildPolicyParams{}, stageTemplate)
-}
-
-// buildParamPickFlowFrom is buildParamPickFlow RE-ENTERED at a given stage with
-// the previous picks in hand, so that a Back from a screen AFTER the pickers
-// costs one screen instead of restarting the parameter walk (2026-08-19
-// directive, "going back should lose nothing").
+// It takes the previous picks and a starting stage so that a Back from a screen
+// AFTER the pickers costs one screen instead of restarting the parameter walk
+// (2026-08-19 directive, "going back should lose nothing"). Pass
+// (buildPolicyParams{}, stageTemplate) for a fresh walk.
 //
 // Back still steps back one stage from wherever it resumes, and Back from
-// stageTemplate still abandons -- the caller re-entering at stageFp does not
-// change where the flow gives up, only where it starts.
-func buildParamPickFlowFrom(ctx *Context, th *Colors, p buildPolicyParams, stage int) (buildPolicyParams, bool) {
+// stageTemplate still abandons -- re-entering at stageFp changes where the flow
+// starts, not where it gives up.
+//
+// ONE ENTRY POINT, NOT A WRAPPER PAIR. A thin buildParamPickFlow() delegating
+// here made every parameter screen reachable from TWO `...Flow` functions, which
+// is exactly what F-190's gate forbids: a walk anchoring on "Choose policy type"
+// could no longer prove which flow drew it.
+// (cmd/emu.TestBuildFlowNeedlesAreDrawnByExactlyOneFlow caught it.)
+func buildParamPickFlow(ctx *Context, th *Colors, p buildPolicyParams, stage int) (buildPolicyParams, bool) {
 	for stage != stageDone {
 		switch stage {
 		case stageTemplate:

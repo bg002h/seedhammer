@@ -222,7 +222,7 @@ func TestSelfSlotSetReachesParams(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())
 		frame, quit := runUI(ctx, func() {
-			p, ok = buildParamPickFlow(ctx, &descriptorTheme)
+			p, ok = buildParamPickFlow(ctx, &descriptorTheme, buildPolicyParams{}, stageTemplate)
 			done = true
 		})
 		defer quit()
