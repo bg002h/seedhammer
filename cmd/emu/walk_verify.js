@@ -552,6 +552,22 @@ export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0,
   if (settled === null) {
     throw new Error(`verify never reached a verdict; trail ${JSON.stringify([...new Set(verdict)].slice(0, 10))}`);
   }
+
+  // THE GATE. Measured 2026-08-19 on a full run (282 s): the device reports
+  //
+  //   "Operator key and secret verified. Other cosigners' keys are taken as
+  //    supplied."  / Verify OK
+  //
+  // Asserted on "verified" AND on the absence of a failure word, because a
+  // screen that says "not verified" contains "verified" as a substring -- the
+  // cheap check would pass on the exact case this walk exists to catch.
+  const squashed = squash(settled);
+  if (/mismatch|notverified|doesnotmatch|failed/i.test(squashed)) {
+    throw new Error(`bundle.Verify REJECTED the readback: ${JSON.stringify(String(settled))}`);
+  }
+  if (!/verified/i.test(squashed)) {
+    throw new Error(`verify settled on a screen that claims nothing: ${JSON.stringify(String(settled))}`);
+  }
   return {
     ok: true,
     verifyVerdict: String(settled).replace(/\s+/g, " ").slice(0, 200),
