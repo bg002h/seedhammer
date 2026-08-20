@@ -788,7 +788,15 @@ func templateConsentFlow(ctx *Context, th *Colors, tmplMd1 []string) bool {
 		showError(ctx, th, "Build Policy", "Couldn't compute the template id.")
 		return false
 	}
-	return confirmReviewScreen(ctx, th, "Template-only md1", templateConsentLines(tmpl, stub, depth))
+	// The structural summary (Stage 2). A failure here is NOT fatal: the
+	// consent screen falls back to the honest-minimal form, which is what it
+	// showed before the summary existed. Refusing to engrave because a
+	// DISPLAY aid could not be computed would be the wrong trade.
+	shape, err := md.PolicyShapeChunks(tmplMd1)
+	if err != nil {
+		shape = md.PolicyShape{}
+	}
+	return confirmReviewScreen(ctx, th, "Template-only md1", templateConsentLines(tmpl, stub, depth, shape))
 }
 
 // multisigBuildExperimentalWarning is the MANDATORY, unskippable, operator-

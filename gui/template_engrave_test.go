@@ -210,7 +210,7 @@ func TestTemplateConsentLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	stub, _ := md.FormAwareStubChunks(wsh)
-	lines := templateConsentLines(tmplWsh, stub, 0)
+	lines := templateConsentLines(tmplWsh, stub, 0, md.PolicyShape{})
 	if !containsLineSubstr(lines, "sortedmulti") {
 		t.Errorf("classifiable consent missing k-of-N label: %v", lines)
 	}
@@ -229,7 +229,11 @@ func TestTemplateConsentLines(t *testing.T) {
 	}
 	depth, _ := md.TapTreeDepthChunks(tr4)
 	stub4, _ := md.FormAwareStubChunks(tr4)
-	lines4 := templateConsentLines(tmplTr4, stub4, depth)
+	shape4, err := md.PolicyShapeChunks(tr4)
+	if err != nil {
+		t.Fatalf("PolicyShapeChunks: %v", err)
+	}
+	lines4 := templateConsentLines(tmplTr4, stub4, depth, shape4)
 	if !containsLineSubstr(lines4, "COMPLEX POLICY") {
 		t.Errorf("complex consent missing honest-minimal header: %v", lines4)
 	}
@@ -274,4 +278,77 @@ func mustTemplateMD1(t *testing.T, path string) []string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return strings.Fields(string(raw))
+}
+
+// TestComplexConsentShowsAStructuralSummary is Stage 2's screen contract.
+//
+// Before this, a complex policy got script family + slot count + template-id and
+// "Cannot fully display on-device." — correct, and nearly contentless. The
+// summary adds spend-path structure walked from the decoded tree.
+func TestComplexConsentShowsAStructuralSummary(t *testing.T) {
+	// tr(@0,{{pk(@1),pk(@2)},pk(@3)}) — a spendable key-path and three leaves.
+	shape := md.PolicyShape{
+		Complete: true,
+		KeyPath:  md.KeyPathSpendable,
+		TapDepth: 2,
+		Branches: []md.Branch{
+			{Keys: 1, Depth: 2},
+			{Keys: 1, Depth: 2},
+			{K: 2, N: 3, Keys: 3, Depth: 1, Timelock: true},
+		},
+	}
+	lines := templateConsentLines(md.Template{N: 4}, [4]byte{0xde, 0xad, 0xbe, 0xef}, 2, shape)
+	joined := strings.Join(lines, "\n")
+
+	// THE KEY-PATH LINE IS THE ONE THAT MUST NOT BE MISSING: a spendable
+	// internal key moves funds without satisfying any leaf.
+	if !strings.Contains(joined, "A KEY CAN SPEND ALONE") {
+		t.Errorf("the spendable key-path is not stated:\n%s", joined)
+	}
+	if !strings.Contains(joined, "Spend paths: 3") {
+		t.Errorf("the spend-path count is missing:\n%s", joined)
+	}
+	if !strings.Contains(joined, "tree depth 2") {
+		t.Errorf("the taptree depth is missing:\n%s", joined)
+	}
+	if !strings.Contains(joined, "2-of-3 +timelock") {
+		t.Errorf("the threshold branch and its timelock are missing:\n%s", joined)
+	}
+	// A branch that is NOT a plain threshold must not be described as one.
+	if strings.Contains(joined, "1-of-1") {
+		t.Errorf("a non-threshold branch was rendered as 1-of-1:\n%s", joined)
+	}
+	// The summary REPLACES the contentless line when it can be given.
+	if strings.Contains(joined, "Cannot fully display on-device.") {
+		t.Errorf("a complete summary still claimed it cannot display:\n%s", joined)
+	}
+	// And the verify instruction survives regardless — a summary is not a
+	// substitute for checking against the coordinator.
+	if !strings.Contains(joined, "VERIFY against your coordinator") {
+		t.Errorf("the verify instruction was dropped:\n%s", joined)
+	}
+}
+
+// TestIncompleteShapeShowsNoSummaryAtAll is the honesty contract at the screen.
+//
+// If the walk could not classify every node, the operator must get the old
+// honest-minimal wording and NOT a partial spend-path list — believing you have
+// seen the whole policy is the failure mode SPEC §4.2/C3 names.
+func TestIncompleteShapeShowsNoSummaryAtAll(t *testing.T) {
+	partial := md.PolicyShape{
+		Complete: false,
+		KeyPath:  md.KeyPathSpendable,
+		Branches: []md.Branch{{K: 2, N: 3, Keys: 3}},
+	}
+	lines := templateConsentLines(md.Template{N: 3}, [4]byte{1, 2, 3, 4}, 1, partial)
+	joined := strings.Join(lines, "\n")
+
+	if !strings.Contains(joined, "Cannot fully display on-device.") {
+		t.Errorf("an incomplete walk lost the honest-minimal wording:\n%s", joined)
+	}
+	for _, leaked := range []string{"Spend path", "2-of-3", "A KEY CAN SPEND ALONE"} {
+		if strings.Contains(joined, leaked) {
+			t.Errorf("an INCOMPLETE summary leaked %q to the screen:\n%s", leaked, joined)
+		}
+	}
 }

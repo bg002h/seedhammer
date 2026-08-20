@@ -60,7 +60,7 @@ func reStubMk1(mk1 []string, stub [4]byte) ([]string, error) {
 //
 // templateID is the 4-byte WDT-Id stub of the (stripped) template; tapDepth is
 // md.TapTreeDepthChunks of the template.
-func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int) []string {
+func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int, shape md.PolicyShape) []string {
 	var lines []string
 	if tmpl.Renderable && tmpl.Policy != md.PolicyComplex {
 		lines = append(lines,
@@ -70,13 +70,25 @@ func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int) []
 			fmt.Sprintf("Template-ID: %x", templateID),
 		)
 	} else {
-		// C3 honest-minimal: no k-of-N computable on-device.
+		// C3 honest-minimal, PLUS a structural summary when one can be given
+		// completely (Stage 2).
 		lines = append(lines,
 			"COMPLEX POLICY (advanced)",
-			"Cannot fully display on-device.",
 			fmt.Sprintf("Script: %s", complexScriptFamily(tmpl, tapDepth)),
 			fmt.Sprintf("Key slots: %d", tmpl.N),
 			fmt.Sprintf("Template-ID: %x", templateID),
+		)
+		// THE CONTRACT: shape.Complete is the ONLY thing that admits a summary.
+		// A partial one is worse than none — SPEC §4.2/C3's objection is exactly
+		// that describing some spend paths and not others leaves the operator
+		// believing they have seen the policy. So an incomplete walk keeps the
+		// original "cannot display" wording and adds nothing.
+		if summary := policySummaryLines(shape); len(summary) > 0 {
+			lines = append(lines, summary...)
+		} else {
+			lines = append(lines, "Cannot fully display on-device.")
+		}
+		lines = append(lines,
 			"VERIFY against your coordinator /",
 			"toolkit BEFORE funding.",
 		)
@@ -113,6 +125,63 @@ func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int) []
 		)
 	}
 	return lines
+}
+
+// policySummaryLines renders the STRUCTURAL summary, or nothing at all.
+//
+// It returns empty for an incomplete walk, and the caller then shows the
+// honest-minimal screen. Every line here is a structural fact read off the
+// decoded tree — no fragment is named, because naming one is a rendering, and a
+// rendering this device cannot re-parse is the thing the cycle's invariant
+// forbids.
+//
+// THE KEY-PATH LINE COMES FIRST AND IS NEVER OMITTED. A spendable taproot
+// internal key can move the funds without satisfying ANY leaf, so a summary that
+// listed leaves and stayed quiet about it would describe the least likely spend
+// path and hide the most direct one.
+func policySummaryLines(shape md.PolicyShape) []string {
+	if !shape.Complete {
+		return nil
+	}
+	if shape.KeyPath == md.KeyPathNone && len(shape.Branches) == 0 {
+		return nil
+	}
+	var out []string
+	switch shape.KeyPath {
+	case md.KeyPathSpendable:
+		out = append(out, "Key-path: A KEY CAN SPEND ALONE")
+	case md.KeyPathNUMS:
+		out = append(out, "Key-path: none (script paths only)")
+	}
+	if n := len(shape.Branches); n > 0 {
+		word := "paths"
+		if n == 1 {
+			word = "path"
+		}
+		if shape.TapDepth > 0 {
+			out = append(out, fmt.Sprintf("Spend %s: %d (tree depth %d)", word, n, shape.TapDepth))
+		} else {
+			out = append(out, fmt.Sprintf("Spend %s: %d", word, n))
+		}
+	}
+	for i, b := range shape.Branches {
+		var desc string
+		if b.N > 0 {
+			desc = fmt.Sprintf("%d-of-%d", b.K, b.N)
+		} else {
+			// NOT a plain threshold. Say how many keys it involves rather than
+			// inventing a k-of-N that would misdescribe the conditions.
+			desc = fmt.Sprintf("%d key(s), custom", b.Keys)
+		}
+		if b.Timelock {
+			desc += " +timelock"
+		}
+		if b.Hashlock {
+			desc += " +hashlock"
+		}
+		out = append(out, fmt.Sprintf("  %d: %s", i+1, desc))
+	}
+	return out
 }
 
 // policyTypeLabel renders a short k-of-N label for a classifiable multisig/
