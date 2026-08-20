@@ -273,10 +273,18 @@ var bip85PkeyHook func(pkey *btcec.PrivateKey)
 //   - Mainnet-only; child engraved onto owner-held steel only, never NFC.
 func bip85DeriveFlow(ctx *Context, th *Colors) {
 	// The master, through the ONE seam (I-3). Not keyboard-only.
-	master, ok := seedEntryFlow(ctx, th)
-	if !ok {
-		return
-	}
+	// BACK STEPS BACK (2026-08-19 operator directive: "going back should lose
+	// nothing"). seed → passphrase → params is a STEP MACHINE, not a straight
+	// line: Back at the params returns to the passphrase, and Back at the
+	// passphrase returns to the seed WITH THE WORDS STILL IN IT. Only Back on
+	// the first step leaves BIP-85 -- which is what backing out of the program
+	// means.
+	//
+	// State is declared out here deliberately: that is what makes a re-entered
+	// step come back holding what was typed. A step machine whose variables
+	// live inside its own loop satisfies the control flow and loses the data.
+	var master bip39.Mnemonic
+	passphrase := ""
 	var child bip39.Mnemonic
 	// Scrub BOTH secrets on EVERY exit path (I-3). child is nil until derived.
 	// This is the ONLY scrub defer and (being registered first) runs LAST/LIFO,
@@ -292,23 +300,54 @@ func bip85DeriveFlow(ctx *Context, th *Colors) {
 		}
 	}()
 
-	// Optional passphrase ON THE MASTER.
-	passphrase := ""
-	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		// §3.3.2 admits ClassPassphrase to this program, so the payload is
-		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
-		// syswPassphraseFlow for the two normative rules a shared edit inside
-		// passphraseFlow would have broken.
-		if pass, ok := syswPassphraseFlow(ctx, th); ok {
-			passphrase = pass
-		}
-	}
+	const (
+		stepSeed = iota
+		stepPassphrase
+		stepParams
+	)
+	step := stepSeed
 
-	for {
+	for !ctx.Done {
+		if step == stepSeed {
+			// Resumes holding `master` when there is one, so arriving from a
+			// Back at the passphrase does not blank the typed words.
+			m, ok := seedEntryFlowResume(ctx, th, master)
+			if !ok {
+				return // first step: Back leaves the program
+			}
+			master = m
+			step = stepPassphrase
+			continue
+		}
+		if step == stepPassphrase {
+			// Optional passphrase ON THE MASTER.
+			ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+			sel, ok := ppChoice.Choose(ctx, th)
+			if !ok {
+				step = stepSeed // Back → the seed, words intact
+				continue
+			}
+			passphrase = ""
+			if sel == 1 {
+				// §3.3.2 admits ClassPassphrase to this program, so the payload is
+				// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
+				// syswPassphraseFlow for the two normative rules a shared edit inside
+				// passphraseFlow would have broken.
+				if pass, ok := syswPassphraseFlow(ctx, th); ok {
+					passphrase = pass
+				}
+			}
+			step = stepParams
+			continue
+		}
+
+		// stepParams. The derive/engrave body below keeps its own `continue`
+		// semantics unchanged -- a continue here stays in stepParams, which is
+		// "derive another child", exactly as before.
 		words, index, ok := bip85ParamPickFlow(ctx, th)
 		if !ok {
-			return
+			step = stepPassphrase // Back → the passphrase, seed intact
+			continue
 		}
 		c, err := deriveBip85Child(master, passphrase, words, index)
 		if err != nil {

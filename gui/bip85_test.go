@@ -526,3 +526,64 @@ func TestDeriveBip85Child_ScrubsPkey(t *testing.T) {
 		t.Fatal("pkey.Key not zeroed after deriveBip85Child returned (M4: missing defer pkey.Zero())")
 	}
 }
+
+// TestBip85BackStepsBackAndLosesNothing pins the 2026-08-19 operator directive
+// ("going back should lose nothing") on the reference program.
+//
+// BEFORE: Back at the child-parameter picker returned from bip85DeriveFlow
+// outright, discarding a typed 12-word master and the passphrase answer. The
+// operator's only route back to the params was to retype the seed.
+//
+// AFTER: Back at the params returns to the PASSPHRASE prompt, and Back there
+// returns to the SEED — re-entered holding the words already typed, which is
+// the half that makes "loses nothing" true rather than merely tidy.
+func TestBip85BackStepsBackAndLosesNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newEngraver()
+		p := newPlatform()
+		p.engraver = e
+		ctx := NewContext(p)
+		returned := false
+		frame, quit := runUI(ctx, func() {
+			bip85DeriveFlow(ctx, &descriptorTheme)
+			returned = true
+		})
+		defer quit()
+		frame()
+
+		// Seed step.
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, abandonAboutPhrase())
+		if c, ok := pumpUntil(frame, "Passphrase", 160); !ok {
+			t.Fatalf("did not reach the passphrase prompt; got %q", c)
+		}
+
+		// Passphrase step → params.
+		click(&ctx.Router, Button3) // Skip
+		if c, ok := pumpUntil(frame, "words", 160); !ok {
+			t.Fatalf("did not reach the child-param picker; got %q", c)
+		}
+
+		// BACK at the params must return to the PASSPHRASE, not leave.
+		click(&ctx.Router, Button1)
+		if c, ok := pumpUntil(frame, "Passphrase", 160); !ok {
+			t.Fatalf("Back at the params did not return to the passphrase; got %q", c)
+		}
+		if returned {
+			t.Fatal("Back at the params LEFT bip85DeriveFlow — the pre-2026-08-19 behaviour")
+		}
+
+		// BACK again must return to the SEED — and it must hold the words, so
+		// the screen is a word entry rather than the 12/24 word-count picker.
+		click(&ctx.Router, Button1)
+		c, ok := pumpUntil(frame, "1:", 160)
+		if !ok {
+			t.Fatalf("Back at the passphrase did not return to a seed screen holding "+
+				"the typed words; got %q", c)
+		}
+		if returned {
+			t.Fatal("Back at the passphrase LEFT bip85DeriveFlow")
+		}
+	})
+}
