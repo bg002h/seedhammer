@@ -945,6 +945,23 @@ type wordEntryOpts struct {
 	// arrows, Center and runes, so a nav-slot button structurally cannot reach
 	// Fragment.
 	terminator bool
+	// resuming draws the SAME `done` affordance, but only while every slot is
+	// already filled -- the state a Back into a completed entry lands in.
+	//
+	// It exists because "going back should lose nothing" (2026-08-19 operator
+	// directive) was NOT true without it, and measurably so: the commit path
+	// below skips filled slots and confirms on running off the end, so an
+	// operator returning to a full 12-word entry could only get out of it
+	// FORWARDS by retyping word 1. Eleven words survived the Back and one did
+	// not, which is a strange contract to explain and a pointless thing to
+	// retype.
+	//
+	// It does not weaken §8c's rule that `done` "cannot appear where a length is
+	// already known": here the length is known AND satisfied, and the button
+	// confirms exactly the words the operator already confirmed once. A partial
+	// resume never draws it, so a short mnemonic still cannot be terminated
+	// early.
+	resuming bool
 	// titlePrefix names WHOSE words these are, keeping the "Word N of M" counter
 	// rather than replacing it the way the `title` parameter does.
 	//
@@ -1054,7 +1071,7 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		}
 		// §8c: `done` ends variable-length entry. Only drawn when the caller
 		// asked for it, so it cannot appear where a length is already known.
-		if opt.terminator && doneBtn.Clicked(ctx) {
+		if (opt.terminator || (opt.resuming && entered() == len(mnemonic))) && doneBtn.Clicked(ctx) {
 			return entered(), true
 		}
 		for okBtn.Clicked(ctx) {
@@ -1119,7 +1136,10 @@ func inputWordsFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic, selected 
 		}
 
 		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
-		if opt.terminator {
+		// DRAWN AND HANDLED BY THE SAME CONDITION. The paragraph below is why:
+		// an undrawn Clickable installs no touch target, so a `done` that is
+		// accepted but not drawn is unreachable on the machine.
+		if opt.terminator || (opt.resuming && entered() == len(mnemonic)) {
 			// §8c's terminator is a SCREEN-LEVEL button, and drawing it is what
 			// makes it one. layoutNavigation is also what installs the touch
 			// target (op.Input, gui.go:2053), and this panel is driven by

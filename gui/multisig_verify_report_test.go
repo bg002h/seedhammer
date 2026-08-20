@@ -603,7 +603,28 @@ func s5DriveVerifyFullTwoSeeds(t *testing.T, records []string, expected []int,
 				"the flow is not in full mode and every assertion below is vacuous", c)
 		}
 		if back {
-			click(&ctx.Router, Button1) // Back out of the ms1 entry
+			// BACK NOW STEPS BACK, ONE STEP PER PRESS (2026-08-19 operator
+			// directive "going back should lose nothing"). It used to end the
+			// whole verify from here; it now returns to the passphrase prompt,
+			// then to the seed, and only the seed step's Back leaves.
+			//
+			// The guarantee this driver exists for is UNCHANGED and still asserted
+			// by the caller: however the operator leaves a partial verify, it
+			// REPORTS. What changed is how many presses that takes, so the walk is
+			// spelled out step by step rather than clicking blind -- a Back that
+			// silently skipped a step would otherwise still reach the report and
+			// look correct.
+			click(&ctx.Router, Button1) // Back at the ms1 entry
+			if c, ok := pumpUntil(frame, "passphrase", 96); !ok {
+				t.Fatalf("Back at the ms1 entry did not return to the passphrase "+
+					"prompt; got %q", c)
+			}
+			click(&ctx.Router, Button1) // Back at the passphrase prompt
+			if c, ok := pumpUntil(frame, "Word", 96); !ok {
+				t.Fatalf("Back at the passphrase prompt did not return to the seed "+
+					"entry; got %q", c)
+			}
+			click(&ctx.Router, Button1) // Back at the seed entry: the step that leaves
 			frame()
 			return
 		}

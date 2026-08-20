@@ -721,6 +721,15 @@ func countUncoveredPolicyKeys(keys []md.ExpandedKey, covered map[int]bool) int {
 	return n
 }
 
+// The three input steps of one verify leg. Back moves between them rather than
+// ending the verify, per the 2026-08-19 operator directive "going back should
+// lose nothing"; only legStepSeed's Back still leaves.
+const (
+	legStepSeed = iota
+	legStepPassphrase
+	legStepMS1
+)
+
 // `rec` IS AN OUT-PARAMETER, and the verdict return is deliberately unchanged
 // (S6a §4.7b-seam). The two facts the restore document needs -- was a pass
 // recorded, was anything adverse recorded -- are written HERE, at the return
@@ -877,131 +886,207 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 	// offered against it, and letting the evidence set the target is how a verify
 	// stops asking for the seed that proves the plate nobody presented.
 	for len(legs) < len(expectedSlots) {
-		reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
-		if !ok {
-			break
-		}
-		// Owned by the deferred scrub from this line on, before any screen below
-		// can return early.
-		typed = append(typed, reMnemonic)
-
+		// ONE LEG IS THREE INPUT STEPS -- seed, passphrase, ms1 -- AND BACK MOVES
+		// BETWEEN THEM (2026-08-19 operator directive: "going back should lose
+		// nothing"). Before this, NEITHER Back inside a leg went back:
+		//
+		//   passphrase  the prompt was read as `if sel, ok := ...; ok && sel == 1`,
+		//               so a Back fell THROUGH with an empty passphrase and the flow
+		//               derived. Back did what Skip does, and then committed to a
+		//               verification the operator was trying to leave.
+		//   ms1         a Back ended the whole verify and reported it incomplete.
+		//
+		// Only the SEED step's Back still leaves, which is the directive's rule for
+		// a first step.
+		//
+		// The steps are a machine rather than a straight line because the
+		// passphrase determines `fresh`: stepping back onto the passphrase and
+		// forward again must RE-DERIVE, never reuse a slot set computed from the
+		// passphrase that was just replaced. Every value a step produces is
+		// therefore ASSIGNED here, not appended to -- `typed` is the one exception,
+		// and deliberately so (see the seed step).
+		var reMnemonic bip39.Mnemonic
 		passphrase := ""
-		ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-		if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-			if pass, ok := passphraseFlow(ctx, th); ok {
-				passphrase = pass
-			}
-		}
-
-		slots := allUserSlots(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
-		fresh, ferr := verifyFreshSlots(expectedSlots, slots, covered)
-		if ferr != nil {
-			// UNREACHABLE IN-PROCESS (F-199, S6b spec §3.1), and left as
-			// verifyRefused deliberately -- it stays non-looping IN CASE it ever
-			// does fire, rather than being upgraded alongside :753's genuinely
-			// correctable readback failure. verifyFreshSlots' only error is
-			// errVerifyNoExpectedSlots on len(expected)==0 (:324-336), and
-			// expectedSlots is a parameter this function never reassigns (see the
-			// source assertion pinning that), so this is a defensive re-check of
-			// the SAME condition :717 already refused before any seed was typed.
-			showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
-			return verifyRefused
-		}
-		if len(fresh) == 0 {
-			// THREE DIFFERENT PROBLEMS, THREE DIFFERENT MESSAGES, and the third is new
-			// with the expected-slot restriction. A seed that is in the policy but
-			// already checked is an operator repeating themselves; a seed in no slot at
-			// all is the wrong wallet, and telling them to "try another" would send
-			// them looking for a seed that exists. The third is a seed that IS a
-			// cosigner and whose slots this run simply did not engrave -- the supply
-			// path's other cosigner, or a build that held a subset -- and calling that
-			// "not a cosigner" would tell an operator holding the right seed that their
-			// wallet is wrong.
-			//
-			// The distinction is drawn with the SAME rule, run against an empty covered
-			// set, rather than with a second hand-rolled intersection.
-			//
-			// AND THE FIRST ARM ASKS ABOUT THE PASSPHRASE BEFORE IT CONDEMNS THE SEED
-			// (F-191). "No slot matched" is produced just as readily by one wrong
-			// character in a re-typed passphrase as by a foreign seed, and the two have
-			// opposite remedies -- retype, or stop trusting your plates. The flow knows
-			// which passphrase it was handed, so it asks the question it can afford:
-			// does this seed fill a slot with the EMPTY passphrase? One re-derivation,
-			// on a path that has already failed and is about to show a screen.
-			everOwed, _ := verifyFreshSlots(expectedSlots, slots, nil)
-			switch {
-			case len(slots) == 0:
-				innocent := multisigVerifySeedIsInnocent(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
-				showError(ctx, th, "Verify Bundle",
-					multisigVerifyNoSlotBody(passphrase != "", innocent))
-			default:
-				// AND THE OTHER TWO ARMS ASK THE SAME QUESTION (I-14). Both used to
-				// assert "The plates still outstanding belong to a different seed." --
-				// a fact the device cannot support, and at S5 frequently false: the
-				// passphrase prompt is per HELD SLOT with no confirm-entry, so one
-				// mistyped character on the second slot mints what looks like a second
-				// master from the SAME words. The routine that can settle part of it
-				// was already here and wired into the first arm only.
-				bare := multisigVerifySeedIsInnocent(reMnemonic, passphrase,
-					&chaincfg.MainNetParams, keys)
-				showError(ctx, th, "Verify Bundle",
-					multisigVerifyCoveredSeedBody(len(everOwed) == 0, bare))
-			}
-			// BREAK, NOT RETURN, for the ms1 entry's reason twenty lines down and
-			// against the same evidence. All three screens above are about the SEED
-			// the operator just typed; none of them is a verdict on the plates
-			// already checked. On the first seed the break reaches the silent
-			// abandon below, which is the shipped behaviour. On the second or later
-			// seed `legs` already holds VERIFIED plates, and returning here walked
-			// out with no verdict at all -- some plates checked, some not, nothing
-			// said, and on the build path the next thing the operator saw was the
-			// restore document. Breaking falls into the "Verify Incomplete" report,
-			// which is what a partial verify is.
-			//
-			// It is placed AFTER the switch rather than inside it because a `break`
-			// in a Go switch breaks the SWITCH, not the loop -- three arms that each
-			// looked like they stopped the verify and did not would be a worse defect
-			// than the one being fixed.
-			//
-			// AND ALL THREE ARMS PRESCRIBE A REMEDY (B3), which is why this is set
-			// unconditionally here rather than per arm: "add it and try again", "try
-			// the password again" (R-M's provedInnocent wording, S6b spec §3.2a --
-			// superseding this comment's earlier "skip the passphrase" quote, struck
-			// by the same ruling), "Check the passphrase before you doubt the
-			// plates", and both covered-seed arms tell the operator to change an
-			// input. A screen that says try again and is followed by the restore
-			// document is worse than one that says nothing.
-			correctable = true
-			break
-		}
-
-		// Hand-type the SECRET ms1 (full mode only; never NFC). ONE PER SEED: a
-		// build across two masters engraves two seed plates, and each must be
-		// checked against the master it claims.
 		ms1Readback := ""
-		if full {
-			s, ok, rejected := multisigVerifyMS1Entry(ctx, th)
-			if !ok {
-				// BREAK, NOT RETURN. On the FIRST seed this reaches the silent
-				// abandon below, which is the shipped behaviour. On the SECOND or
-				// later seed `legs` already holds verified plates, and a bare return
-				// here walked out of the flow with NO SCREEN AT ALL -- some plates
-				// checked, some not, nothing said, and on the build path the next
-				// thing the operator saw was the restore document. Breaking falls
-				// into the "Verify Incomplete" report, which is what a partial
-				// verify is. (len(legs) < len(expectedSlots) necessarily holds here:
-				// the coverage break is tested only after this seed's derive loop.)
-				//
-				// ONLY A REJECTION IS CORRECTABLE (B3), AND A BACK IS NOT. The helper
-				// returns two different failures through one bool: it either SHOWED a
-				// screen naming what was wrong with the object the operator typed --
-				// which they can retype -- or the operator pressed Back at the
-				// keyboard, which is them declining to type an ms1 at all. Re-offering
-				// the verify after a Back loops them against a choice they just made.
-				correctable = correctable || rejected
-				break
+		var fresh []int
+		// Built ONCE per leg so that stepping back onto it remembers the selection
+		// the operator made. A Back that forgets the answer to the step it returns
+		// to loses precisely what the directive says it must not.
+		ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+		legState := legStepSeed
+		legLeft := false    // Back out of the FIRST step: abandon the verify
+		legRefused := false // a screen was shown that ends the verify
+
+	legSteps:
+		for {
+			switch legState {
+			case legStepSeed:
+				m, ok := seedEntryFlowTypedOnlyResume(ctx, th, reMnemonic)
+				if !ok {
+					legLeft = true
+					break legSteps
+				}
+				reMnemonic = m
+				// Owned by the deferred scrub from this line on, before any screen
+				// below can return early. Stepping back and re-entering APPENDS
+				// another copy rather than replacing this one: every array the
+				// operator's words ever landed in has to be scrubbed, and the copy
+				// they abandoned is no less live than the copy they kept.
+				typed = append(typed, reMnemonic)
+				legState = legStepPassphrase
+			case legStepPassphrase:
+				sel, ok := ppChoice.Choose(ctx, th)
+				if !ok {
+					legState = legStepSeed
+					continue
+				}
+				// REASSIGNED, not left from the previous pass: an operator who added
+				// a passphrase, stepped back, and then chose Skip must be verified
+				// against the empty one they just chose.
+				passphrase = ""
+				if sel == 1 {
+					if pass, ok := passphraseFlow(ctx, th); ok {
+						passphrase = pass
+					}
+				}
+
+				slots := allUserSlots(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
+				// ASSIGNED, NOT DECLARED. `fresh` belongs to the leg, not to this
+				// step: the derive loop below the step machine reads it. Written
+				// with `:=` here it silently shadows the leg's copy -- which still
+				// compiles, because ferr is new -- and the derive loop then iterates
+				// over a nil slice and appends no legs at all. Caught by
+				// TestMS1ClauseIsCountFreeAcrossSeedAndLegCounts, not by the build.
+				var ferr error
+				fresh, ferr = verifyFreshSlots(expectedSlots, slots, covered)
+				if ferr != nil {
+					// UNREACHABLE IN-PROCESS (F-199, S6b spec §3.1), and left as
+					// verifyRefused deliberately -- it stays non-looping IN CASE it ever
+					// does fire, rather than being upgraded alongside :753's genuinely
+					// correctable readback failure. verifyFreshSlots' only error is
+					// errVerifyNoExpectedSlots on len(expected)==0 (:324-336), and
+					// expectedSlots is a parameter this function never reassigns (see the
+					// source assertion pinning that), so this is a defensive re-check of
+					// the SAME condition :717 already refused before any seed was typed.
+					showError(ctx, th, "Verify Bundle", multisigVerifyNoExpectationBody)
+					return verifyRefused
+				}
+				if len(fresh) == 0 {
+					// THREE DIFFERENT PROBLEMS, THREE DIFFERENT MESSAGES, and the third is new
+					// with the expected-slot restriction. A seed that is in the policy but
+					// already checked is an operator repeating themselves; a seed in no slot at
+					// all is the wrong wallet, and telling them to "try another" would send
+					// them looking for a seed that exists. The third is a seed that IS a
+					// cosigner and whose slots this run simply did not engrave -- the supply
+					// path's other cosigner, or a build that held a subset -- and calling that
+					// "not a cosigner" would tell an operator holding the right seed that their
+					// wallet is wrong.
+					//
+					// The distinction is drawn with the SAME rule, run against an empty covered
+					// set, rather than with a second hand-rolled intersection.
+					//
+					// AND THE FIRST ARM ASKS ABOUT THE PASSPHRASE BEFORE IT CONDEMNS THE SEED
+					// (F-191). "No slot matched" is produced just as readily by one wrong
+					// character in a re-typed passphrase as by a foreign seed, and the two have
+					// opposite remedies -- retype, or stop trusting your plates. The flow knows
+					// which passphrase it was handed, so it asks the question it can afford:
+					// does this seed fill a slot with the EMPTY passphrase? One re-derivation,
+					// on a path that has already failed and is about to show a screen.
+					everOwed, _ := verifyFreshSlots(expectedSlots, slots, nil)
+					switch {
+					case len(slots) == 0:
+						innocent := multisigVerifySeedIsInnocent(reMnemonic, passphrase, &chaincfg.MainNetParams, keys)
+						showError(ctx, th, "Verify Bundle",
+							multisigVerifyNoSlotBody(passphrase != "", innocent))
+					default:
+						// AND THE OTHER TWO ARMS ASK THE SAME QUESTION (I-14). Both used to
+						// assert "The plates still outstanding belong to a different seed." --
+						// a fact the device cannot support, and at S5 frequently false: the
+						// passphrase prompt is per HELD SLOT with no confirm-entry, so one
+						// mistyped character on the second slot mints what looks like a second
+						// master from the SAME words. The routine that can settle part of it
+						// was already here and wired into the first arm only.
+						bare := multisigVerifySeedIsInnocent(reMnemonic, passphrase,
+							&chaincfg.MainNetParams, keys)
+						showError(ctx, th, "Verify Bundle",
+							multisigVerifyCoveredSeedBody(len(everOwed) == 0, bare))
+					}
+					// BREAK, NOT RETURN, for the ms1 entry's reason twenty lines down and
+					// against the same evidence. All three screens above are about the SEED
+					// the operator just typed; none of them is a verdict on the plates
+					// already checked. On the first seed the break reaches the silent
+					// abandon below, which is the shipped behaviour. On the second or later
+					// seed `legs` already holds VERIFIED plates, and returning here walked
+					// out with no verdict at all -- some plates checked, some not, nothing
+					// said, and on the build path the next thing the operator saw was the
+					// restore document. Breaking falls into the "Verify Incomplete" report,
+					// which is what a partial verify is.
+					//
+					// It is placed AFTER the switch rather than inside it because a `break`
+					// in a Go switch breaks the SWITCH, not the loop -- three arms that each
+					// looked like they stopped the verify and did not would be a worse defect
+					// than the one being fixed.
+					//
+					// AND ALL THREE ARMS PRESCRIBE A REMEDY (B3), which is why this is set
+					// unconditionally here rather than per arm: "add it and try again", "try
+					// the password again" (R-M's provedInnocent wording, S6b spec §3.2a --
+					// superseding this comment's earlier "skip the passphrase" quote, struck
+					// by the same ruling), "Check the passphrase before you doubt the
+					// plates", and both covered-seed arms tell the operator to change an
+					// input. A screen that says try again and is followed by the restore
+					// document is worse than one that says nothing.
+					correctable = true
+					legRefused = true
+					break legSteps
+				}
+				legState = legStepMS1
+			case legStepMS1:
+				// Hand-type the SECRET ms1 (full mode only; never NFC). ONE PER SEED:
+				// a build across two masters engraves two seed plates, and each must
+				// be checked against the master it claims.
+				if !full {
+					break legSteps
+				}
+
+				s, ok, rejected := multisigVerifyMS1Entry(ctx, th)
+				if !ok {
+					// BREAK, NOT RETURN. On the FIRST seed this reaches the silent
+					// abandon below, which is the shipped behaviour. On the SECOND or
+					// later seed `legs` already holds verified plates, and a bare return
+					// here walked out of the flow with NO SCREEN AT ALL -- some plates
+					// checked, some not, nothing said, and on the build path the next
+					// thing the operator saw was the restore document. Breaking falls
+					// into the "Verify Incomplete" report, which is what a partial
+					// verify is. (len(legs) < len(expectedSlots) necessarily holds here:
+					// the coverage break is tested only after this seed's derive loop.)
+					//
+					// ONLY A REJECTION IS CORRECTABLE (B3), AND A BACK IS NOT. The helper
+					// returns two different failures through one bool: it either SHOWED a
+					// screen naming what was wrong with the object the operator typed --
+					// which they can retype -- or the operator pressed Back at the
+					// keyboard, which is them declining to type an ms1 at all. Re-offering
+					// the verify after a Back loops them against a choice they just made.
+					//
+					// A BACK NOW STEPS BACK TO THE PASSPHRASE (2026-08-19 directive),
+					// which is the step before this one -- not a re-offer of the ms1
+					// keyboard the operator just declined, which is the loop the
+					// paragraph above refuses. A REJECTION still stops the verify: the
+					// helper already showed the screen naming what was wrong, and B3
+					// gives that screen a remedy the callers' re-offer provides.
+					if rejected {
+						correctable = true
+						legRefused = true
+						break legSteps
+					}
+					legState = legStepPassphrase
+					continue
+				}
+				ms1Readback = s
+				break legSteps
 			}
-			ms1Readback = s
+		}
+		if legLeft || legRefused {
+			break
 		}
 
 		for _, s := range fresh {

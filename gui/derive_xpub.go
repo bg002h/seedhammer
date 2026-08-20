@@ -181,7 +181,44 @@ func seedEntryFlowResume(ctx *Context, th *Colors, prev bip39.Mnemonic) (bip39.M
 		}
 		return nil, false
 	}
-	if _, confirmed := inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true}); !confirmed {
+	if _, confirmed := inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true, resuming: true}); !confirmed {
+		return abandon()
+	}
+	if isEmptyMnemonic(resume) {
+		return abandon()
+	}
+	return resume, true
+}
+
+// seedEntryFlowTypedOnlyResume is seedEntryFlowTypedOnly that RE-ENTERS with
+// words already typed, for a step machine whose Back returns to seed entry.
+//
+// Added 2026-08-19 with the verify flow's conversion. It is the typed-only twin
+// of seedEntryFlowResume: verify never offers NFC or the camera for a re-typed
+// seed, because the whole point of the readback is that the operator proves the
+// plate by hand.
+//
+// prev == nil behaves exactly like seedEntryFlowTypedOnly, so a first pass needs
+// no special case.
+//
+// USE THE RETURNED BOOL, do not infer Back from emptiness -- a resumed entry
+// never starts empty, so that inference would read a Back as a confirmation.
+// SCRUB THE COPY on every path that does not hand it back: `resume` holds the
+// operator's words, and returning nil without zeroing leaves a second live copy
+// behind on exactly the Back that was meant to abandon it.
+func seedEntryFlowTypedOnlyResume(ctx *Context, th *Colors, prev bip39.Mnemonic) (bip39.Mnemonic, bool) {
+	if len(prev) == 0 {
+		return seedEntryFlowTypedOnly(ctx, th)
+	}
+	resume := make(bip39.Mnemonic, len(prev))
+	copy(resume, prev)
+	abandon := func() (bip39.Mnemonic, bool) {
+		for i := range resume {
+			resume[i] = 0
+		}
+		return nil, false
+	}
+	if _, confirmed := inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true, resuming: true}); !confirmed {
 		return abandon()
 	}
 	if isEmptyMnemonic(resume) {
