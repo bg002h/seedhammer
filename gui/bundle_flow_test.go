@@ -203,3 +203,69 @@ func TestBundleReviewFlowListsCards(t *testing.T) {
 		t.Fatalf("Back (Button1) should not confirm the review flow")
 	}
 }
+
+// TestBundleGatherResumeKeepsCards — the 2026-08-19 operator directive
+// ("going back should lose nothing") on the Engrave Bundle program.
+//
+// bundleFlow already LOOPED: Back at the review returned to the gather. But it
+// called the gather FRESH, so every card the operator had scanned was silently
+// discarded by the Back that was only meant to revisit them. The loop looked
+// correct and lost the work anyway — which is exactly the failure the directive
+// is about, and why "does Back land in the right place" is not a sufficient
+// test.
+//
+// The previous behaviour was DELIBERATE and documented ("the operator re-scans,
+// mirrors single-card flows"); the directive overrides it.
+func TestBundleGatherResumeKeepsCards(t *testing.T) {
+	g := &bundleGatherer{}
+	offerAll(t, g, md1CardA(t))
+	offerAll(t, g, mk1CardA(t))
+	prev := g.cards
+	if len(prev) != 2 {
+		t.Fatalf("fixture should gather two cards, got %d", len(prev))
+	}
+
+	// DRIVE THE REAL FUNCTION, not a hand-rolled copy of what it does.
+	//
+	// A first version of this test re-offered into a bare gatherer and asserted
+	// the set survived. Mutation-testing killed it: deleting the re-offer loop
+	// from bundleGatherFlowResume left that test PASSING, because it exercised
+	// the mechanism rather than the wiring. This drives the flow and reads its
+	// screen, so the loop is load-bearing.
+	ctx := NewContext(newPlatform())
+	var got []bundleCard
+	frame, quit := runUI(ctx, func() {
+		got, _ = bundleGatherFlowResume(ctx, &descriptorTheme, "Engrave Bundle", prev)
+	})
+	defer quit()
+	// Before ANY scan, the tally must already show the resumed cards.
+	c, found := pumpUntil(frame, "md1 descriptors: 1", 32)
+	if !found {
+		t.Fatalf("resumed gather did not show the prior md1 on entry; got %q", c)
+	}
+	if !uiContains(c, "mk1 keys: 1") {
+		t.Fatalf("resumed gather did not show the prior mk1 on entry; got %q", c)
+	}
+	_ = got
+
+	resumed := &bundleGatherer{}
+	for _, cd := range prev {
+		for _, str := range cd.strings {
+			resumed.offer(mdmkText(str))
+		}
+	}
+	if len(resumed.cards) != len(prev) {
+		t.Fatalf("resume lost cards: %d on the pile, %d after re-offer",
+			len(prev), len(resumed.cards))
+	}
+	for i := range prev {
+		if resumed.cards[i].kind != prev[i].kind {
+			t.Errorf("card %d kind changed across resume: %v -> %v",
+				i, prev[i].kind, resumed.cards[i].kind)
+		}
+		if len(resumed.cards[i].strings) != len(prev[i].strings) {
+			t.Errorf("card %d lost chunks across resume: %d -> %d",
+				i, len(prev[i].strings), len(resumed.cards[i].strings))
+		}
+	}
+}

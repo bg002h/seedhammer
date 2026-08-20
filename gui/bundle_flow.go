@@ -25,15 +25,23 @@ func bundleFlow(ctx *Context, th *Colors) {
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
 		ctx.syswBundleSeeds = []string{body}
 	}
+	var gathered []bundleCard
 	for {
-		cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
+		// Resumes with what was already scanned. Back at the review returns to
+		// the gather WITH THE CARDS STILL ON IT; Back at the gather itself is
+		// the first step and still leaves the program.
+		cards, ok := bundleGatherFlowResume(ctx, th, "Engrave Bundle", gathered)
 		if !ok {
 			return // Back / empty bundle.
 		}
 		if !bundleReviewFlow(ctx, th, cards) {
-			// Back from review → resume adding cards. The gather flow starts a
+			// SUPERSEDED 2026-08-19. This used to read: "The gather flow starts a
 			// fresh accumulator; the operator re-scans (mirrors single-card flows,
-			// which also don't persist a half-built set across Back).
+			// which also don't persist a half-built set across Back)." That was a
+			// deliberate choice, justified by consistency with single-card flows
+			// -- and it is what the "going back should lose nothing" directive
+			// overrides. A Back meant to REVISIT the set discarded it.
+			gathered = cards
 			continue
 		}
 		bundleEngrave(ctx, th, "Engrave Bundle", cards, "", "")
@@ -150,7 +158,21 @@ func (s *bundleGatherScreen) tally() []string {
 // reachable from Build (see bundleDonePending below) and a refusal titled for
 // the wrong program is D-4 one screen deeper, where the operator is already
 // stuck.
+// bundleGatherFlow gathers from scratch. Every existing caller keeps this
+// signature and this behaviour.
 func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, bool) {
+	return bundleGatherFlowResume(ctx, th, title, nil)
+}
+
+// bundleGatherFlowResume gathers with `prev` already on the pile.
+//
+// Added 2026-08-19 for the operator directive "going back should lose nothing".
+//
+// Re-offering is how the systemwide-payload seeds already enter the gatherer, so
+// resumed cards travel the SAME admission path as scanned ones rather than
+// bypassing it: a card that would be refused on a fresh scan is still refused
+// here.
+func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundleCard) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{
 		g:         &bundleGatherer{},
 		hasReader: ctx.Platform.Features().Has(FeatureNFC),
@@ -168,6 +190,11 @@ func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, boo
 	// (groupRecordsByCard, gui/multisig_build_payload.go). @N order is
 	// identity-bearing (md/encode_multisig.go's ordering contract), so which
 	// side of this seam owns the guarantee is worth being exact about.
+	for _, c := range prev {
+		for _, str := range c.strings {
+			scr.g.offer(mdmkText(str))
+		}
+	}
 	for _, seed := range ctx.syswBundleSeeds {
 		if seed == "" {
 			continue

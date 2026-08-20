@@ -69,14 +69,27 @@ func TestSuppliedGatherKeepsItsTitle(t *testing.T) {
 // refusal titled for the wrong program is the defect D-4 names, one screen
 // deeper, where an operator is already confused.
 func TestGatherTitleReachesTheRefusalsToo(t *testing.T) {
-	body := funcBody(t, "bundle_flow.go", "func bundleGatherFlow(")
+	// TARGETS THE RESUME FORM, where the body now lives (2026-08-19): the
+	// gather was split so a Back at the review can return to it WITH the cards
+	// still on the pile, leaving bundleGatherFlow a thin delegating wrapper.
+	// Checking the wrapper would have passed vacuously — which the anti-vacuity
+	// guard below caught the moment the split landed.
+	body := funcBody(t, "bundle_flow.go", "func bundleGatherFlowResume(")
 	if strings.Contains(body, `"Engrave Bundle"`) {
-		t.Error("bundleGatherFlow still hard-codes \"Engrave Bundle\" somewhere in " +
-			"its body, so on the Build path it names the wrong program")
+		t.Error("bundleGatherFlowResume still hard-codes \"Engrave Bundle\" somewhere " +
+			"in its body, so on the Build path it names the wrong program")
 	}
 	// Non-vacuous: the slice must actually contain the function.
 	if !strings.Contains(body, "bundleDoneDecision") {
-		t.Fatalf("funcBody did not capture bundleGatherFlow; got %d bytes", len(body))
+		t.Fatalf("funcBody did not capture bundleGatherFlowResume; got %d bytes", len(body))
+	}
+	// The wrapper must not smuggle a hard-coded title back in either.
+	wrapper := funcBody(t, "bundle_flow.go", "func bundleGatherFlow(")
+	if strings.Contains(wrapper, `"Engrave Bundle"`) {
+		t.Error("bundleGatherFlow's wrapper hard-codes \"Engrave Bundle\"")
+	}
+	if !strings.Contains(wrapper, "bundleGatherFlowResume") {
+		t.Fatalf("bundleGatherFlow no longer delegates; got %d bytes", len(wrapper))
 	}
 }
 
