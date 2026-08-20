@@ -166,9 +166,26 @@ func seedEntryFlowResume(ctx *Context, th *Colors, prev bip39.Mnemonic) (bip39.M
 	}
 	resume := make(bip39.Mnemonic, len(prev))
 	copy(resume, prev)
-	inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true})
-	if isEmptyMnemonic(resume) {
+	// USE THE RETURNED BOOL, do not infer Back from emptiness. The blank-entry
+	// path upstream can treat "still empty" as "backed out" because it starts
+	// empty; a RESUMED entry never is, so the same inference would report a Back
+	// as a confirmation and walk on with words the operator was trying to leave.
+	// inputWordsFlow returns false only from its Back button (gui.go:1052).
+	// SCRUB THE COPY ON EVERY PATH THAT DOES NOT HAND IT BACK. `resume` holds
+	// the operator's words; returning nil without zeroing it would leave a
+	// second live copy of the seed behind on exactly the Back that was meant to
+	// abandon it. On success the caller takes ownership and scrubs.
+	abandon := func() (bip39.Mnemonic, bool) {
+		for i := range resume {
+			resume[i] = 0
+		}
 		return nil, false
+	}
+	if _, confirmed := inputWordsFlow(ctx, th, resume, 0, "", wordEntryOpts{checksumGate: true}); !confirmed {
+		return abandon()
+	}
+	if isEmptyMnemonic(resume) {
+		return abandon()
 	}
 	return resume, true
 }

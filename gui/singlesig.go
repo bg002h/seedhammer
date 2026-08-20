@@ -40,15 +40,129 @@ import (
 // assert it is scrubbed on exit, D11). nil in production.
 var singleSigSeedHook func(bip39.Mnemonic)
 
+// singleSigInputs collects every operator answer this flow needs, with BACK
+// MEANING BACK (2026-08-19 operator directive: "going back should lose
+// nothing").
+//
+// seed → script → passphrase → engrave-mode is a step machine: each Back
+// returns to the previous screen with the earlier answers intact, and only Back
+// on the FIRST step leaves the program — which is what backing out of
+// Engrave Single-Sig means.
+//
+// EXTRACTED rather than inlined. The caller's body is long and its own control
+// flow is delicate; folding a step machine into it means re-targeting `return`s
+// that already mean "abandon". Keeping the machine self-contained means the
+// caller changes by exactly one call, and the brace structure of the code that
+// engraves is untouched.
+//
+// ok == false means the operator left; the caller returns as it always did.
+func singleSigInputs(ctx *Context, th *Colors) (
+	mnemonic bip39.Mnemonic, purpose int, script md.ScriptKind,
+	passphrase string, full, ok bool,
+) {
+	// SCRUB ON EVERY ABANDONED PATH (D11). The seed is created HERE now, so a
+	// Back that leaves the program must zero it here too — the caller's own
+	// scrub defer sees only what this function RETURNS, and returning nil on
+	// failure would hand it nothing to zero while the typed words sat in the
+	// backing array. Caught by TestEngraveSingleSigFlowSeedScrubbed, which is
+	// exactly the exit path it exercises.
+	//
+	// The failure paths below `return` BARE for this reason: a bare return keeps
+	// the named `mnemonic` pointing at the array, so this defer can still reach
+	// it. `return nil, ...` would drop the reference before the defer ran.
+	defer func() {
+		if !ok {
+			for i := range mnemonic {
+				mnemonic[i] = 0
+			}
+		}
+	}()
+
+	const (
+		stepSeed = iota
+		stepScript
+		stepPassphrase
+		stepMode
+		stepDone
+	)
+	step := stepSeed
+	for step != stepDone {
+		if ctx.Done {
+			return
+		}
+		switch step {
+		case stepSeed:
+			// Resumes holding the words, so a Back from the script picker does
+			// not blank a seed the operator already typed.
+			m, got := seedEntryFlowResume(ctx, th, mnemonic)
+			if !got {
+				return
+			}
+			mnemonic = m
+			// The hook fires AS SOON AS the seed exists, which is where it fired
+			// before this flow became a step machine. Leaving it at the caller
+			// would mean a Back that leaves the program never reaches it — and
+			// the D11 scrub test, which captures through this hook, would have
+			// nothing to assert on exactly the exit path it exercises.
+			if singleSigSeedHook != nil {
+				singleSigSeedHook(mnemonic)
+			}
+			step = stepScript
+		case stepScript:
+			pp, sc, got := singleSigPickFlow(ctx, th)
+			if !got {
+				step = stepSeed
+				continue
+			}
+			purpose, script = pp, sc
+			step = stepPassphrase
+		case stepPassphrase:
+			ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+			sel, got := ppChoice.Choose(ctx, th)
+			if !got {
+				step = stepScript
+				continue
+			}
+			passphrase = ""
+			if sel == 1 {
+				// §3.3.2 admits ClassPassphrase to this program, so the payload is
+				// offered before the keyboard (plan stage 13b). NOT passphraseFlow:
+				// see syswPassphraseFlow for the two normative rules a shared edit
+				// inside passphraseFlow would have broken.
+				if pass, pok := syswPassphraseFlow(ctx, th); pok {
+					passphrase = pass
+				}
+			}
+			step = stepMode
+		case stepMode:
+			// THE "FULL" ROW NAMES WHAT IT LEAVES OUT (F-198a). The passphrase
+			// taken above is a LIVE derivation input, while the ms1 this run
+			// engraves encodes the WORDS ONLY — so the words alone restore a
+			// DIFFERENT wallet. buildFullModeLabel says so on the label, which is
+			// what the operator reads BEFORE pressing.
+			modeChoice := &ChoiceScreen{
+				Title:   "Engrave Mode",
+				Lead:    "What to engrave?",
+				Choices: []string{buildFullModeLabel(passphrase != ""), "Watch-only (keys)"},
+			}
+			modeSel, got := modeChoice.Choose(ctx, th)
+			if !got {
+				step = stepPassphrase
+				continue
+			}
+			full = modeSel == 0
+			step = stepDone
+		}
+	}
+	return mnemonic, purpose, script, passphrase, full, true
+}
+
 func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// The seed, through the ONE seam (D12). seedEntryFlow offers every source this
 	// machine has; it is not keyboard-only.
-	mnemonic, ok := seedEntryFlow(ctx, th)
+	mnemonic, purpose, script, passphrase, full, ok := singleSigInputs(ctx, th)
 	if !ok {
 		return
-	}
-	if singleSigSeedHook != nil {
-		singleSigSeedHook(mnemonic)
 	}
 	// Scrub the SECRET mnemonic on EVERY exit path (incl. abort), after its last
 	// derivation consumer (D11).
@@ -59,53 +173,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	}()
 
 	// Wallet type (BIP-84 default + Advanced); mainnet-only.
-	purpose, script, ok := singleSigPickFlow(ctx, th)
-	if !ok {
-		return
-	}
 	path := singleSigPath(purpose)
-
-	// Optional passphrase.
-	passphrase := ""
-	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		// §3.3.2 admits ClassPassphrase to this program, so the payload is
-		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
-		// syswPassphraseFlow for the two normative rules a shared edit inside
-		// passphraseFlow would have broken.
-		if pass, ok := syswPassphraseFlow(ctx, th); ok {
-			passphrase = pass
-		}
-	}
-
-	// Full (engrave ms1+mk1+md1) vs watch-only (mk1+md1 + ms1 reminder).
-	//
-	// THE "FULL" ROW NAMES WHAT IT LEAVES OUT (F-198a), on this path too. The
-	// passphrase taken above is a LIVE derivation input -- it reaches
-	// deriveSingleSigBundle below and changes the master fingerprint and every
-	// key under it -- while the ms1 this run engraves encodes the WORDS ONLY.
-	// Measured on the same twelve words: the ms1 string is byte-identical with
-	// and without a passphrase, and the master fingerprint is not. So the words
-	// alone restore a DIFFERENT wallet, with no error anywhere, and
-	// "Full (seed + keys)" over that promises a backup that does not reach the
-	// money.
-	//
-	// The label is where it has to be said, because the label is what the
-	// operator reads BEFORE pressing; a note anywhere else is a note read after
-	// the decision. buildFullModeLabel already returns the correct string and was
-	// wired to both multisig paths -- single-sig was the last holdout, which left
-	// the asymmetry the wrong way round: the two paths that told the truth are
-	// the multisig ones, and the flagship was the one that lied.
-	modeChoice := &ChoiceScreen{
-		Title:   "Engrave Mode",
-		Lead:    "What to engrave?",
-		Choices: []string{buildFullModeLabel(passphrase != ""), "Watch-only (keys)"},
-	}
-	modeSel, ok := modeChoice.Choose(ctx, th)
-	if !ok {
-		return
-	}
-	full := modeSel == 0
 
 	// Derive the 3 legs (entropy gated + wiped inside; seed/master scrubbed inside
 	// deriveAccountXpub). The mnemonic is consumed for the LAST time here.
@@ -319,7 +387,7 @@ var singleSigBareSeedFPHook func()
 // singleSigPassphrasePlateOffer implements S6b spec 2.6: the passphrase-
 // plate offer, and the lazy bare-seed derivation it gates. Factored out of
 // engraveSingleSigFlow so GATE 2.6 -- "the offer appears only when
-// passphrase != '' [and] the ~31s derivation does NOT run when no
+// passphrase != ” [and] the ~31s derivation does NOT run when no
 // passphrase plate is engraved" -- can be driven directly rather than only
 // through the whole orchestrator.
 //

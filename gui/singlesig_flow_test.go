@@ -164,13 +164,30 @@ func TestEngraveSingleSigFlowSeedScrubbed(t *testing.T) {
 		if c, ok := pumpUntil(frame, "Wallet Type", 160); !ok {
 			t.Fatalf("did not reach wallet-type picker; got %q", c)
 		}
-		// Back out of the wallet-type picker → the flow returns and scrubs.
-		click(&ctx.Router, Button1)
+		// EXIT ROUTE CHANGED 2026-08-19, the scrub assertion did not.
+		//
+		// Back from the wallet-type picker used to return from the flow. Under
+		// the "going back should lose nothing" directive it now steps BACK to
+		// the seed, which is the point — so this test leaves by pressing Back
+		// TWICE: once to the seed, once more to leave the program from its
+		// first step.
+		//
+		// What is being tested here is D11 (the mnemonic is zeroed on exit),
+		// not where Back lands; that is covered by
+		// TestSingleSigBackStepsBackAndLosesNothing.
+		click(&ctx.Router, Button1) // picker → seed
 		for i := 0; i < 32 && !done; i++ {
 			frame()
 		}
+		if done {
+			t.Fatal("Back from the picker LEFT the flow — the pre-2026-08-19 behaviour")
+		}
+		click(&ctx.Router, Button1) // seed (first step) → leave
+		for i := 0; i < 64 && !done; i++ {
+			frame()
+		}
 		if !done {
-			t.Fatal("flow did not return after Back from the picker")
+			t.Fatal("Back at the seed step did not leave the flow")
 		}
 		if captured == nil {
 			t.Fatal("seed hook did not capture the mnemonic")
@@ -179,6 +196,46 @@ func TestEngraveSingleSigFlowSeedScrubbed(t *testing.T) {
 			if w != 0 {
 				t.Fatalf("mnemonic[%d] = %d, not zeroed on exit (D11)", i, w)
 			}
+		}
+	})
+}
+
+// TestSingleSigBackStepsBackAndLosesNothing — the 2026-08-19 operator directive
+// on the single-sig program.
+//
+// BEFORE: Back at the wallet-type picker returned from engraveSingleSigFlow,
+// discarding a typed 12-word seed.
+//
+// AFTER: it steps back to the seed, RE-ENTERED HOLDING THE WORDS, and only a
+// second Back (from the first step) leaves.
+func TestSingleSigBackStepsBackAndLosesNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := NewContext(newPlatform())
+		done := false
+		frame, quit := runUI(ctx, func() {
+			engraveSingleSigFlow(ctx, &descriptorTheme)
+			done = true
+		})
+		defer quit()
+		frame()
+
+		click(&ctx.Router, Button3) // 12 WORDS
+		frame()
+		driveWords(&ctx.Router, abandonAboutPhrase())
+		if c, ok := pumpUntil(frame, "Wallet Type", 160); !ok {
+			t.Fatalf("did not reach the wallet-type picker; got %q", c)
+		}
+
+		// Back → the seed, holding the words. A word-entry screen shows "1:",
+		// the blank path would show the 12/24 word-count picker instead.
+		click(&ctx.Router, Button1)
+		c, ok := pumpUntil(frame, "1:", 160)
+		if !ok {
+			t.Fatalf("Back at the picker did not return to a seed screen holding "+
+				"the typed words; got %q", c)
+		}
+		if done {
+			t.Fatal("Back at the picker LEFT the flow — the pre-2026-08-19 behaviour")
 		}
 	})
 }
