@@ -43,3 +43,22 @@ no-op. Compare that list against the primary's `MANIFEST` on every re-pin.
 | `tr_with_leaf`, `nums_taproot`, `single_string_boundary` | exercised, single-string + byte parity |
 | `wsh_sortedmulti_2chunk` | exercised, byte parity only — its `.phrase.txt` is a 3-line chunk-format string with a `chunk-set-id:` header, like `wsh_multi_chunked` |
 | `sh_wpkh` | **vendored but NOT exercised.** This package refuses it: `md: missing explicit origin` (`md/md.go:893`), because its descriptor carries a pathless shared origin, `"path_decl":{"tag":"Shared","data":"m"}`. The primary gained pathless decode in the very release this re-pin points at. **The Go port is behind the Rust primary** — convergence work, tracked as F-166. Reproduce in one line: add `"sh_wpkh"` to `singleStringVectorNames` and run `go test ./md/`. |
+
+## Keyed conformance vectors (R3, vendored 2026-08-20)
+
+- Source: `descriptor-mnemonic` `b3b10f09`, `crates/md-codec/tests/vectors/`
+- Names: `keyed_*` — 6 vectors, 5 files each including `.conformance.json`
+
+These carry REAL xpubs (BIP-39's published "abandon … about" mnemonic at
+`bip48-p2wsh` accounts 0..3, master fingerprint `73c5da0a` — never put funds
+behind them), which is what the other 15 vectors could not do: every entry in
+the primary's MANIFEST was keyless, so this port could agree with Rust about
+every byte on the wire and still compute a different KEY-DEPENDENT identity.
+
+`<name>.conformance.json` carries the template, path, keys, fingerprints,
+`md1_encoding_id`, BOTH wallet ids, and per chain the canonical descriptor
+string plus three addresses. `md/conformance_keyed_test.go` is the gate.
+
+It found F-212 on its first run: Go and Rust compute different
+`WalletPolicyId`s when the origin is ELIDED, and agree when it is explicit.
+That gap is pinned by shape in the test, not skipped.
