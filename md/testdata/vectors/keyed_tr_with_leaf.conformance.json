@@ -6,7 +6,7 @@
         "bc1pne93ph6acfeh49mts45l5nvqtqytme5m7nuhmaa20m4y6lptz24s0rmhep",
         "bc1p42y29er23vyvnhqtt5029z2qgsr2ux6jmdcf3wngr6v84fnwrquqg0329s"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*))#l0g2e3a2"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*))#zp8ct4uj"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1p2p3nvx74mq4yvgd3t0akhmsdc7qgfhztth7zc7vex2fjjkx3752qjag2kg",
         "bc1ptn7c9fjqdm2sl9ycsp8z0a5fy0ddckk2p0wc80hxdpk5ajjlhvdsa855qu"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*))#0xn0gcmn"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*))#jgua6u6t"
     }
   },
   "fingerprints": [
@@ -37,10 +37,10 @@
       "xpub": "xpub6DzhyrnFFYQ1HimDiM388xHnDiRPNdZJFBmmxge3Y1WWcHLtMJLfRuhRHqnQCPbTj3fGKTuKFLHzzwpJkp5Dtc3UtLKZKaVZe1yqMBXd6Vk"
     }
   ],
-  "md1_encoding_id": "9386606eefb72c53a24c96949dbef4d1",
+  "md1_encoding_id": "e0a829dbd45e7bad09262103b9c48e06",
   "name": "keyed_tr_with_leaf",
-  "path": "48'/0'/0'/2'",
-  "template": "tr(@0/<0;1>/*,pk(@1/<0;1>/*))",
+  "path": null,
+  "template": "tr(@0/48'/0'/0'/2'/<0;1>/*,pk(@1/48'/0'/1'/2'/<0;1>/*))",
   "wallet_descriptor_template_id": "c8fe87cd5fb7351db12479a2bab8f8ad",
-  "wallet_policy_id": "a72ff4eecf1a7d4052736fe6712a1ddd"
+  "wallet_policy_id": "b671300106bf245d39850bbbfefd8f62"
 }

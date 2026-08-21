@@ -67,6 +67,27 @@ It found F-212 on its first run: Go and Rust compute different
 `WalletPolicyId`s when the origin is ELIDED, and agree when it is explicit.
 That gap is pinned by shape in the test, not skipped.
 
+### REGENERATED 2026-08-20 with per-key origins (F-217)
+
+Every multi-key keyed vector previously declared **one** key origin for
+**several different** keys — `[73c5da0a/48'/0'/0'/2']` bound to two, three or
+four distinct xpubs. BIP-32 is deterministic, so that pair names exactly one
+key: the vectors pinned a wallet that cannot exist. Measured before the fix:
+**9 contradictory, 0 consistent**; after: **0 and 11**.
+
+Cause was `md encode --path`, which flattens per-key ("Divergent") origins to a
+single shared one. The keys are genuinely accounts 0..3 of BIP-39's test seed,
+so each now declares its TRUE origin `48'/0'/N'/2'` — written in the TEMPLATE
+(`@0/48'/0'/0'/2'/<0;1>/*`), which is where md has always taken per-key origins,
+and `path` is dropped on exactly those vectors because `--path` would flatten
+back what the template just said.
+
+Nothing here caught it, and nothing could have: addresses derive from the xpubs
+a card CARRIES, never from the origin it declares, so every address in every
+vector matched either way. `descriptor-mnemonic` `fe4b1ec9` adds the encoder
+refusal and a corpus gate; the Go port needs no change to AGREE, since the wire
+bytes and every identity moved together.
+
 ### `keyless_tr_with_leaf` (Stage 4, added 2026-08-20)
 
 The same template as `keyed_tr_with_leaf` with **no keys**, so it lands on the

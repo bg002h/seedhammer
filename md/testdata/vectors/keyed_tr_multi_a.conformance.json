@@ -6,7 +6,7 @@
         "bc1pcnwrffqu4s92jzhcsmfa6umx4fy6etr5mypgd4wd7exz3ulzkfsqgxrx9e",
         "bc1p9hq3fjyts3jrd459falj98mth3dfn0jlhhrmh0kz3lag2r0nqyhscsh630"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,multi_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*))#gw56v936"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,multi_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,[73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*))#34e29cce"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1pxcs9x2tj6fq9cgtc4d3duwjsxlcr8f647cdrraz8cd8ppxaz6q4qu43tdc",
         "bc1p5cudgxhx3ctqv28s4x7ul963pyfq74vjvgvg6wy2k6slf2als3kslxumz7"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,multi_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*))#xlqju8vh"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,multi_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,[73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*))#lydz4695"
     }
   },
   "fingerprints": [
@@ -37,10 +37,10 @@
       "xpub": "xpub6DzhyrnFFYQ1HimDiM388xHnDiRPNdZJFBmmxge3Y1WWcHLtMJLfRuhRHqnQCPbTj3fGKTuKFLHzzwpJkp5Dtc3UtLKZKaVZe1yqMBXd6Vk"
     }
   ],
-  "md1_encoding_id": "77d19fbf7add40251c4149a7006984c1",
+  "md1_encoding_id": "6a145368c27d05c8a6d2ebb6953233a2",
   "name": "keyed_tr_multi_a",
-  "path": "48'/0'/0'/2'",
-  "template": "tr(@0/<0;1>/*,multi_a(2,@0/<0;1>/*,@1/<0;1>/*))",
+  "path": null,
+  "template": "tr(@0/48'/0'/0'/2'/<0;1>/*,multi_a(2,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*))",
   "wallet_descriptor_template_id": "f15f29695b582f0e3a7b5be6e54f3908",
-  "wallet_policy_id": "a34f7012405bb05bb4a61f9ae572e632"
+  "wallet_policy_id": "1f26f9b7cdb8e745c898bb93f1134ba7"
 }

@@ -6,7 +6,7 @@
         "bc1qnn569ln8m5n9nsk4nt27hlxdqvlr9t87s0ukutx5vshk4fl0jm9qrsgjlg",
         "bc1q2pxfdu6jgyljnn99q4vh8mpdfjklw2dg5rkxsu7507q7fvuv3svsf9s3uk"
       ],
-      "descriptor": "wsh(thresh(2,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*),s:pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*),s:pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/0/*)))#8dhp4pyw"
+      "descriptor": "wsh(thresh(2,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*),s:pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*),s:pk([73c5da0a/48'/0'/2'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/0/*)))#cfszdp0p"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1qygwg73vtkyqfe8y7mzqhpfhwy6yyfc8wumusmz9rt60es3utprxq2jhx03",
         "bc1qahqr09jn3yhrl8lquwgc92g8paavnf82kf22f72tw7rm4zvctums8xynxm"
       ],
-      "descriptor": "wsh(thresh(2,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*),s:pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*),s:pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/1/*)))#7hcy9kz8"
+      "descriptor": "wsh(thresh(2,pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*),s:pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*),s:pk([73c5da0a/48'/0'/2'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/1/*)))#pnl8akfg"
     }
   },
   "fingerprints": [
@@ -45,10 +45,10 @@
       "xpub": "xpub6EGx8sPr9FxPPE1rbZazhqWwpMXA3Hf5DYKtZbL7c4BSddzmQktp96UaTvecEkoCZysuaj79GMCFZYT1KKk7Ph2M3Kf5g8B82KZ8TZ9SKQR"
     }
   ],
-  "md1_encoding_id": "6adac29f284b8deba9c477368451310a",
+  "md1_encoding_id": "5c0b6e98dee9c810257eab50785b9daf",
   "name": "keyed_wsh_thresh",
-  "path": "48'/0'/0'/2'",
-  "template": "wsh(thresh(2,pk(@0/<0;1>/*),s:pk(@1/<0;1>/*),s:pk(@2/<0;1>/*)))",
+  "path": null,
+  "template": "wsh(thresh(2,pk(@0/48'/0'/0'/2'/<0;1>/*),s:pk(@1/48'/0'/1'/2'/<0;1>/*),s:pk(@2/48'/0'/2'/2'/<0;1>/*)))",
   "wallet_descriptor_template_id": "f0d7e88ce79d7e808812c78c676f20be",
-  "wallet_policy_id": "362d4caae6c969e4822d540eb61899ce"
+  "wallet_policy_id": "9d00e902e019287f6bb40eb0f0e54d1b"
 }
