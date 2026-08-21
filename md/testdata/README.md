@@ -47,8 +47,11 @@ no-op. Compare that list against the primary's `MANIFEST` on every re-pin.
 ## Keyed conformance vectors (R3, vendored 2026-08-20)
 
 - Source: `descriptor-mnemonic` `b3b10f09`, `crates/md-codec/tests/vectors/`
-- Names: `keyed_*` — 7 vectors, 5 files each including `.conformance.json`
-  (`keyed_tr_sortedmulti_a` added 2026-08-20 with R5, from `75032c2f`)
+- Names: `keyed_*` — 8 vectors, 5 files each including `.conformance.json`
+  (`keyed_tr_sortedmulti_a` added 2026-08-20 with R5, from `75032c2f`;
+  `keyed_tr_depth2_rightspine` added the same day from `b8663056` — the
+  mirror of the left-heavy depth-2 tree, without which a tree-rebuilder
+  mutation that ignores leaf depth passes)
 
 These carry REAL xpubs (BIP-39's published "abandon … about" mnemonic at
 `bip48-p2wsh` accounts 0..3, master fingerprint `73c5da0a` — never put funds
