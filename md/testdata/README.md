@@ -66,3 +66,54 @@ string plus three addresses. `md/conformance_keyed_test.go` is the gate.
 It found F-212 on its first run: Go and Rust compute different
 `WalletPolicyId`s when the origin is ELIDED, and agree when it is explicit.
 That gap is pinned by shape in the test, not skipped.
+
+### `keyless_tr_with_leaf` (Stage 4, added 2026-08-20)
+
+The same template as `keyed_tr_with_leaf` with **no keys**, so it lands on the
+device's `expandUnsupported` branch carrying nothing an address could be derived
+from. `gui/policy_address_test.go` uses it as the NEGATIVE case: the addresses
+affordance must not be drawn, and the "display only" refusal must survive.
+
+Without it that suite could pass while offering the addresses button to every
+policy — including ones no address exists for.
+
+Regenerate (`descriptor-mnemonic` at or after `bf028ad0`):
+
+```sh
+md encode "$(cat md/testdata/vectors/keyed_tr_with_leaf.template)" \
+   --path "48'/0'/0'/2'" --force-chunked | grep '^md1' \
+   > md/testdata/vectors/keyless_tr_with_leaf.phrase.txt
+```
+
+`--path` is required: the `tr()` wrapper has no canonical default origin, so
+without it the card only PARTIAL-decodes. It carries no `.conformance.json` —
+there are no addresses to conform to, which is the entire point of it.
+
+### `keyed_tr_multi_a` (Stage 4, added 2026-08-20)
+
+From `descriptor-mnemonic` `97d39e4b`, where it was added FIRST per the
+Rust-primary rule. It is the corpus's only order-SENSITIVE tap leaf: every other
+multi-key leaf is `sortedmulti_a`, which sorts on the derived keys and therefore
+reads the same in any order, so "preserve the WRITTEN key order" was asserted by
+nothing. A mutation reversing a leaf's key indices passed the whole suite.
+
+It discriminates, and that was checked rather than assumed — `multi_a` and
+`sortedmulti_a` over the SAME two keys give different addresses
+(`bc1pf4auj…` vs `bc1p588jm…`). Had they matched, the written order would already
+have been sorted order.
+
+### `gap_tr_leaf_and_v` (Stage 4, added 2026-08-20)
+
+`tr(@0/<0;1>/*,and_v(v:pk(@1/<0;1>/*),older(144)))` — a timelocked taproot leaf.
+**A capability gap, vendored deliberately.** The card encodes, and the PRIMARY
+derives its addresses; this port's tap-leaf emitter describes pk / multi_a /
+sortedmulti_a only, so it refuses. `gui/policy_address_test.go` asserts the
+refusal, which is what covers `complexAddressSource`'s derive probe — every
+conformance vector derives, so deleting the probe broke nothing without this.
+
+Rust's addresses are stored in its `.conformance.json` so that a future emitter
+fix has ground truth. It is named `gap_*` rather than `keyed_*` on purpose: it is
+NOT a conformance vector, and must not be swept into
+`md/conformance_keyed_test.go`'s glob, which expects identities it has no reason
+to carry. Pinned by shape — when the emitter grows `and_v`/`older` leaves the
+test FAILS saying the gap is closed, rather than going quiet.

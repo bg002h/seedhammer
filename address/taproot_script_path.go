@@ -82,6 +82,59 @@ func TaprootScriptPath(
 	if err != nil {
 		return "", err
 	}
+	return taprootScriptPathAt(ikey, leaves, index, change, network)
+}
+
+// NUMSInternalKey is BIP-341's "no known discrete logarithm" point H, used as
+// the internal key by a taproot policy with NO key-path spend. md1 carries it as
+// a single `is_nums` bit rather than 32 bytes (SPEC §7), so the point itself has
+// to live on this side.
+//
+// The x coordinate is BIP-341's, and the even-Y lift is what `lift_x` means
+// there. Getting this wrong does not fail loudly: it yields a perfectly
+// well-formed address for a different, WRONG output key.
+var numsXOnly = [32]byte{
+	0x50, 0x92, 0x9b, 0x74, 0xc1, 0xa0, 0x49, 0x54,
+	0xb7, 0x8b, 0x4b, 0x60, 0x35, 0xe9, 0x7a, 0x5e,
+	0x07, 0x8a, 0x5a, 0x0f, 0x28, 0xec, 0x96, 0xd5,
+	0x47, 0xbf, 0xee, 0x9a, 0xce, 0x80, 0x3a, 0xc0,
+}
+
+// NUMSInternalKey returns the BIP-341 unspendable internal key H.
+func NUMSInternalKey() (*secp256k1.PublicKey, error) {
+	return schnorr.ParsePubKey(numsXOnly[:])
+}
+
+// TaprootScriptPathNUMS derives the P2TR address for a taproot policy whose
+// internal key is the NUMS point — script paths only, no key-path spend.
+//
+// Separate from TaprootScriptPath because there is no `bip380.Key` to derive
+// from: the internal key is a fixed constant and does NOT move with the address
+// index. The leaves still do, which is why index/change are still parameters.
+func TaprootScriptPathNUMS(
+	leaves []TapLeafSpec,
+	index uint32,
+	change bool,
+	network *chaincfg.Params,
+) (string, error) {
+	ikey, err := NUMSInternalKey()
+	if err != nil {
+		return "", err
+	}
+	return taprootScriptPathAt(ikey, leaves, index, change, network)
+}
+
+// taprootScriptPathAt emits every leaf script at (index, change) and wraps the
+// internal key around the resulting tree. Shared by the keyed and NUMS entry
+// points so the leaf-emission rules — including sortedmulti_a's sort on DERIVED
+// keys — exist once.
+func taprootScriptPathAt(
+	ikey *secp256k1.PublicKey,
+	leaves []TapLeafSpec,
+	index uint32,
+	change bool,
+	network *chaincfg.Params,
+) (string, error) {
 	scripts := make([]LeafScript, 0, len(leaves))
 	for _, l := range leaves {
 		derived := make([]*secp256k1.PublicKey, 0, len(l.Keys))
@@ -93,6 +146,7 @@ func TaprootScriptPath(
 			derived = append(derived, pk)
 		}
 		var script []byte
+		var err error
 		switch l.Kind {
 		case TapLeafPK:
 			if len(derived) != 1 {

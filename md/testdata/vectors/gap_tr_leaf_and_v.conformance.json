@@ -1,0 +1,21 @@
+{
+  "name": "gap_tr_leaf_and_v",
+  "template": "tr(@0/<0;1>/*,and_v(v:pk(@1/<0;1>/*),older(144)))",
+  "path": "48'/0'/0'/2'",
+  "chains": {
+    "0": {
+      "addresses": [
+        "bc1pkt2t64zvw4pzfvm5qn4yydkkt6teexhjp7huqfyjth8wh40z3l7qp7aqla",
+        "bc1p6r88s5x528dmjl8gffck0lw0xk7czvgfrrhcjzxptthe3yz3xfksvuepfk",
+        "bc1pzzrswjprqs8y7ryhv42w4d8m7sn4rfwtmv93m7wm6tp5qj4ell6q6mtxta"
+      ]
+    },
+    "1": {
+      "addresses": [
+        "bc1phx8yec3awr9yxywmyjseedfgjuzpr8ls4h8lem879af3sg08zp0sftswl2",
+        "bc1plgvu3kylg6qqda93hjsdt6a6l6we4zj8elfujk7qdx9vuuw65ajs09jp56",
+        "bc1ph95d5wyq3avlu66t5wud6mthk02y47rfch8vjzx8739kwnyq5kqsx9j7r0"
+      ]
+    }
+  }
+}

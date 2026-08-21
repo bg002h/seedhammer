@@ -48,14 +48,41 @@ func expandedToDescriptor(tpl md.Template, keys []md.ExpandedKey) (*bip380.Descr
 		}
 	}
 
+	bkeys, kok := expandedKeysToBip380(keys)
+	if !kok {
+		return nil, expandUnsupported
+	}
+
+	desc := &bip380.Descriptor{
+		Script:    script,
+		Type:      msType,
+		Threshold: tpl.K, // 0 for singlesig (unused by address derivation).
+		Keys:      bkeys,
+	}
+	return desc, expandOK
+}
+
+// expandedKeysToBip380 translates the per-@N expansion into the `bip380.Key`s
+// the address layer derives from, or reports !ok for a use-site this device
+// will not derive.
+//
+// EXTRACTED so that the two address routes share ONE use-site translation. The
+// flat-descriptor route (expandedToDescriptor, above) and the complex-policy
+// route (complexAddressSource, policy_address.go) both need it, and package
+// `address` documents the hazard exactly: "a use-site applied twice or not at
+// all is a wrong address". A second copy of this loop is how that happens —
+// silently, with a plausible address as the only symptom.
+//
+// The !ok cases are a hardened wildcard, a hardened multipath alternative, or
+// an exotic range (D5, R0-I2). They are rejected HERE, before any derivation,
+// so the shape fails display-only rather than late at verify against an address
+// that is wrong.
+func expandedKeysToBip380(keys []md.ExpandedKey) ([]bip380.Key, bool) {
 	bkeys := make([]bip380.Key, 0, len(keys))
 	for _, k := range keys {
 		children, cok := useSiteToChildren(k.UseSite)
 		if !cok {
-			// Hardened wildcard / hardened multipath alt / exotic range (D5,
-			// R0-I2): reject early so it fails display-only, never late at verify
-			// against a wrong address.
-			return nil, expandUnsupported
+			return nil, false
 		}
 		bkeys = append(bkeys, bip380.Key{
 			Network:           &chaincfg.MainNetParams, // D1: mainnet-only.
@@ -67,14 +94,7 @@ func expandedToDescriptor(tpl md.Template, keys []md.ExpandedKey) (*bip380.Descr
 			ParentFingerprint: 0,
 		})
 	}
-
-	desc := &bip380.Descriptor{
-		Script:    script,
-		Type:      msType,
-		Threshold: tpl.K, // 0 for singlesig (unused by address derivation).
-		Keys:      bkeys,
-	}
-	return desc, expandOK
+	return bkeys, true
 }
 
 // scriptForTemplate maps the renderable Template shape to a bip380 Script +

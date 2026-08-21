@@ -24,6 +24,24 @@ const addrMaxIndex = 49 // show indices 0..49; bounds the paging loop
 // §4.2). Recomputes only on entry / toggle / page (off any hot path; Measure
 // emits no draw ops). dims is stable for the flow's lifetime.
 func descriptorAddressFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
+	addressListFlow(ctx, th, func(index uint32, change bool) (string, error) {
+		if change {
+			return address.Change(desc, index)
+		}
+		return address.Receive(desc, index)
+	})
+}
+
+// addressListFlow is descriptorAddressFlow's body with its address SOURCE
+// abstracted: `at(index, change)` returns one address.
+//
+// Split out for the Stage 4 wiring. A taproot script tree and a wsh miniscript
+// policy have no faithful *bip380.Descriptor to pass, so before this the
+// screen was unreachable for exactly the shapes the operator most needs to
+// check — and the alternative, a second paging screen, would have been a second
+// place for the measure-and-advance rule (never drop an index off-screen) to be
+// got wrong.
+func addressListFlow(ctx *Context, th *Colors, at func(index uint32, change bool) (string, error)) {
 	backBtn := &Clickable{Button: Button1}
 	toggleBtn := &Clickable{Button: Button2}
 	pageBtn := &Clickable{Button: Button3}
@@ -49,13 +67,7 @@ func descriptorAddressFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
 		y := contentTop
 		for i := uint32(0); start+i <= addrMaxIndex; i++ {
 			idx := start + i
-			var a string
-			var err error
-			if change {
-				a, err = address.Change(desc, idx)
-			} else {
-				a, err = address.Receive(desc, idx)
-			}
+			a, err := at(idx, change)
 			if err != nil {
 				showError(ctx, th, "Address", err.Error())
 				return false

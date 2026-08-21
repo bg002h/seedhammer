@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -165,7 +166,38 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 	case expandTemplateOnly:
 		md1DisplayFlow(ctx, th, tpl)
 	default: // expandUnsupported
+		// STAGE 4: "display only" is no longer true for every complex policy.
+		// A taproot script tree and a wsh miniscript policy now derive real
+		// addresses (complexAddressSource), so ask before asserting — the error
+		// screen below is reserved for the shapes that genuinely cannot.
+		//
+		// The order matters: no "display only" flashes past first. Telling an
+		// operator a capability is missing and then offering it is worse than
+		// either, because the sentence they remember is the refusal.
+		if at, ok := complexAddressSource(collected, keys); ok {
+			md1PolicyFlow(ctx, th, tpl, policyIDHeader(collected), at)
+			return
+		}
 		showError(ctx, th, "Inspect descriptor", "Complex policy - display only.")
 		md1DisplayFlow(ctx, th, tpl)
 	}
+}
+
+// policyIDHeader labels the wallet id this screen is showing, or returns nothing
+// if it cannot be computed.
+//
+// NAMING WHICH ID IT IS, is the whole point (plan D2 + D4). Two ids exist for
+// one policy: the descriptor TEMPLATE id is key-stable, and the POLICY id is
+// key-dependent. An operator comparing an unlabelled 32-hex string against a
+// coordinator has no way to tell which one they are looking at, and a mismatch
+// between the two reads as a corrupted backup rather than as two different
+// questions. This screen has real xpubs by construction (complexAddressSource
+// refuses without them), so the key-dependent one is the one that answers "is
+// this MY wallet".
+func policyIDHeader(collected []string) []string {
+	id, err := md.WalletPolicyIdChunks(collected)
+	if err != nil {
+		return nil
+	}
+	return []string{"Policy id: " + hex.EncodeToString(id[:])}
 }

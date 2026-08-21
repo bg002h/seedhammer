@@ -104,8 +104,24 @@ func md1Summary(tpl md.Template) []string {
 // gap-free so the tail is always reachable (spec invariant 2.10). Mirrors
 // mk1DisplayFlow.
 func md1DisplayFlow(ctx *Context, th *Colors, tpl md.Template) {
+	md1PolicyFlow(ctx, th, tpl, nil, nil)
+}
+
+// md1PolicyFlow is md1DisplayFlow with two Stage 4 additions: `header` lines
+// prepended to the summary, and an address source on Button2.
+//
+// WHY BUTTON2 AND NOT A NEW SCREEN. DescriptorScreen.Confirm already puts
+// "Addresses" on Button2 for the shapes a *bip380.Descriptor can express, gated
+// on address.Supported. A complex policy arriving at a screen with the same
+// affordance in the same place is the point: the operator's question ("what does
+// this card actually pay to?") does not change because the policy got harder,
+// and until now the answer for exactly the hard shapes was "display only".
+//
+// `at == nil` means no address source, which is the read-only behaviour every
+// pre-existing caller had and still gets.
+func md1PolicyFlow(ctx *Context, th *Colors, tpl md.Template, header []string, at func(uint32, bool) (string, error)) {
 	var lines []string
-	for _, ln := range md1Summary(tpl) {
+	for _, ln := range append(append([]string(nil), header...), md1Summary(tpl)...) {
 		if len(ln) > 20 {
 			lines = append(lines, chunkString(ln, 20)...)
 		} else {
@@ -114,6 +130,7 @@ func md1DisplayFlow(ctx *Context, th *Colors, tpl md.Template) {
 	}
 
 	backBtn := &Clickable{Button: Button1}
+	addrBtn := &Clickable{Button: Button2}
 	pageBtn := &Clickable{Button: Button3}
 	dims := ctx.Platform.DisplaySize()
 	lineWidth := dims.X - 2*8
@@ -142,6 +159,13 @@ func md1DisplayFlow(ctx *Context, th *Colors, tpl md.Template) {
 				break
 			}
 		}
+		// Drain Button2 every frame; act only when an address source exists
+		// (the queue-head idiom DescriptorScreen.Confirm uses, for the same
+		// reason: a click left in the queue resurfaces on an unrelated screen).
+		if addrBtn.Clicked(ctx) && at != nil {
+			addressListFlow(ctx, th, at)
+			continue
+		}
 		if pageBtn.Clicked(ctx) {
 			if start+shown < len(lines) {
 				start += shown
@@ -151,10 +175,14 @@ func md1DisplayFlow(ctx *Context, th *Colors, tpl md.Template) {
 			continue
 		}
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "md1 descriptor")
-		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+		navButtons := []NavButton{
 			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
-			{Clickable: pageBtn, Style: StylePrimary, Icon: assets.IconRight},
-		}...)
+		}
+		if at != nil {
+			navButtons = append(navButtons, NavButton{Clickable: addrBtn, Style: StyleSecondary, Icon: assets.IconEdit})
+		}
+		navButtons = append(navButtons, NavButton{Clickable: pageBtn, Style: StylePrimary, Icon: assets.IconRight})
+		nav, _ := layoutNavigation(&ctx.B, th, dims, navButtons...)
 		frameOps := append([]op.Op{nav, titleOp}, body...)
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
