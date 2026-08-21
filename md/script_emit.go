@@ -46,6 +46,15 @@ const (
 	opCSV              = 0xb2 // OP_CHECKSEQUENCEVERIFY
 	opCLTV             = 0xb1 // OP_CHECKLOCKTIMEVERIFY
 	opDROP             = 0x75
+	opBOOLAND          = 0x9a
+	opBOOLOR           = 0x9b
+	opNOTIF            = 0x64
+	opIFDUP            = 0x73
+	opTOALTSTACK       = 0x6b
+	opFROMALTSTACK     = 0x6c
+	opADD              = 0x93
+	op0NOTEQUAL        = 0x92
+	opSWAP             = 0x7c
 	op1Negate          = 0x4f
 	op0                = 0x00
 )
@@ -118,6 +127,17 @@ func pushNumber(out *[]byte, v uint32) {
 func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 	switch n.tag {
 	case tagPkK:
+		// A BARE `PkK` CARRIES AN IMPLICIT `c:` — it emits OP_CHECKSIG too.
+		//
+		// The md1 wire deliberately stores a bare key at every key-check
+		// position and reserves `Tag::Check` for wrapping NON-key children
+		// (SPEC §5.1 Q12); the renderer reconstructs the `pk(K)` shorthand from
+		// it. So the wire's `PkK` is miniscript's `c:pk_k`, and emitting only
+		// the push produces a script that is missing its signature check.
+		//
+		// This was invisible until a vector contained a bare `pk()`: the
+		// timelock/hashlock vector is all `multi` and hash/timelock fragments,
+		// so it passed with the push-only version. `keyed_wsh_or_b` caught it.
 		b, ok := n.body.(keyArgBody)
 		if !ok {
 			return ErrScriptUnsupported
@@ -127,6 +147,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		pushData(out, k)
+		*out = append(*out, opCHECKSIG)
 		return nil
 
 	case tagCheck:
@@ -195,6 +216,162 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return err
 		}
 		*out = append(*out, opENDIF)
+		return nil
+
+	case tagAndB:
+		// `and_b(X,Y)` — X Y OP_BOOLAND.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		if err := emitFragment(c.children[1], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opBOOLAND)
+		return nil
+
+	case tagOrB:
+		// `or_b(X,Z)` — X Z OP_BOOLOR.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		if err := emitFragment(c.children[1], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opBOOLOR)
+		return nil
+
+	case tagOrC:
+		// `or_c(X,Z)` — X OP_NOTIF Z OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opNOTIF)
+		if err := emitFragment(c.children[1], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagOrD:
+		// `or_d(X,Z)` — X OP_IFDUP OP_NOTIF Z OP_ENDIF.
+		//
+		// The OP_IFDUP is what distinguishes it from or_c and is easy to drop:
+		// without it the script still parses and hashes elsewhere. It is the
+		// degrading-multisig idiom's fragment, so it earns its own vector.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opIFDUP, opNOTIF)
+		if err := emitFragment(c.children[1], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagThresh:
+		// `thresh(k,X1,...,Xn)` — X1 (Xi OP_ADD)... <k> OP_EQUAL.
+		//
+		// The threshold is over SUB-POLICIES, not keys, which is why this is
+		// not multi: each branch contributes 0 or 1 and the sum is compared.
+		b, ok := n.body.(variableBody)
+		if !ok || len(b.children) == 0 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(b.children[0], keys, out); err != nil {
+			return err
+		}
+		for _, c := range b.children[1:] {
+			if err := emitFragment(c, keys, out); err != nil {
+				return err
+			}
+			*out = append(*out, opADD)
+		}
+		pushNumber(out, uint32(b.k))
+		*out = append(*out, opEQUAL)
+		return nil
+
+	case tagSwap:
+		// `s:X` — OP_SWAP X.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opSWAP)
+		return emitFragment(c.children[0], keys, out)
+
+	case tagAlt:
+		// `a:X` — OP_TOALTSTACK X OP_FROMALTSTACK.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opTOALTSTACK)
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opFROMALTSTACK)
+		return nil
+
+	case tagDupIf:
+		// `d:X` — OP_DUP OP_IF X OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opDUP, opIF)
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagZeroNotEqual:
+		// `n:X` — X OP_0NOTEQUAL.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, op0NOTEQUAL)
+		return nil
+
+	case tagNonZero:
+		// `j:X` — OP_SIZE OP_0NOTEQUAL OP_IF X OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opSIZE, op0NOTEQUAL, opIF)
+		if err := emitFragment(c.children[0], keys, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagTrue:
+		*out = append(*out, 0x51) // OP_1
+		return nil
+
+	case tagFalse:
+		*out = append(*out, op0)
 		return nil
 
 	case tagOlder:

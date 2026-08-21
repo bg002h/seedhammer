@@ -47,7 +47,7 @@ no-op. Compare that list against the primary's `MANIFEST` on every re-pin.
 ## Keyed conformance vectors (R3, vendored 2026-08-20)
 
 - Source: `descriptor-mnemonic` `b3b10f09`, `crates/md-codec/tests/vectors/`
-- Names: `keyed_*` — 9 vectors, 5 files each including `.conformance.json`
+- Names: `keyed_*` — 12 vectors, 5 files each including `.conformance.json`
   (`keyed_tr_sortedmulti_a` added 2026-08-20 with R5, from `75032c2f`;
   `keyed_tr_depth2_rightspine` added the same day from `b8663056` — the
   mirror of the left-heavy depth-2 tree, without which a tree-rebuilder

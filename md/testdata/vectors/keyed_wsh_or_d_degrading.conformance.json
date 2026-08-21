@@ -1,0 +1,54 @@
+{
+  "chains": {
+    "0": {
+      "addresses": [
+        "bc1qayxvf43yc8ves5d3y0438e0qyg02cjv2n4rdngdq873pt76xh7msrlx85h",
+        "bc1q6xskdrp3x3uynvej8z845snspkl9udfljllly09hd5sg5lrq368s02h2e5",
+        "bc1qweu34mq6xjnackufx7putxg47znk6myc58mrdyvpxdca23qexmeq95sks7"
+      ],
+      "descriptor": "wsh(or_d(multi(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*),and_v(v:older(65535),pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/0/*))))#5zcnhclv"
+    },
+    "1": {
+      "addresses": [
+        "bc1qse9ty3xe3gcmltnadhe289fnvfh9wzele45wjfy23umsm6eaq5tq79xc60",
+        "bc1qnpdxjcf9d8nfgxucfmxcgcjfw2kvgve5dyk4rldtet967mlg32usreptcu",
+        "bc1qk9qasrkpapqe7fm97gz74u4ew8atvra5dqf62lplstawa0p9n4sq40atcs"
+      ],
+      "descriptor": "wsh(or_d(multi(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*),and_v(v:older(65535),pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGS5QF7iox7vX4iVsg1dj9epBz8dhpHDRoJTCNYChFEZhZ26Fda2Bz3GyUAUPNGRn1zhwMZktL49GBdUAc1cPCMPNm3cGkqg/1/*))))#jkd9crhq"
+    }
+  },
+  "fingerprints": [
+    {
+      "fingerprint": "73c5da0a",
+      "index": 0
+    },
+    {
+      "fingerprint": "73c5da0a",
+      "index": 1
+    },
+    {
+      "fingerprint": "73c5da0a",
+      "index": 2
+    }
+  ],
+  "keys": [
+    {
+      "index": 0,
+      "xpub": "xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf"
+    },
+    {
+      "index": 1,
+      "xpub": "xpub6DzhyrnFFYQ1HimDiM388xHnDiRPNdZJFBmmxge3Y1WWcHLtMJLfRuhRHqnQCPbTj3fGKTuKFLHzzwpJkp5Dtc3UtLKZKaVZe1yqMBXd6Vk"
+    },
+    {
+      "index": 2,
+      "xpub": "xpub6EGx8sPr9FxPPE1rbZazhqWwpMXA3Hf5DYKtZbL7c4BSddzmQktp96UaTvecEkoCZysuaj79GMCFZYT1KKk7Ph2M3Kf5g8B82KZ8TZ9SKQR"
+    }
+  ],
+  "md1_encoding_id": "4f8f3980d69db7e51991dd447324088e",
+  "name": "keyed_wsh_or_d_degrading",
+  "path": "48'/0'/0'/2'",
+  "template": "wsh(or_d(multi(2,@0/<0;1>/*,@1/<0;1>/*),and_v(v:older(65535),pk(@2/<0;1>/*))))",
+  "wallet_descriptor_template_id": "e312886e5f84e84bab7de07ec4b084e3",
+  "wallet_policy_id": "03f5a068b32df50d1e2ff4c811db5be2"
+}
