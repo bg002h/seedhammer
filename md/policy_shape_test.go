@@ -44,6 +44,9 @@ func TestPolicyShapeDescribesRealCards(t *testing.T) {
 		// invent a spend path that does not exist.
 		{vector: "keyed_tr_keyonly", keyPath: KeyPathSpendable, branches: 0},
 		{vector: "keyed_tr_with_leaf", keyPath: KeyPathSpendable, branches: 1, tapDepth: 0},
+		// A tap leaf that IS a plain threshold over keys: K/N must be reported,
+		// unlike the bare-pk leaves above.
+		{vector: "keyed_tr_sortedmulti_a", keyPath: KeyPathSpendable, branches: 1, wantK: 2, wantN: 2},
 		// THE SHAPE THE CYCLE IS ABOUT: three leaves, unbalanced, depth 2.
 		{vector: "keyed_tr_depth2", keyPath: KeyPathSpendable, branches: 3, tapDepth: 2},
 	} {

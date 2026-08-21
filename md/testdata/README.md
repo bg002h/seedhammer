@@ -47,7 +47,8 @@ no-op. Compare that list against the primary's `MANIFEST` on every re-pin.
 ## Keyed conformance vectors (R3, vendored 2026-08-20)
 
 - Source: `descriptor-mnemonic` `b3b10f09`, `crates/md-codec/tests/vectors/`
-- Names: `keyed_*` — 6 vectors, 5 files each including `.conformance.json`
+- Names: `keyed_*` — 7 vectors, 5 files each including `.conformance.json`
+  (`keyed_tr_sortedmulti_a` added 2026-08-20 with R5, from `75032c2f`)
 
 These carry REAL xpubs (BIP-39's published "abandon … about" mnemonic at
 `bip48-p2wsh` accounts 0..3, master fingerprint `73c5da0a` — never put funds
