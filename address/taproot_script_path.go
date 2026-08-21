@@ -2,6 +2,7 @@ package address
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"sort"
 
@@ -226,4 +227,31 @@ func MultiALeafScript(k int, keys []*secp256k1.PublicKey, sorted bool) ([]byte, 
 	b.AddInt64(int64(k))
 	b.AddOp(txscript.OP_NUMEQUAL)
 	return b.Script()
+}
+
+// DeriveChild exposes this package's child-key derivation.
+//
+// It is exported because the segwit-v0 witness-script emitter lives in package
+// `md` (the only package holding the decoded AST) and needs DERIVED keys handed
+// to it. The alternative — deriving inside the codec — would put the use-site
+// path in two places, and a use-site applied twice or not at all is a wrong
+// address. One rule, one implementation, called from wherever it is needed.
+func DeriveChild(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
+	return derivePubKey(k, index, change)
+}
+
+// WitnessScriptAddress wraps a segwit-v0 witness script into its P2WSH address.
+//
+// Pairing this with `md.EmitWitnessScriptChunks` makes the address a FUNCTION of
+// the script bytes: P2WSH commits to sha256(script), so agreeing with another
+// implementation on the address means agreeing on every opcode. That is why the
+// emitter's tests assert addresses rather than script hex — a script diff can be
+// argued about, an address cannot.
+func WitnessScriptAddress(script []byte, network *chaincfg.Params) (string, error) {
+	h := sha256.Sum256(script)
+	addr, err := address.NewAddressWitnessScriptHash(h[:], network)
+	if err != nil {
+		return "", err
+	}
+	return addr.String(), nil
 }
