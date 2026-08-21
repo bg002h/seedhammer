@@ -142,13 +142,16 @@ var decoyNeedles = []struct {
 }{
 	// Two sites: the build flow's wallet-policy form picker and singlesig's.
 	{"Which md1?", 2},
-	// TWO sites since S1: bundleFlow and supplyMultisigPolicyFlow. It was three
-	// — buildMultisigPolicyFlow had the same picker — and S1 removed that one,
-	// because the Build path now takes the WHOLE cosigner set from the payload
-	// and a source picker with one answer is a tap that teaches nothing. Still a
-	// decoy, and still the reason "the walk reached a card gather" proves
-	// nothing: two flows can draw it.
-	{"First card from where?", 2},
+	// THREE sites since the Wallet Policy program: bundleFlow,
+	// supplyMultisigPolicyFlow and walletPolicyFlow. It was two — S1 had removed
+	// buildMultisigPolicyFlow's copy, because the Build path takes the WHOLE
+	// cosigner set from the payload and a source picker with one answer is a tap
+	// that teaches nothing. Wallet Policy put a third back, deliberately: it
+	// offers the payload through the SAME offer() a scanned card enters by, and
+	// a second insertion path would be a second way for a card to join a set
+	// with only one of them checked. Still a decoy, and MORE of one now — "the
+	// walk reached a card gather" distinguishes nothing among three flows.
+	{"First card from where?", 3},
 	// CORRECTED BY S2/D-4. This used to read "the gather's title comes from the
 	// SHARED gatherer, so it reads 'Engrave Bundle' even when the operator
 	// arrived via Build policy" — true when it was written, false since D-4 made

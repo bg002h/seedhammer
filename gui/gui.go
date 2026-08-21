@@ -188,6 +188,30 @@ const (
 	engraveBundle
 	engraveSingleSig
 	engraveMultisig
+	// walletPolicy is the 10th navigable program (plan D5): a front door for a
+	// wallet policy that came from OUTSIDE this device. It is not a rename of
+	// Multisig and not an extension of Bundle.
+	//
+	// WHY IT IS ITS OWN PROGRAM. Engrave Bundle can already gather and engrave a
+	// supplied md1 — what it cannot do is PROVE it. Its review screen reads
+	// "N cards verified" plus a per-card label, which says the chunks reassembled
+	// and nothing about which wallet the operator is about to commit to steel.
+	// Engrave Multisig proves more, but demands a seed and cuts COSIGNER plates:
+	// its question is "am I in this policy", not "is this the right policy".
+	// Neither answers plan D2 — proof is derived addresses plus a NAMED wallet id
+	// — and bolting that onto either would drag a seed requirement or a plate
+	// census into a flow that needs neither.
+	//
+	// INSERTED mid-enum, not appended, per the house rule on loadPayload just
+	// below: this program is UNCONDITIONAL, so bip85Derive stays the bound
+	// StartScreen.lastNav() returns and unlockPayload stays the conditional
+	// last. Appending it would put an unconditional program after a conditional
+	// one and break that bound.
+	//
+	// Placed beside the other ENGRAVE programs rather than after Load Payload:
+	// the carousel reads as a list of things to make, and a utility sitting
+	// between two of them is a seam an operator has to step over.
+	walletPolicy
 	// loadPayload is UNCONDITIONAL and therefore inserted mid-enum per the house
 	// rule, before bip85Derive, so bip85Derive stays the bound StartScreen.lastNav
 	// returns and unlockPayload stays the last navigable program. Two
@@ -2018,6 +2042,9 @@ func uiFlow(ctx *Context, version string) {
 			case engraveMultisig:
 				engraveMultisigFlow(ctx, th)
 				continue
+			case walletPolicy:
+				walletPolicyFlow(ctx, th)
+				continue
 			case loadPayload:
 				syswPayloadMenu(ctx, th)
 				continue
@@ -2171,6 +2198,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Engrave Single-Sig"
 	case engraveMultisig:
 		titleTxt = "Engrave Multisig"
+	case walletPolicy:
+		titleTxt = "Wallet Policy"
 	case loadPayload:
 		titleTxt = "Load Payload"
 	case bip85Derive:
@@ -2378,7 +2407,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, loadPayload, bip85Derive, unlockPayload:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, walletPolicy, loadPayload, bip85Derive, unlockPayload:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()

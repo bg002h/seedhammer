@@ -63,6 +63,10 @@ var syswConsumers = []syswConsumer{
 		"the supplied-md1 path (plan stage 13c)"},
 	{"multisig_build.go", "buildMultisigPolicyFlow", []syswProgram{progMultisig},
 		"the cosigner-card gather (plan stage 13c)"},
+	{"wallet_policy.go", "walletPolicyFlow", []syswProgram{progWalletPolicy},
+		"the Wallet Policy program's first card (plan D5). ClassMDMK only — this " +
+			"program never derives from a secret, so progWalletPolicy admits no " +
+			"seed class at all"},
 }
 
 // classNames maps the sysw.Class identifiers a call site can name to their

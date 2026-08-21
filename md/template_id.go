@@ -126,3 +126,49 @@ func FormAwareStubChunks(strs []string) ([4]byte, error) {
 	}
 	return FormAwareStub(d)
 }
+
+// WalletIdKind names WHICH wallet id a form-aware lookup returned.
+//
+// This exists because the two ids are indistinguishable once rendered: both are
+// 16 bytes of hex, and they differ for the same wallet. An operator comparing
+// the wrong one against a coordinator sees a mismatch and reads it as a
+// corrupted backup. Returning the kind alongside the id makes "say which one
+// you are showing" structural — a caller cannot print the label without having
+// been told the answer.
+type WalletIdKind uint8
+
+const (
+	// WalletIdPolicy — key-DEPENDENT. Changes if any key changes, so it answers
+	// "is this MY wallet, with these cosigners".
+	WalletIdPolicy WalletIdKind = iota
+	// WalletIdTemplate — key-STABLE. Identical across keyless, keyed and re-keyed
+	// forms of one policy, so it answers "is this the right POLICY SHAPE" and
+	// says nothing about whose keys are in it.
+	WalletIdTemplate
+)
+
+func (k WalletIdKind) String() string {
+	if k == WalletIdTemplate {
+		return "Template-ID"
+	}
+	return "Policy-ID"
+}
+
+// FormAwareIdChunks returns the wallet id that is AUTHORITATIVE for this card's
+// form, and the kind of id it returned.
+//
+// The full-16-byte sibling of FormAwareStub, and it selects by the same
+// isWalletPolicy discriminant, so a card's stub and its displayed id can never
+// disagree about which identity they are.
+func FormAwareIdChunks(strs []string) ([16]byte, WalletIdKind, error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return [16]byte{}, WalletIdPolicy, err
+	}
+	if isWalletPolicy(d) {
+		id, err := WalletPolicyId(d)
+		return id, WalletIdPolicy, err
+	}
+	id, err := WalletDescriptorTemplateId(d)
+	return id, WalletIdTemplate, err
+}

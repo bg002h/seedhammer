@@ -23,6 +23,7 @@ const (
 	progBundle
 	progSingleSig
 	progMultisig
+	progWalletPolicy
 	progBip85
 )
 
@@ -35,6 +36,12 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 	progBundle:       {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	progSingleSig:    {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassMDMK: true},
 	progMultisig:     {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
+	// NO seed class. The Wallet Policy program never derives from a secret: its
+	// proof is addresses derived from the policy's OWN public keys plus a named
+	// wallet id, so admitting a mnemonic would grant a capability the flow has
+	// no use for. Least privilege, and it is enforced here rather than by the
+	// flow declining to ask.
+	progWalletPolicy: {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	progBip85:        {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
 }
 
