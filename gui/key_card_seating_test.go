@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"seedhammer.com/md"
@@ -388,5 +389,89 @@ func TestAStrippedTemplateCannotSeatTwoMastersAtOnePath(t *testing.T) {
 				t.Fatalf("without a fingerprint, card %d should still match slot %d by origin", ci, si)
 			}
 		}
+	}
+}
+
+// ─── D3's first half, through the CONSENT SURFACE ───────────────────────────
+//
+// The tests above exercise `seatKeyCards` directly. These go through
+// `walletPolicyConsentLines`, which is what an operator actually sees — the
+// join is where this kind of feature usually fails, with every component green.
+
+func TestConsentSeatsKeyCardsAndShowsRustAddresses(t *testing.T) {
+	tmpl, cards, want := seatFixture(t)
+	lines, err := walletPolicyConsentLines(tmpl, cards)
+	if err != nil {
+		t.Fatalf("consent refused a complete, correct gather: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, want) {
+		t.Fatalf("the consent screen does not show the Rust-derived address %s:\n%s", want, joined)
+	}
+	for _, forbidden := range []string{"Keyless template - no addresses", "no addresses"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("the screen still says %q after a successful seating:\n%s", forbidden, joined)
+		}
+	}
+}
+
+// D3's SECOND half must survive: skipping the gather still reaches consent,
+// without address proof. Adding the first half must not have removed it.
+func TestConsentWithoutKeyCardsStillSaysKeyless(t *testing.T) {
+	tmpl, _, _ := seatFixture(t)
+	lines, err := walletPolicyConsentLines(tmpl, nil)
+	if err != nil {
+		t.Fatalf("a keyless template alone was refused: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "no addresses") {
+		t.Fatalf("a keyless template with no cards should say so:\n%s", joined)
+	}
+}
+
+// A FULL-POLICY card must not be re-seated. Seating over a card that already
+// carries its keys would let a stray key card silently replace a declared one.
+func TestConsentDoesNotSeatOverAFullPolicyCard(t *testing.T) {
+	keyed := loadVectorChunks(t, seatVector)
+	_, cards, want := seatFixture(t)
+	// Hand the FULL policy card the key cards too; the policy's own keys win.
+	lines, err := walletPolicyConsentLines(keyed, cards)
+	if err != nil {
+		t.Fatalf("a full policy card with key cards alongside was refused: %v", err)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), want) {
+		t.Fatal("the full-policy card's own addresses are not shown")
+	}
+}
+
+// Every typed refusal must reach the operator as its OWN sentence. "Your cards
+// were refused" is accurate, actionable by nobody, and indistinguishable from a
+// broken device.
+func TestEachSeatingRefusalHasItsOwnSentence(t *testing.T) {
+	tmpl, cards, _ := seatFixture(t)
+
+	foreign := append([]mk.Card{}, cards...)
+	foreign[0].Stubs = [][4]byte{{0xde, 0xad, 0xbe, 0xef}}
+
+	noSlot := append([]mk.Card{}, cards...)
+	noSlot[0].Path = "m/48'/0'/99'/2'"
+
+	for name, tc := range map[string]struct {
+		cards []mk.Card
+		want  string
+	}{
+		"not this policy": {foreign, "different stub"},
+		"matches no slot": {noSlot, "matches no slot"},
+		"incomplete":      {cards[:1], "no key card yet"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := walletPolicyConsentLines(tmpl, tc.cards)
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("the refusal does not say %q:\n%s", tc.want, err.Error())
+			}
+		})
 	}
 }

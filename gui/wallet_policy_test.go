@@ -11,7 +11,7 @@ import (
 // the way the screen renders them.
 func consentText(t *testing.T, vector string) string {
 	t.Helper()
-	lines, err := walletPolicyConsentLines(loadVectorChunks(t, vector))
+	lines, err := walletPolicyConsentLines(loadVectorChunks(t, vector), nil)
 	if err != nil {
 		t.Fatalf("%s: consent lines refused: %v", vector, err)
 	}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"seedhammer.com/mk"
+
 	"seedhammer.com/address"
 	"seedhammer.com/md"
 	"seedhammer.com/sysw"
@@ -52,7 +54,12 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 			showError(ctx, th, title, "Supply exactly one wallet policy (md1) card.")
 			continue
 		}
-		lines, err := walletPolicyConsentLines(md1)
+		keyCards, err := walletPolicyKeyCards(cards)
+		if err != nil {
+			showError(ctx, th, title, "Couldn't read one of the key cards.")
+			continue
+		}
+		lines, err := walletPolicyConsentLines(md1, keyCards)
 		if err != nil {
 			showError(ctx, th, title, err.Error())
 			continue
@@ -96,10 +103,27 @@ func walletPolicyMd1(cards []bundleCard) ([]string, bool) {
 
 // walletPolicyConsentLines is the proof (plan D2), in the order an operator
 // checks it: which wallet, what shape, where it pays.
-func walletPolicyConsentLines(md1 []string) ([]string, error) {
+func walletPolicyConsentLines(md1 []string, keyCards []mk.Card) ([]string, error) {
 	tpl, keys, err := md.ExpandWalletPolicyChunks(md1)
 	if err != nil {
 		return nil, errors.New("Couldn't decode the supplied wallet policy.")
+	}
+
+	// D3's first half: a KEYLESS template plus gathered mk1 key cards is a
+	// wallet this device can prove, once each card is seated at the slot whose
+	// declared origin it matches. Skipping the gather is still valid and still
+	// reaches consent — without address proof — which is D3's second half and
+	// shipped first.
+	//
+	// Only when the template carries no keys of its own. A full-policy card
+	// already has them, and seating over the top would let a stray key card
+	// silently replace one the policy declared.
+	if len(keyCards) > 0 && templateIsKeyless(keys) {
+		seated, err := seatKeyCards(md1, keyCards)
+		if err != nil {
+			return nil, seatRefusalMessage(err)
+		}
+		keys = seated
 	}
 
 	// THE ID, NAMED. The kind comes from the codec rather than from a guess
@@ -217,4 +241,71 @@ func policyAddressAt(md1 []string, tpl md.Template, keys []md.ExpandedKey) (func
 		}, true
 	}
 	return complexAddressSource(md1, keys)
+}
+
+// templateIsKeyless reports whether NO slot carries an xpub.
+//
+// All-or-nothing on purpose. A partially-keyed card is not a template waiting
+// for cards; it is a shape this device already refuses to derive from, and
+// seating into the gaps would produce a wallet that is half what was engraved
+// and half what happened to be scanned.
+func templateIsKeyless(keys []md.ExpandedKey) bool {
+	for _, k := range keys {
+		if k.XpubPresent {
+			return false
+		}
+	}
+	return len(keys) > 0
+}
+
+// walletPolicyKeyCards decodes the mk1 key cards out of the gathered set.
+func walletPolicyKeyCards(cards []bundleCard) ([]mk.Card, error) {
+	var out []mk.Card
+	for _, c := range cards {
+		if c.kind != cardMK1 {
+			continue
+		}
+		card, err := mk.Decode(c.strings)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, card)
+	}
+	return out, nil
+}
+
+// seatRefusalMessage turns a typed seating refusal into the sentence an
+// operator can act on.
+//
+// ONE SENTENCE PER CASE, because "your key cards were refused" is the worst
+// version of a correct refusal: it is accurate, actionable by nobody, and
+// indistinguishable from a broken device. Each of these names what the device
+// saw and what the operator can do about it.
+func seatRefusalMessage(err error) error {
+	switch {
+	case errors.Is(err, errSeatNotThisPolicy):
+		// The likeliest cause by far, and it is not operator error: a key card
+		// minted for the FULL policy carries the POLICY id stub, while a keyless
+		// template's stub is the TEMPLATE id. Same wallet, two different stubs.
+		return errors.New(
+			"A key card doesn't belong to this policy. Note that key cards made " +
+				"for the full-policy card carry a different stub than a " +
+				"template-only card expects.")
+	case errors.Is(err, errSeatNoSlot):
+		return errors.New(
+			"A key card's derivation path matches no slot in this policy. " +
+				"Check it belongs to this wallet.")
+	case errors.Is(err, errSeatSlotUnfilled):
+		return errors.New(
+			"Some slots have no key card yet. Gather one card per slot, or " +
+				"skip and continue without address proof.")
+	case errors.Is(err, errSeatSlotContested):
+		// The undecidable case, and the one where guessing would be invisible.
+		// It happens when the template declares no fingerprints and two slots
+		// share a derivation path — a stripped template cannot tell them apart.
+		return errors.New(
+			"Two different key cards claim the same slot, and this template " +
+				"can't tell them apart. It declares no fingerprints.")
+	}
+	return errors.New("Couldn't match the key cards to this policy.")
 }
