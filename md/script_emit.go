@@ -27,21 +27,26 @@ import (
 
 // Opcodes used by the emitted subset.
 const (
-	opDUP              = 0x76
-	opEQUAL            = 0x87
-	opEQUALVERIFY      = 0x88
-	opVERIFY           = 0x69
-	opIF               = 0x63
-	opELSE             = 0x67
-	opENDIF            = 0x68
-	opSIZE             = 0x82
-	opSHA256           = 0xa8
-	opHASH160          = 0xa9
-	opHASH256          = 0xaa
-	opRIPEMD160        = 0xa6
-	opCHECKSIG         = 0xac
-	opCHECKSIGVERIFY   = 0xad
-	opCHECKMULTISIG    = 0xae
+	opDUP            = 0x76
+	opEQUAL          = 0x87
+	opEQUALVERIFY    = 0x88
+	opVERIFY         = 0x69
+	opIF             = 0x63
+	opELSE           = 0x67
+	opENDIF          = 0x68
+	opSIZE           = 0x82
+	opSHA256         = 0xa8
+	opHASH160        = 0xa9
+	opHASH256        = 0xaa
+	opRIPEMD160      = 0xa6
+	opCHECKSIG       = 0xac
+	opCHECKSIGVERIFY = 0xad
+	opCHECKMULTISIG  = 0xae
+	// BIP-342 tapscript. OP_CHECKSIGADD reuses OP_SUCCESS186's slot, which is
+	// why it exists only under taproot; OP_NUMEQUAL is ordinary but is the
+	// terminator multi_a uses in place of CHECKMULTISIG's implicit compare.
+	opCHECKSIGADD      = 0xba
+	opNUMEQUAL         = 0x9c
 	opCHECKMULTISIGVER = 0xaf
 	opCSV              = 0xb2 // OP_CHECKSEQUENCEVERIFY
 	opCLTV             = 0xb1 // OP_CHECKLOCKTIMEVERIFY
@@ -63,6 +68,28 @@ const (
 // can say "not supported yet" rather than "invalid policy".
 var ErrScriptUnsupported = errors.New("md: script fragment not supported for emission")
 
+// emitEnv is the emission context: the derived keys, and WHICH SCRIPT LANGUAGE
+// is being emitted.
+//
+// One fragment walker serves both, because segwit-v0 witness scripts and
+// tapscript leaves are the same miniscript over different primitives. Only two
+// things actually differ, and both are in `tap`:
+//
+//   - KEY WIDTH. `keys` holds 33-byte compressed points for segwit v0 and
+//     32-byte x-only points for tapscript. The caller derives, so this walker
+//     just pushes what it is given — but the two must never be mixed, since a
+//     33-byte push in a tapscript leaf is a valid script for the wrong key.
+//   - THE MULTISIG OPCODE. BIP-342 DISABLED `OP_CHECKMULTISIG` in tapscript and
+//     replaced it with `multi_a`'s CHECKSIGADD accumulation. So `multi` is
+//     segwit-v0-only and `multi_a` is tapscript-only, and each is REFUSED in
+//     the other context rather than silently translated: a policy asking for
+//     CHECKMULTISIG under taproot is not a policy this device can honour, and
+//     emitting the "equivalent" would commit funds to a script nobody wrote.
+type emitEnv struct {
+	keys map[uint8][]byte
+	tap  bool
+}
+
 // EmitWitnessScriptChunks decodes an md1 chunk set and emits the segwit-v0
 // witness script for its `wsh(...)` body, using the supplied derived keys.
 //
@@ -80,7 +107,7 @@ func EmitWitnessScriptChunks(strs []string, keys map[uint8][]byte) ([]byte, erro
 		return nil, ErrScriptUnsupported
 	}
 	var out []byte
-	if err := emitFragment(b.children[0], keys, &out); err != nil {
+	if err := emitFragment(b.children[0], emitEnv{keys: keys}, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -124,7 +151,7 @@ func pushNumber(out *[]byte, v uint32) {
 }
 
 // emitFragment appends one fragment's script.
-func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
+func emitFragment(n node, e emitEnv, out *[]byte) error {
 	switch n.tag {
 	case tagPkK:
 		// A BARE `PkK` CARRIES AN IMPLICIT `c:` — it emits OP_CHECKSIG too.
@@ -142,7 +169,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok {
 			return ErrScriptUnsupported
 		}
-		k, ok := keys[b.index]
+		k, ok := e.keys[b.index]
 		if !ok {
 			return ErrScriptUnsupported
 		}
@@ -156,7 +183,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 1 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opCHECKSIG)
@@ -172,7 +199,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		before := len(*out)
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		if len(*out) == before {
@@ -196,10 +223,10 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 2 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
-		return emitFragment(c.children[1], keys, out)
+		return emitFragment(c.children[1], e, out)
 
 	case tagOrI:
 		// `or_i(X,Y)` — OP_IF X OP_ELSE Y OP_ENDIF.
@@ -208,11 +235,11 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		*out = append(*out, opIF)
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opELSE)
-		if err := emitFragment(c.children[1], keys, out); err != nil {
+		if err := emitFragment(c.children[1], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opENDIF)
@@ -224,10 +251,10 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 2 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
-		if err := emitFragment(c.children[1], keys, out); err != nil {
+		if err := emitFragment(c.children[1], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opBOOLAND)
@@ -239,10 +266,10 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 2 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
-		if err := emitFragment(c.children[1], keys, out); err != nil {
+		if err := emitFragment(c.children[1], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opBOOLOR)
@@ -254,11 +281,11 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 2 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opNOTIF)
-		if err := emitFragment(c.children[1], keys, out); err != nil {
+		if err := emitFragment(c.children[1], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opENDIF)
@@ -274,11 +301,11 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 2 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opIFDUP, opNOTIF)
-		if err := emitFragment(c.children[1], keys, out); err != nil {
+		if err := emitFragment(c.children[1], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opENDIF)
@@ -293,11 +320,11 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(b.children) == 0 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(b.children[0], keys, out); err != nil {
+		if err := emitFragment(b.children[0], e, out); err != nil {
 			return err
 		}
 		for _, c := range b.children[1:] {
-			if err := emitFragment(c, keys, out); err != nil {
+			if err := emitFragment(c, e, out); err != nil {
 				return err
 			}
 			*out = append(*out, opADD)
@@ -313,7 +340,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		*out = append(*out, opSWAP)
-		return emitFragment(c.children[0], keys, out)
+		return emitFragment(c.children[0], e, out)
 
 	case tagAlt:
 		// `a:X` — OP_TOALTSTACK X OP_FROMALTSTACK.
@@ -322,7 +349,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		*out = append(*out, opTOALTSTACK)
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opFROMALTSTACK)
@@ -335,7 +362,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		*out = append(*out, opDUP, opIF)
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opENDIF)
@@ -347,7 +374,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		if !ok || len(c.children) != 1 {
 			return ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, op0NOTEQUAL)
@@ -360,7 +387,7 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 			return ErrScriptUnsupported
 		}
 		*out = append(*out, opSIZE, op0NOTEQUAL, opIF)
-		if err := emitFragment(c.children[0], keys, out); err != nil {
+		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}
 		*out = append(*out, opENDIF)
@@ -426,13 +453,19 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		return nil
 
 	case tagMulti, tagSortedMulti:
+		// BIP-342 disabled OP_CHECKMULTISIG in tapscript. A `multi()` inside a
+		// tap leaf has no emission, and inventing the multi_a equivalent would
+		// change the policy.
+		if e.tap {
+			return ErrScriptUnsupported
+		}
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
 			return ErrScriptUnsupported
 		}
 		ks := make([][]byte, 0, len(b.indices))
 		for _, i := range b.indices {
-			k, ok := keys[i]
+			k, ok := e.keys[i]
 			if !ok {
 				return ErrScriptUnsupported
 			}
@@ -447,6 +480,45 @@ func emitFragment(n node, keys map[uint8][]byte, out *[]byte) error {
 		}
 		pushNumber(out, uint32(len(ks)))
 		*out = append(*out, opCHECKMULTISIG)
+		return nil
+
+	case tagMultiA, tagSortedMultiA:
+		// `multi_a(k, ...)` — BIP-342's replacement for CHECKMULTISIG:
+		//
+		//	<k0> OP_CHECKSIG <k1> OP_CHECKSIGADD … <kn-1> OP_CHECKSIGADD <k> OP_NUMEQUAL
+		//
+		// The first key CHECKSIGs to seed the accumulator; every later one adds
+		// to it. Tapscript-only, for the same reason `multi` is not.
+		if !e.tap {
+			return ErrScriptUnsupported
+		}
+		b, ok := n.body.(multiKeysBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		ks := make([][]byte, 0, len(b.indices))
+		for _, i := range b.indices {
+			k, ok := e.keys[i]
+			if !ok {
+				return ErrScriptUnsupported
+			}
+			ks = append(ks, k)
+		}
+		// sortedmulti_a sorts the DERIVED keys, so the order depends on the
+		// address index — it cannot be precomputed from the template.
+		if n.tag == tagSortedMultiA {
+			sortByteSlices(ks)
+		}
+		for i, k := range ks {
+			pushData(out, k)
+			if i == 0 {
+				*out = append(*out, opCHECKSIG)
+			} else {
+				*out = append(*out, opCHECKSIGADD)
+			}
+		}
+		pushNumber(out, uint32(b.k))
+		*out = append(*out, opNUMEQUAL)
 		return nil
 
 	default:

@@ -330,35 +330,68 @@ func hexString(b []byte) string {
 	return string(out)
 }
 
-// TestTapLeafGapIsPinnedByShape covers the one thing complexAddressSource does
-// that nothing else could see: the DERIVE PROBE.
+// TestTheTimelockedTapLeafGapIsCLOSED — the tripwire fired, and this is what it
+// became.
 //
-// The probe (deriving index 0 and reporting ok only if it worked) exists so the
-// answer to "can this device show addresses for this policy" comes from the
-// emitters rather than from a hand-maintained list of shapes. Every keyed
-// conformance vector derives, so removing the probe broke NOTHING — a mutation
-// that deleted it passed the whole suite.
+// `tr(@0, and_v(v:pk(@1), older(144)))` is a timelocked taproot leaf: the shape
+// the DESCRIBE path (a three-name vocabulary of pk / multi_a / sortedmulti_a)
+// could never name. It used to be pinned as a refusal, with Rust's addresses
+// vendored beside it so that a future fix would have something to be right
+// against. F-214's emitter closed it, the pinned test failed with "THE GAP IS
+// CLOSED", and the address it produced was byte-identical to the vendored one.
 //
-// This is the missing case, and it is a real one rather than a contrivance:
-// `tr(@0, and_v(v:pk(@1), older(144)))` — a timelocked taproot leaf — encodes
-// to a perfectly good md1 card, and the PRIMARY (Rust) derives its addresses.
-// This port's tap-leaf emitter describes pk / multi_a / sortedmulti_a only, so
-// it cannot, and refuses instead of approximating. An approximated leaf is a
-// valid-looking address for a script nobody can spend from.
-//
-// PINNED BY SHAPE, NOT SKIPPED: the assertion is "this must refuse". When the
-// emitter grows and_v/older leaves, this test FAILS and says the gap is closed —
-// rather than going quiet and leaving a capability nobody notices arriving.
-// Ground truth is vendored alongside so that fix has something to be right
-// against.
-func TestTapLeafGapIsPinnedByShape(t *testing.T) {
+// Kept as a POSITIVE test rather than deleted: the vector is the only
+// timelocked tap leaf in this repo, and it is now the thing that would notice
+// if emission regressed to the vocabulary.
+func TestTheTimelockedTapLeafGapIsCLOSED(t *testing.T) {
 	chunks := loadVectorChunks(t, "gap_tr_leaf_and_v")
+	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	at, ok := complexAddressSource(chunks, keys)
+	if !ok {
+		t.Fatal("a timelocked tap leaf no longer derives — F-214 has regressed")
+	}
+	for _, c := range []struct {
+		chain  string
+		change bool
+	}{{"0", false}, {"1", true}} {
+		for i := 0; i < 2; i++ {
+			want := vectorAddress(t, "gap_tr_leaf_and_v", c.chain, i)
+			got, err := at(uint32(i), c.change)
+			if err != nil {
+				t.Fatalf("chain %s index %d: %v", c.chain, i, err)
+			}
+			if got != want {
+				t.Fatalf("chain %s index %d:\n got  %s\n want %s (rust)", c.chain, i, got, want)
+			}
+		}
+	}
+}
+
+// TestPkhTapLeafGapIsPinnedByShape is the NEW tripwire, and it covers what the
+// old one did: complexAddressSource's DERIVE PROBE.
+//
+// The probe exists so "can this device show addresses for this policy" comes
+// from the emitter rather than a hand-kept list. Every conformance vector
+// derives, so removing the probe breaks nothing without a shape that cannot —
+// which is precisely what the closed gap above stopped being.
+//
+// `pkh()` in a tap leaf is that shape today. The PRIMARY derives it; this port's
+// emitter has no `tagPkH` case, and adding one means hashing the derived key,
+// which would pull RIPEMD-160 into a codec that currently does no key work at
+// all. Refused rather than approximated.
+//
+// PINNED BY SHAPE: when the emitter grows `pk_h`, this FAILS saying the gap is
+// closed rather than going quiet. Rust's addresses are vendored beside it.
+func TestPkhTapLeafGapIsPinnedByShape(t *testing.T) {
+	chunks := loadVectorChunks(t, "gap_tr_leaf_pkh")
 	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
 	if err != nil {
 		t.Fatalf("the card itself must decode: %v", err)
 	}
-	// It has to be the PROBE that refuses, not an earlier guard: real xpubs are
-	// present and they translate. Otherwise this pins nothing.
+	// It has to be the PROBE that refuses, not an earlier guard.
 	for _, k := range keys {
 		if !k.XpubPresent {
 			t.Fatal("fixture must carry real xpubs, or it tests the no-keys guard instead")
@@ -371,16 +404,14 @@ func TestTapLeafGapIsPinnedByShape(t *testing.T) {
 		t.Fatalf("fixture must reach the complex branch, got status %v", status)
 	}
 
-	if _, ok := complexAddressSource(chunks, keys); ok {
-		want := vectorAddress(t, "gap_tr_leaf_and_v", "0", 0)
-		src, _ := complexAddressSource(chunks, keys)
-		got, err := src(0, false)
+	if at, ok := complexAddressSource(chunks, keys); ok {
+		want := vectorAddress(t, "gap_tr_leaf_pkh", "0", 0)
+		got, err := at(0, false)
 		if err == nil && got == want {
-			t.Fatalf("THE GAP IS CLOSED: this port now derives %s for a tap leaf outside "+
-				"pk/multi_a/sortedmulti_a, matching Rust. Delete this test and move the vector "+
-				"into the keyed conformance corpus.", got)
+			t.Fatalf("THE GAP IS CLOSED: this port now derives %s for a pkh tap leaf, "+
+				"matching Rust. Convert this to a positive test, as its predecessor was.", got)
 		}
-		t.Fatalf("complexAddressSource claims a shape the tap-leaf emitter cannot describe "+
-			"(got %q, err %v) — Rust derives %s; an approximated leaf is a wrong address", got, err, want)
+		t.Fatalf("complexAddressSource claims a shape the emitter cannot build "+
+			"(got %q, err %v) — Rust derives %s", got, err, want)
 	}
 }

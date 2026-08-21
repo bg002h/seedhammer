@@ -104,7 +104,7 @@ func TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses(t *testing.T) {
 		t.Errorf("the keyless case does not say why there are none:\n%s", keyless)
 	}
 
-	gap := consentText(t, "gap_tr_leaf_and_v")
+	gap := consentText(t, "gap_tr_leaf_pkh")
 	if !strings.Contains(gap, "can't derive") {
 		t.Errorf("an underivable KEYED policy does not say so:\n%s", gap)
 	}

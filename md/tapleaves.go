@@ -151,3 +151,79 @@ var (
 // ErrTapLeafUnsupported lets a caller distinguish "cannot derive this shape yet"
 // from a decode failure, so the UI can say which.
 var ErrTapLeafUnsupported = errTapLeafUnsupported
+
+// TapLeafScript is one EMITTED tapscript leaf: its depth in the tree, and the
+// script bytes themselves.
+//
+// The counterpart to `TapLeaf`, and it exists because describing a leaf and
+// emitting one are different problems with different limits. `TapLeaf` names a
+// shape from a fixed vocabulary — pk, multi_a, sortedmulti_a — and cannot say
+// anything about a leaf built from timelocks, hashlocks and combinators.
+// Emission has no such vocabulary: it walks the fragment tree the same way the
+// segwit-v0 emitter does, so it covers everything that emitter covers.
+type TapLeafScript struct {
+	Depth  int
+	Script []byte
+}
+
+// EmitTapLeavesChunks decodes an md1 chunk set and emits the tapscript for every
+// leaf of its taproot tree, in depth-first order.
+//
+// `keys` maps each `@N` to its DERIVED 32-byte X-ONLY public key. X-only, not
+// compressed: BIP-341 keys carry no parity byte, and a 33-byte push here builds
+// a perfectly valid script for a different key.
+//
+// WHY THIS EXISTS ALONGSIDE TapLeavesChunks (F-214). That accessor describes
+// leaves from a three-shape vocabulary, so every leaf built from a timelock or a
+// hashlock was refused — and the constellation's own pathological wallet is
+// FOUR such leaves. Measured: `TapLeavesChunks` on its taproot form returns
+// ErrTapLeafUnsupported with zero leaves, while the primary Rust implementation
+// derives its addresses without complaint. This closes that gap by reusing the
+// fragment walker instead of growing the vocabulary — a tap leaf is ordinary
+// miniscript, and the segwit-v0 emitter already knew how to walk it.
+//
+// The result feeds `address.TaprootScriptPathAddress` directly: its `LeafScript`
+// is this type's shape, so the caller does no translation and there is no second
+// place for depth to be got wrong.
+func EmitTapLeavesChunks(strs []string, keys map[uint8][]byte) (internalKeyIndex uint8, isNUMS bool, leaves []TapLeafScript, err error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return 0, false, nil, err
+	}
+	if d.tree.tag != tagTr {
+		return 0, false, nil, errNoTapTree
+	}
+	b, ok := d.tree.body.(trBody)
+	if !ok || b.tree == nil {
+		return 0, false, nil, errNoTapTree
+	}
+	var out []TapLeafScript
+	if err := emitTapLeaves(*b.tree, 0, emitEnv{keys: keys, tap: true}, &out); err != nil {
+		return 0, false, nil, err
+	}
+	return b.keyIndex, b.isNums, out, nil
+}
+
+// emitTapLeaves mirrors collectTapLeaves' walk exactly — same recursion, same
+// depth accounting, same binary-tree refusal. Kept as a sibling rather than
+// folded together because the two return different things and the shared part
+// is four lines; a single walk parameterised by "describe or emit" would be
+// harder to read than either.
+func emitTapLeaves(n node, depth int, e emitEnv, out *[]TapLeafScript) error {
+	if n.tag == tagTapTree {
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return errTapTreeShape
+		}
+		if err := emitTapLeaves(c.children[0], depth+1, e, out); err != nil {
+			return err
+		}
+		return emitTapLeaves(c.children[1], depth+1, e, out)
+	}
+	var script []byte
+	if err := emitFragment(n, e, &script); err != nil {
+		return err
+	}
+	*out = append(*out, TapLeafScript{Depth: depth, Script: script})
+	return nil
+}

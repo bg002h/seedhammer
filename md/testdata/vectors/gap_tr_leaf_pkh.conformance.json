@@ -1,0 +1,20 @@
+{
+  "name": "gap_tr_leaf_pkh",
+  "template": "tr(@0/48'/0'/0'/2'/<0;1>/*,pkh(@1/48'/0'/1'/2'/<0;1>/*))",
+  "chains": {
+    "0": {
+      "addresses": [
+        "bc1pl3kq0susghpu43eszll3ym5wjq9uva3enmwj49akc7v5rr68aw9qjz8aja",
+        "bc1p3jg6rsz5gd2lze2f5hvpd00y4kdkx9nrrda24w422a7l8fj0jkrqs2djgc",
+        "bc1pxa8lufgxpey3fhnmudv45y283nk9ljft9l9kjw6f3cj6hm8jt25s66lza7"
+      ]
+    },
+    "1": {
+      "addresses": [
+        "bc1pgdzs3jfqxktg00qut4e5khy2gtmrvxah3sh0s7g7ut76zkdjaahsj57atg",
+        "bc1pqzj92z9vphn2cqrf390lrdgmc8gjh942al9mh6d793dcnpp7q0ws70vjzd",
+        "bc1pjsytqcx0zur4m2gjeyak5t6ktuer60xfsfkym23ku868acff3v2qhq56nk"
+      ]
+    }
+  }
+}

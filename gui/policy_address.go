@@ -1,7 +1,11 @@
 package gui
 
 import (
+	"errors"
+
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"seedhammer.com/address"
 	"seedhammer.com/bip380"
 	"seedhammer.com/md"
@@ -57,23 +61,61 @@ func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint3
 	network := &chaincfg.MainNetParams // D1: mainnet-only.
 
 	var src func(uint32, bool) (string, error)
-	if ikIndex, isNUMS, leaves, err := md.TapLeavesChunks(collected); err == nil {
-		specs, sok := tapLeafSpecs(leaves, byIndex)
-		if !sok {
-			return nil, false
-		}
-		if isNUMS {
-			src = func(index uint32, change bool) (string, error) {
-				return address.TaprootScriptPathNUMS(specs, index, change, network)
+	// PROBE WITH THE FUNCTION THAT DOES THE WORK. EmitTapLeavesChunks returns
+	// the internal-key facts itself, so this asks it once with a throwaway key
+	// map purely to learn "is this a taproot script tree, and what is its
+	// internal key".
+	//
+	// It used to read those facts from TapLeavesChunks instead, whose error path
+	// returns `0, false, nil, err` — so for every shape the DESCRIBER could not
+	// name, the caller silently got isNUMS=false and index 0 and derived the
+	// internal key from @0. The addresses were well-formed and wrong. Caught
+	// only by comparing against Rust: `multi_a` alone matched, and all three
+	// `and_v(v:…, multi_a(…))` shapes did not — the difference being exactly
+	// which of them the describer could name. Never consume values from a call
+	// that returned an error.
+	probe := make(map[uint8][]byte, len(byIndex))
+	for i := range byIndex {
+		probe[i] = make([]byte, 32)
+	}
+	if ikIndex, isNUMS, _, err := md.EmitTapLeavesChunks(collected, probe); err == nil {
+		src = func(index uint32, change bool) (string, error) {
+			xonly := make(map[uint8][]byte, len(byIndex))
+			for i, k := range byIndex {
+				pk, err := address.DeriveChild(k, index, change)
+				if err != nil {
+					return "", err
+				}
+				// X-ONLY, not compressed: BIP-341 keys carry no parity byte, and
+				// a 33-byte push builds a valid script for a different key.
+				xonly[i] = schnorr.SerializePubKey(pk)
 			}
-		} else {
-			internal, iok := byIndex[ikIndex]
-			if !iok {
-				return nil, false
+			_, _, leaves, err := md.EmitTapLeavesChunks(collected, xonly)
+			if err != nil {
+				return "", err
 			}
-			src = func(index uint32, change bool) (string, error) {
-				return address.TaprootScriptPath(internal, specs, index, change, network)
+			scripts := make([]address.LeafScript, 0, len(leaves))
+			for _, l := range leaves {
+				scripts = append(scripts, address.LeafScript{Depth: l.Depth, Script: l.Script})
 			}
+			var ikey *secp256k1.PublicKey
+			if isNUMS {
+				ikey, err = address.NUMSInternalKey()
+			} else {
+				internal, iok := byIndex[ikIndex]
+				if !iok {
+					return "", errors.New("gui: taproot internal key has no @N entry")
+				}
+				ikey, err = address.DeriveChild(internal, index, change)
+			}
+			if err != nil {
+				return "", err
+			}
+			addr, err := address.TaprootScriptPathAddress(ikey, scripts, network)
+			if err != nil {
+				return "", err
+			}
+			return addr.String(), nil
 		}
 	} else {
 		src = func(index uint32, change bool) (string, error) {
