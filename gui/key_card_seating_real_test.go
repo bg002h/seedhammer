@@ -54,3 +54,41 @@ func TestSeatingFromRealMk1Strings(t *testing.T) {
 		t.Fatalf("the screen says it has no addresses while showing them:\n%s", joined)
 	}
 }
+
+// A6 — ONE CARD FILLS TWO SLOTS, and it must, because the policy is legitimate.
+//
+// `wsh(multi(2, @0/48'/0'/0'/2'/<0;1>/*, @1/48'/0'/0'/2'/<2;3>/*))`: one master,
+// one origin, TWO slots that differ only in their multipath branch. The branches
+// derive different children at every index, so this is a genuine two-key script
+// and not the duplicate F-218 refuses — F-218's check is `(xpub, use-site)`
+// precisely so this shape survives it.
+//
+// It is also the case a naive "one card, one slot" rule would break: the single
+// gathered card has to seat itself twice, and refusing that would make a legal
+// wallet unprovable.
+func TestOneCardFillsTwoSlotsAtDifferentUseSites(t *testing.T) {
+	template := []string{
+		"md1fl6djqqpq2tvyyy4qqxppsg2qknq2zcqvk7fyv32kdh4x",
+	}
+	cardStrings := []string{
+		"mk1qpsrpvpqqsq7k3qrv3eutks2q5zg3vs7rnefw94m5rru59s2su80aw2q4wgdpapgfl4pkhsdyytkwl5z8lphut2hvvpp5u7459ydp5mne0my",
+		"mk1qpsrpvpp806lhaeh6reknylagmwyjycf8044xtt9flsdlkvt6f6cthyl9xqv9j48zyp9thcewjz0a",
+	}
+	const want = "bc1qsa6qqvkypr9v8ve5z54t8yjtn99ws48w8umyyzyhxy8n6p4msemslqyh88"
+
+	decoded, err := walletPolicyKeyCards([]bundleCard{{kind: cardMK1, strings: cardStrings}})
+	if err != nil {
+		t.Fatalf("the card did not decode: %v", err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("expected ONE card, got %d — the point is that one card fills two slots", len(decoded))
+	}
+	lines, err := walletPolicyConsentLines(template, decoded)
+	if err != nil {
+		t.Fatalf("one card for two slots was refused: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, want) {
+		t.Fatalf("the seated wallet is not the one the host derives (%s):\n%s", want, joined)
+	}
+}
