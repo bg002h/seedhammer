@@ -227,3 +227,64 @@ func xpubBytesFor(d *descriptor, idx uint8) [65]byte {
 	}
 	return [65]byte{}
 }
+
+// DuplicateKeySlots reports the first pair of `@N` slots that carry the SAME
+// key at the SAME use-site, and therefore derive an identical child at every
+// address index (F-218).
+//
+// Such a policy reads as k-of-n and is satisfiable by fewer parties than it
+// names: one key seated twice lets its holder produce two of the required
+// signatures alone. The script is legal; the wallet is not what it looks like.
+//
+// CONVERGENCE PORT of `md_codec::validate::validate_no_duplicate_key_slots`
+// (descriptor-mnemonic `38cc2fb5`), and it is MORE PRECISE than this package's
+// existing `duplicateSlotPair` in gui/multisig_build.go — deliberately.
+//
+// That one compares chain-code‖pubkey alone, on the stated reasoning that
+// "identical xpubs derive identical child keys at every address index". True
+// only when the use-sites match. The same xpub at two different multipath
+// branches derives a DIFFERENT child at every index — measured, `<0;1>` and
+// `<2;3>` over one key give different addresses — so it is two wallets, not a
+// duplicate. The build flow it guards constructs a uniform use-site, so it is
+// correct THERE; a supplied policy carries whatever use-sites it likes, which
+// is why this one exists separately rather than as an edit to that.
+//
+// The comparison basis is otherwise that function's, adopted verbatim: NOT the
+// fingerprint (which identifies a master, so it would refuse the legitimate
+// cosigner contributing two accounts) and NOT the base58 xpub (whose
+// depth/parent metadata differs between two sources of one key, so it would
+// MISS a real duplicate arriving by two routes).
+func DuplicateKeySlots(keys []ExpandedKey) (a uint8, b uint8, dup bool) {
+	for i := range keys {
+		if !keys[i].XpubPresent {
+			continue
+		}
+		for j := i + 1; j < len(keys); j++ {
+			if !keys[j].XpubPresent {
+				continue
+			}
+			if keys[i].Xpub == keys[j].Xpub && sameUseSite(keys[i].UseSite, keys[j].UseSite) {
+				return keys[i].Index, keys[j].Index, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// sameUseSite compares two resolved use-sites. UseSite holds a slice, so it is
+// not comparable with `==` — and reaching for reflect.DeepEqual here would drag
+// reflection into a package that runs on TinyGo.
+func sameUseSite(a, b UseSite) bool {
+	if a.HasMultipath != b.HasMultipath || a.WildcardHardened != b.WildcardHardened {
+		return false
+	}
+	if len(a.Multipath) != len(b.Multipath) {
+		return false
+	}
+	for i := range a.Multipath {
+		if a.Multipath[i] != b.Multipath[i] {
+			return false
+		}
+	}
+	return true
+}

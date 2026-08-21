@@ -130,6 +130,21 @@ func walletPolicyConsentLines(md1 []string) ([]string, error) {
 		}
 	}
 
+	// F-218: REFUSE a policy that seats one key twice, before consent.
+	//
+	// It reads as k-of-n and one holder can satisfy two of the seats. The build
+	// flow has refused this since it shipped — but only where the DEVICE
+	// assembled the policy; a card that arrived already built, which is every
+	// card this program sees, never reached that check.
+	//
+	// Refused rather than warned about, matching the build flow and the host.
+	// A warning on a consent screen is a thing to tap past.
+	if a, b, dup := md.DuplicateKeySlots(keys); dup {
+		return nil, fmt.Errorf(
+			"Slots @%d and @%d hold the same key. This policy names %d cosigners "+
+				"but one of them holds two seats.", a, b, tpl.N)
+	}
+
 	lines = append(lines, md1Summary(tpl)...)
 	lines = append(lines, walletPolicyAddressLines(md1, tpl, keys)...)
 	return lines, nil
