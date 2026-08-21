@@ -11,7 +11,8 @@ import "errors"
 // rust-miniscript, so these shapes ENCODE/STRIP fine at the wire level — they
 // would be silently engraved as an UNRECOVERABLE backup. templateEngraveShapeGuard
 // adds the refusal on the TEMPLATE-ENGRAVE path (the default full-policy path is
-// unchanged). tr(NUMS, multi_a) is ADMITTED (the toolkit ships it). A hardened
+// unchanged). tr(NUMS, multi_a) is ADMITTED (the toolkit ships it), and so is
+// tr(sortedmulti_a) since F-215 — see guardNode. A hardened
 // use-site is NOT refused here — its restoration concern is an off-device
 // derive/address matter, not the template wire (it strips/encodes fine).
 
@@ -47,8 +48,24 @@ func TemplateEngraveShapeGuardChunks(strs []string) error {
 func guardNode(n node, inCombinator bool) error {
 	switch n.tag {
 	case tagSortedMultiA:
-		// SortedMultiA (tap leaf) has no rust-miniscript renderer → refuse.
-		return errTemplateUnsupportedShape
+		// ADMITTED SINCE 2026-08-21 (F-215). This arm refused on the grounds that
+		// `sortedmulti_a` "has no rust-miniscript renderer" — true when written,
+		// and false since the S0 pin lift (PR #910 gave upstream
+		// `Terminal::SortedMultiA`) and R5.
+		//
+		// Re-measured on the current binaries before this line changed, because
+		// an enumerated safety argument goes stale silently:
+		//
+		//	md encode  tr(@0,sortedmulti_a(2,@0,@1))  -> 1 chunk
+		//	md decode  -> exit 0, the template verbatim
+		//	md verify  -> re-encodes to its own template
+		//	md address -> bc1p588jmtx4ptv76t9sclt6gt33eyydvsrea4njyayerqj2frw5m5aq5gzycw
+		//
+		// Fully recoverable with the shipped tooling, which is the only thing
+		// this guard was ever asking. Refusing it now blocks a legitimate
+		// template engrave (D4) and nothing else. Convergence toward the
+		// primary, which admits the shape at every stage.
+		return nil
 	case tagMultiA:
 		// multi_a renders (tr(NUMS, multi_a) is shipped) → admit; nothing below.
 		return nil

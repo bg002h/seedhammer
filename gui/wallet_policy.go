@@ -118,13 +118,15 @@ func walletPolicyConsentLines(md1 []string) ([]string, error) {
 		// unrecoverable backup. Same guard the template-engrave opt-in runs, so
 		// the two paths refuse the same shapes.
 		//
-		// KNOWN STALE, DELIBERATELY KEPT: both shapes it names have moved since
-		// it was written (F-215) — `tr(sortedmulti_a)` now round-trips through
-		// the toolkit, and `sortedmulti` under a combinator is refused at encode
-		// so it cannot reach a card at all. Loosening an admission rule is
-		// risk-set work and belongs in its own cycle, applied to BOTH paths at
-		// once; a new program quietly admitting more than the shipped one is the
-		// worse of the two errors.
+		// NO LONGER STALE (F-215, closed 2026-08-21). When this program was
+		// written the guard still refused `tr(sortedmulti_a)` on a premise that
+		// had already died with the S0 pin lift, and this comment said so while
+		// calling it anyway — a new program quietly admitting more than the
+		// shipped one being the worse of the two errors. The guard has since
+		// been narrowed on measurement, for both paths at once, so calling it
+		// now refuses only what is genuinely unrecoverable: `sortedmulti` under
+		// a combinator, which our own encoder rejects outright, leaving this as
+		// defence against a card from some other producer.
 		if err := md.TemplateEngraveShapeGuardChunks(md1); err != nil {
 			return nil, errors.New("This template can't be restored with the shipped tools.")
 		}

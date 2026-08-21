@@ -7,13 +7,25 @@ import (
 // ─── Task 8: template-engrave shape refusals (C4) ────────────────────────────
 //
 // templateEngraveShapeGuard refuses the render-gap shapes the shipped toolkit
-// cannot reconstruct: tr(sortedmulti_a) and sortedmulti/multi nested under a
-// combinator. These shapes ENCODE/STRIP fine today (no parse refusal) — the
-// guard is NEW refusal code on the template-engrave path. tr(NUMS, multi_a) is
-// ADMITTED (the toolkit ships it); a hardened use-site STRIPS fine on the fork
+// cannot reconstruct. It once named TWO; since F-215 (2026-08-21) only one is
+// left, and the correction is the interesting part.
+//
+// tr(sortedmulti_a) is now ADMITTED. The refusal's premise — "no
+// rust-miniscript renderer" — died with the S0 pin lift (PR #910 gave upstream
+// Terminal::SortedMultiA) and R5. Re-measured on the current binaries before
+// this test moved: the shape encodes to one chunk, `md decode` returns the
+// template verbatim at exit 0, `md verify` re-encodes it to its own template,
+// and `md address` derives a real address. Fully recoverable, which is the only
+// thing this guard ever asked.
+//
+// sortedmulti nested under a COMBINATOR stays refused — and it is now
+// unreachable from our own encoder besides (`md encode` rejects it by
+// BIP-383/388), so the arm is defence against a card from some other producer.
+//
+// tr(NUMS, multi_a) is ADMITTED; a hardened use-site STRIPS fine on the fork
 // (its refusal is an off-device derive/address concern, not the template wire).
 
-// trNumsSortedMultiAGuard: tr(NUMS, sortedmulti_a(2,@0,@1,@2)). REFUSED.
+// trNumsSortedMultiAGuard: tr(NUMS, sortedmulti_a(2,@0,@1,@2)). ADMITTED since F-215.
 func trNumsSortedMultiAGuard() *descriptor {
 	o := originPath{components: []pathComponent{{true, 48}, {true, 0}, {true, 0}, {true, 2}}}
 	leaf := node{tag: tagSortedMultiA, body: multiKeysBody{k: 2, indices: []uint8{0, 1, 2}}}
@@ -76,7 +88,6 @@ func canonicalWshSortedMultiGuard() *descriptor {
 
 func TestTemplateEngraveShapeGuard(t *testing.T) {
 	refused := map[string]*descriptor{
-		"tr(sortedmulti_a)":          trNumsSortedMultiAGuard(),
 		"wsh(or_i(sortedmulti,...))": wshOrISortedMultiGuard(),
 	}
 	for name, d := range refused {
@@ -93,6 +104,8 @@ func TestTemplateEngraveShapeGuard(t *testing.T) {
 	}
 
 	admitted := map[string]*descriptor{
+		// F-215: was in `refused` until the pin lift made it recoverable.
+		"tr(sortedmulti_a)":           trNumsSortedMultiAGuard(),
 		"tr(NUMS, multi_a)":           trNumsMultiAGuard(),
 		"wsh(sortedmulti) canonical":  canonicalWshSortedMultiGuard(),
 		"wsh(or_i(multi,...)) legacy": wshOrILegacyMultiGuard(),
