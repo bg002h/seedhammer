@@ -2214,9 +2214,32 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 	content, sz := m.layout(&ctx.B, th, dims.X, prevBtn, nextBtn)
 	content = content.Offset(r.Center(sz))
 
+	// The version label is measured BEFORE the pager is placed, because the
+	// pager's room depends on it. F-154: both live in the bottom strip, the
+	// pager was centred on the FULL width, and the version text is anchored to
+	// the right edge — so every program added pushed the dot row further into
+	// the text until they overlapped. Measured on the emulator's own
+	// framebuffer at ten programs: two dots drawn around "Fi" and "rm" of
+	// "Firmware: …", enclosing the letters.
+	//
+	// Centring on the full width is what is wrong, not the spacing. At 480px
+	// with the version text starting near x=306 the pager can be at most ~132px
+	// however tightly the dots are packed, and ten 13px dots do not fit in that
+	// even edge to edge. So the pager is centred in the room it ACTUALLY has.
+	ver, versz := widget.Labelw(&ctx.B, ctx.Styles.debug, 200, th.Text, m.Version)
+	ver = ver.Offset(r.SE(versz.Add(image.Pt(4, 0))))
+
 	inner, sz := layoutMainPager(&ctx.B, th, m.prog, m.lastNav())
 	_, middle := r.CutBottom(leadingSize)
-	inner = inner.Offset(middle.Center(sz))
+	// Room = everything left of the version label, less a gap the width of one
+	// space. If the pager is wider than that it is centred on the screen as
+	// before: an overflowing row is a layout that has run out, and shoving it
+	// left would only trade an overlap with the text for one with the logo.
+	pagerRegion := middle
+	if room := middle.Max.X - versz.X - 4 - 4; sz.X <= room-middle.Min.X {
+		pagerRegion.Max.X = room
+	}
+	inner = inner.Offset(pagerRegion.Center(sz))
 	sttxt := ""
 	if time.Now().Before(m.scanTimeout) {
 		ctx.WakeupAt(m.scanTimeout)
@@ -2234,8 +2257,6 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 	subt, sz := widget.Labelw(&ctx.B, ctx.Styles.subtitle, 300, th.Text, sttxt)
 	subt = subt.Offset(r.S(sz).Sub(image.Pt(0, 16)))
 
-	ver, sz := widget.Labelw(&ctx.B, ctx.Styles.debug, 200, th.Text, m.Version)
-	ver = ver.Offset(r.SE(sz.Add(image.Pt(4, 0))))
 	logo, sz := widget.Labelw(&ctx.B, ctx.Styles.debug, 100, th.Text, "SeedHammer")
 	logo = logo.Offset(r.SW(sz).Add(image.Pt(3, 0)))
 	return op.Layer(
