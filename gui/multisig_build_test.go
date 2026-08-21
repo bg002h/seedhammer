@@ -280,18 +280,25 @@ func TestAssembleBuildPolicy_IncludeFpDiffers(t *testing.T) {
 	selfFP[1] = byte(selfMasterFP >> 16)
 	selfFP[2] = byte(selfMasterFP >> 8)
 	selfFP[3] = byte(selfMasterFP)
-	withFp := func(k md.ExpandedKey) md.MultisigCosigner {
+	withFp := func(tag byte, k md.ExpandedKey) md.MultisigCosigner {
 		var cc [32]byte
 		var pk [33]byte
 		copy(cc[:], k.Xpub[0:32])
 		copy(pk[:], k.Xpub[32:65])
 		// Foreign slots carry no fp in the fixture; for the INCLUDE homogeneous
-		// case synthesize a fingerprint — this test only asserts the id DIFFERS
-		// from the fp-absent golden.
-		return md.MultisigCosigner{ChainCode: cc, CompressedPubkey: pk, Fingerprint: [4]byte{1, 2, 3, 4}, FpPresent: true}
+		// case synthesize one — this test only asserts the id DIFFERS from the
+		// fp-absent golden.
+		//
+		// A DISTINCT fingerprint per slot, and `tag` exists for that reason
+		// alone. Both slots used to get {1,2,3,4}, which — at one shared origin,
+		// over two DIFFERENT keys — is the impossible card F-217 is about: a
+		// (fingerprint, path) pair names exactly one key under BIP-32. The
+		// convergence port caught it here on its first run. Nothing this test
+		// asserts needs the two to match.
+		return md.MultisigCosigner{ChainCode: cc, CompressedPubkey: pk, Fingerprint: [4]byte{1, 2, 3, tag}, FpPresent: true}
 	}
 	req := md.EncodeMultisigRequest{
-		Cosigners:    []md.MultisigCosigner{withFp(keys[0]), {ChainCode: selfCC, CompressedPubkey: selfPK, Fingerprint: selfFP, FpPresent: true}, withFp(keys[2])},
+		Cosigners:    []md.MultisigCosigner{withFp(4, keys[0]), {ChainCode: selfCC, CompressedPubkey: selfPK, Fingerprint: selfFP, FpPresent: true}, withFp(5, keys[2])},
 		K:            2,
 		Script:       md.MultisigWsh,
 		OriginMode:   md.OriginShared,

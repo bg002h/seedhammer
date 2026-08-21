@@ -1,6 +1,9 @@
 package md
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ─── EncodeMultisig (T6c Phase A) — byte-faithful sortedmulti WALLET-POLICY md1 ─
 //
@@ -77,6 +80,26 @@ var (
 	errMultisigEmptyDivergent    = errors.New("md: EncodeMultisig OriginDivergent requires a non-empty Origin for every cosigner")
 	errMultisigBadScript         = errors.New("md: EncodeMultisig unknown script kind")
 	errMultisigBadOriginMode     = errors.New("md: unknown multisig origin mode")
+
+	// ErrOriginKeyContradiction — two cosigners declare the SAME master
+	// fingerprint and the SAME origin path while carrying DIFFERENT keys.
+	//
+	// BIP-32 is deterministic: that pair identifies exactly ONE extended key, so
+	// such a card describes a wallet that cannot exist. Provable from the
+	// request alone — no seed, no network, no derivation.
+	//
+	// CONVERGENCE PORT of `md_codec::validate::validate_origin_key_consistency`
+	// (descriptor-mnemonic fe4b1ec9), which found the shape in NINE of nine
+	// multi-key conformance vectors. The port needed no change to AGREE with
+	// Rust on those vectors — wire bytes, ids and addresses all moved together
+	// — which is exactly why it needs this check rather than inheriting one:
+	// addresses derive from the keys a card CARRIES, never from the origin it
+	// declares, so nothing downstream in either language can see it.
+	//
+	// Distinct from the build flow's duplicate-key refusal
+	// (`errBuildDuplicateKey`): that is the SAME key in two slots, this is
+	// DIFFERENT keys claiming one origin. Opposite defects, opposite remedies.
+	ErrOriginKeyContradiction = errors.New("md: two cosigners declare the same key origin but different keys; one origin identifies exactly one key")
 )
 
 // EncodeMultisig assembles a sortedmulti k-of-n wallet-policy md1 over the given
@@ -88,6 +111,10 @@ var (
 // origin-mode and script-kind guards).
 func EncodeMultisig(req EncodeMultisigRequest) (out []string, stub [4]byte, slots []SlotInfo, err error) {
 	n := len(req.Cosigners)
+
+	if err := checkOriginKeyConsistency(req); err != nil {
+		return nil, [4]byte{}, nil, err
+	}
 
 	// Build the path declaration per the EXPLICIT origin mode.
 	var pd pathDecl
@@ -200,4 +227,53 @@ func multiSigTree(script MultisigScript, k uint8, n int) (node, error) {
 	default:
 		return node{}, errMultisigBadScript
 	}
+}
+
+// checkOriginKeyConsistency refuses a request whose cosigners bind one key
+// origin to several different keys (F-217).
+//
+// SCOPE, matching the Rust primary exactly so the two cannot drift:
+//   - both cosigners must have FpPresent. Without a fingerprint the origin path
+//     names no master, so no contradiction is provable and none is claimed.
+//   - the SAME key in two slots at one origin is CONSISTENT here. That is key
+//     reuse — a different hazard with its own refusal — and one message
+//     explaining both would explain neither.
+//   - two DIFFERENT fingerprints at one path are fine; two people may both use
+//     48'/0'/0'/2'. Refusing that would break every ordinary multisig.
+//
+// In OriginShared mode every cosigner has the same origin by construction, so
+// the comparison is on fingerprint and key alone — which is precisely the case
+// `--path` produced on the host.
+func checkOriginKeyConsistency(req EncodeMultisigRequest) error {
+	sameOrigin := func(a, b MultisigCosigner) bool {
+		if req.OriginMode == OriginShared {
+			return true
+		}
+		if len(a.Origin) != len(b.Origin) {
+			return false
+		}
+		for i := range a.Origin {
+			if a.Origin[i] != b.Origin[i] {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range req.Cosigners {
+		a := req.Cosigners[i]
+		if !a.FpPresent {
+			continue
+		}
+		for j := i + 1; j < len(req.Cosigners); j++ {
+			b := req.Cosigners[j]
+			if !b.FpPresent || a.Fingerprint != b.Fingerprint || !sameOrigin(a, b) {
+				continue
+			}
+			if a.ChainCode == b.ChainCode && a.CompressedPubkey == b.CompressedPubkey {
+				continue // same key at one origin: consistent, and not this error
+			}
+			return fmt.Errorf("%w: @%d and @%d both claim %x", ErrOriginKeyContradiction, i, j, a.Fingerprint)
+		}
+	}
+	return nil
 }
