@@ -110,7 +110,12 @@ async function readAllPages(shotURL, prefix, maxPages = 8) {
 }
 
 export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCards = [],
-                            expect = {}, expectRefusal = null } = {}) {
+                            expect = {}, expectRefusal = null, prefix = "s" } = {}) {
+  // SHOT NAMES ARE NAMESPACED BY CALLER. shots/ is one flat directory shared by
+  // every journey, so a fixed "s" prefix meant the hashvault walk silently
+  // overwrote the seating walk's frames -- two different wallets, one set of
+  // filenames, and nothing to tell them apart afterwards. That is the
+  // mislabelled-evidence failure this constellation has already had once.
   if (!md1.length) throw new Error("run({md1}): the walk needs the card set to present");
   const taken = [];
 
@@ -125,21 +130,21 @@ export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCard
   // machine with no payload at all.
   const first = await raceFor(["SeedHammer", "systemwide payload is present"]);
   if (first !== "SeedHammer") {
-    taken.push(await screenShot(shotURL, "s00a-payload-prompt.png"));
+    taken.push(await screenShot(shotURL, `${prefix}00a-payload-prompt.png`));
     await tap(BACK);
     await waitFor("SeedHammer");
   }
-  taken.push(await screenShot(shotURL, "s00-boot.png"));
+  taken.push(await screenShot(shotURL, `${prefix}00-boot.png`));
 
   // (2) Reach the program by NAME, not by counting alone.
   for (let i = 0; i < TAPS_TO_WALLET_POLICY; i++) await tap(CAROUSEL_NEXT);
   await waitFor("WalletPolicy");
-  taken.push(await screenShot(shotURL, "s01-carousel.png"));
+  taken.push(await screenShot(shotURL, `${prefix}01-carousel.png`));
 
   // (3) Enter it. The gather screen is what it opens on.
   await tap(CONFIRM);
   await waitFor("md1descriptors:0");
-  taken.push(await screenShot(shotURL, "s02-gather-empty.png"));
+  taken.push(await screenShot(shotURL, `${prefix}02-gather-empty.png`));
 
   // (4) Present the card set.
   //
@@ -183,7 +188,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCard
     throw new Error(`gathered ${keyTally ? keyTally[1] : "?"} key cards, expected ` +
       `${keyCards.length}; screen reads ${JSON.stringify(window.shScreen())}`);
   }
-  taken.push(await screenShot(shotURL, "s03-gather-full.png"));
+  taken.push(await screenShot(shotURL, `${prefix}03-gather-full.png`));
 
   // (5) Done → the consent screen, or the REFUSAL.
   await tap(CONFIRM);
@@ -195,7 +200,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCard
   // either outcome alone.
   if (expectRefusal) {
     const text = await waitFor(expectRefusal, 20000);
-    taken.push(await screenShot(shotURL, "s05-refusal.png"));
+    taken.push(await screenShot(shotURL, `${prefix}05-refusal.png`));
     if (/bc1[a-z0-9]{20,}/.test(squash(text))) {
       throw new Error(`the refusal screen also shows an address: ${JSON.stringify(text)}`);
     }
@@ -207,7 +212,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCard
   // the keyed label here timed out against a perfectly good screen that already
   // had the addresses on it.
   await waitFor("-ID:");
-  const consent = await readAllPages(shotURL, "s04-consent-p");
+  const consent = await readAllPages(shotURL, `${prefix}04-consent-p`);
   taken.push(...consent.names);
 
   // (6a) THE SEATING MUST HAVE HAPPENED. If the device fell back to
