@@ -523,3 +523,94 @@ func TestEncodeMultisigRefuse(t *testing.T) {
 		})
 	}
 }
+
+// TestEncodeMultisigAlwaysEmitsAKeyedCard pins WHY the device's build path is
+// exempt from F-227.
+//
+// F-227: a KEYLESS template names its slots by origin, and restoring it seats
+// one mk1 key card per slot. When two slots share a declaration — same origin,
+// and no fingerprint to break the tie — every card matches both slots and
+// seating must refuse the whole set (errSeatSlotContested). `md encode` now
+// warns about that at authoring time.
+//
+// The device authors policies too (gui/multisig_build.go), so the natural
+// question is whether it can engrave an unseatable template. It cannot, and the
+// reason is structural rather than careful: MultisigCosigner's ChainCode and
+// CompressedPubkey are plain arrays with no "present" flag, unlike Fingerprint
+// which has FpPresent. Every cosigner therefore contributes a Pubkeys TLV
+// entry, so EncodeMultisig's output is always a KEYED wallet policy — and
+// nothing is ever seated onto a keyed card, because it carries its own keys.
+//
+// Asserted through FormAwareStub, which is the codec's own answer to "which
+// form is this": a keyed policy roots on WalletPolicyId, a keyless template on
+// WalletDescriptorTemplateId. Deliberately NOT asserted by reading the type
+// definition, which is what "structural rather than careful" would otherwise
+// have to rest on.
+//
+// This is a REGRESSION PIN. If EncodeMultisig ever gains a keyless mode, this
+// test fails and F-227's advisory becomes due on the device side too.
+func TestEncodeMultisigAlwaysEmitsAKeyedCard(t *testing.T) {
+	cc, pk := mkXpub65(t, "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "03a9394a2f1a4f99613a716956c8540f6dba6f18931c2639107221b267d740af23")
+	cc2, pk2 := mkXpub65(t, "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5")
+
+	// The WORST case for F-227 on purpose: every cosigner at ONE shared origin
+	// and NOT ONE declaring a fingerprint. As a keyless template this is
+	// exactly the unseatable shape.
+	req := EncodeMultisigRequest{
+		Cosigners: []MultisigCosigner{
+			{ChainCode: cc, CompressedPubkey: pk},
+			{ChainCode: cc2, CompressedPubkey: pk2},
+			{ChainCode: cc, CompressedPubkey: pk2},
+		},
+		K:            2,
+		Script:       MultisigWsh,
+		OriginMode:   OriginShared,
+		SharedOrigin: sharedOrigin4828(),
+	}
+	out, stub, _, err := EncodeMultisig(req)
+	if err != nil {
+		t.Fatalf("EncodeMultisig: %v", err)
+	}
+
+	policyStub, err := WalletPolicyIDStubChunks(out)
+	if err != nil {
+		t.Fatalf("WalletPolicyIDStubChunks: %v", err)
+	}
+
+	// THE ASSERTION BELOW MUST BE ABLE TO FAIL. It compares the form-aware stub
+	// against the WalletPolicyId, which discriminates nothing if the two id
+	// spaces happen to agree for this descriptor. Prove they disagree first, or
+	// the rest of this test is decoration that would pass for a keyless card.
+	d, err := Reassemble(out)
+	if err != nil {
+		t.Fatalf("Reassemble: %v", err)
+	}
+	templateStub, err := WalletDescriptorTemplateIdStub(d)
+	if err != nil {
+		t.Fatalf("WalletDescriptorTemplateIdStub: %v", err)
+	}
+	if templateStub == policyStub {
+		t.Fatalf("the two id spaces agree for this descriptor (%x), so this test "+
+			"cannot tell a keyed card from a keyless one — pick a different fixture",
+			policyStub)
+	}
+
+	if stub != policyStub {
+		t.Fatalf("EncodeMultisig emitted a card whose form-aware stub (%x) is NOT the "+
+			"WalletPolicyId (%x) — it produced a KEYLESS template, so the device can now "+
+			"engrave a backup that cannot be seated. F-227's advisory is due here too.",
+			stub, policyStub)
+	}
+
+	// And the same answer read back off the WIRE, not from the in-memory
+	// descriptor — the device engraves strings, and it is the strings a
+	// restorer will hold.
+	wireStub, err := FormAwareStubChunks(out)
+	if err != nil {
+		t.Fatalf("FormAwareStubChunks: %v", err)
+	}
+	if wireStub != policyStub {
+		t.Fatalf("the engraved chunks read back as a keyless template (stub %x, "+
+			"WalletPolicyId %x)", wireStub, policyStub)
+	}
+}
