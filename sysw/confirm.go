@@ -2,10 +2,12 @@ package sysw
 
 import (
 	"sort"
+	"strings"
 
 	"seedhammer.com/codex32"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
+	"seedhammer.com/mt"
 )
 
 // MDMKUnconfirmed returns the indices of the ClassMDMK records that are NOT
@@ -131,4 +133,54 @@ func cardKeyOf(record string) (card, bool) {
 		return card{hrp: 'k', chunked: h.Chunked, csid: h.ChunkSetID}, true
 	}
 	return card{}, false
+}
+
+// MTUnconfirmed returns the indices of the ClassMt records that are NOT
+// decode-confirmed -- `[mt-decode]`, the mt sibling of MDMKUnconfirmed above,
+// converging on me-cli's sysw::mt::mt_unconfirmed (Rust primary).
+//
+// Grouped by chunk_set_id (every mt1 is chunked; there is no non-chunked form
+// and therefore no uniq arm). A group confirms only when it is COMPLETE, the
+// bytes PARSE as one serialized Bitcoin transaction, and the set id equals
+// the top 20 bits of the display txid -- mt.Decode is all three. Reassembly
+// alone confirms nothing for mt: any complete set of BCH-valid strings
+// reassembles, which is exactly the smuggling channel §5.3.2 names.
+//
+// Indices are into the CALLER'S slice; nothing here refuses anything -- an
+// unconfirmed record loads and counts as SECRET for flag evaluation.
+func MTUnconfirmed(records []string) []int {
+	groups := make(map[uint32][]int)
+	var order []uint32 // map order is randomised; the walk must not be
+	var out []int
+
+	for i, r := range records {
+		if Classify(r) != ClassMt {
+			continue
+		}
+		h, err := mt.ParseHeader(strings.TrimSpace(r))
+		if err != nil {
+			// Fail CLOSED: a record whose set identity cannot be read cannot
+			// be grouped, so nothing could ever confirm it. (Classify trims,
+			// so a padded record classifies and then lands here.)
+			out = append(out, i)
+			continue
+		}
+		if _, seen := groups[h.ChunkSetID]; !seen {
+			order = append(order, h.ChunkSetID)
+		}
+		groups[h.ChunkSetID] = append(groups[h.ChunkSetID], i)
+	}
+
+	for _, csid := range order {
+		idxs := groups[csid]
+		set := make([]string, len(idxs))
+		for j, i := range idxs {
+			set[j] = strings.TrimSpace(records[i])
+		}
+		if _, err := mt.Decode(set); err != nil {
+			out = append(out, idxs...)
+		}
+	}
+	sort.Ints(out)
+	return out
 }

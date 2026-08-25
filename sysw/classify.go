@@ -5,6 +5,7 @@ import (
 
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
+	"seedhammer.com/mt"
 )
 
 // MaxEngraveableMs1Len mirrors the Rust primary's MAX_ENGRAVEABLE_MS1_LEN
@@ -44,6 +45,14 @@ func classifyConstellation(record string) Class {
 	}
 	if codex32.ValidMD(record) || codex32.ValidMK(record) {
 		return ClassMDMK
+	}
+	// Strict, like the rest of this function: exact BCH validity, no
+	// correction, consistent case (codex32's engine), and mt.ParseHeader must
+	// read a header or the string is not a chunk of anything.
+	if codex32.ValidMT(record) {
+		if _, err := mt.ParseHeader(record); err == nil {
+			return ClassMt
+		}
 	}
 	return ClassUnknown
 }

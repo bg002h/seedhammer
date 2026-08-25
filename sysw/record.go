@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+
+	"seedhammer.com/mt"
 )
 
 // Prefixes are RESERVED. A record beginning with one whose body is not valid
@@ -12,6 +14,11 @@ import (
 const (
 	TextPrefix = "text:"
 	PassPrefix = "pass:"
+	// TxPrefix carries a raw signed Bitcoin transaction as lowercase hex, for
+	// QR engraving. Reserved like the other two; classification additionally
+	// requires the bytes to PARSE as one transaction (see Classify), so the
+	// prefix cannot smuggle arbitrary bytes into a non-secret class.
+	TxPrefix = "tx:"
 )
 
 type Class int
@@ -25,6 +32,15 @@ const (
 	ClassDescriptor
 	ClassMDMK
 	ClassAddress
+	// ClassMt is one chunk of an mt1 signed-transaction set. NOT secret: the
+	// record exists to be engraved in cleartext, so flash holds nothing the
+	// steel will not. An UNCONFIRMED one still reads as secret through
+	// MTUnconfirmed, exactly as ClassMDMK does through MDMKUnconfirmed.
+	ClassMt
+	// ClassTx is a tx:-prefixed raw signed transaction, for the QR engraving
+	// path. Classification already proved it parses; no confirmation walk
+	// exists for it. Same secrecy reasoning as ClassMt.
+	ClassTx
 )
 
 // IsSecret extends the shipped predicate (seal/session.go:17, which is
@@ -55,6 +71,8 @@ func DecodeBody(record string) ([]byte, error) {
 		body = record[len(TextPrefix):]
 	case strings.HasPrefix(record, PassPrefix):
 		body = record[len(PassPrefix):]
+	case strings.HasPrefix(record, TxPrefix):
+		body = record[len(TxPrefix):]
 	default:
 		return nil, errors.New("sysw: not an encoded record")
 	}
@@ -86,6 +104,17 @@ func Classify(record string) Class {
 	if strings.HasPrefix(record, TextPrefix) {
 		if _, err := DecodeBody(record); err == nil {
 			return ClassFreeText
+		}
+		return ClassUnknown
+	}
+	if strings.HasPrefix(record, TxPrefix) {
+		// Hex AND a structural transaction parse -- mirroring the Rust
+		// primary's classify. A body that decodes but does not parse is
+		// Unknown, never quietly some other class.
+		if b, err := DecodeBody(record); err == nil {
+			if _, err := mt.ParseTx(b); err == nil {
+				return ClassTx
+			}
 		}
 		return ClassUnknown
 	}
