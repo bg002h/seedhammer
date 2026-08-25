@@ -40,8 +40,10 @@ func hasMagic(b []byte) bool {
 // THE ORDER IS THE SAFETY ARGUMENT. ParseHeader is handed a HeaderLen-bounded
 // slice — a CONSTANT bound, so nothing attacker-controlled sizes it — and it
 // rejects either section length above MaxSectionLen. Only after it returns may
-// those lengths be used for arithmetic: both are then proven <= 8191, so the
-// sum cannot wrap a 32-bit int.
+// those lengths be used for arithmetic: both are then proven <= MaxSectionLen,
+// so the sum cannot wrap a 32-bit int. MaxSectionLen is 32,734 and the formula
+// that produced it is exactly the no-wrap property -- two maxed sections plus
+// header plus tag fit the 64 KiB region, and that is const-asserted in wire.go.
 func boundBlob(region []byte) (int, error) {
 	if len(region) < HeaderLen {
 		return 0, ErrTooShort

@@ -36,9 +36,32 @@ const (
 	IVLen     = 12
 	TagLen    = 16
 
-	// MaxSectionLen is EPD §6's cap, inherited unchanged: 8191 rather than
-	// 8192 because the scan buffer signals overflow when it is exactly FULL.
-	MaxSectionLen = 8191
+	// MaxSectionLen -- RAISED from 8191 to 32,734, converging on the Rust
+	// primary (crates/me-cli/src/sysw/wire.rs).
+	//
+	// 8191 was the NFC SCAN BUFFER minus one: gui/scan.go allocates 8*1024 and
+	// signals overflow when the buffer is exactly FULL. `sysw` inherited it
+	// unchanged, so the FLASH path was capped at an eighth of its own region
+	// for a reason belonging to a transport it never uses -- a sysw container
+	// reaches the device by picotool at 0x10D00000, never on a tag. A RECORD
+	// on a tag is still bound by the scan buffer, and that is a different
+	// limit on a different thing.
+	//
+	// **THE PORT MOVES WITH THE PRIMARY OR THE DEVICE REFUSES WHAT THE HOST
+	// EMITS.** `me` raised its constant; leaving this at 8191 would make every
+	// container between 8,192 and 32,734 bytes of section load on the host and
+	// fail at ParseHeader on the machine -- with "malformed container", which
+	// is the wrong sentence for a payload that is exactly right.
+	//
+	// The formula preserves the property boundBlob's no-wrap argument rests
+	// on:
+	//
+	//	(RegionLen - HeaderLen - TagLen) / 2 = (65536 - 52 - 16) / 2 = 32734
+	//
+	// so TWO maxed sections plus header plus tag still fit the region. A round
+	// 32,768 breaks it by 34 bytes. `seal`'s own cap stays 8191 and stays
+	// FROZEN -- EPD's container really is scanned.
+	MaxSectionLen = (RegionLen - HeaderLen - TagLen) / 2
 	MinIterations = 100_000
 	MaxIterations = 2_000_000
 
@@ -55,6 +78,16 @@ const (
 	WordsMax     = 24
 	WordsDefault = 12
 )
+
+// The property MaxSectionLen's formula exists to preserve, at COMPILE time:
+// two maxed sections plus header plus tag still fit the region, which is what
+// boundBlob's 32-bit no-wrap reasoning rests on. A test would fail late; a
+// negative array length fails the build.
+var _ [RegionLen - (HeaderLen + 2*MaxSectionLen + TagLen)]struct{}
+
+// ...and a round 32,768 would NOT fit -- by 34 bytes. This is why the cap is an
+// ugly number, pinned so nobody "tidies" it into a power of two.
+var _ [MaxSectionLen - 32734]struct{}
 
 type Header struct {
 	Iterations uint32
