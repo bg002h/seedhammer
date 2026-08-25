@@ -390,19 +390,21 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 			cmd.Engrave(t.Yield)
 		}
 
-		offy := params.I(outerMargin)
-		centerRow(plate.Title, offy)
+		// THE TITLE AND FOOTER ARE EMITTED LAST -- see the loop's tail. Their
+		// ROWS are decided here, because the body's first row depends on
+		// whether row 0 is spoken for, and position comes from the y offset
+		// rather than from emission order. Nothing is drawn yet.
+		titleRow := params.I(outerMargin)
+		offy := titleRow
 		if plate.Title != "" {
 			// Row 0 is spoken for; the body starts on row 1 (spec 1.2b,
 			// pinned by TestTextTitleFooterAreAbsoluteRows).
 			offy += fontSize
 		}
-		if plate.Footer != "" {
-			// The LAST plate row, anchored from the bottom -- not "after the
-			// body" -- so a short body never leaves the footer sitting
-			// mid-plate, inside the QR keep-out band (spec 1.1.2).
-			centerRow(plate.Footer, footerRowY(params, plate.fontMM()))
-		}
+		// The footer is the LAST plate row, anchored from the bottom -- not
+		// "after the body" -- so a short body never leaves it sitting
+		// mid-plate, inside the QR keep-out band (spec 1.1.2).
+		footerRow := footerRowY(params, plate.fontMM())
 
 		for i, p := range plate.Paragraphs {
 			qrScale := p.QRScale
@@ -487,5 +489,30 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 				offy += params.I(1)
 			}
 		}
+
+		// AN UNSIGNED PLATE IS AN UNFINISHED PLATE.
+		//
+		// The title row is the plate's CLAIM ABOUT ITSELF -- "TX 2DCF2B97
+		// 1/2", "PLATE 2 OF 3". Cut first, as it was, a plate abandoned at
+		// minute 20 already carried that claim and LOOKED FINISHED, so an
+		// operator taught to sort by it would put a half-cut plate in the good
+		// stack. This device has NO CAMERA and cannot read a plate back, so
+		// the operator is the only inspector there will ever be and a claim
+		// that outruns the artifact has nothing downstream to catch it.
+		//
+		// It is a reordering of YIELDS and nothing else: both rows' positions
+		// are the y offsets computed above, so the finished plate is
+		// byte-identical to what this emitted before. That is also why no
+		// bounds or golden test in this package can see the change, and why
+		// TestTheTitleAndFooterAreEmittedLast asserts the ORDER of emitted
+		// operations instead.
+		//
+		// There is no resume for an abandoned cut, for a mechanical reason:
+		// re-clamping cannot guarantee the plate returns to the same origin,
+		// and this machine has already produced a misregistration artefact
+		// traced to Y-axis play from a loose screw. A resumed cut would be
+		// offset and would still look finished.
+		centerRow(plate.Title, titleRow)
+		centerRow(plate.Footer, footerRow)
 	}
 }

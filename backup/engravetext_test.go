@@ -346,3 +346,73 @@ func TestTextTitleFooterBudget(t *testing.T) {
 		}
 	}
 }
+
+// GRAFT 4 — THE PLATE'S CLAIM ABOUT ITSELF IS CUT LAST.
+//
+// > AN UNSIGNED PLATE IS AN UNFINISHED PLATE.
+//
+// The title row is the plate's claim about itself -- "TX 2DCF2B97 1/2". Cut
+// FIRST, a plate abandoned at minute 20 already carries that claim and LOOKS
+// FINISHED, so an operator taught to sort by it puts a half-cut plate in the
+// good stack. The device has no camera and the operator is the only inspector,
+// so a claim that outruns the artifact has nothing downstream to catch it.
+//
+// THE TEST MUST ASSERT THE ORDER OF EMITTED OPERATIONS, NOT THE IMAGE: a
+// FINISHED plate looks identical either way, so every bounds/golden test in
+// this file passes under both orders and none of them can see this.
+//
+// `Engraving` is `iter.Seq[Command]` -- an ordered sequence executed in
+// emission order -- and plate POSITION comes from the y offset rather than
+// from that order, which is why legend-last is a reordering of yields and not
+// a layout change. TestTextTitleFooterAreAbsoluteRows still pins the rows.
+func TestTheTitleAndFooterAreEmittedLast(t *testing.T) {
+	plate := Text{
+		Title:      "TX 2DCF2B97 1/2",
+		Footer:     "FOOTERROW",
+		Paragraphs: []Paragraph{{Text: "mt1p9h8jqq9qqqqgqqqqqqqyqherdfykhhpey6z2"}},
+		Font:       sh.Font,
+		FontSize:   3.0,
+	}
+	fontSize := params.F(plate.fontMM())
+	titleBottom := params.I(outerMargin) + fontSize
+	footerTop := footerRowY(params, plate.fontMM())
+
+	// Bucket every knot by which ROW it lands in, and record when it was
+	// emitted. The three bands do not overlap: measured on this fixture the
+	// title occupies y[22133,34961] against a titleBottom of 38400, the body
+	// y[41505,75654], and the footer y[501987,513614] against a footerTop of
+	// 499200.
+	firstClaim, lastBody, nTitle, nFooter, nBody := -1, -1, 0, 0, 0
+	i := 0
+	for c := range EngraveText(params, plate) {
+		k, ok := c.AsKnot()
+		if !ok {
+			continue
+		}
+		switch {
+		case k.Knot.Y < titleBottom:
+			nTitle++
+			if firstClaim < 0 || i < firstClaim {
+				firstClaim = i
+			}
+		case k.Knot.Y >= footerTop:
+			nFooter++
+			if firstClaim < 0 || i < firstClaim {
+				firstClaim = i
+			}
+		default:
+			nBody++
+			lastBody = i
+		}
+		i++
+	}
+	if nTitle == 0 || nFooter == 0 || nBody == 0 {
+		t.Fatalf("the fixture must cut all three: title=%d body=%d footer=%d "+
+			"(a band that never fires makes this test vacuous)", nTitle, nBody, nFooter)
+	}
+	if firstClaim < lastBody {
+		t.Errorf("the plate's claim about itself is cut at knot %d, before the body "+
+			"finishes at %d: a plate abandoned mid-cut would already read as finished",
+			firstClaim, lastBody)
+	}
+}

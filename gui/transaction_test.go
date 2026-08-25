@@ -403,3 +403,53 @@ func TestNoPayloadAndNoTransactionAreDifferentMessages(t *testing.T) {
 	}
 	shown(t, true, sessionWith("text:6869"), "holds no transaction")
 }
+
+// GRAFT 4, at the ARTIFACT rather than at the mechanism: the invariant has to
+// survive into the Plate the engraver actually executes.
+//
+// backup.TestTheTitleAndFooterAreEmittedLast pins the reordering inside
+// EngraveText. This pins that a real transaction plate -- built by the real
+// planner, through toPlate and engrave.PlanEngraving -- still cuts its
+// "TX 2DCF2B97 n/m" claim last. PlanEngraving is a streaming transform, so
+// order survives it; that is an assumption worth a test rather than a comment.
+func TestTransactionPlateCutsItsTitleLast(t *testing.T) {
+	pl := newPlatform()
+	plates, titles, _, err := planTransactionQRPlates(pl, evenTx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := pl.EngraverParams()
+	// The title occupies row 0: the outer margin down one font size. Everything
+	// the plate says about the transaction is below it.
+	titleBottom := params.I(3) + params.F(transactionFontMM)
+
+	for i, p := range plates {
+		firstTitle, lastBody, nTitle, nBody := -1, -1, 0, 0
+		n := 0
+		for k := range p.Spline {
+			if !k.Engrave {
+				n++
+				continue
+			}
+			if k.Ctrl.Y < titleBottom {
+				nTitle++
+				if firstTitle < 0 {
+					firstTitle = n
+				}
+			} else {
+				nBody++
+				lastBody = n
+			}
+			n++
+		}
+		if nTitle == 0 || nBody == 0 {
+			t.Fatalf("plate %d (%q): title knots=%d body knots=%d -- a band that never "+
+				"fires makes this vacuous", i, titles[i], nTitle, nBody)
+		}
+		if firstTitle < lastBody {
+			t.Errorf("plate %d (%q) cuts its title at knot %d, before the body finishes "+
+				"at %d: abandoned mid-cut it would already read as finished",
+				i, titles[i], firstTitle, lastBody)
+		}
+	}
+}
