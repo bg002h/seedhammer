@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"sort"
 	"strings"
 
 	qr "github.com/seedhammer/kortschak-qr"
@@ -105,6 +106,86 @@ func legendSubstitution(complete bool) string {
 	return "INCOMPLETE - MISSING STRINGS - RE-ENCODE PAYLOAD"
 }
 
+// txNothingToEngrave is R11' as one function, so the two situations cannot
+// drift into one sentence again.
+//
+// `incomplete` counts mt1 strings that belong to no offered set at all. It is a
+// SUFFIX rather than a message of its own: the payload is still loaded and
+// still holds things, so the operator needs the inventory either way.
+func txNothingToEngrave(s *syswSession, incomplete int) string {
+	if s == nil || !s.loaded {
+		return "No payload is loaded.\n\nLoad one with Load Payload, or write one with " +
+			"`me sysw pack --region`."
+	}
+	if !s.compared {
+		// A payload nobody has authenticated is not a payload with nothing in
+		// it, and the fix is different: compare the digest. Saying "holds no
+		// transaction" here would be a claim about contents this session is
+		// not allowed to read.
+		return "This payload has not been checked, so nothing may be taken from it.\n\n" +
+			"Compare its digest at Load Payload."
+	}
+	msg := "This payload holds no transaction.\n\nIt holds: " + txPayloadHolds(s) + "."
+	if incomplete > 0 {
+		msg += fmt.Sprintf("\n\n%d mt1 string(s) belong to no complete set. "+
+			"Pack every string of the set with `me sysw pack`.", incomplete)
+	}
+	return msg
+}
+
+// txPayloadHolds is the payload's inventory, by class, counted.
+//
+// The operator cannot otherwise tell a payload with the WRONG contents from an
+// empty one, and those have different fixes -- re-pack versus pack at all.
+func txPayloadHolds(s *syswSession) string {
+	seen := map[string]int{}
+	for _, r := range s.records {
+		seen[txClassName(r.class)]++
+	}
+	if len(seen) == 0 {
+		return "nothing"
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%d %s", seen[k], k))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// txClassName names a record class for an operator.
+//
+// It lives HERE, in fork-native UI code, and not in package sysw: the Rust
+// primary has no such function, and adding one to the port would be the port
+// leading. These are words on a screen, not normative behaviour.
+func txClassName(c sysw.Class) string {
+	switch c {
+	case sysw.ClassMnemonic:
+		return "BIP-39 mnemonic"
+	case sysw.ClassCodex32Secret:
+		return "codex32 secret"
+	case sysw.ClassPassphrase:
+		return "passphrase"
+	case sysw.ClassFreeText:
+		return "free text"
+	case sysw.ClassDescriptor:
+		return "descriptor"
+	case sysw.ClassMDMK:
+		return "md1/mk1 card"
+	case sysw.ClassAddress:
+		return "address"
+	case sysw.ClassMt:
+		return "mt1 chunk"
+	case sysw.ClassTx:
+		return "raw transaction"
+	}
+	return "unrecognised record"
+}
+
 func engraveTransactionFlow(ctx *Context, th *Colors) {
 	engraveTransactionFlowSeeded(ctx, th, "")
 }
@@ -123,21 +204,23 @@ func engraveTransactionFlowSeeded(ctx *Context, th *Colors, seed string) {
 	}
 	hasReader := ctx.Platform.Features().Has(FeatureNFC)
 	if len(cands) == 0 {
-		if incomplete > 0 {
-			showError(ctx, th, "Engrave Transaction",
-				fmt.Sprintf("The payload holds %d mt1 string(s) but no COMPLETE transaction. "+
-					"Pack every string of the set with `me sysw pack`.", incomplete))
-			return
-		}
+		// R11' -- TWO DISTINCT MESSAGES. The carousel entry is UNCONDITIONAL,
+		// so the most common way to reach it is with NO PAYLOAD AT ALL: a
+		// fresh boot where the operator declined the offer, or a machine that
+		// has never had a payload written. Telling that operator their payload
+		// "holds no transaction" names a payload that does not exist; telling
+		// the other one to load a payload sends them to re-do a step they did.
+		// Both name the fix; only the second may speak about contents.
+		showError(ctx, th, "Engrave Transaction", txNothingToEngrave(ctx.sysw, incomplete))
+		// THE MESSAGE IS SHOWN WHETHER OR NOT THERE IS A READER. The SH2 has
+		// one soldered to every board, so gating it on !hasReader would show
+		// it to nobody: the operator would be dropped into a scanner with no
+		// statement of why. With a reader, the scanner follows the message.
 		if hasReader {
 			if c, ok := transactionGatherFlow(ctx, th, ""); ok {
 				transactionReviewAndEngrave(ctx, th, c)
 			}
-			return
 		}
-		showError(ctx, th, "Engrave Transaction",
-			"No transaction loaded. Pack mt1 strings (from `mt encode`) or a tx: record "+
-				"(from `me tx`) with `me sysw pack --region`, then Load Payload.")
 		return
 	}
 	// Pick a transaction. One is the common case; the payload MAY hold several.

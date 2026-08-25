@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -331,4 +332,74 @@ func TestUnconfirmedSetIsEngraveableWithASubstitutedLegend(t *testing.T) {
 	if len(plates) == 0 {
 		t.Fatal("no plates produced for an unconfirmed set")
 	}
+}
+
+// GRAFT 3 / R11' — TWO DISTINCT MESSAGES, because the two situations are
+// different and the operator's next move differs.
+//
+// The carousel entry is UNCONDITIONAL, so the MOST COMMON way to reach it is
+// with no payload loaded at all -- a fresh boot where the operator declined
+// the offer, or a machine with no payload region. Telling that operator their
+// payload "holds no transaction" names a payload that does not exist; telling
+// the other one "load a payload" when one is already loaded sends them to
+// re-do a step they did.
+//
+// | state | message |
+// | --- | --- |
+// | no payload loaded | "No payload is loaded. Load one with Load Payload." |
+// | loaded, no transaction in it | "This payload holds no transaction. It holds: <classes>." |
+//
+// Both name the fix; only the second may speak about contents.
+func TestNoPayloadAndNoTransactionAreDifferentMessages(t *testing.T) {
+	shown := func(t *testing.T, withReader bool, sess *syswSession, want string) string {
+		t.Helper()
+		p := newPlatform()
+		if withReader {
+			p.nfc = func() io.ReadCloser { return &fakeNFC{closed: make(chan struct{})} }
+		}
+		ctx := NewContext(p)
+		ctx.sysw = sess
+		frame, quit := runUI(ctx, func() { engraveTransactionFlow(ctx, &descriptorTheme) })
+		defer quit()
+		got, ok := pumpUntil(frame, want, 32)
+		if !ok {
+			t.Fatalf("no screen said %q; last frame was %q", want, got)
+		}
+		return got
+	}
+
+	// (a) NO PAYLOAD AT ALL.
+	noPayload := shown(t, false, nil, "No payload is loaded")
+	if uiContains(noPayload, "holds no transaction") {
+		t.Error("the no-payload screen names a payload that does not exist")
+	}
+	if !uiContains(noPayload, "Load Payload") {
+		t.Error("the no-payload screen must name the fix")
+	}
+
+	// (b) A PAYLOAD IS LOADED, WITH NO TRANSACTION IN IT. It must say so, and
+	// it must say what the payload DOES hold -- otherwise the operator cannot
+	// tell a payload with the wrong contents from an empty one.
+	noTx := shown(t, false, sessionWith("text:6869"), "holds no transaction")
+	if uiContains(noTx, "No payload is loaded") {
+		t.Error("a loaded payload was described as absent")
+	}
+	if !uiContains(noTx, "free text") {
+		t.Errorf("the screen must name what the payload holds; got %q", noTx)
+	}
+
+	// THE COLLAPSE THIS EXISTS TO PREVENT: one message serving both.
+	if noPayload == noTx {
+		t.Fatal("both situations produced the same screen")
+	}
+
+	// AND BOTH ARE REACHABLE ON THE REAL MACHINE. The SH2 has an NFC reader
+	// soldered to every board, so a flow that shows these only when
+	// Features() lacks FeatureNFC shows them to nobody: the operator would be
+	// dropped into a scanner with no statement of why.
+	withReader := shown(t, true, nil, "No payload is loaded")
+	if withReader == "" {
+		t.Error("the no-payload message is unreachable with a reader present")
+	}
+	shown(t, true, sessionWith("text:6869"), "holds no transaction")
 }
