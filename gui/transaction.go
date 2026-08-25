@@ -37,7 +37,25 @@ import (
 const transactionFontMM = 3.0
 
 // txCandidate is one engraveable transaction and where it came from.
+//
+// UNCONFIRMED CANDIDATES ARE STILL ENGRAVEABLE (operator rulings 2026-08-25a
+// and 2026-08-25b). An incomplete set, or one that does not reassemble into a
+// transaction, is REPORTED LOUDLY AND ENGRAVED -- it is not refused and it is
+// not dropped. Two reasons, both operator-stated:
+//
+//   - a tx: payload is NOT necessarily regenerable. It carries a finalized
+//     signing ceremony, and re-signing changes the artifact. Refusing can cost
+//     the operator the ceremony; reporting cannot.
+//   - every mt1 chunk is independently valid and BCH-protected, and carries
+//     its own index and count. 201 engraved chunks plus a 202nd recovered
+//     later reassemble -- which is how md/mk multi-card backups already work.
+//
+// What the operator loses instead is the LEGEND: `subst` replaces their chosen
+// text, un-overridably, so the warning rides on the steel. The device has no
+// camera and can never read a plate back to warn anyone later, so the plate is
+// the only surface where a warning outlives the session.
 type txCandidate struct {
+	// tx is the zero value when !confirmed -- an unconfirmed set has no txid.
 	tx mt.Tx
 	// strs is the mt1 string set, in index order — nil when the transaction
 	// arrived as a tx: record only, in which case TEXT plates are unavailable
@@ -45,6 +63,46 @@ type txCandidate struct {
 	// second implementation of a normative format, and Rust may never follow).
 	strs []string
 	src  syswSource
+	// confirmed: the set reassembled into a transaction whose txid matches its
+	// chunk_set_id. QR plates require it -- there are no transaction bytes to
+	// encode without it -- but TEXT plates do not.
+	confirmed bool
+	// csid identifies the set even when nothing else does.
+	csid uint32
+	// subst is the MANDATORY legend when !confirmed. Empty when confirmed.
+	subst string
+}
+
+// setIsComplete reads the chunk headers alone: count declared, and every index
+// 0..count-1 present exactly once. It needs no reassembly, which is the point --
+// it distinguishes "missing strings" from "will not decode" for the legend.
+func setIsComplete(set []string) bool {
+	if len(set) == 0 {
+		return false
+	}
+	h, err := mt.ParseHeader(set[0])
+	if err != nil {
+		return false
+	}
+	seen := make(map[int]bool, len(set))
+	for _, r := range set {
+		hh, err := mt.ParseHeader(r)
+		if err != nil || hh.TotalChunks != h.TotalChunks {
+			return false
+		}
+		seen[hh.ChunkIndex] = true
+	}
+	return len(seen) == h.TotalChunks
+}
+
+// legendSubstitution is the text that replaces the operator's own legend on an
+// unconfirmed plate (ruling 2026-08-25b). It is not dismissible: a warning the
+// operator can turn off is not a control.
+func legendSubstitution(complete bool) string {
+	if complete {
+		return "INCOMPLETE - DOES NOT DECODE - RE-ENCODE PAYLOAD"
+	}
+	return "INCOMPLETE - MISSING STRINGS - RE-ENCODE PAYLOAD"
 }
 
 func engraveTransactionFlow(ctx *Context, th *Colors) {
@@ -142,13 +200,25 @@ func payloadTransactions(ctx *Context) (cands []txCandidate, incomplete int) {
 	}
 	for _, csid := range order {
 		set := sets[csid]
+		ordered := orderByIndex(set)
 		tx, err := mt.Decode(set)
 		if err != nil {
+			// RULING 2026-08-25: report loudly, do not refuse. The set is still
+			// offered; the operator engraves the strings they have and the
+			// legend says so. `complete` distinguishes the two messages: a full
+			// set that will not decode is a different problem from a gap.
+			complete := setIsComplete(set)
 			incomplete += len(set)
+			cands = append(cands, txCandidate{
+				strs: ordered, src: srcPayload, csid: csid,
+				confirmed: false, subst: legendSubstitution(complete),
+			})
 			continue
 		}
-		ordered := orderByIndex(set)
-		cands = append(cands, txCandidate{tx: tx, strs: ordered, src: srcPayload})
+		cands = append(cands, txCandidate{
+			tx: tx, strs: ordered, src: srcPayload, csid: csid,
+			confirmed: true,
+		})
 	}
 	txRecs, ok := ctx.sysw.takeAll(sysw.ClassTx)
 	if ok {
@@ -243,7 +313,7 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 			msg = "Set complete but does not confirm as one transaction. Dropped."
 			return txCandidate{}, false
 		}
-		return txCandidate{tx: tx, strs: orderByIndex(set), src: srcNFC}, true
+		return txCandidate{tx: tx, strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID, confirmed: true}, true
 	}
 	if seed != "" {
 		if c, done := offer(seed); done {
@@ -305,6 +375,26 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 // or `me tx`'s own report: the FULL txid (the value the host printed), the
 // size, and the source (§3.3.3 F3 — anything not typed names its source).
 func transactionReviewLines(c txCandidate) []string {
+	if !c.confirmed {
+		// RULING 2026-08-25: engraveable, loudly. No txid exists to show -- the
+		// set never reassembled -- so the set id is the only identifier there is.
+		return []string{
+			"UNCONFIRMED SET", "",
+			fmt.Sprintf("Set %05x, %d string(s).", c.csid, len(c.strs)),
+			"",
+			"This does NOT reassemble into",
+			"a transaction. The strings are",
+			"engraveable and each is valid,",
+			"but the set is not complete.",
+			"",
+			"The plate legend WILL be",
+			"replaced with:",
+			c.subst,
+			"",
+			"QR plates are unavailable:",
+			"there are no transaction bytes.",
+		}
+	}
 	lines := []string{"Engrave this transaction?", ""}
 	lines = append(lines, chunkString(c.tx.TxidDisplay, 16)...)
 	lines = append(lines, "",
@@ -323,7 +413,15 @@ func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
 	if len(c.strs) > 0 {
 		choices = append(choices, "TEXT PLATES")
 	}
-	choices = append(choices, "QR PLATES")
+	// QR encodes the RAW TRANSACTION. An unconfirmed set has none, so the
+	// choice is withheld rather than offered and then failed (r9's lesson: a
+	// gate that cannot pass is worse than one that is absent).
+	if c.confirmed {
+		choices = append(choices, "QR PLATES")
+	}
+	if len(choices) == 0 {
+		return
+	}
 	for {
 		cs := &ChoiceScreen{Title: "Engrave Transaction", Lead: "Choose plate kind", Choices: choices}
 		i, ok := cs.Choose(ctx, th)
@@ -335,7 +433,7 @@ func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
 		var note string
 		var err error
 		if choices[i] == "TEXT PLATES" {
-			plates, titles, err = planTransactionTextPlates(ctx.Platform, c.tx, c.strs)
+			plates, titles, err = planTransactionTextPlates(ctx.Platform, c)
 			if err == nil {
 				note = fmt.Sprintf("%d plate(s), %d string(s)", len(plates), len(c.strs))
 			}
@@ -398,6 +496,12 @@ func transactionPlateTitle(tx mt.Tx, n, m int) string {
 	return fmt.Sprintf("TX %s %d/%d", strings.ToUpper(tx.TxidDisplay[:8]), n, m)
 }
 
+// transactionSetPlateTitle names an UNCONFIRMED set, which has no txid because
+// it never reassembled. The set id is the only identifier it has.
+func transactionSetPlateTitle(csid uint32, n, m int) string {
+	return fmt.Sprintf("SET %05X %d/%d", csid, n, m)
+}
+
 // planTransactionTextPlates packs the mt1 strings onto plates verbatim, in
 // index order, AS MANY PER PLATE AS FIT — the brief's stated requirement, to
 // minimise total plates. Greedy first-fit is optimal here because every chunk
@@ -407,12 +511,22 @@ func transactionPlateTitle(tx mt.Tx, n, m int) string {
 // Fit is decided by the real thing: build the plate, plan the engraving,
 // toPlate rejects overflow — the same one-source-of-truth rule the wrap code
 // (backup/wrap.go) states for lines.
-func planTransactionTextPlates(pl Platform, tx mt.Tx, strs []string) ([]Plate, []string, error) {
+func planTransactionTextPlates(pl Platform, c txCandidate) ([]Plate, []string, error) {
+	strs := c.strs
 	params := pl.EngraverParams()
+	// RULING 2026-08-25b: an unconfirmed set engraves, and the operator's own
+	// legend is REPLACED -- un-overridably -- by the warning. There is no code
+	// path that restores it: a warning the operator can turn off is not a
+	// control, and the plate is the only surface that outlives the session on a
+	// device with no camera.
+	subst := c.subst
 	// Two passes: first count the plates (titles carry n/m), then build.
 	// build constructs the i-th plate holding strs[lo:hi] with title t.
 	build := func(lo, hi int, title string) (Plate, error) {
-		paras := make([]backup.Paragraph, 0, hi-lo)
+		paras := make([]backup.Paragraph, 0, hi-lo+1)
+		if subst != "" {
+			paras = append(paras, backup.Paragraph{Text: subst})
+		}
 		for _, s := range strs[lo:hi] {
 			paras = append(paras, backup.Paragraph{Text: s})
 		}
@@ -445,7 +559,12 @@ func planTransactionTextPlates(pl Platform, tx mt.Tx, strs []string) ([]Plate, [
 	plates := make([]Plate, 0, len(bounds))
 	titles := make([]string, 0, len(bounds))
 	for i, b := range bounds {
-		title := transactionPlateTitle(tx, i+1, len(bounds))
+		var title string
+		if c.confirmed {
+			title = transactionPlateTitle(c.tx, i+1, len(bounds))
+		} else {
+			title = transactionSetPlateTitle(c.csid, i+1, len(bounds))
+		}
 		p, err := build(b[0], b[1], title)
 		if err != nil {
 			return nil, nil, err

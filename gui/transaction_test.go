@@ -47,7 +47,7 @@ func sessionWith(records ...string) *syswSession {
 // not happening.
 func TestTextPlatesPackMultipleStringsPerPlate(t *testing.T) {
 	pl := newPlatform()
-	plates, titles, err := planTransactionTextPlates(pl, evenTx(t), txEven)
+	plates, titles, err := planTransactionTextPlates(pl, txCandidate{tx: evenTx(t), strs: txEven, confirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +158,23 @@ func TestPayloadTransactionsConfirmsAndMerges(t *testing.T) {
 		t.Fatalf("tx: alone: %+v", cands)
 	}
 
-	// An incomplete set is not offered, and is counted for the error message.
+	// RULING 2026-08-25a: an incomplete set IS offered -- reported loudly and
+	// engraveable -- not dropped. This assertion previously required 0
+	// candidates, which was the pre-ruling behaviour: the device did `continue`
+	// and the operator lost a signing ceremony to a set missing one string.
 	ctx.sysw = sessionWith(txEven[:4]...)
 	cands, incomplete = payloadTransactions(ctx)
-	if len(cands) != 0 || incomplete != 4 {
-		t.Errorf("incomplete set: %d candidates, %d counted", len(cands), incomplete)
+	if len(cands) != 1 || incomplete != 4 {
+		t.Fatalf("incomplete set: %d candidates, %d counted", len(cands), incomplete)
+	}
+	if cands[0].confirmed {
+		t.Error("an incomplete set must not be marked confirmed")
+	}
+	if cands[0].subst == "" {
+		t.Error("an unconfirmed candidate must carry the legend that replaces the operator's")
+	}
+	if len(cands[0].strs) != 4 {
+		t.Errorf("the four strings the operator HAS must still be engraveable, got %d", len(cands[0].strs))
 	}
 }
 
@@ -200,7 +212,9 @@ func TestSessionMarksIncompleteMtSetsUnconfirmed(t *testing.T) {
 // The review screen shows the FULL txid — the value the host printed and the
 // only thing the operator can compare — plus the bearer warning.
 func TestTransactionReviewLines(t *testing.T) {
-	c := txCandidate{tx: evenTx(t), strs: txEven, src: srcPayload}
+	// confirmed: true is REQUIRED -- the zero value is UNCONFIRMED, so a
+	// candidate that nothing confirmed fails closed (rulings 2026-08-25).
+	c := txCandidate{tx: evenTx(t), strs: txEven, src: srcPayload, confirmed: true}
 	joined := strings.Join(transactionReviewLines(c), "\n")
 	if !strings.Contains(joined, txEvenTxid[:16]) ||
 		!strings.Contains(joined, txEvenTxid[48:]) {
@@ -287,5 +301,34 @@ func TestQRPlanScalesWithTransactionSize(t *testing.T) {
 		if strings.Contains(note, "ECC L") {
 			t.Errorf("%d B: below the ECC floor: %s", tc.bytes, note)
 		}
+	}
+}
+
+// RULING 2026-08-25: an unconfirmed set is ENGRAVEABLE, and the operator's
+// legend is replaced un-overridably. Before this, the device DROPPED such a set
+// -- the payload path did `continue` and the NFC path said "Dropped."
+func TestUnconfirmedSetIsEngraveableWithASubstitutedLegend(t *testing.T) {
+	c := txCandidate{
+		strs: txEven[:3], src: srcPayload, csid: 0x2dcf2,
+		confirmed: false, subst: legendSubstitution(false),
+	}
+	lines := strings.Join(transactionReviewLines(c), "\n")
+	if !strings.Contains(lines, "UNCONFIRMED SET") {
+		t.Error("the review screen must say the set is unconfirmed")
+	}
+	if !strings.Contains(lines, c.subst) {
+		t.Error("the review screen must show the legend that will REPLACE the operator's")
+	}
+	if !strings.Contains(lines, "QR plates are unavailable") {
+		t.Error("QR needs transaction bytes an unconfirmed set does not have")
+	}
+
+	pl := newPlatform()
+	plates, _, err := planTransactionTextPlates(pl, c)
+	if err != nil {
+		t.Fatalf("an unconfirmed set must still ENGRAVE: %v", err)
+	}
+	if len(plates) == 0 {
+		t.Fatal("no plates produced for an unconfirmed set")
 	}
 }

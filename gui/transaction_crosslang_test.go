@@ -63,7 +63,7 @@ func TestHostPackedMtPayloadLoadsAndConfirms(t *testing.T) {
 
 	// ...and both plate kinds actually plan, so the operator holding this
 	// payload can reach steel.
-	if _, _, err := planTransactionTextPlates(ctx.Platform, c.tx, c.strs); err != nil {
+	if _, _, err := planTransactionTextPlates(ctx.Platform, c); err != nil {
 		t.Errorf("text plates: %v", err)
 	}
 	if _, _, _, err := planTransactionQRPlates(ctx.Platform, c.tx); err != nil {
