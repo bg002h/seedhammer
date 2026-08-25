@@ -51,7 +51,18 @@ func EncodeSet(data []byte, k int, level qr.Level) ([]*qr.Code, error) {
 		return nil, errTooManySymbols
 	}
 	if k == 1 {
-		c, err := qr.Encode(string(data), level)
+		// BYTE MODE, EXPLICITLY -- not qr.Encode, which selects numeric, then
+		// alphanumeric, then byte, and would therefore make ONE symbol's
+		// capacity a fact about the payload's CHARACTER DISTRIBUTION rather
+		// than its length. A transaction whose serialization happened to fall
+		// inside the alphanumeric charset would fit a symbol its neighbours of
+		// identical size would not, and the plate count the operator is shown
+		// on the review screen would move for a reason nothing on that screen
+		// explains. It also made the package's own "byte mode always" claim
+		// false of half its own paths.
+		//
+		// Found by running capgate over this package (capgate_test.go).
+		c, err := encodeByte(data, level)
 		if err != nil {
 			return nil, err
 		}
@@ -110,6 +121,13 @@ func (s saHeader) Encode(b *coding.Bits, _ coding.Version) {
 	b.Write(uint(s.parity), 8)
 }
 
+// encodeByte is the vendored qr.Encode's version walk and mask search with the
+// mode PINNED to byte, for the single-symbol case. It shares encodeSA's body by
+// passing no header.
+func encodeByte(data []byte, level qr.Level) (*qr.Code, error) {
+	return encodeSegments(coding.String(data), level, nil)
+}
+
 // encodeSA mirrors the vendored qr.Encode's version walk and mask search,
 // with the Structured Append header prepended. Byte mode always: the payload
 // is raw transaction bytes, and a per-part mode choice would make symbol
@@ -119,14 +137,29 @@ func encodeSA(part []byte, index, count int, parity byte, level qr.Level) (*qr.C
 	if err := head.Check(); err != nil {
 		return nil, err
 	}
-	body := coding.String(part)
+	return encodeSegments(coding.String(part), level, &head)
+}
+
+// encodeSegments is the version walk and mask search both paths share, with the
+// byte-mode body and an OPTIONAL Structured Append header ahead of it.
+//
+// ONE implementation, because two were the drift risk: the capacity a symbol
+// has and the capacity the planner assumes it has are computed here and
+// nowhere else.
+func encodeSegments(body coding.String, level qr.Level, head *saHeader) (*qr.Code, error) {
 	l := coding.Level(level)
+	headBits := func(v coding.Version) int {
+		if head == nil {
+			return 0
+		}
+		return head.Bits(v)
+	}
 	var v coding.Version
 	for v = coding.MinVersion; ; v++ {
 		if v > coding.MaxVersion {
 			return nil, errors.New("txqr: part too long to encode as QR")
 		}
-		if head.Bits(v)+body.Bits(v) <= v.DataBytes(l)*8 {
+		if headBits(v)+body.Bits(v) <= v.DataBytes(l)*8 {
 			break
 		}
 	}
@@ -137,7 +170,12 @@ func encodeSA(part []byte, index, count int, parity byte, level qr.Level) (*qr.C
 		if err != nil {
 			return nil, err
 		}
-		cc, err := p.Encode(head, body)
+		var cc *coding.Code
+		if head == nil {
+			cc, err = p.Encode(body)
+		} else {
+			cc, err = p.Encode(*head, body)
+		}
 		if err != nil {
 			return nil, err
 		}
