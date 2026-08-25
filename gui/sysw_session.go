@@ -58,9 +58,11 @@ type syswRecord struct {
 	class sysw.Class
 	body  string
 
-	// unconfirmed is `[mdmk-decode]` (§12.6) for a ClassMDMK record: the payload
-	// does not contain the complete card set this record belongs to, or that set
-	// does not reassemble and decode. Always false for every other class.
+	// unconfirmed is `[mdmk-decode]` (§12.6) for a ClassMDMK record — the
+	// payload does not contain the complete card set this record belongs to,
+	// or that set does not reassemble and decode — and `[mt-decode]` for a
+	// ClassMt record (complete, parses as a transaction, txid binds). Always
+	// false for every other class.
 	//
 	// Set ONCE, at load, for the same reason `class` is: classification is
 	// at-load (§3.2.1), and a confirmation re-decided at the point of use would
@@ -95,6 +97,13 @@ func (s *syswSession) load(p *sysw.Payload, identity [32]byte, sealed, cliffAbov
 
 	unconfirmed := make(map[int]bool)
 	for _, i := range sysw.MDMKUnconfirmed(all) {
+		unconfirmed[i] = true
+	}
+	// `[mt-decode]`: the same whole-payload question for mt1 chunk sets. An
+	// unconfirmed mt record counts as SECRET for flags exactly as an
+	// unconfirmed md1/mk1 does — reassembly-plus-parse is mt's only semantic
+	// arbiter, so an unconfirmable record may hold anything.
+	for _, i := range sysw.MTUnconfirmed(all) {
 		unconfirmed[i] = true
 	}
 	for i, r := range all {

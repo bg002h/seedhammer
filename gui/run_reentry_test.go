@@ -294,7 +294,8 @@ var reentryCarouselTitles = []string{
 	"Engrave Single-Sig",
 	"Engrave Multisig",
 	"Wallet Policy",
-	// Load Payload sits here, between Engrave Multisig and BIP-85: it is
+	"Engrave Transaction",
+	// Load Payload sits here, between Engrave Transaction and BIP-85: it is
 	// UNCONDITIONAL and so was inserted mid-enum, leaving bip85Derive as the
 	// bound lastNav returns and Sealed Payload last. This list mirrors the
 	// carousel, so it moves when the carousel does.

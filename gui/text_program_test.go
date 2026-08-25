@@ -25,6 +25,7 @@ var ftProgramTitles = []string{
 	"Engrave Single-Sig",
 	"Engrave Multisig",
 	"Wallet Policy",
+	"Engrave Transaction",
 	"Load Payload",
 	"BIP-85",
 }

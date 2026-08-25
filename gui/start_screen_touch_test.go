@@ -138,6 +138,7 @@ func TestStartScreenPagerTouchReachesEveryProgram(t *testing.T) {
 		"Engrave Single-Sig",
 		"Engrave Multisig",
 		"Wallet Policy",
+		"Engrave Transaction",
 		"Load Payload",
 		"BIP-85",
 		"Backup Wallet", // wraps

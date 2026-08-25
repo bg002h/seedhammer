@@ -25,6 +25,7 @@ const (
 	progMultisig
 	progWalletPolicy
 	progBip85
+	progTransaction
 )
 
 // admitted is §3.3.2's table. `true` = admitted; absent = refused with a reason.
@@ -43,6 +44,11 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 	// flow declining to ask.
 	progWalletPolicy: {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	progBip85:        {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
+	// Engrave Transaction consumes exactly the two transaction record forms.
+	// NO seed class and no passphrase: the program signs nothing and derives
+	// nothing, so admitting a secret would grant a capability the flow has no
+	// use for — least privilege, same reasoning as progWalletPolicy.
+	progTransaction: {sysw.ClassMt: true, sysw.ClassTx: true},
 }
 
 // admits reports whether a program may consume a class.

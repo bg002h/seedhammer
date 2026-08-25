@@ -212,6 +212,14 @@ const (
 	// the carousel reads as a list of things to make, and a utility sitting
 	// between two of them is a seam an operator has to step over.
 	walletPolicy
+	// engraveTransaction cuts an already-signed Bitcoin transaction to steel:
+	// mt1 strings as packed TEXT plates, or the raw bytes as QR plates
+	// (gui/transaction.go). Inserted mid-enum per the house rule on
+	// unconditional programs, before loadPayload, so bip85Derive stays the
+	// bound StartScreen.lastNav() returns and unlockPayload stays the
+	// conditional last. Placed beside the other ENGRAVE programs: the
+	// carousel reads as a list of things to make.
+	engraveTransaction
 	// loadPayload is UNCONDITIONAL and therefore inserted mid-enum per the house
 	// rule, before bip85Derive, so bip85Derive stays the bound StartScreen.lastNav
 	// returns and unlockPayload stays the last navigable program. Two
@@ -2045,6 +2053,9 @@ func uiFlow(ctx *Context, version string) {
 			case walletPolicy:
 				walletPolicyFlow(ctx, th)
 				continue
+			case engraveTransaction:
+				engraveTransactionFlow(ctx, th)
+				continue
 			case loadPayload:
 				syswPayloadMenu(ctx, th)
 				continue
@@ -2200,6 +2211,8 @@ func (m *StartScreen) draw(ctx *Context, th *Colors, dims image.Point, prevBtn, 
 		titleTxt = "Engrave Multisig"
 	case walletPolicy:
 		titleTxt = "Wallet Policy"
+	case engraveTransaction:
+		titleTxt = "Engrave Transaction"
 	case loadPayload:
 		titleTxt = "Load Payload"
 	case bip85Derive:
@@ -2428,7 +2441,7 @@ func (m *StartScreen) layout(buf *op.Buffer, th *Colors, width int, prevBtn, nex
 
 func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 	switch page {
-	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, walletPolicy, loadPayload, bip85Derive, unlockPayload:
+	case backupWallet, engravePassphrase, engraveText, engraveXpub, engraveBundle, engraveSingleSig, engraveMultisig, walletPolicy, engraveTransaction, loadPayload, bip85Derive, unlockPayload:
 		img := assets.Hammer
 		o := op.Image(buf, img)
 		return o, img.Bounds().Size()
@@ -2476,6 +2489,10 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 		descriptorFlow(ctx, th, scan)
 	case mdmkText:
 		mdmkFlow(ctx, th, scan)
+	case mtText:
+		// A scanned chunk enters the transaction program's gather, so it is
+		// never dropped and never engraved alone.
+		engraveTransactionFlowSeeded(ctx, th, string(scan))
 	case freeTextScan:
 		// §5.3's two new record forms, arriving the way §2.1 says everything
 		// else already may. Both are srcNFC by construction -- this switch is

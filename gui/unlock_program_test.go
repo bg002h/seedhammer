@@ -27,6 +27,7 @@ var unlockProgramTitles = []string{
 	"Engrave Single-Sig",
 	"Engrave Multisig",
 	"Wallet Policy",
+	"Engrave Transaction",
 	"Load Payload",
 	"BIP-85",
 	"Sealed Payload",
@@ -195,7 +196,7 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 	// A full lap of the UNCONDITIONAL programs: with no payload the last tap
 	// must wrap back to the first program rather than step onto the conditional
 	// Sealed Payload entry.
-	const lap = 10
+	const lap = 11
 	for i := 1; i <= lap; i++ {
 		want := unlockProgramTitles[i%lap]
 		tap(&ctx.Router, drawer(), right)
@@ -210,8 +211,8 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 			t.Fatalf("tap #%d reached the Sealed Payload entry with no payload present: %q", i, content)
 		}
 	}
-	if got := pagerDots(t, ctx, bip85Derive); got != 10 {
-		t.Errorf("the no-payload pager draws %d dots, want 10", got)
+	if got := pagerDots(t, ctx, bip85Derive); got != 11 {
+		t.Errorf("the no-payload pager draws %d dots, want 11", got)
 	}
 }
 
@@ -234,7 +235,7 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 		t.Fatalf("initial program is not %q; got %q", unlockProgramTitles[0], content)
 	}
 	_, right := arrowPoints(ctx)
-	const lap = 11 // 10 unconditional programs + the conditional Sealed Payload
+	const lap = 12 // 11 unconditional programs + the conditional Sealed Payload
 	seenUnlock := false
 	for i := 1; i <= lap; i++ {
 		want := unlockProgramTitles[i%lap]
@@ -248,7 +249,7 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 		}
 		if i == lap-1 {
 			if !uiContains(content, "Sealed Payload") {
-				t.Fatalf("the tenth program is not Sealed Payload; got %q", content)
+				t.Fatalf("the last program is not Sealed Payload; got %q", content)
 			}
 			seenUnlock = true
 		}
@@ -256,7 +257,7 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 	if !seenUnlock {
 		t.Fatal("the Sealed Payload entry was never reached")
 	}
-	if got := pagerDots(t, ctx, unlockPayload); got != 11 {
+	if got := pagerDots(t, ctx, unlockPayload); got != 12 {
 		t.Errorf("the payload-present pager draws %d dots, want 10", got)
 	}
 }
@@ -280,7 +281,7 @@ func TestUnlockPayloadEntrySelectable(t *testing.T) {
 		t.Fatal("uiFlow produced no frame")
 	}
 	_, right := arrowPoints(ctx)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 11; i++ {
 		tap(&ctx.Router, drawer(), right)
 		if _, ok := frame(); !ok {
 			t.Fatalf("no frame after tap #%d", i+1)
@@ -385,7 +386,7 @@ func TestStartupProbesWithoutReadingTheRegion(t *testing.T) {
 	// navigating.
 	_, right := arrowPoints(ctx)
 	var content string
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 11; i++ {
 		tap(&ctx.Router, drawer(), right)
 		c, ok := frame()
 		if !ok {

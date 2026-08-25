@@ -90,6 +90,11 @@ func (s *scanner) Scan(r io.Reader) (any, error) {
 		return s, nil
 	} else if codex32.ValidMD(string(buf)) || codex32.ValidMK(string(buf)) {
 		return mdmkText(buf), nil
+	} else if codex32.ValidMT(string(buf)) {
+		// One chunk of an mt1 signed-transaction set. Routed to the Engrave
+		// Transaction program's gather, which accumulates the set and refuses
+		// to engrave until it CONFIRMS (mt.Decode).
+		return mtText(buf), nil
 	} else if _, aerr := btcaddr.DecodeAddress(string(buf), &chaincfg.MainNetParams); aerr == nil {
 		return addressText(buf), nil
 	} else if _, aerr := btcaddr.DecodeAddress(string(buf), &chaincfg.TestNet3Params); aerr == nil {
@@ -122,6 +127,11 @@ type addressText string
 
 // mdmkText is a BCH-validated md1/mk1 string, engraved verbatim as text/QR.
 type mdmkText string
+
+// mtText is a BCH-validated mt1 string — one chunk of a signed-transaction
+// set. A single string is never engraved alone; the transaction program
+// gathers the set and confirms it first.
+type mtText string
 
 type debugCommand struct {
 	Command string

@@ -39,9 +39,18 @@ func TestBip85DeriveProgramNavigable(t *testing.T) {
 	if !uiContains(content, "Wallet Policy") {
 		t.Fatalf("walletPolicy not reachable after Multisig; got %q", content)
 	}
-	// Right -> loadPayload, which sits between walletPolicy and bip85Derive: it
-	// is unconditional, so it was inserted mid-enum and bip85Derive stayed the
-	// bound lastNav returns.
+	// Right -> engraveTransaction, inserted beside the other engrave programs.
+	click(&ctx.Router, Right)
+	content, ok = frame()
+	if !ok {
+		t.Fatal("no frame after the Right onto Engrave Transaction")
+	}
+	if !uiContains(content, "Engrave Transaction") {
+		t.Fatalf("engraveTransaction not reachable after Wallet Policy; got %q", content)
+	}
+	// Right -> loadPayload, which sits between engraveTransaction and
+	// bip85Derive: it is unconditional, so it was inserted mid-enum and
+	// bip85Derive stayed the bound lastNav returns.
 	click(&ctx.Router, Right)
 	content, ok = frame()
 	if !ok {
