@@ -999,7 +999,21 @@ func transactionPostCutLines(c txCandidate, qr bool, plates int) []string {
 	lines = append(lines, "",
 		"Order does not matter.",
 		"")
-	if c.subst != "" {
+	if c.subst != "" && len(c.strs) == 0 {
+		// P5 M-4 — a tx: record admitted with --allow-unsigned-inputs carries a
+		// substituted legend AND engraves QR plates, but its bytes DO decode:
+		// `mt inspect` on the scan-back succeeds and prints the transaction.
+		// Telling the operator to "expect it to fail there too" predicts an
+		// outcome that will not happen, and an instruction that mispredicts is
+		// one they stop trusting. What did not hold here is the SIGNATURE
+		// check, not the decode.
+		lines = append(lines,
+			"This WILL decode there.",
+			"What did not hold here is",
+			"that every input is signed.",
+			"The plate legend says so",
+			"permanently.")
+	} else if c.subst != "" {
 		lines = append(lines,
 			"This set did NOT confirm",
 			"here, so expect it to fail",
@@ -1248,11 +1262,25 @@ func planTransactionQRPlates(pl Platform, c txCandidate) ([]Plate, []string, str
 	// of the SMALLEST MODULE this device will emit. Without the module size
 	// the sentence cannot be acted on and cannot be checked.
 	const floorScale = 2 // 0.6mm, the smallest module the search ever tries
+	// P5 N-2 — the remedy must be one this candidate HAS. A tx:-record-only
+	// candidate carries no mt1 strings, so "Use TEXT plates" is impossible for
+	// it; the operator's route is to re-pack the transaction as an mt1 set.
+	// P5 N-3 — the ceiling below is a MODULE-FIT bound. `buildQRPlates`
+	// additionally requires the legend/title assembly to fit, so the true
+	// acceptance threshold is at or below this number. Said plainly rather
+	// than quoted as exact, because a refusal that overstates its own ceiling
+	// sends the operator to shave bytes that will not be enough.
+	remedy := "Use TEXT plates."
+	if len(c.strs) == 0 {
+		remedy = "This arrived as a tx: record, so there are no TEXT plates " +
+			"to fall back to. Re-pack the transaction as an mt1 set."
+	}
 	return nil, nil, "", fmt.Errorf("%d bytes is too large for QR plates.\n\n"+
 		"At %s modules - the smallest this machine cuts - %d Structured Append "+
-		"symbols at ECC %s hold at most %d bytes.\n\nUse TEXT plates.",
+		"symbols at ECC %s hold at most about %d bytes (module fit; the legend "+
+		"and title take a little more).\n\n%s",
 		len(c.tx.Raw), moduleLabel(floorScale), txqr.MaxSymbols, eccName[qr.M],
-		qrCeilingBytes(params, qr.M, floorScale))
+		qrCeilingBytes(params, qr.M, floorScale), remedy)
 }
 
 // moduleLabel is the engraved module pitch for a stroke multiplier. ONE table,

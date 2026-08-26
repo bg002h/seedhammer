@@ -302,3 +302,41 @@ func TestTheUnconfirmedScreenDoesNotContradictItsOwnLegend(t *testing.T) {
 		}
 	}
 }
+
+// P5 M-4 — the post-cut screen predicted the WRONG outcome for an unsigned
+// `tx:` record. Such a candidate carries a substituted legend and engraves QR
+// plates, but its bytes decode fine: `mt inspect` on the scan-back succeeds.
+// Telling the operator to "expect it to fail there too" mispredicts, and an
+// instruction that mispredicts is one they stop trusting.
+func TestPostCutDoesNotPredictFailureForARecordThatWillDecode(t *testing.T) {
+	rec := txCandidate{ // a tx: record: bytes present, no mt1 strings
+		confirmed: false,
+		subst:     legendSubstitution(true),
+		tx:        mt.Tx{Raw: []byte{0x01, 0x02}, TxidDisplay: "abcdef0123456789"},
+	}
+	var joined string
+	for _, l := range transactionPostCutLines(rec, true, 3) {
+		joined += l + "\n"
+	}
+	if strings.Contains(joined, "expect it to fail") {
+		t.Fatalf("a tx: record's QR DOES decode; predicting failure is wrong:\n%s", joined)
+	}
+	if !strings.Contains(joined, "WILL decode") {
+		t.Fatalf("it must say what actually happens:\n%s", joined)
+	}
+
+	// THE CONTROL: an unconfirmed SET (mt1 strings that did not reassemble)
+	// keeps the original prediction, because for it the decode genuinely fails.
+	set := txCandidate{
+		confirmed: false,
+		subst:     legendSubstitution(false),
+		strs:      []string{"mt1one", "mt1two"},
+	}
+	var sj string
+	for _, l := range transactionPostCutLines(set, false, 2) {
+		sj += l + "\n"
+	}
+	if !strings.Contains(sj, "expect it to fail") {
+		t.Fatalf("an unconfirmed SET must still predict failure:\n%s", sj)
+	}
+}
