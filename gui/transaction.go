@@ -324,12 +324,7 @@ func engraveTransactionFlowSeeded(ctx *Context, th *Colors, seed string) {
 	// Pick a transaction. One is the common case; the payload MAY hold several.
 	choices := make([]string, 0, len(cands)+1)
 	for _, c := range cands {
-		what := "raw bytes"
-		if len(c.strs) > 0 {
-			what = fmt.Sprintf("%d strings", len(c.strs))
-		}
-		choices = append(choices, fmt.Sprintf("TX %s | %d B | %s",
-			strings.ToUpper(c.tx.TxidDisplay[:8]), len(c.tx.Raw), what))
+		choices = append(choices, transactionChoiceRow(c))
 	}
 	if hasReader {
 		choices = append(choices, "Scan instead")
@@ -350,6 +345,41 @@ func engraveTransactionFlowSeeded(ctx *Context, th *Colors, seed string) {
 		return
 	}
 	transactionReviewAndEngrave(ctx, th, cands[idx])
+}
+
+// transactionChoiceRow is one row of the picker.
+//
+// IT PANICKED. Every row read `c.tx.TxidDisplay[:8]`, and an UNCONFIRMED
+// candidate carries the ZERO-VALUE mt.Tx -- the set never reassembled, so
+// there is no txid to slice:
+//
+//	panic: runtime error: slice bounds out of range [:8] with length 0
+//
+// The rows are built for ALL candidates before `len(choices) > 1` decides
+// whether to show the screen, so a payload holding ONE incomplete mt1 set
+// crashed the program with no picker ever displayed -- and that payload is the
+// ordinary one ruling 2026-08-25 exists for: an operator who packed the
+// strings they had.
+//
+// So the row is derived from what the candidate ACTUALLY has, and the three
+// shapes are labelled apart. A picker where a spendable transaction and one
+// that can never be broadcast look alike is the R10 hazard in miniature.
+func transactionChoiceRow(c txCandidate) string {
+	what := "raw bytes"
+	if len(c.strs) > 0 {
+		what = fmt.Sprintf("%d strings", len(c.strs))
+	}
+	if !c.hasBytes() {
+		// No txid exists. The set id is the only identifier there is, and
+		// saying "TX" over an empty string is how this crashed.
+		return fmt.Sprintf("SET %05X | UNCONFIRMED | %s", c.csid, what)
+	}
+	label := "TX"
+	if !c.confirmed {
+		label = "UNSIGNED"
+	}
+	return fmt.Sprintf("%s %s | %d B | %s", label,
+		strings.ToUpper(c.tx.TxidDisplay[:8]), len(c.tx.Raw), what)
 }
 
 // payloadTransactions collects every CONFIRMED transaction the loaded payload
@@ -648,13 +678,24 @@ func transactionReviewLines(c txCandidate) []string {
 			"there are no transaction bytes.",
 		}
 	}
-	lines := []string{"Engrave this transaction?", ""}
+	// THE BEARER WARNING IS ABOVE THE TXID, and the order is the finding.
+	// confirmReviewScreen PAGES: with the warning last, page 1 held the
+	// question and the four txid lines and nothing else, so an operator who
+	// pressed Continue -- the ordinary thing to do on a screen showing the
+	// number they came to check -- confirmed the cut WITHOUT EVER SEEING IT.
+	// Found by walking the flow (G-P3.20); no assertion on the wording could
+	// see it, because the words were there.
+	lines := []string{
+		"Engrave this transaction?",
+		"",
+		"BEARER: anyone holding the",
+		"plates can broadcast it.",
+		"",
+	}
 	lines = append(lines, chunkString(c.tx.TxidDisplay, 16)...)
 	lines = append(lines, "",
 		fmt.Sprintf("%d bytes, %d in, %d out", len(c.tx.Raw), c.tx.Inputs, c.tx.Outputs),
-		"Source: "+syswSourceName(c.src),
-		"BEARER: anyone holding the",
-		"plates can broadcast it.")
+		"Source: "+syswSourceName(c.src))
 	return lines
 }
 
@@ -699,15 +740,112 @@ func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
 			continue
 		}
 		// The configuration is stated BEFORE the first cut — which plates, how
-		// many, at what protection — because plate count and ECC are the two
-		// numbers the operator budgeted blanks and time by.
-		if !confirmReviewScreen(ctx, th, "Plates", []string{note, "", "Engrave?"}) {
+		// many, at what protection, AND HOW LONG. This comment used to claim
+		// plate count and ECC were "the two numbers the operator budgeted
+		// blanks and time by", while no time appeared anywhere: at ~21 minutes
+		// a plate, a four-plate job is most of an afternoon, and the screen
+		// that asks for the commitment is the only place to say so. Stopping
+		// mid-set costs a blank (G-P3.13), so the estimate is not a nicety.
+		lines := []string{note, transactionJobTime(plates, ctx.Platform.EngraverParams().TicksPerSecond), "", "Engrave?"}
+		if !confirmReviewScreen(ctx, th, "Plates", lines) {
 			continue
 		}
 		if engraveTransactionPlates(ctx, th, plates, titles) {
+			// G-P3.17(b) — the per-JOB instruction, once, after the last plate.
+			transactionPostCutFlow(ctx, th, c, choices[i] == "QR PLATES", len(plates))
 			return
 		}
 	}
+}
+
+// transactionJobTime is how long the whole job takes, from the PLAN rather
+// than from a rule of thumb: Plate.Duration is the tick count the engraver will
+// actually spend, and TicksPerSecond is the same divisor the live remaining-time
+// readout uses. Two clocks for one machine would disagree in front of the
+// operator.
+func transactionJobTime(plates []Plate, ticksPerSecond uint) string {
+	tps := uint64(ticksPerSecond)
+	if tps == 0 {
+		// A zero-tick machine is a programming error, not an input. Say
+		// nothing rather than divide by zero on a confirm screen.
+		return "cut time unknown"
+	}
+	var ticks uint64
+	for _, p := range plates {
+		ticks += p.Duration
+	}
+	sec := (ticks + tps - 1) / tps
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("about %d s of cutting", sec)
+	case sec < 3600:
+		return fmt.Sprintf("about %d min of cutting", (sec+59)/60)
+	default:
+		return fmt.Sprintf("about %d h %d min of cutting", sec/3600, (sec%3600+59)/60)
+	}
+}
+
+// transactionPostCutFlow is the PER-JOB instruction (§4.3a, G-P3.17b): shown
+// ONCE, after the last plate, naming what to do with the set as a whole.
+//
+// IT IS THE ONLY PLACE THE DEVICE CAN SAY "TEST THE PLATE", and it has to,
+// because it never tests one itself: the SH2 has no camera, so nothing on this
+// machine can ever read a plate back. If the operator does not check the
+// artifact now, nobody checks it until the day it is needed.
+//
+// It names ONE command per plate kind, and names it once -- the per-plate
+// legends carry the scan-order fact, so repeating it here would be the
+// job-level instruction the gate exists to unpick.
+func transactionPostCutFlow(ctx *Context, th *Colors, c txCandidate, qr bool, plates int) {
+	confirmReviewScreen(ctx, th, "Plates Cut", transactionPostCutLines(c, qr, plates))
+}
+
+// transactionPostCutLines is the screen's text, as LINES.
+//
+// PAGED, NOT A MODAL, and that is not a style choice. The first draft used
+// showNotice, and ErrorScreen does not page: the body was cut off mid-sentence
+// at "Order does not matter - it is inside", so the operator never reached the
+// two lines that matter most -- what to check the txid against, and that this
+// machine can never read a plate back. Three assertions on the wording passed
+// while the words were unreachable, which is F-151's shape one step along:
+// there, text was submitted and not drawn; here, drawn and not shown.
+func transactionPostCutLines(c txCandidate, qr bool, plates int) []string {
+	lines := []string{
+		fmt.Sprintf("%d plate(s) cut.", plates),
+		"",
+		"TEST THEM NOW, before you",
+		"file them.",
+		"",
+	}
+	if qr {
+		lines = append(lines,
+			"Scan every QR with a phone,",
+			"join the hex, and run",
+			"`mt inspect` on it.")
+	} else {
+		lines = append(lines,
+			"Type one string into",
+			"`mt verify`, then `mt decode`",
+			"the whole set.")
+	}
+	lines = append(lines, "",
+		"Order does not matter.",
+		"")
+	if c.subst != "" {
+		lines = append(lines,
+			"This set did NOT confirm",
+			"here, so expect it to fail",
+			"there too. The plate legend",
+			"says so permanently.")
+	} else {
+		lines = append(lines,
+			"Check the txid it reports",
+			"against TX "+strings.ToUpper(c.tx.TxidDisplay[:8])+".")
+	}
+	return append(lines, "",
+		"This machine has no camera",
+		"and can never read a plate",
+		"back.")
 }
 
 // engraveTransactionPlates cuts the plan in order. A set-level Back warns the
@@ -856,7 +994,12 @@ func planTransactionTextPlates(pl Platform, c txCandidate) ([]Plate, []string, e
 // refusal, and three copies is three chances to disagree.
 var eccName = map[qr.Level]string{qr.L: "L", qr.M: "M", qr.Q: "Q", qr.H: "H"}
 
-func transactionLegend(c txCandidate, symbols int, ecc qr.Level) string {
+// plateHasQR distinguishes the two plates a legend can land on. §4.3a: THE
+// PER-PLATE INSTRUCTION IS A FUNCTION OF WHAT IS ON THAT PLATE. A legend-only
+// plate carries no symbol at all, and it was telling the operator to "scan all
+// qr, any order" -- an instruction about plates that are not this one, cut into
+// the one plate that has nothing to scan.
+func transactionLegend(c txCandidate, symbols int, ecc qr.Level, plateHasQR bool) string {
 	signedness := "raw signed bitcoin tx"
 	var lines []string
 	if c.subst != "" {
@@ -871,15 +1014,22 @@ func transactionLegend(c txCandidate, symbols int, ecc qr.Level) string {
 		"txid "+c.tx.TxidDisplay,
 		fmt.Sprintf("%s, %d bytes, %d qr, ecc %s", signedness, len(c.tx.Raw), symbols, eccName[ecc]),
 	)
+	// What to DO with it, said about the plate it is cut into.
+	verb := "then broadcast"
+	if c.subst != "" {
+		// Nothing here is broadcastable, and the plate must not say it is.
+		verb = "to read it back"
+	}
 	switch {
-	case c.subst != "" && symbols > 1:
-		lines = append(lines, "scan all qr, any order, to read it back")
-	case c.subst != "":
-		lines = append(lines, "scan to read it back")
+	case !plateHasQR:
+		// The legend plate. The symbols are elsewhere, and saying so is the
+		// whole content of this plate's instruction.
+		lines = append(lines, fmt.Sprintf("the %d qr are on the other plates", symbols),
+			"scan them all, any order, "+verb)
 	case symbols > 1:
-		lines = append(lines, "scan all qr, any order, then broadcast")
+		lines = append(lines, "scan all qr, any order, "+verb)
 	default:
-		lines = append(lines, "scan, then broadcast")
+		lines = append(lines, "scan this qr, "+verb)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1034,21 +1184,23 @@ func buildQRPlates(params engrave.Params, c txCandidate, symbols int, legendAlon
 		titles = append(titles, title)
 		return true
 	}
-	legend := transactionLegend(c, symbols, ecc)
 	plateNo := 1
 	if legendAlone {
-		if !build(backup.Text{Paragraphs: []backup.Paragraph{{Text: legend}}},
-			transactionPlateTitle(tx, plateNo, plateCount)) {
+		if !build(backup.Text{Paragraphs: []backup.Paragraph{
+			{Text: transactionLegend(c, symbols, ecc, false)},
+		}}, transactionPlateTitle(tx, plateNo, plateCount)) {
 			return nil, nil, false
 		}
 		plateNo++
 	}
-	for i, c := range set {
+	for i, sym := range set {
 		paras := []backup.Paragraph{}
 		if i == 0 && !legendAlone {
-			paras = append(paras, backup.Paragraph{Text: legend, QR: c, QRScale: scale})
+			paras = append(paras, backup.Paragraph{
+				Text: transactionLegend(c, symbols, ecc, true), QR: sym, QRScale: scale,
+			})
 		} else {
-			paras = append(paras, backup.Paragraph{QR: c, QRScale: scale})
+			paras = append(paras, backup.Paragraph{QR: sym, QRScale: scale})
 		}
 		if !build(backup.Text{Paragraphs: paras},
 			transactionPlateTitle(tx, plateNo, plateCount)) {

@@ -112,14 +112,14 @@ func TestQRPlanSmallTransactionIsOnePlateAboveTheFloor(t *testing.T) {
 // QR carries, and — for a multi-symbol set — that scan order is irrelevant.
 func TestTransactionLegendNamesTheFacts(t *testing.T) {
 	tx := evenTx(t)
-	one := transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.M)
+	one := transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.M, true)
 	if !strings.Contains(one, "txid "+txEvenTxid) {
 		t.Error("legend must carry the full txid")
 	}
 	if !strings.Contains(one, "raw signed bitcoin tx") {
 		t.Error("legend must say what the QR carries — mt1/codex32 wording would be wrong here")
 	}
-	many := transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M)
+	many := transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M, true)
 	if !strings.Contains(many, "any order") {
 		t.Error("a multi-symbol legend must say scan order is irrelevant")
 	}
@@ -235,8 +235,8 @@ func TestTransactionPlateTextIsEngraveable(t *testing.T) {
 	tx := evenTx(t)
 	texts := []string{
 		transactionPlateTitle(tx, 16, 16),
-		transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M),
-		transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.H),
+		transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M, true),
+		transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.H, true),
 		txEven[0],
 	}
 	for _, txt := range texts {

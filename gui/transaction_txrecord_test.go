@@ -225,7 +225,7 @@ func TestTheUnsignedQRPlateCarriesTheSubstitutedLegendNotTheSignedOne(t *testing
 	cands, _ := payloadTransactions(ctx)
 	c := cands[0]
 
-	legend := transactionLegend(c, 1, 0)
+	legend := transactionLegend(c, 1, 0, true)
 	if !strings.Contains(legend, c.subst) {
 		t.Errorf("the engraved legend must carry the substitution:\n%s", legend)
 	}
@@ -245,7 +245,7 @@ func TestTheUnsignedQRPlateCarriesTheSubstitutedLegendNotTheSignedOne(t *testing
 	ctx2 := NewContext(newPlatform())
 	ctx2.sysw = sessionWith("tx:" + rawHexOf(t, evenTx(t)))
 	ok, _ := payloadTransactions(ctx2)
-	good := transactionLegend(ok[0], 1, 0)
+	good := transactionLegend(ok[0], 1, 0, true)
 	if !strings.Contains(good, "raw signed bitcoin tx") || !strings.Contains(good, "then broadcast") {
 		t.Errorf("a signed transaction lost its ordinary legend:\n%s", good)
 	}
@@ -262,7 +262,7 @@ func TestTheSubstitutedLegendsAreEngraveable(t *testing.T) {
 	ctx.sysw = sessionWith("tx:" + txStrippedHex)
 	cands, _ := payloadTransactions(ctx)
 	texts := []string{
-		transactionLegend(cands[0], 3, 0),
+		transactionLegend(cands[0], 3, 0, true),
 		legendUnsigned,
 		legendSubstitution(true),
 		legendSubstitution(false),
