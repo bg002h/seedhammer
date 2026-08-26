@@ -818,7 +818,14 @@ func transactionReviewLines(c txCandidate) []string {
 			"This does NOT reassemble into",
 			"a transaction. The strings are",
 			"engraveable and each is valid,",
-			"but the set is not complete.",
+			// RULED 2026-08-26: "just say incomplete/does not decode". This
+			// line used to assert "the set is not complete" unconditionally --
+			// false for a two-run payload, where every index IS present and the
+			// set still will not reassemble. The legend three lines below
+			// already distinguishes those two cases correctly, so the screen
+			// was contradicting it and only one could be true.
+			"but the set is incomplete or",
+			"does not decode.",
 			"",
 			"The plate legend WILL be",
 			"replaced with:",

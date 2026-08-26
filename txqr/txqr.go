@@ -78,6 +78,20 @@ func EncodeSet(data []byte, k int, level qr.Level) ([]*qr.Code, error) {
 		parity ^= b
 	}
 	per := (len(data) + k - 1) / k
+	// P5 M-1 — `k > len(data)` is NOT the whole precondition, and this used to
+	// be the only guard. With per = ceil(len/k), the trailing symbols get
+	// lo = i*per past the end while hi is clamped to len(data), so `data[lo:hi]`
+	// has lo > hi and PANICS. Executed: len=113, k=16 -> per=8, lo=120, hi=113.
+	//
+	// gui/transaction.go already documented the contract this restores --
+	// "EncodeSet REFUSES a payload it cannot split into k non-empty parts" --
+	// so the comment was true of the intent and false of the code.
+	if (k-1)*per >= len(data) {
+		return nil, fmt.Errorf(
+			"txqr: %d symbols cannot split %d bytes into %d non-empty parts (%d per symbol leaves the last empty)",
+			k, len(data), k, per,
+		)
+	}
 	out := make([]*qr.Code, 0, k)
 	for i := 0; i < k; i++ {
 		lo := i * per

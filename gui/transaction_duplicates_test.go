@@ -268,3 +268,37 @@ func TestWalkADuplicatedStringIsNamedBeforeTheCut(t *testing.T) {
 		w.paged("different order")
 	})
 }
+
+// RULED 2026-08-26 (operator): "just say incomplete/does not decode".
+//
+// The unconfirmed screen hardcoded "but the set is not complete." while its own
+// legend three lines below distinguishes two cases: INCOMPLETE - DOES NOT
+// DECODE (every index present, still will not reassemble — the two-run splice)
+// and INCOMPLETE - MISSING STRINGS. For a two-run payload every index IS
+// present, so the screen asserted something false while the legend beside it
+// was right. Only one of them could be true, and the operator reads both.
+//
+// The screen must now cover both cases without asserting which.
+func TestTheUnconfirmedScreenDoesNotContradictItsOwnLegend(t *testing.T) {
+	for _, complete := range []bool{true, false} {
+		c := txCandidate{
+			confirmed: false,
+			csid:      0x2dcf2,
+			strs:      []string{"mt1one", "mt1two"},
+			subst:     legendSubstitution(complete),
+		}
+		var joined string
+		for _, l := range transactionReviewLines(c) {
+			joined += l + "\n"
+		}
+		if strings.Contains(joined, "but the set is not complete.") {
+			t.Fatalf("complete=%v: the screen still asserts incompleteness "+
+				"unconditionally, which is false for a set whose indices are "+
+				"all present:\n%s", complete, joined)
+		}
+		if !strings.Contains(joined, "incomplete or") && !strings.Contains(joined, "does not decode") {
+			t.Fatalf("complete=%v: the screen must name BOTH possibilities so it "+
+				"cannot contradict the legend:\n%s", complete, joined)
+		}
+	}
+}

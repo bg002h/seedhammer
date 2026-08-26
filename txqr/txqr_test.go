@@ -149,3 +149,46 @@ func mergedBytes(t *testing.T, out string, k int) []byte {
 	t.Fatalf("k=%d: no merged result in ZXing output:\n%s", k, out)
 	return nil
 }
+
+// P5 M-1 — EncodeSet panicked instead of refusing, for a k that cannot split
+// the data into k non-empty parts.
+//
+// The only guard was `k > len(data)`, which does not catch it: with per =
+// ceil(len/k), the last few symbols get lo = i*per beyond len(data) while hi is
+// clamped to len(data), so `data[lo:hi]` has lo > hi. Executed arithmetic:
+// len=113, k=16 -> per=8, lo=120, hi=113 -> data[120:113].
+//
+// gui/transaction.go's comment already asserted the contract this test pins:
+// "EncodeSet REFUSES a payload it cannot split into k non-empty parts." That
+// was false; now it is true.
+func TestEncodeSetRefusesAKThatCannotSplitIntoNonEmptyParts(t *testing.T) {
+	for _, tc := range []struct{ n, k int }{
+		{113, 16},
+		{60, 14},
+	} {
+		data := make([]byte, tc.n)
+		for i := range data {
+			data[i] = byte(i)
+		}
+		got, err := EncodeSet(data, tc.k, qr.M)
+		if err == nil {
+			t.Fatalf("n=%d k=%d: expected a refusal, got %d symbols", tc.n, tc.k, len(got))
+		}
+	}
+}
+
+// THE CONTROL: a k that CAN split must still encode. Without this, refusing
+// everything would satisfy the test above.
+func TestEncodeSetStillEncodesASplittableSet(t *testing.T) {
+	data := make([]byte, 113)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	got, err := EncodeSet(data, 15, qr.M)
+	if err != nil {
+		t.Fatalf("n=113 k=15 must encode: %v", err)
+	}
+	if len(got) != 15 {
+		t.Fatalf("want 15 symbols, got %d", len(got))
+	}
+}
