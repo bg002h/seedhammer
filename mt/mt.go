@@ -54,7 +54,11 @@ var (
 	errAmbiguousChunk  = errors.New("mt: two different payloads for one chunk index")
 	errUnevenChunks    = errors.New("mt: non-final chunks differ in length")
 	errTxidBinding     = errors.New("mt: chunk_set_id does not match the transaction's txid")
-	errUnsignedInputs  = errors.New("mt: an input carries neither a scriptSig nor a witness")
+	// ErrUnsignedInputs is EXPORTED because the caller must be able to tell
+	// this failure from the others: it is the only one where the bytes are a
+	// real transaction with the right txid, so it earns its own legend
+	// substitution rather than "DOES NOT DECODE", which would be false.
+	ErrUnsignedInputs = errors.New("mt: an input carries neither a scriptSig nor a witness")
 	errNotATransaction = errors.New("mt: reassembled bytes are not one serialized transaction")
 )
 
@@ -252,7 +256,7 @@ func Decode(in []string) (Tx, error) {
 	// operator's legend REPLACED, exactly as it does for any other set that
 	// fails to confirm.
 	if !tx.EveryInputSigned {
-		return Tx{}, errUnsignedInputs
+		return Tx{}, ErrUnsignedInputs
 	}
 	return tx, nil
 }

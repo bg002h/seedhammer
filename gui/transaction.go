@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"sort"
@@ -157,6 +158,25 @@ func legendSubstitution(complete bool) string {
 // Kept SHORT deliberately -- it shares plate 1 with a QR symbol, and
 // TestTheUnsignedLegendStillFitsAQRPlate is what stops it growing past that.
 const legendUnsigned = "UNSIGNED INPUT - CANNOT BE BROADCAST - RE-EXPORT"
+
+// substitutionFor picks the legend that replaces the operator's own, from what
+// ACTUALLY went wrong.
+//
+// ONE FUNCTION, USED BY BOTH DELIVERY PATHS, and that is the point of G-P3.9:
+// the payload path engraved a complete-but-non-decoding set under a
+// substituted legend while the NFC gather DROPPED the identical set with
+// "Set complete but does not confirm as one transaction. Dropped." Two
+// behaviours for one condition, and the drop contradicted ruling 2026-08-25b
+// outright -- the operator loses every string they scanned.
+func substitutionFor(set []string, err error) string {
+	if errors.Is(err, mt.ErrUnsignedInputs) {
+		// The bytes ARE a transaction and the txid IS right. Calling that
+		// "DOES NOT DECODE" would send the operator to re-encode a payload
+		// that is encoded perfectly well.
+		return legendUnsigned
+	}
+	return legendSubstitution(setIsComplete(set))
+}
 
 
 
@@ -368,11 +388,10 @@ func payloadTransactions(ctx *Context) (cands []txCandidate, incomplete int) {
 			// offered; the operator engraves the strings they have and the
 			// legend says so. `complete` distinguishes the two messages: a full
 			// set that will not decode is a different problem from a gap.
-			complete := setIsComplete(set)
 			incomplete += len(set)
 			cands = append(cands, txCandidate{
 				strs: ordered, src: srcPayload, csid: csid,
-				confirmed: false, subst: legendSubstitution(complete),
+				confirmed: false, subst: substitutionFor(set, err),
 			})
 			continue
 		}
@@ -448,29 +467,48 @@ func orderByIndex(set []string) []string {
 
 // ─── NFC gather ──────────────────────────────────────────────────────────────
 
-// transactionGatherFlow accumulates scanned mt1 strings until one chunk set is
-// COMPLETE AND CONFIRMED, then returns it. Sets are keyed by chunk_set_id, so
-// chunks of several transactions may arrive interleaved; the first set to
-// confirm wins. A complete set that does NOT confirm (bad parse, txid
-// mismatch) is dropped with a message — it can never become engraveable.
-func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, bool) {
-	sets := map[uint32][]string{}
-	var msg string
-	offer := func(s string) (txCandidate, bool) {
-		s = strings.TrimSpace(s)
+// txGather is the gather's STATE AND DECISION, lifted out of the frame loop.
+//
+// It is a type rather than a closure because the divergence G-P3.9 closed
+// lived inside that closure and no test could reach it: every gather test in
+// the tree drove screens, so the one line that decided a complete-but-broken
+// set's fate was exercised by nothing.
+type txGather struct {
+	sets map[uint32][]string
+	msg  string
+}
+
+func newTxGather() *txGather { return &txGather{sets: map[uint32][]string{}} }
+
+// strings is how many distinct strings are held, across all sets.
+func (g *txGather) strings() int {
+	var n int
+	for _, set := range g.sets {
+		n += len(set)
+	}
+	return n
+}
+
+// offer accepts one scanned string. It returns a candidate when the set it
+// belongs to becomes DECIDABLE -- confirmed, or complete and definitively not
+// confirmable. Anything more scanning could still fix returns false with a
+// message.
+func (g *txGather) offer(s string) (txCandidate, bool) {
+	s = strings.TrimSpace(s)
+	{
 		h, err := mt.ParseHeader(s)
 		if err != nil {
-			msg = "Not an mt1 string."
+			g.msg = "Not an mt1 string."
 			return txCandidate{}, false
 		}
-		for _, have := range sets[h.ChunkSetID] {
+		for _, have := range g.sets[h.ChunkSetID] {
 			if have == s {
-				msg = "Already scanned that string."
+				g.msg = "Already scanned that string."
 				return txCandidate{}, false
 			}
 		}
-		sets[h.ChunkSetID] = append(sets[h.ChunkSetID], s)
-		set := sets[h.ChunkSetID]
+		g.sets[h.ChunkSetID] = append(g.sets[h.ChunkSetID], s)
+		set := g.sets[h.ChunkSetID]
 		distinct := map[int]bool{}
 		for _, x := range set {
 			if hh, err := mt.ParseHeader(x); err == nil {
@@ -478,22 +516,41 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 			}
 		}
 		if len(distinct) < h.TotalChunks {
-			msg = fmt.Sprintf("String %d of %d. %d to go.",
+			g.msg = fmt.Sprintf("String %d of %d. %d to go.",
 				h.ChunkIndex+1, h.TotalChunks, h.TotalChunks-len(distinct))
 			return txCandidate{}, false
 		}
 		tx, err := mt.Decode(set)
 		if err != nil {
-			// Complete and WRONG: parse or txid-binding failure. Unfixable by
-			// more scanning; drop the set and say why.
-			delete(sets, h.ChunkSetID)
-			msg = "Set complete but does not confirm as one transaction. Dropped."
-			return txCandidate{}, false
+			// G-P3.9. Complete and WRONG. This used to DROP the set --
+			// `delete(sets, ...)` and "Set complete but does not confirm as
+			// one transaction. Dropped." -- which threw away every string the
+			// operator had just scanned, and contradicted ruling 2026-08-25b
+			// while the PAYLOAD path, three functions up, engraved the
+			// identical set under a substituted legend. Two behaviours for one
+			// condition.
+			//
+			// Now it is offered exactly as the payload path offers it: an
+			// unconfirmed candidate whose legend is replaced. The review
+			// screen says what is wrong and the operator decides. More
+			// scanning cannot fix it, so returning is right -- dropping was
+			// not.
+			return txCandidate{
+				strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID,
+				confirmed: false, subst: substitutionFor(set, err),
+			}, true
 		}
 		return txCandidate{tx: tx, strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID, confirmed: true}, true
 	}
+}
+
+// transactionGatherFlow accumulates scanned mt1 strings until one chunk set is
+// decidable, then returns it. Sets are keyed by chunk_set_id, so chunks of
+// several transactions may arrive interleaved.
+func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, bool) {
+	g := newTxGather()
 	if seed != "" {
-		if c, done := offer(seed); done {
+		if c, done := g.offer(seed); done {
 			return c, true
 		}
 	}
@@ -508,24 +565,20 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 		select {
 		case scan := <-scans:
 			if s, ok := scan.Object.(mtText); ok {
-				if c, done := offer(string(s)); done {
+				if c, done := g.offer(string(s)); done {
 					return c, true
 				}
 			} else if scan.Object != nil {
-				msg = "Not an mt1 string."
+				g.msg = "Not an mt1 string."
 			}
 		default:
 		}
-		var n int
-		for _, set := range sets {
-			n += len(set)
-		}
 		lines := []string{
-			fmt.Sprintf("mt1 strings: %d", n),
+			fmt.Sprintf("mt1 strings: %d", g.strings()),
 			"Scan each string of the set.",
 		}
-		if msg != "" {
-			lines = append(lines, msg)
+		if g.msg != "" {
+			lines = append(lines, g.msg)
 		}
 		lineWidth := dims.X - 2*8
 		y := leadingSize + 8
