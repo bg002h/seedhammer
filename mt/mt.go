@@ -290,6 +290,7 @@ func ParseTx(raw []byte) (Tx, error) {
 	} else {
 		p.pos = mark
 	}
+	anyWitness := false
 	coreStart := p.pos
 	nIn, err := p.count()
 	if err != nil || nIn == 0 {
@@ -333,12 +334,23 @@ func ParseTx(raw []byte) (Tx, error) {
 			}
 			if items > 0 {
 				signed[i] = true
+				anyWitness = true
 			}
 			for j := 0; j < items; j++ {
 				if err := p.skipBytes(); err != nil {
 					return Tx{}, errNotATransaction
 				}
 			}
+		}
+		// P5 M-6, ported from the primary (me-cli sysw/tx.rs
+		// TxError::EmptyWitnessOnSegwitMarker). The marker CLAIMS witness data.
+		// With every stack empty the bytes are neither a valid segwit
+		// transaction -- Bitcoin Core: "Superfluous witness record" -- nor a
+		// legacy one, since its re-parse hits the 0x00 input count. Accepting
+		// them let a QR plate be cut, under a legend reading "raw signed
+		// bitcoin tx ... then broadcast", for bytes no node will accept.
+		if !anyWitness {
+			return Tx{}, errNotATransaction
 		}
 	}
 	locktime, err := p.take(4)

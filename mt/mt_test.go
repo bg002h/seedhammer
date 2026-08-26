@@ -239,3 +239,30 @@ func TestOneSignedInputDoesNotVouchForTheOthers(t *testing.T) {
 			"does not make the transaction spendable")
 	}
 }
+
+// P5 M-6, ported from the primary (me-cli sysw/tx.rs). A segwit-marked
+// transaction whose every witness stack is empty parsed as well-formed here and
+// in Rust, and with non-empty scriptSigs it passed the signature predicate too
+// — so a QR plate could be cut for bytes Bitcoin Core rejects outright.
+func TestASegwitMarkerWithNoWitnessDataIsRefused(t *testing.T) {
+	var b []byte
+	b = append(b, 0x02, 0, 0, 0) // version
+	b = append(b, 0x00, 0x01)    // segwit marker + flag
+	b = append(b, 0x01)          // 1 input
+	for i := 0; i < 32; i++ {
+		b = append(b, 0x11) // prevout txid
+	}
+	b = append(b, 0, 0, 0, 0)          // prevout vout
+	b = append(b, 0x01, 0x51)          // a NON-EMPTY scriptSig
+	b = append(b, 0xff, 0xff, 0xff, 0xff) // sequence
+	b = append(b, 0x01)                // 1 output
+	b = append(b, 0x10, 0x27, 0, 0, 0, 0, 0, 0)
+	b = append(b, 0x01, 0x51)          // scriptPubKey
+	b = append(b, 0x00)                // THE DEFECT: witness stack, zero items
+	b = append(b, 0, 0, 0, 0)          // locktime
+
+	if _, err := ParseTx(b); err == nil {
+		t.Fatal("a segwit marker with no witness data must be refused: " +
+			"no node will accept these bytes")
+	}
+}
