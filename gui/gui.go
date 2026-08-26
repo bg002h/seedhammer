@@ -2016,7 +2016,21 @@ func uiFlow(ctx *Context, version string) {
 	// no payload never sees a prompt at all. The operator can also reach it any
 	// time from the `Load Payload` carousel entry, which is why declining here
 	// costs nothing.
-	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), true)
+	// G-P3.15 / SPEC §3.3, WHICH RULED THE MENU APPEARS IMMEDIATELY AFTER A
+	// SUCCESSFUL LOAD. This called syswLoadFlow directly and returned to the
+	// carousel, so syswPayloadMenu -- documented as "the Load Payload carousel
+	// entry" -- was reachable ONLY by navigating there afterwards, never at the
+	// moment the ruling names. A gate that says "the menu exists and lists what
+	// the payload holds" passes on the menu alone while the ruled behaviour
+	// stays untrue; this is the second half of it.
+	//
+	// BACK is the exit, as §3.3 requires, and syswPayloadMenu's ChoiceScreen
+	// returns ok=false on cancel -- so a machine whose operator does not want
+	// the menu is one button from the carousel, and a machine with no payload
+	// never sees it at all.
+	if syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), true) {
+		syswPayloadMenu(ctx, th)
+	}
 
 	s := &StartScreen{
 		Version:    version,

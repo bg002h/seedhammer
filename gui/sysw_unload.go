@@ -36,20 +36,61 @@ func syswPayloadMenu(ctx *Context, th *Colors) {
 		syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
 		return
 	}
+	// CONTENT-DERIVED (§3.3, G-P3.15). The lead names what this payload
+	// actually holds -- "this payload holds: 1 transaction, 2 seeds" is the
+	// ruling's own example -- because the operator cannot otherwise tell a
+	// payload with the WRONG contents from the right one, and those have
+	// different fixes: re-pack, versus carry on.
+	choices := []string{"LOAD AGAIN", "UNLOAD"}
+	// ...and one content-derived ENTRY. Offered only when the payload holds
+	// something this program can consume, so it is never a button that leads
+	// to "this payload holds no transaction".
+	toTransaction := syswPayloadHasTransaction(ctx.sysw)
+	if toTransaction {
+		choices = append([]string{"ENGRAVE TRANSACTION"}, choices...)
+	}
 	cs := &ChoiceScreen{
 		Title:   "Load Payload",
-		Lead:    "A payload is loaded.",
-		Choices: []string{"LOAD AGAIN", "UNLOAD"},
+		Lead:    "Loaded. It holds: " + txPayloadHolds(ctx.sysw) + ".",
+		Choices: choices,
 	}
 	choice, ok := cs.Choose(ctx, th)
 	if !ok {
+		// BACK is the exit and must be, for the same reason syswUnloadFlow's
+		// BACK is choice 0: this screen appears at boot now, and a screen that
+		// appears unbidden must cost nothing to leave.
 		return
+	}
+	if toTransaction {
+		if choice == 0 {
+			engraveTransactionFlow(ctx, th)
+			return
+		}
+		choice--
 	}
 	if choice == 1 {
 		syswUnloadFlow(ctx, th)
 		return
 	}
 	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+}
+
+// syswPayloadHasTransaction reports whether the loaded payload holds anything
+// the Engrave Transaction program can consume.
+//
+// Asked through the ADMISSION TABLE rather than by listing classes here: the
+// table is §3.3.2 transcribed, and a second list of "what the transaction
+// program eats" is a second answer to a question that already has one.
+func syswPayloadHasTransaction(s *syswSession) bool {
+	if s == nil || !s.loaded || !s.compared {
+		return false
+	}
+	for _, r := range s.records {
+		if admits(progTransaction, r.class) {
+			return true
+		}
+	}
+	return false
 }
 
 // syswUnloadFlow confirms, drops the session, and states plainly what did and

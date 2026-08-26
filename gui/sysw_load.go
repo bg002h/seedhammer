@@ -164,9 +164,15 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	if h.PubLen > 0 {
 		pub := strings.Split(string(region[sysw.HeaderLen:sysw.HeaderLen+int(h.PubLen)]), "\n")
 		d := sysw.PublicDataHash(pub, h.Sealed())
+		// G-P3.16 / SPEC §3.2. This named `me sysw pack` -- the WRITE path.
+		// Re-running it means re-supplying every record and re-running the
+		// whole ceremony, and on the sealed path it mints a fresh passphrase;
+		// the operator standing at the machine has the FILE, not the records.
+		// `me sysw show <file>` reads what they have and prints this number.
 		lines := []string{
-			"Compare this against what",
-			"`me sysw pack` printed:",
+			"Compare this against",
+			"`me sysw show <file>`",
+			"on the host:",
 			"",
 			sysw.FormatHash(d),
 		}
