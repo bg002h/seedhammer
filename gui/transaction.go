@@ -725,11 +725,20 @@ func engraveTransactionPlates(ctx *Context, th *Colors, plates []Plate, titles [
 		for !engraved {
 			_, ok := cs.Choose(ctx, th)
 			if !ok {
+				// SAY "DISCARD IT" (§4.4, G-P3.13). The old text said a re-run
+				// starts at plate 1 and left the operator to infer the rest --
+				// and the inference most people make is the wrong one: keep
+				// the half-cut blank and carry on later. A re-run mints
+				// byte-identical plates FROM PLATE 1, so a kept partial plate
+				// becomes a second, WRONG copy of a plate in the same drawer,
+				// and the device has no camera to tell them apart afterwards.
 				showError(ctx, th, "Transaction Incomplete",
 					fmt.Sprintf("Stopped at plate %d of %d. A partial set does not carry the "+
-						"whole transaction. A re-run cuts the same plates byte for byte, but "+
-						"starts at plate 1 - finish a set in one sitting, or start over.",
-						i+1, len(plates)))
+						"whole transaction.\n\nDISCARD the plate in the machine. It is "+
+						"half cut and nothing will finish it.\n\nA re-run cuts the same "+
+						"plates byte for byte, starting at plate 1 - so keeping this one "+
+						"leaves you two plates numbered %d/%d that are not the same.",
+						i+1, len(plates), i+1, len(plates)))
 				return false
 			}
 			if NewEngraveScreen(ctx, p).Engrave(ctx, &engraveTheme) {
@@ -842,8 +851,12 @@ func planTransactionTextPlates(pl Platform, c txCandidate) ([]Plate, []string, e
 // a plate stating in steel that a transaction which can never be broadcast is
 // signed and ready to. The review screen promised a substitution the plate did
 // not make.
+// eccName is the engraved/reported name of an error-correction level. ONE
+// table: it appears on the plate legend, in the plan note and in R16's
+// refusal, and three copies is three chances to disagree.
+var eccName = map[qr.Level]string{qr.L: "L", qr.M: "M", qr.Q: "Q", qr.H: "H"}
+
 func transactionLegend(c txCandidate, symbols int, ecc qr.Level) string {
-	eccName := map[qr.Level]string{qr.L: "L", qr.M: "M", qr.Q: "Q", qr.H: "H"}[ecc]
 	signedness := "raw signed bitcoin tx"
 	var lines []string
 	if c.subst != "" {
@@ -856,7 +869,7 @@ func transactionLegend(c txCandidate, symbols int, ecc qr.Level) string {
 	}
 	lines = append(lines,
 		"txid "+c.tx.TxidDisplay,
-		fmt.Sprintf("%s, %d bytes, %d qr, ecc %s", signedness, len(c.tx.Raw), symbols, eccName),
+		fmt.Sprintf("%s, %d bytes, %d qr, ecc %s", signedness, len(c.tx.Raw), symbols, eccName[ecc]),
 	)
 	switch {
 	case c.subst != "" && symbols > 1:
@@ -890,7 +903,6 @@ func planTransactionQRPlates(pl Platform, c txCandidate) ([]Plate, []string, str
 		symbols     int
 		legendAlone bool
 	}
-	eccName := map[qr.Level]string{qr.L: "L", qr.M: "M", qr.Q: "Q", qr.H: "H"}
 	for plateCount := 1; plateCount <= txqr.MaxSymbols+1; plateCount++ {
 		layouts := []layout{}
 		if plateCount >= 2 && plateCount-1 <= txqr.MaxSymbols {
@@ -905,17 +917,86 @@ func planTransactionQRPlates(pl Platform, c txCandidate) ([]Plate, []string, str
 					plates, titles, ok := buildQRPlates(params, c, lay.symbols, lay.legendAlone, ecc, scale)
 					if ok {
 						note := fmt.Sprintf("%d plate(s), %d QR, ECC %s, %s modules",
-							plateCount, lay.symbols, eccName[ecc],
-							map[int]string{3: "0.9mm", 2: "0.6mm"}[scale])
+							plateCount, lay.symbols, eccName[ecc], moduleLabel(scale))
 						return plates, titles, note, nil
 					}
 				}
 			}
 		}
 	}
-	return nil, nil, "", fmt.Errorf("transaction too large for QR plates at ECC M "+
-		"(%d bytes; the Structured Append cap is %d symbols) - use TEXT plates",
-		len(c.tx.Raw), txqr.MaxSymbols)
+	// R16 / §4.1a. NAME THE MODULE SIZE AND THE CEILING AT IT. "too large"
+	// with a byte count tells the operator nothing about how much too large,
+	// and the answer is not a property of the transaction -- it is a property
+	// of the SMALLEST MODULE this device will emit. Without the module size
+	// the sentence cannot be acted on and cannot be checked.
+	const floorScale = 2 // 0.6mm, the smallest module the search ever tries
+	return nil, nil, "", fmt.Errorf("%d bytes is too large for QR plates.\n\n"+
+		"At %s modules - the smallest this machine cuts - %d Structured Append "+
+		"symbols at ECC %s hold at most %d bytes.\n\nUse TEXT plates.",
+		len(c.tx.Raw), moduleLabel(floorScale), txqr.MaxSymbols, eccName[qr.M],
+		qrCeilingBytes(params, qr.M, floorScale))
+}
+
+// moduleLabel is the engraved module pitch for a stroke multiplier. ONE table,
+// used by the note and by the refusal, because two operators comparing a
+// success note against a failure message must be reading the same units.
+func moduleLabel(scale int) string {
+	switch scale {
+	case 3:
+		return "0.9mm"
+	case 2:
+		return "0.6mm"
+	}
+	return fmt.Sprintf("%dx", scale)
+}
+
+// qrCeilingBytes is the largest transaction that COULD have fitted: 16
+// Structured Append symbols at the given ECC and module, on this plate.
+//
+// MEASURED BY SEARCH, not written down. The answer depends on the plate
+// geometry, the stroke width AND on which QR version txqr's encoder picks, so
+// a constant here would be a number that goes stale the first time any of the
+// three moves -- and it would go stale silently, in a refusal message nobody
+// reads until the day it matters.
+//
+// Called only on the failure path, so its cost never lands on a working cut.
+func qrCeilingBytes(params engrave.Params, ecc qr.Level, scale int) int {
+	usable := params.F(85) - 2*params.I(3) - 2*params.I(2)
+	fits := func(n int) bool {
+		set, err := txqr.EncodeSet(make([]byte, n), txqr.MaxSymbols, ecc)
+		if err != nil {
+			return false
+		}
+		for _, c := range set {
+			if c.Size*params.StrokeWidth*scale > usable {
+				return false
+			}
+		}
+		return true
+	}
+	// The search starts at MaxSymbols, not at 1, and that is not an
+	// optimisation: EncodeSet REFUSES a payload it cannot split into k
+	// non-empty parts, so `fits` is false at the bottom for a reason that has
+	// nothing to do with the plate. Doubling up from 1 therefore never leaves
+	// the ground and returns 0 -- measured, and it made the refusal state a
+	// ceiling of zero bytes.
+	lo := txqr.MaxSymbols
+	if !fits(lo) {
+		return 0
+	}
+	hi := lo * 2
+	for hi < 1<<20 && fits(hi) {
+		lo, hi = hi, hi*2
+	}
+	for lo+1 < hi {
+		mid := (lo + hi) / 2
+		if fits(mid) {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return lo
 }
 
 // buildQRPlates attempts one configuration; ok=false means it does not fit.
