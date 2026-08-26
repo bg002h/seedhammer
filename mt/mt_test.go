@@ -169,3 +169,73 @@ func TestParseTxMatchesTheNode(t *testing.T) {
 		t.Error("32 zero bytes are not a transaction")
 	}
 }
+
+// RED FIRST (G-P3.2). The device had NO signature check at all: parseTx called
+// skipBytes for the scriptSig and DISCARDED the length. A witness-stripped
+// transaction has the same txid as the honest one, so every other check --
+// parse, txid derivation, chunk_set_id binding -- passes it.
+//
+// The host refuses this. Before this test the device would have engraved it.
+func TestAStrippedTransactionIsNotSigned(t *testing.T) {
+	honest := unhexT(t, "020000000001017c8da925af70e49a12b0cea7b639df5037c87b7fa61f262b86ac32c47aa3ba1a0000000000fdffffff02404b4c0000000000160014c1de0dd435d1d4ad97ed1f51d63f91c800cc4eab3ea1b92901000000160014751097c299d6354fbb2c5a84512dd708f2902f5e0247304402207debc7d89984c7717940b622504318d2c184966a618b32cf8b700d0f125b3ffa02206ef875f9c0b5931e0ea1cf0c109bdb8512835c8e51526f99b3419929a2ea7259012103718f5fd45b926226357e2b0400574b41a32d0bf0ae69a02eebea5fbc542ff52060000000")
+	stripped := unhexT(t, "02000000017c8da925af70e49a12b0cea7b639df5037c87b7fa61f262b86ac32c47aa3ba1a0000000000fdffffff02404b4c0000000000160014c1de0dd435d1d4ad97ed1f51d63f91c800cc4eab3ea1b92901000000160014751097c299d6354fbb2c5a84512dd708f2902f5e60000000")
+
+	h, err := ParseTx(honest)
+	if err != nil {
+		t.Fatalf("honest body must parse: %v", err)
+	}
+	s, err := ParseTx(stripped)
+	if err != nil {
+		t.Fatalf("the stripped body still parses -- that is the problem: %v", err)
+	}
+	if h.TxidDisplay != s.TxidDisplay {
+		t.Fatal("premise broken: if the txids differed the txid alone would catch this")
+	}
+	if !h.EveryInputSigned {
+		t.Error("the honest body's input carries a witness")
+	}
+	if s.EveryInputSigned {
+		t.Error("the stripped body has no witness and an empty scriptSig -- unsigned")
+	}
+}
+
+func unhexT(t *testing.T, s string) []byte {
+	t.Helper()
+	b := make([]byte, len(s)/2)
+	for i := range b {
+		var v byte
+		for j := 0; j < 2; j++ {
+			c := s[i*2+j]
+			switch {
+			case c >= '0' && c <= '9':
+				v = v<<4 | (c - '0')
+			case c >= 'a' && c <= 'f':
+				v = v<<4 | (c - 'a' + 10)
+			default:
+				t.Fatalf("bad hex %q", c)
+			}
+		}
+		b[i] = v
+	}
+	return b
+}
+
+// The predicate is PER INPUT. Mutation-tested: replacing the all() with an
+// any() over the whole transaction leaves TestAStrippedTransactionIsNotSigned
+// GREEN and turns this one RED. The Rust side needed exactly this second vector
+// for exactly this reason -- the lesson landed twice.
+func TestOneSignedInputDoesNotVouchForTheOthers(t *testing.T) {
+	// Input 0 legacy-signed (non-empty scriptSig), input 1 a segwit input whose
+	// witness was stripped (empty scriptSig, no witness). Serialized legacy.
+	tx, err := ParseTx(unhexT(t, "020000000211111111111111111111111111111111111111111111111111111111111111110000000048473030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030ffffffff22222222222222222222222222222222222222222222222222222222222222220100000000ffffffff0150c3000000000000160014333333333333333333333333333333333333333300000000"))
+	if err != nil {
+		t.Fatalf("a mixed stripped body parses: %v", err)
+	}
+	if tx.Inputs != 2 {
+		t.Fatalf("want 2 inputs, got %d", tx.Inputs)
+	}
+	if tx.EveryInputSigned {
+		t.Error("input 1 has no scriptSig and no witness -- input 0 being signed " +
+			"does not make the transaction spendable")
+	}
+}

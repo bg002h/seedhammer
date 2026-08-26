@@ -54,6 +54,7 @@ var (
 	errAmbiguousChunk  = errors.New("mt: two different payloads for one chunk index")
 	errUnevenChunks    = errors.New("mt: non-final chunks differ in length")
 	errTxidBinding     = errors.New("mt: chunk_set_id does not match the transaction's txid")
+	errUnsignedInputs  = errors.New("mt: an input carries neither a scriptSig nor a witness")
 	errNotATransaction = errors.New("mt: reassembled bytes are not one serialized transaction")
 )
 
@@ -128,6 +129,18 @@ type Tx struct {
 	Inputs      int
 	Outputs     int
 	SegWit      bool
+	// EveryInputSigned: every input carries a non-empty scriptSig or at least
+	// one witness item. False means the transaction cannot be broadcast.
+	//
+	// (G-P3.2) This is the ONLY thing separating a signature-stripped
+	// transaction from the honest one it came from: stripping the witness is
+	// exactly the operation the txid is defined to ignore, so both have the
+	// same txid, the same ChunkSetID, and pass every other check here. The
+	// parser previously called skipBytes for the scriptSig and DISCARDED the
+	// length, so the device had no signal at all.
+	//
+	// Rust is primary: crates/me-cli/src/sysw/tx.rs's `every_input_signed`.
+	EveryInputSigned bool
 }
 
 // ChunkSetID returns the top 20 bits of the display txid — the value every
@@ -222,13 +235,25 @@ func Decode(in []string) (Tx, error) {
 	if tx.ChunkSetID() != first.ChunkSetID {
 		return Tx{}, errTxidBinding
 	}
+	// (G-P3.2) A set carrying an UNSIGNED transaction does not confirm. The
+	// binding above cannot see it: stripping the witnesses leaves the txid
+	// unchanged, so the set id still matches. Under the 2026-08-25 rulings the
+	// consequence is NOT a refusal -- the caller offers the set with the
+	// operator's legend REPLACED, exactly as it does for any other set that
+	// fails to confirm.
+	if !tx.EveryInputSigned {
+		return Tx{}, errUnsignedInputs
+	}
 	return tx, nil
 }
 
 // ParseTx structurally parses one serialized Bitcoin transaction and computes
 // its txid over the witness-stripped form (BIP-141). Structural ONLY: no
-// script validation, no signature checks, no judgement about signedness —
-// those are `mt`'s (the host tool's) at encode time. The whole buffer must be
+// script validation and no signature VALIDITY check -- that needs prevout
+// scripts and amounts an offline device cannot have. It does report whether
+// every input carries a signature at all (EveryInputSigned), which is
+// structural and is the only signal separating a stripped transaction from the
+// honest one it came from. The whole buffer must be
 // consumed. Mirrors me-cli's sysw::tx::parse.
 func ParseTx(raw []byte) (Tx, error) {
 	p := &parser{buf: raw}
@@ -256,13 +281,19 @@ func ParseTx(raw []byte) (Tx, error) {
 	if err != nil || nIn == 0 {
 		return Tx{}, errNotATransaction
 	}
+	// Per input, not per transaction: a mixed transaction keeps its legacy
+	// scriptSigs when the witnesses are stripped, so a whole-transaction test
+	// would pass while the segwit inputs were left unsigned.
+	signed := make([]bool, nIn)
 	for i := 0; i < nIn; i++ {
 		if _, err := p.take(36); err != nil { // outpoint
 			return Tx{}, errNotATransaction
 		}
-		if err := p.skipBytes(); err != nil { // scriptSig
+		n, err := p.bytesLen() // scriptSig
+		if err != nil {
 			return Tx{}, errNotATransaction
 		}
+		signed[i] = n > 0
 		if _, err := p.take(4); err != nil { // sequence
 			return Tx{}, errNotATransaction
 		}
@@ -285,6 +316,9 @@ func ParseTx(raw []byte) (Tx, error) {
 			items, err := p.count()
 			if err != nil {
 				return Tx{}, errNotATransaction
+			}
+			if items > 0 {
+				signed[i] = true
 			}
 			for j := 0; j < items; j++ {
 				if err := p.skipBytes(); err != nil {
@@ -318,6 +352,14 @@ func ParseTx(raw []byte) (Tx, error) {
 		Inputs:      nIn,
 		Outputs:     nOut,
 		SegWit:      segwit,
+		EveryInputSigned: func() bool {
+			for _, ok := range signed {
+				if !ok {
+					return false
+				}
+			}
+			return true
+		}(),
 	}, nil
 }
 
@@ -401,6 +443,21 @@ func (p *parser) count() (int, error) {
 		return 0, errNotATransaction
 	}
 	return int(v), nil
+}
+
+// bytesLen skips a length-prefixed byte string and RETURNS its length, which
+// skipBytes discards. The signature predicate needs to know whether a scriptSig
+// was empty, and "no error" cannot say.
+func (p *parser) bytesLen() (int, error) {
+	n, err := p.varint()
+	if err != nil {
+		return 0, err
+	}
+	if n > uint64(len(p.buf)-p.pos) {
+		return 0, errNotATransaction
+	}
+	p.pos += int(n)
+	return int(n), nil
 }
 
 func (p *parser) skipBytes() error {
