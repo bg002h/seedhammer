@@ -61,6 +61,18 @@ func TestScan(t *testing.T) {
 			Content: mdmkText("mk1qpzg69ppsnz4v7cjv3qfjhf76k4t5pt96u0psdrqfqvll8qh7h5athg837pmkf3dpug2mmjtfel6x"),
 		},
 		{
+			// G-P3.8. The mt1 branch was added to Scan and NEVER DRIVEN
+			// THROUGH IT: every mt1 test in the tree started from a string
+			// already known to be one. A branch nothing routes to is a branch
+			// that can be deleted, reordered behind a sniffer, or return the
+			// wrong carrier type without a single test noticing -- and the
+			// carrier type IS the routing, because engraveObjectFlow switches
+			// on it.
+			Name:    "mt1",
+			Encoded: "mt1p9h8jqq9qqqqgqqqqqqqyqherdfykhhpey6z2cvafak8804qd7g0dl6v8ex9wr2cvky023skwkeud2229sax",
+			Content: mtText("mt1p9h8jqq9qqqqgqqqqqqqyqherdfykhhpey6z2cvafak8804qd7g0dl6v8ex9wr2cvky023skwkeud2229sax"),
+		},
+		{
 			Name:    "Command",
 			Encoded: "command: sudo-make-me-a-sandwich!",
 			Content: debugCommand{"sudo-make-me-a-sandwich!"},
