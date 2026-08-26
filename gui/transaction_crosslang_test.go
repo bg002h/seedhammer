@@ -66,7 +66,7 @@ func TestHostPackedMtPayloadLoadsAndConfirms(t *testing.T) {
 	if _, _, err := planTransactionTextPlates(ctx.Platform, c); err != nil {
 		t.Errorf("text plates: %v", err)
 	}
-	if _, _, _, err := planTransactionQRPlates(ctx.Platform, c.tx); err != nil {
+	if _, _, _, err := planTransactionQRPlates(ctx.Platform, c); err != nil {
 		t.Errorf("qr plates: %v", err)
 	}
 

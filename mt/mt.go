@@ -141,6 +141,16 @@ type Tx struct {
 	//
 	// Rust is primary: crates/me-cli/src/sysw/tx.rs's `every_input_signed`.
 	EveryInputSigned bool
+	// UnsignedInputs are the INDICES of the inputs carrying neither. Empty
+	// exactly when EveryInputSigned is true.
+	//
+	// Carried rather than recomputed by the caller because the review screen
+	// has to say WHICH input: "an input is unsigned" tells an operator holding
+	// a 3-input transaction nothing they can act on.
+	//
+	// CONVERGENCE PORT, not a Go-led change: `unsigned_inputs` landed in
+	// crates/me-cli/src/sysw/tx.rs first, with its vectors (G-P3.3).
+	UnsignedInputs []int
 }
 
 // ChunkSetID returns the top 20 bits of the display txid — the value every
@@ -335,6 +345,16 @@ func ParseTx(raw []byte) (Tx, error) {
 		return Tx{}, errNotATransaction
 	}
 
+	// PER INPUT, and the list is the answer: EveryInputSigned is defined from
+	// it below, so the verdict and the indices the screens print cannot drift.
+	// Mirrors sysw::tx::parse's `unsigned`.
+	var unsigned []int
+	for i, ok := range signed {
+		if !ok {
+			unsigned = append(unsigned, i)
+		}
+	}
+
 	h := sha256.New()
 	h.Write(version)
 	h.Write(raw[coreStart:coreEnd])
@@ -352,14 +372,8 @@ func ParseTx(raw []byte) (Tx, error) {
 		Inputs:      nIn,
 		Outputs:     nOut,
 		SegWit:      segwit,
-		EveryInputSigned: func() bool {
-			for _, ok := range signed {
-				if !ok {
-					return false
-				}
-			}
-			return true
-		}(),
+		EveryInputSigned: len(unsigned) == 0,
+		UnsignedInputs:   unsigned,
 	}, nil
 }
 

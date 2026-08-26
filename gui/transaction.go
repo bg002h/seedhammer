@@ -64,14 +64,51 @@ type txCandidate struct {
 	// second implementation of a normative format, and Rust may never follow).
 	strs []string
 	src  syswSource
-	// confirmed: the set reassembled into a transaction whose txid matches its
-	// chunk_set_id. QR plates require it -- there are no transaction bytes to
-	// encode without it -- but TEXT plates do not.
+	// confirmed: this device parsed the transaction, derived its txid, and
+	// found every input signed. It is what the review screen VOUCHES for.
+	//
+	// IT IS NOT THE SAME QUESTION AS "can this be a QR" -- that is hasBytes().
+	// Conflating them is what made the whole tx: path inert: a signed tx:
+	// record was built without setting this field, whose zero value is false,
+	// so the device showed a signed transaction the UNCONFIRMED SET screen and
+	// then offered no plate kind at all.
 	confirmed bool
-	// csid identifies the set even when nothing else does.
+	// csid identifies the set even when nothing else does. Zero for a tx:
+	// record, which is not a set and has no chunk_set_id.
 	csid uint32
 	// subst is the MANDATORY legend when !confirmed. Empty when confirmed.
 	subst string
+	// unsigned lists the inputs carrying neither a scriptSig nor a witness.
+	// Only ever non-empty for a tx: RECORD -- an mt1 set carrying an unsigned
+	// transaction does not decode at all (mt.Decode refuses it), so it arrives
+	// with no tx and no bytes.
+	unsigned []int
+}
+
+// hasBytes reports whether there are transaction bytes to put into a QR.
+//
+// An unconfirmed SET has none: it never reassembled, so there is nothing to
+// encode and the choice is withheld rather than offered and then failed. An
+// UNSIGNED tx: record has all of them -- it parses perfectly, it simply cannot
+// be broadcast -- so it engraves under the substituted legend, which is the
+// 2026-08-25b posture applied to the class the ruling did not name.
+func (c txCandidate) hasBytes() bool { return len(c.tx.Raw) > 0 }
+
+// transactionPlateKinds is what the operator may choose for this candidate.
+//
+// EXTRACTED SO IT CAN BE TESTED. It was three lines inside
+// transactionReviewAndEngrave, and the case where it came back EMPTY -- which
+// makes the program return with no screen at all -- was reachable by the most
+// ordinary payload there is.
+func transactionPlateKinds(c txCandidate) []string {
+	var choices []string
+	if len(c.strs) > 0 {
+		choices = append(choices, "TEXT PLATES")
+	}
+	if c.hasBytes() {
+		choices = append(choices, "QR PLATES")
+	}
+	return choices
 }
 
 // setIsComplete reads the chunk headers alone: count declared, and every index
@@ -105,6 +142,23 @@ func legendSubstitution(complete bool) string {
 	}
 	return "INCOMPLETE - MISSING STRINGS - RE-ENCODE PAYLOAD"
 }
+
+// legendUnsigned is the THIRD substitution, for the case the ruling did not
+// name because the class was supposed to be refused at the host: a tx: record
+// that parses and whose txid is right and which CANNOT BE BROADCAST.
+//
+// It reaches the device only when the operator passed `me sysw pack
+// --allow-unsigned-inputs`, which exists for honest empty inputs (P2A anchor
+// spends). Refusing here would make that override useless; engraving it under
+// the operator's own legend would put a plate in a drawer that looks like a
+// backup of a spendable transaction and is not. So: engrave, and put the
+// warning where it outlives the session.
+//
+// Kept SHORT deliberately -- it shares plate 1 with a QR symbol, and
+// TestTheUnsignedLegendStillFitsAQRPlate is what stops it growing past that.
+const legendUnsigned = "UNSIGNED INPUT - CANNOT BE BROADCAST - RE-EXPORT"
+
+
 
 // txNothingToEngrave is R11' as one function, so the two situations cannot
 // drift into one sentence again.
@@ -155,6 +209,30 @@ func txPayloadHolds(s *syswSession) string {
 		parts = append(parts, fmt.Sprintf("%d %s", seen[k], k))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// namedInputs is "input 1" / "inputs 1 and 3" / "inputs 0, 2 and 5", for an
+// operator. Mirrors me-cli's `name_inputs`.
+func namedInputs(idx []int) string {
+	n := make([]string, 0, len(idx))
+	for _, i := range idx {
+		n = append(n, fmt.Sprintf("%d", i))
+	}
+	switch len(n) {
+	case 0:
+		return "No input"
+	case 1:
+		return "Input " + n[0]
+	default:
+		return "Inputs " + strings.Join(n[:len(n)-1], ", ") + " and " + n[len(n)-1]
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // txClassName names a record class for an operator.
@@ -316,11 +394,27 @@ func payloadTransactions(ctx *Context) (cands []txCandidate, incomplete int) {
 				continue
 			}
 			for _, c := range cands {
-				if c.tx.TxidDisplay == tx.TxidDisplay {
+				// Guarded on confirmed: an UNCONFIRMED set has the zero-value
+				// tx, whose TxidDisplay is "", and merging a real record into
+				// it would hand the operator a candidate with no bytes.
+				if c.confirmed && c.tx.TxidDisplay == tx.TxidDisplay {
 					continue next // merged: the set candidate already carries the bytes
 				}
 			}
-			cands = append(cands, txCandidate{tx: tx, src: srcPayload})
+			if !tx.EveryInputSigned {
+				// The signature predicate, on the tx: class, ON THE DEVICE.
+				// sysw.Classify requires only a structural parse, so this
+				// record IS ClassTx and reaches here -- and its txid is
+				// byte-identical to a signed version's, because stripping the
+				// signatures is exactly what the txid ignores. Nothing else on
+				// this screen can tell the two apart.
+				cands = append(cands, txCandidate{
+					tx: tx, src: srcPayload, confirmed: false,
+					subst: legendUnsigned, unsigned: tx.UnsignedInputs,
+				})
+				continue
+			}
+			cands = append(cands, txCandidate{tx: tx, src: srcPayload, confirmed: true})
 		}
 	}
 	return cands, incomplete
@@ -458,6 +552,29 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 // or `me tx`'s own report: the FULL txid (the value the host printed), the
 // size, and the source (§3.3.3 F3 — anything not typed names its source).
 func transactionReviewLines(c txCandidate) []string {
+	if !c.confirmed && c.hasBytes() {
+		// A tx: record that PARSES and cannot be BROADCAST. Its txid is the
+		// one the operator expects -- that is the whole hazard -- so the
+		// screen states the txid AND immediately states what it is not worth.
+		lines := []string{"UNSIGNED TRANSACTION", ""}
+		lines = append(lines, chunkString(c.tx.TxidDisplay, 16)...)
+		lines = append(lines, "",
+			fmt.Sprintf("%d bytes, %d in, %d out", len(c.tx.Raw), c.tx.Inputs, c.tx.Outputs),
+			namedInputs(c.unsigned)+" carr"+plural(len(c.unsigned), "ies", "y"),
+			"neither a scriptSig nor a",
+			"witness. This CANNOT be",
+			"broadcast.",
+			"",
+			"The txid above is the same one",
+			"a signed version would have.",
+			"",
+			"The plate legend WILL be",
+			"replaced with:",
+			c.subst,
+			"",
+			"Source: "+syswSourceName(c.src))
+		return lines
+	}
 	if !c.confirmed {
 		// RULING 2026-08-25: engraveable, loudly. No txid exists to show -- the
 		// set never reassembled -- so the set id is the only identifier there is.
@@ -492,17 +609,18 @@ func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
 	if !confirmReviewScreen(ctx, th, "Transaction", transactionReviewLines(c)) {
 		return
 	}
-	var choices []string
-	if len(c.strs) > 0 {
-		choices = append(choices, "TEXT PLATES")
-	}
-	// QR encodes the RAW TRANSACTION. An unconfirmed set has none, so the
-	// choice is withheld rather than offered and then failed (r9's lesson: a
+	// QR encodes the RAW TRANSACTION, so it is offered exactly when there ARE
+	// bytes -- withheld rather than offered and then failed (r9's lesson: a
 	// gate that cannot pass is worse than one that is absent).
-	if c.confirmed {
-		choices = append(choices, "QR PLATES")
-	}
+	choices := transactionPlateKinds(c)
 	if len(choices) == 0 {
+		// UNREACHABLE by construction: every candidate has strings or bytes.
+		// Said out loud because returning silently here is exactly the bug
+		// that made the tx: path inert, and a silent return looks like a
+		// cancel to the operator.
+		showError(ctx, th, "Engrave Transaction",
+			"This transaction has neither mt1 strings to engrave as text nor "+
+				"bytes to encode as QR. Re-pack the payload with `me sysw pack`.")
 		return
 	}
 	for {
@@ -521,7 +639,7 @@ func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
 				note = fmt.Sprintf("%d plate(s), %d string(s)", len(plates), len(c.strs))
 			}
 		} else {
-			plates, titles, note, err = planTransactionQRPlates(ctx.Platform, c.tx)
+			plates, titles, note, err = planTransactionQRPlates(ctx.Platform, c)
 		}
 		if err != nil {
 			showError(ctx, th, "Engrave Transaction", err.Error())
@@ -662,15 +780,39 @@ func planTransactionTextPlates(pl Platform, c txCandidate) ([]Plate, []string, e
 // the txid (what the operator compares against the host's report), what the
 // QR carries, and the one operational fact a recoverer must be told — scan
 // order is IRRELEVANT, the order lives inside each symbol.
-func transactionLegend(tx mt.Tx, symbols int, ecc qr.Level) string {
+//
+// IT TAKES THE CANDIDATE, NOT THE TRANSACTION, and that is the whole reason
+// this signature changed. When `c.subst` is set the operator's legend is
+// replaced un-overridably (ruling 2026-08-25b) — and so is OURS. Built from
+// `mt.Tx` alone, this function could not know, so an UNSIGNED transaction
+// would have been cut under "raw signed bitcoin tx … scan, then broadcast":
+// a plate stating in steel that a transaction which can never be broadcast is
+// signed and ready to. The review screen promised a substitution the plate did
+// not make.
+func transactionLegend(c txCandidate, symbols int, ecc qr.Level) string {
 	eccName := map[qr.Level]string{qr.L: "L", qr.M: "M", qr.Q: "Q", qr.H: "H"}[ecc]
-	lines := []string{
-		"txid " + tx.TxidDisplay,
-		fmt.Sprintf("raw signed bitcoin tx, %d bytes, %d qr, ecc %s", len(tx.Raw), symbols, eccName),
+	signedness := "raw signed bitcoin tx"
+	var lines []string
+	if c.subst != "" {
+		// The warning goes FIRST, and the word "signed" and the instruction to
+		// broadcast both go away. Everything else stays: the txid is still how
+		// this plate is identified, and scan order is still a fact a recoverer
+		// needs.
+		lines = append(lines, c.subst)
+		signedness = "raw bitcoin tx, NOT BROADCASTABLE"
 	}
-	if symbols > 1 {
+	lines = append(lines,
+		"txid "+c.tx.TxidDisplay,
+		fmt.Sprintf("%s, %d bytes, %d qr, ecc %s", signedness, len(c.tx.Raw), symbols, eccName),
+	)
+	switch {
+	case c.subst != "" && symbols > 1:
+		lines = append(lines, "scan all qr, any order, to read it back")
+	case c.subst != "":
+		lines = append(lines, "scan to read it back")
+	case symbols > 1:
 		lines = append(lines, "scan all qr, any order, then broadcast")
-	} else {
+	default:
 		lines = append(lines, "scan, then broadcast")
 	}
 	return strings.Join(lines, "\n")
@@ -689,7 +831,7 @@ func transactionLegend(tx mt.Tx, symbols int, ecc qr.Level) string {
 // One symbol per plate. For P >= 2 plates the P-1-symbols-plus-legend-plate
 // layout is tried BEFORE P symbols with the legend inline, because fewer
 // symbols outranks everything but plate count. The 16-symbol cap is hard.
-func planTransactionQRPlates(pl Platform, tx mt.Tx) ([]Plate, []string, string, error) {
+func planTransactionQRPlates(pl Platform, c txCandidate) ([]Plate, []string, string, error) {
 	params := pl.EngraverParams()
 	type layout struct {
 		symbols     int
@@ -707,7 +849,7 @@ func planTransactionQRPlates(pl Platform, tx mt.Tx) ([]Plate, []string, string, 
 		for _, lay := range layouts {
 			for _, ecc := range []qr.Level{qr.H, qr.Q, qr.M} {
 				for _, scale := range []int{3, 2} { // 0.9mm, then 0.6mm modules
-					plates, titles, ok := buildQRPlates(params, tx, lay.symbols, lay.legendAlone, ecc, scale)
+					plates, titles, ok := buildQRPlates(params, c, lay.symbols, lay.legendAlone, ecc, scale)
 					if ok {
 						note := fmt.Sprintf("%d plate(s), %d QR, ECC %s, %s modules",
 							plateCount, lay.symbols, eccName[ecc],
@@ -720,7 +862,7 @@ func planTransactionQRPlates(pl Platform, tx mt.Tx) ([]Plate, []string, string, 
 	}
 	return nil, nil, "", fmt.Errorf("transaction too large for QR plates at ECC M "+
 		"(%d bytes; the Structured Append cap is %d symbols) - use TEXT plates",
-		len(tx.Raw), txqr.MaxSymbols)
+		len(c.tx.Raw), txqr.MaxSymbols)
 }
 
 // buildQRPlates attempts one configuration; ok=false means it does not fit.
@@ -728,7 +870,8 @@ func planTransactionQRPlates(pl Platform, tx mt.Tx) ([]Plate, []string, string, 
 // A cheap geometry gate runs before any spline is planned: a symbol whose
 // module grid plus quiet border cannot fit the usable width at this scale can
 // never pass toPlate, and toPlate plans a full engraving to find that out.
-func buildQRPlates(params engrave.Params, tx mt.Tx, symbols int, legendAlone bool, ecc qr.Level, scale int) ([]Plate, []string, bool) {
+func buildQRPlates(params engrave.Params, c txCandidate, symbols int, legendAlone bool, ecc qr.Level, scale int) ([]Plate, []string, bool) {
+	tx := c.tx
 	set, err := txqr.EncodeSet(tx.Raw, symbols, ecc)
 	if err != nil {
 		return nil, nil, false
@@ -757,7 +900,7 @@ func buildQRPlates(params engrave.Params, tx mt.Tx, symbols int, legendAlone boo
 		titles = append(titles, title)
 		return true
 	}
-	legend := transactionLegend(tx, symbols, ecc)
+	legend := transactionLegend(c, symbols, ecc)
 	plateNo := 1
 	if legendAlone {
 		if !build(backup.Text{Paragraphs: []backup.Paragraph{{Text: legend}}},

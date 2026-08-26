@@ -88,7 +88,7 @@ func TestTextPlatesKeepIndexOrder(t *testing.T) {
 // the M floor.
 func TestQRPlanSmallTransactionIsOnePlateAboveTheFloor(t *testing.T) {
 	pl := newPlatform()
-	plates, titles, note, err := planTransactionQRPlates(pl, evenTx(t))
+	plates, titles, note, err := planTransactionQRPlates(pl, txCandidate{tx: evenTx(t), confirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,14 +112,14 @@ func TestQRPlanSmallTransactionIsOnePlateAboveTheFloor(t *testing.T) {
 // QR carries, and — for a multi-symbol set — that scan order is irrelevant.
 func TestTransactionLegendNamesTheFacts(t *testing.T) {
 	tx := evenTx(t)
-	one := transactionLegend(tx, 1, qr.M)
+	one := transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.M)
 	if !strings.Contains(one, "txid "+txEvenTxid) {
 		t.Error("legend must carry the full txid")
 	}
 	if !strings.Contains(one, "raw signed bitcoin tx") {
 		t.Error("legend must say what the QR carries — mt1/codex32 wording would be wrong here")
 	}
-	many := transactionLegend(tx, 3, qr.M)
+	many := transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M)
 	if !strings.Contains(many, "any order") {
 		t.Error("a multi-symbol legend must say scan order is irrelevant")
 	}
@@ -235,8 +235,8 @@ func TestTransactionPlateTextIsEngraveable(t *testing.T) {
 	tx := evenTx(t)
 	texts := []string{
 		transactionPlateTitle(tx, 16, 16),
-		transactionLegend(tx, 3, qr.M),
-		transactionLegend(tx, 1, qr.H),
+		transactionLegend(txCandidate{tx: tx, confirmed: true}, 3, qr.M),
+		transactionLegend(txCandidate{tx: tx, confirmed: true}, 1, qr.H),
 		txEven[0],
 	}
 	for _, txt := range texts {
@@ -291,7 +291,7 @@ func TestQRPlanScalesWithTransactionSize(t *testing.T) {
 		{4000, 7}, // the largest a tx: record can deliver (section cap)
 	} {
 		tx := syntheticTx(t, tc.bytes-64)
-		plates, _, note, err := planTransactionQRPlates(pl, tx)
+		plates, _, note, err := planTransactionQRPlates(pl, txCandidate{tx: tx, confirmed: true})
 		if err != nil {
 			t.Fatalf("%d B: %v", tc.bytes, err)
 		}
@@ -414,7 +414,7 @@ func TestNoPayloadAndNoTransactionAreDifferentMessages(t *testing.T) {
 // order survives it; that is an assumption worth a test rather than a comment.
 func TestTransactionPlateCutsItsTitleLast(t *testing.T) {
 	pl := newPlatform()
-	plates, titles, _, err := planTransactionQRPlates(pl, evenTx(t))
+	plates, titles, _, err := planTransactionQRPlates(pl, txCandidate{tx: evenTx(t), confirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
