@@ -84,6 +84,19 @@ type txCandidate struct {
 	// transaction does not decode at all (mt.Decode refuses it), so it arrives
 	// with no tx and no bytes.
 	unsigned []int
+	// dupIdx lists the chunk indices, 0-BASED and ascending, at which the set
+	// held more than one distinct string. `strs` holds the LAST of each
+	// (operator ruling 2026-08-26: last wins) -- these are the slots where the
+	// others were dropped, and the review screen names them so the operator
+	// can re-pack in another order and cut a different copy.
+	//
+	// It is carried on the candidate rather than recomputed at the screen
+	// because `strs` is already deduped by the time a screen sees it: the
+	// evidence does not survive orderByIndex.
+	dupIdx []int
+	// dupTotal is the set's DECLARED chunk count, from the header. Never
+	// len(strs), which is the deduped number.
+	dupTotal int
 }
 
 // hasBytes reports whether there are transaction bytes to put into a QR.
@@ -412,6 +425,10 @@ func payloadTransactions(ctx *Context) (cands []txCandidate, incomplete int) {
 	for _, csid := range order {
 		set := sets[csid]
 		ordered := orderByIndex(set)
+		// BEFORE the dedup is consumed: orderByIndex keeps the last string per
+		// index and the rest are gone, so which indices collided is only
+		// knowable from `set`.
+		dupIdx, dupTotal := duplicateChunkIndices(set)
 		tx, err := mt.Decode(set)
 		if err != nil {
 			// RULING 2026-08-25: report loudly, do not refuse. The set is still
@@ -422,12 +439,13 @@ func payloadTransactions(ctx *Context) (cands []txCandidate, incomplete int) {
 			cands = append(cands, txCandidate{
 				strs: ordered, src: srcPayload, csid: csid,
 				confirmed: false, subst: substitutionFor(set, err),
+				dupIdx: dupIdx, dupTotal: dupTotal,
 			})
 			continue
 		}
 		cands = append(cands, txCandidate{
 			tx: tx, strs: ordered, src: srcPayload, csid: csid,
-			confirmed: true,
+			confirmed: true, dupIdx: dupIdx, dupTotal: dupTotal,
 		})
 	}
 	txRecs, ok := ctx.sysw.takeAll(sysw.ClassTx)
@@ -495,6 +513,121 @@ func orderByIndex(set []string) []string {
 	return out
 }
 
+// duplicateChunkIndices names every chunk index for which the set holds two
+// strings that are NOT the same string -- the indices orderByIndex thins,
+// keeping the last -- together with the set's DECLARED chunk count.
+//
+// IT EXISTS BECAUSE THE THINNING USED TO BE SILENT (P5 I-2). A set can hold two
+// different strings for one index without any collision luck: sign the same
+// PSBT twice and the second ceremony differs only in witness bytes, which the
+// txid ignores, so the chunk_set_id, the count and the lengths are all
+// identical. mt.Decode refuses such a set and the legend is substituted -- but
+// the review screen then reported the DEDUPED count and nothing named the
+// strings that would never be cut.
+//
+// OPERATOR RULING 2026-08-26: "last wins is fine but message to user that this
+// is the rule is required so they can try again in different order." So the
+// dedup is unchanged and this is what the message is built from.
+//
+// EQUALITY IS CASE-BLIND, deliberately. mt.Decode compares PAYLOAD BYTES and
+// tolerates an exact duplicate ("a well-kept drawer, not an error"), and a
+// codex32 string is consistent-case, so an all-uppercase copy of a chunk
+// carries the identical payload. Reporting that would send the operator away
+// to re-pack a payload that lost nothing.
+//
+// total is the DECLARED count, from the first parseable header -- the same
+// field mt.Decode reads the count from, and pointedly NOT len(set) or
+// len(orderByIndex(set)). The deduped length is the number the screen was
+// already showing while the drop went unnamed, so using it here would put the
+// defect inside its own warning. A header whose index is out of range for its
+// count cannot reach this: mt.ParseHeader refuses it, so the named number is
+// never larger than the total it is named against.
+func duplicateChunkIndices(set []string) (idx []int, total int) {
+	distinct := map[int][]string{}
+	for _, s := range set {
+		h, err := mt.ParseHeader(s)
+		if err != nil {
+			continue // not engraved in place either; orderByIndex skips it too
+		}
+		if total == 0 {
+			total = h.TotalChunks
+		}
+		seen := false
+		for _, have := range distinct[h.ChunkIndex] {
+			if strings.EqualFold(have, s) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			distinct[h.ChunkIndex] = append(distinct[h.ChunkIndex], s)
+		}
+	}
+	for i, ss := range distinct {
+		if len(ss) > 1 {
+			idx = append(idx, i)
+		}
+	}
+	sort.Ints(idx) // map order is random; a warning that reshuffles is not one
+	return idx, total
+}
+
+// namedChunks is "string 4 of 6" / "strings 4 and 5 of 6" /
+// "strings 1, 4 and 5 of 6", for an operator. Mirrors namedInputs.
+//
+// IT COUNTS FROM ONE, and the shape is the HOST's, not a new one. me-cli's
+// describe_set_problem prints "MISSING string(s) 4 and 5 of 6" over the same
+// grouping, under a comment that settles the question outright: "Chunk numbers
+// are 1-BASED here and everywhere an operator reads them ... (SPEC_mt SS1.1:
+// the wire index is 0-based and appears in no message). Printing the wire index
+// would send someone counting the strings on their desk and finding the wrong
+// one." The gather agrees ("String %d of %d." at h.ChunkIndex+1), and so does
+// mt.Decode's own "missing chunk %d of %d".
+//
+// "string" AND NOT "plate", though the ruling said plate: a TEXT plate carries
+// AS MANY STRINGS AS FIT (planTransactionTextPlates packs six onto one), so
+// plate numbering is a different, coarser count and "plate 4 of 6" would send
+// the operator to a plate that does not exist. The strings are engraved in
+// index order, so string 4 is the fourth one reading down the set.
+func namedChunks(idx []int, total int) string {
+	n := make([]string, 0, len(idx))
+	for _, i := range idx {
+		n = append(n, fmt.Sprintf("%d", i+1))
+	}
+	switch len(n) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("string %s of %d", n[0], total)
+	default:
+		return fmt.Sprintf("strings %s and %s of %d",
+			strings.Join(n[:len(n)-1], ", "), n[len(n)-1], total)
+	}
+}
+
+// transactionDuplicateLines is the message operator ruling 2026-08-26
+// requires: the rule stated, every colliding index named, and the one action
+// that changes the outcome.
+//
+// IT NAMES INDICES AND NEVER STRINGS. An mt1 string is a chunk of a signed
+// transaction -- bearer material -- so which slot collided is the message and
+// the string body is not.
+func transactionDuplicateLines(idx []int, total int) []string {
+	if len(idx) == 0 {
+		return nil
+	}
+	return []string{
+		"DUPLICATE STRINGS - LAST WINS",
+		"",
+		fmt.Sprintf("Duplicate %s found, last wins.", namedChunks(idx, total)),
+		"",
+		"The earlier copies are NOT",
+		"engraved. Re-pack the payload",
+		"in a different order to cut a",
+		"different copy.",
+	}
+}
+
 // ─── NFC gather ──────────────────────────────────────────────────────────────
 
 // txGather is the gather's STATE AND DECISION, lifted out of the frame loop.
@@ -550,6 +683,7 @@ func (g *txGather) offer(s string) (txCandidate, bool) {
 				h.ChunkIndex+1, h.TotalChunks, h.TotalChunks-len(distinct))
 			return txCandidate{}, false
 		}
+		dupIdx, dupTotal := duplicateChunkIndices(set)
 		tx, err := mt.Decode(set)
 		if err != nil {
 			// G-P3.9. Complete and WRONG. This used to DROP the set --
@@ -568,9 +702,11 @@ func (g *txGather) offer(s string) (txCandidate, bool) {
 			return txCandidate{
 				strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID,
 				confirmed: false, subst: substitutionFor(set, err),
+				dupIdx: dupIdx, dupTotal: dupTotal,
 			}, true
 		}
-		return txCandidate{tx: tx, strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID, confirmed: true}, true
+		return txCandidate{tx: tx, strs: orderByIndex(set), src: srcNFC, csid: h.ChunkSetID,
+			confirmed: true, dupIdx: dupIdx, dupTotal: dupTotal}, true
 	}
 }
 
@@ -661,10 +797,24 @@ func transactionReviewLines(c txCandidate) []string {
 	if !c.confirmed {
 		// RULING 2026-08-25: engraveable, loudly. No txid exists to show -- the
 		// set never reassembled -- so the set id is the only identifier there is.
-		return []string{
+		lines := []string{
 			"UNCONFIRMED SET", "",
 			fmt.Sprintf("Set %05x, %d string(s).", c.csid, len(c.strs)),
 			"",
+		}
+		// RULING 2026-08-26, and it goes HERE -- third block, above the
+		// legend -- for the reason G-P3.20 found for the bearer warning:
+		// confirmReviewScreen PAGES, and on the shipped 480x320 panel page one
+		// of this screen holds about seven lines. A warning below the legend
+		// block is a warning the operator can press Continue past without ever
+		// seeing, and this one is the only place the DEDUPED count above it is
+		// explained. `%d string(s)` counts what will be cut; these lines say
+		// what will not.
+		lines = append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal)...)
+		if len(c.dupIdx) > 0 {
+			lines = append(lines, "")
+		}
+		return append(lines,
 			"This does NOT reassemble into",
 			"a transaction. The strings are",
 			"engraveable and each is valid,",
@@ -676,7 +826,7 @@ func transactionReviewLines(c txCandidate) []string {
 			"",
 			"QR plates are unavailable:",
 			"there are no transaction bytes.",
-		}
+		)
 	}
 	// THE BEARER WARNING IS ABOVE THE TXID, and the order is the finding.
 	// confirmReviewScreen PAGES: with the warning last, page 1 held the
@@ -696,7 +846,18 @@ func transactionReviewLines(c txCandidate) []string {
 	lines = append(lines, "",
 		fmt.Sprintf("%d bytes, %d in, %d out", len(c.tx.Raw), c.tx.Inputs, c.tx.Outputs),
 		"Source: "+syswSourceName(c.src))
-	return lines
+	// ON A CONFIRMED CANDIDATE THIS BLOCK IS ALL BUT UNREACHABLE, and it is
+	// emitted anyway rather than argued away. mt.Decode compares payload
+	// BYTES, so a set it confirmed cannot hold two indices whose payloads
+	// disagree; the only strings that are distinct here and identical there
+	// differ in the FINAL chunk's padding bits, which payloadBytes truncates
+	// (mt.go: the primary truncates rather than rejecting), so it takes a
+	// forged string to reach. Nothing of value is dropped in that case, which
+	// is why the block goes LAST here and third from the top on the
+	// unconfirmed screen: page one of the confirmed review is the bearer
+	// warning's, ruled by G-P3.20, and a near-unreachable notice must not
+	// displace it.
+	return append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal)...)
 }
 
 func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
