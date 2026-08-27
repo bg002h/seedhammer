@@ -340,3 +340,38 @@ func TestPostCutDoesNotPredictFailureForARecordThatWillDecode(t *testing.T) {
 		t.Fatalf("an unconfirmed SET must still predict failure:\n%s", sj)
 	}
 }
+
+// Fold review B-1 — the remedy must be one this operator HAS.
+//
+// The first version of the duplicate message told every operator to "Re-pack
+// the payload". An operator who reached this screen by SCANNING has no payload
+// of theirs to re-pack; the action that changes their outcome is to scan the
+// copy they want kept last. An instruction naming a channel the reader does not
+// have is the same defect class as F-251 and P5 M-4.
+func TestTheDuplicateRemedyMatchesTheChannelTheOperatorUsed(t *testing.T) {
+	join := func(ls []string) string {
+		out := ""
+		for _, l := range ls {
+			out += l + "\n"
+		}
+		return out
+	}
+	payload := join(transactionDuplicateLines([]int{4}, 6, srcPayload))
+	if !strings.Contains(payload, "Re-pack the payload") {
+		t.Fatalf("a payload operator keeps the re-pack remedy:\n%s", payload)
+	}
+	nfc := join(transactionDuplicateLines([]int{4}, 6, srcNFC))
+	if strings.Contains(nfc, "Re-pack the payload") {
+		t.Fatalf("an NFC operator has no payload to re-pack:\n%s", nfc)
+	}
+	if !strings.Contains(nfc, "LAST") {
+		t.Fatalf("and must be told the action that changes the outcome:\n%s", nfc)
+	}
+	// Both must still state the rule and name the collision. NOTE 1-BASED: index
+	// 4 renders as "5 of 6", which is the constellation convention `me` also uses.
+	for _, s := range []string{payload, nfc} {
+		if !strings.Contains(s, "LAST WINS") || !strings.Contains(s, "5 of 6") {
+			t.Fatalf("the ruling's content must survive either branch:\n%s", s)
+		}
+	}
+}

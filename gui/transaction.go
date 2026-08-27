@@ -612,20 +612,33 @@ func namedChunks(idx []int, total int) string {
 // IT NAMES INDICES AND NEVER STRINGS. An mt1 string is a chunk of a signed
 // transaction -- bearer material -- so which slot collided is the message and
 // the string body is not.
-func transactionDuplicateLines(idx []int, total int) []string {
+func transactionDuplicateLines(idx []int, total int, src syswSource) []string {
 	if len(idx) == 0 {
 		return nil
 	}
-	return []string{
+	// THE REMEDY MUST BE ONE THIS OPERATOR HAS (fold review B-1). The first
+	// version said "re-pack the payload" unconditionally -- advice for a
+	// channel an NFC operator does not have. They scanned these strings; there
+	// is no payload of theirs to re-pack, and the action that changes the
+	// outcome is to scan the copy they want LAST.
+	remedy := []string{
+		"engraved. Re-pack the payload",
+		"in a different order to cut a",
+		"different copy.",
+	}
+	if src == srcNFC {
+		remedy = []string{
+			"engraved. Scan the copy you",
+			"want kept LAST, then retry.",
+		}
+	}
+	return append([]string{
 		"DUPLICATE STRINGS - LAST WINS",
 		"",
 		fmt.Sprintf("Duplicate %s found, last wins.", namedChunks(idx, total)),
 		"",
 		"The earlier copies are NOT",
-		"engraved. Re-pack the payload",
-		"in a different order to cut a",
-		"different copy.",
-	}
+	}, remedy...)
 }
 
 // ─── NFC gather ──────────────────────────────────────────────────────────────
@@ -810,7 +823,7 @@ func transactionReviewLines(c txCandidate) []string {
 		// seeing, and this one is the only place the DEDUPED count above it is
 		// explained. `%d string(s)` counts what will be cut; these lines say
 		// what will not.
-		lines = append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal)...)
+		lines = append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal, c.src)...)
 		if len(c.dupIdx) > 0 {
 			lines = append(lines, "")
 		}
@@ -864,7 +877,7 @@ func transactionReviewLines(c txCandidate) []string {
 	// unconfirmed screen: page one of the confirmed review is the bearer
 	// warning's, ruled by G-P3.20, and a near-unreachable notice must not
 	// displace it.
-	return append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal)...)
+	return append(lines, transactionDuplicateLines(c.dupIdx, c.dupTotal, c.src)...)
 }
 
 func transactionReviewAndEngrave(ctx *Context, th *Colors, c txCandidate) {
