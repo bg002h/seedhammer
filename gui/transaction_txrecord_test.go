@@ -19,7 +19,7 @@ import (
 //
 //	UNCONFIRMED SET
 //	Set 00000, 0 string(s).
-//	This does NOT reassemble into a transaction. ...
+//	This did not confirm as a transaction on this device. ...
 //	The plate legend WILL be replaced with:
 //	QR plates are unavailable: there are no transaction bytes.
 //

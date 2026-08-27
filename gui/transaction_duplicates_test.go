@@ -278,7 +278,14 @@ func TestWalkADuplicatedStringIsNamedBeforeTheCut(t *testing.T) {
 // present, so the screen asserted something false while the legend beside it
 // was right. Only one of them could be true, and the operator reads both.
 //
-// The screen must now cover both cases without asserting which.
+// SUPERSEDED 2026-08-26 (operator): name NO cause at all.
+//
+// Covering both cases fixed the two-run payload and left the UNSIGNED one
+// still wrong -- an unsigned set DOES reassemble and DOES decode, so "incomplete
+// or does not decode" was false in both halves for it. Asserting no cause is
+// strictly stronger than asserting both: a screen that names no cause cannot
+// contradict any legend. This test now enforces that stronger rule, which is why
+// the second assertion inverted from "must name both" to "must name none".
 func TestTheUnconfirmedScreenDoesNotContradictItsOwnLegend(t *testing.T) {
 	for _, complete := range []bool{true, false} {
 		c := txCandidate{
@@ -296,9 +303,19 @@ func TestTheUnconfirmedScreenDoesNotContradictItsOwnLegend(t *testing.T) {
 				"unconditionally, which is false for a set whose indices are "+
 				"all present:\n%s", complete, joined)
 		}
-		if !strings.Contains(joined, "incomplete or") && !strings.Contains(joined, "does not decode") {
-			t.Fatalf("complete=%v: the screen must name BOTH possibilities so it "+
-				"cannot contradict the legend:\n%s", complete, joined)
+		for _, cause := range []string{
+			"not complete", "incomplete", "does not decode", "does NOT reassemble",
+		} {
+			if strings.Contains(joined, cause) {
+				t.Fatalf("complete=%v: the screen asserts a cause (%q). It must "+
+					"report only what was OBSERVED -- that the set did not confirm "+
+					"here -- because any named cause is false for at least one of "+
+					"the three ways a set fails to confirm:\n%s", complete, cause, joined)
+			}
+		}
+		if !strings.Contains(joined, "did not confirm") {
+			t.Fatalf("complete=%v: the screen must still say the set did not "+
+				"confirm, or it reports nothing at all:\n%s", complete, joined)
 		}
 	}
 }

@@ -828,17 +828,26 @@ func transactionReviewLines(c txCandidate) []string {
 			lines = append(lines, "")
 		}
 		return append(lines,
-			"This does NOT reassemble into",
-			"a transaction. The strings are",
-			"engraveable and each is valid,",
-			// RULED 2026-08-26: "just say incomplete/does not decode". This
-			// line used to assert "the set is not complete" unconditionally --
-			// false for a two-run payload, where every index IS present and the
-			// set still will not reassemble. The legend three lines below
-			// already distinguishes those two cases correctly, so the screen
-			// was contradicting it and only one could be true.
-			"but the set is incomplete or",
-			"does not decode.",
+			// RULED 2026-08-26 (operator): say what was OBSERVED, not why.
+			// The previous wording asserted a cause, and for an UNSIGNED set
+			// both halves were false -- it DOES reassemble and it DOES decode,
+			// which contradicted this file's own comment at substitutionFor.
+			// "did not confirm" is exactly the condition tested (!confirmed)
+			// and is true for all three causes: incomplete, undecodable, and
+			// unsigned. The closing caveat is the operator's: this device does
+			// not parse every transaction, so the operator must know their own.
+			"This did not confirm as a",
+			"transaction on this device.",
+			"The strings are engraveable",
+			"and each is valid.",
+			// The earlier ruling here narrowed this to "incomplete/does not
+			// decode", which fixed the two-run payload case and left the
+			// UNSIGNED one still wrong. Naming no cause at all covers both,
+			// and the legend below still distinguishes them.
+			"",
+			"This device does not parse",
+			"every transaction. Know what",
+			"you are engraving.",
 			"",
 			"The plate legend WILL be",
 			"replaced with:",
