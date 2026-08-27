@@ -392,3 +392,38 @@ func TestTheDuplicateRemedyMatchesTheChannelTheOperatorUsed(t *testing.T) {
 		}
 	}
 }
+
+// B-2 (fold review 2026-08-26): the post-cut screen discriminated by CHANNEL,
+// not by CAUSE. `c.subst != "" && len(c.strs) == 0` reads "arrived as a payload
+// rather than as loose strings" — so an unsigned SET, which has strings, fell to
+// the branch predicting "expect it to fail there too".
+//
+// That prediction is false in the discouraging direction: an unsigned
+// transaction DOES decode, so `mt decode` on the host succeeds after the device
+// said to expect failure. An operator who trusts the warning may not check at
+// all, or may conclude their plates are bad.
+//
+// The cause is already on the candidate. BOTH paths set subst to legendUnsigned
+// for this case — the set path via substitutionFor(set, err), the payload path
+// directly — so testing the legend discriminates by cause and covers both
+// channels. This is the same shape as B-0: the legend was right and the screen
+// was not consulting it.
+func TestThePostCutScreenDoesNotPredictFailureForAnUnsignedSet(t *testing.T) {
+	for _, strs := range [][]string{nil, {"mt1one", "mt1two"}} {
+		c := txCandidate{
+			confirmed: false,
+			subst:     legendUnsigned,
+			strs:      strs,
+			csid:      0x2dcf2,
+		}
+		joined := strings.Join(transactionPostCutLines(c, false, 1), " ")
+		if strings.Contains(joined, "expect it to fail") {
+			t.Errorf("strs=%d: an unsigned transaction DOES decode; predicting "+
+				"failure is false and discouraging:\n%s", len(strs), joined)
+		}
+		if !strings.Contains(joined, "WILL decode there") {
+			t.Errorf("strs=%d: the screen must say it will decode, whichever "+
+				"channel it arrived by:\n%s", len(strs), joined)
+		}
+	}
+}

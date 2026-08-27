@@ -539,9 +539,23 @@ func orderByIndex(set []string) []string {
 // field mt.Decode reads the count from, and pointedly NOT len(set) or
 // len(orderByIndex(set)). The deduped length is the number the screen was
 // already showing while the drop went unnamed, so using it here would put the
-// defect inside its own warning. A header whose index is out of range for its
-// count cannot reach this: mt.ParseHeader refuses it, so the named number is
-// never larger than the total it is named against.
+// defect inside its own warning.
+//
+// B-3 (fold review 2026-08-26): this comment used to claim the named number can
+// never exceed the total, on the grounds that mt.ParseHeader refuses an
+// out-of-range index. THAT CLAIM WAS FALSE and is deleted rather than softened.
+// ParseHeader bounds ChunkIndex against THAT STRING'S OWN TotalChunks
+// (mt/mt.go: `h.ChunkIndex >= h.TotalChunks`) and nothing bounds it against the
+// first string's. Mixed declared counts inside one csid group are a case the
+// rest of the code explicitly ANTICIPATES -- setIsComplete rejects them just
+// above, and mt.Decode returns a count mismatch -- so the assumption was
+// contradicted two functions away.
+//
+// The consequence is cosmetic and needs a spliced set: >=3 strings and >=2
+// distinct declared counts, first-parsed smallest. It renders as "Duplicate
+// string 5 of 2 found" -- a number that cannot exist, weird enough that nobody
+// would act on it. Left as-is deliberately; the FALSE COMMENT was the hazard,
+// because a future reader would have believed the invariant and relied on it.
 func duplicateChunkIndices(set []string) (idx []int, total int) {
 	distinct := map[int][]string{}
 	for _, s := range set {
@@ -1021,7 +1035,27 @@ func transactionPostCutLines(c txCandidate, qr bool, plates int) []string {
 	lines = append(lines, "",
 		"Order does not matter.",
 		"")
-	if c.subst != "" && len(c.strs) == 0 {
+	// B-2 (fold review 2026-08-26): discriminate by CAUSE, not by channel.
+	// This read `c.subst != "" && len(c.strs) == 0` — "arrived as a payload
+	// rather than as loose strings" — so an unsigned SET, which has strings,
+	// fell through to the branch predicting failure. Both paths already set
+	// legendUnsigned for this cause (the set path via substitutionFor, the
+	// payload path directly). It is NOT enough on its own: a `tx:` record carries
+	// BYTES and will decode whatever legend was substituted, which the legend
+	// test alone would have broken -- caught by
+	// TestPostCutDoesNotPredictFailureForARecordThatWillDecode, not by reasoning.
+	//
+	// So the question is "will this decode there", and it has two independent
+	// yeses:
+	//   bytes present            -- a tx: record, any subst
+	//   legendUnsigned           -- an unsigned SET, whose bytes Go's decoder
+	//                               discards (F-262) but which DID decode
+	// and one no: an unconfirmed set with neither, where the decode genuinely
+	// fails and the original prediction is correct.
+	// c.subst != "" keeps CONFIRMED candidates out: they have Raw too, and they
+	// belong in the else branch that names their txid. Dropping it swallowed them
+	// -- caught by TestThePostCutScreenNamesOneCommandAndSaysOrderDoesNotMatter.
+	if c.subst != "" && (len(c.tx.Raw) > 0 || c.subst == legendUnsigned) {
 		// P5 M-4 — a tx: record admitted with --allow-unsigned-inputs carries a
 		// substituted legend AND engraves QR plates, but its bytes DO decode:
 		// `mt inspect` on the scan-back succeeds and prints the transaction.
