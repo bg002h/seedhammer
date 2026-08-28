@@ -124,8 +124,10 @@ for row in "${CASES[@]}"; do
       echo "$name  MUTATION 2 (wrong golden)   KILLED but NOT at the plate comparison: $line" >> "$report"
       fail_n=$((fail_n + 1))
     else
-      detail="$(grep -m1 -oE 'spline (lengths )?[0-9]+ (vs|and) [0-9]+.*' "$work/$name.m2.txt" || true)"
-      echo "$name  MUTATION 2 (wrong golden)   KILLED at compare: ${detail:-${line:0:120}}" >> "$report"
+      # The comparison's own words, whole -- "spline lengths A vs B, N/M knots
+      # differ" is the measurement, and a truncated one is not evidence.
+      detail="$(sed -n 's/.*is NOT the plate [^ ]* pins: //p' "$work/$name.m2.txt" | head -1)"
+      echo "$name  MUTATION 2 (wrong golden)   KILLED at compare: ${detail:-$line}" >> "$report"
       pass_n=$((pass_n + 1))
     fi
   fi
