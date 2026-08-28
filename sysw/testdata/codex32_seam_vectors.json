@@ -1,0 +1,117 @@
+{
+  "_comment": [
+    "THE HOST/DEVICE codex32 SEAM, as a gate rather than a comment.",
+    "",
+    "Until this file existed, the invariant lived only in prose, in",
+    "crates/me-cli/src/seal/record.rs ('The device's `codex32.New` has no such",
+    "narrowing'). Prose does not fail a build. This does.",
+    "",
+    "THE INVARIANT: host_admits => device_admits. The host (`me`) packs only the",
+    "constellation ms1 PROFILE; the device (the seedhammer fork) displays any",
+    "BCH-valid codex32 it can engrave. Host being the narrower side is the SAFE",
+    "direction: everything the host will put in a payload, the device will read.",
+    "A row with host_admits=true and device_admits=false is the dangerous",
+    "direction and is what both tests exist to catch -- the host would have",
+    "packed a record the device refuses, i.e. an engraved backup that will not",
+    "load.",
+    "",
+    "WHAT THE TWO VERDICTS MEAN, exactly:",
+    "  host_admits   -- Rust: mnemonic_engrave::sysw::classify(s) == Class::Codex32Secret",
+    "  device_admits -- Go:   sysw.Classify(s) == ClassCodex32Secret",
+    "Both are the sysw record classifier, so the two columns answer the same",
+    "question in the two languages. Neither is a claim about any other layer.",
+    "",
+    "WHY THE HOST IS NARROWER. Constellation ms1 is a deliberate two-gate PROFILE",
+    "over BIP-93: the string length must be in ms-codec's VALID_STR_LENGTHS",
+    "[50, 56, 62, 69, 75] or VALID_MNEM_STR_LENGTHS [51, 58, 64, 70, 77], and then",
+    "the 4-character id must be `entr`. Plain BIP-93 at 128/256 bits lands on 48",
+    "and 74 characters -- the profile's extra tag byte is what shifts it. So the",
+    "48- and 74-character rows below are CORRECT BIP-93 and correctly not",
+    "constellation records; nothing here is owed a widening of either accept set.",
+    "",
+    "THE ROW SET MUST KEEP ALL THREE SHAPES -- yes/yes, no/yes, no/no. Without a",
+    "yes/yes row, a mutation that refuses everything passes; without a no/no row,",
+    "one that admits everything passes.",
+    "",
+    "THIS FILE IS SHARED, BYTE FOR BYTE. mnemonic-engrave is the primary",
+    "(crates/me-cli/testdata/codex32_seam_vectors.json); the seedhammer fork",
+    "carries a vendored copy at sysw/testdata/codex32_seam_vectors.json. Both",
+    "tests pin the SAME sha256 of this file as a literal, so the two copies",
+    "cannot drift without one of the two suites going red. To change a row:",
+    "  1. edit this file",
+    "  2. sha256sum crates/me-cli/testdata/codex32_seam_vectors.json",
+    "  3. put that value in SEAM_VECTORS_SHA256 in",
+    "     crates/me-cli/tests/codex32_seam.rs AND in seamVectorsSHA256 in the",
+    "     fork's sysw/codex32_seam_test.go",
+    "  4. copy the file to the fork",
+    "",
+    "PROVENANCE is per row, in each row's `source`."
+  ],
+  "invariant": "host_admits => device_admits",
+  "vectors": [
+    {
+      "name": "bip93-secret-128",
+      "string": "ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
+      "chars": 48,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "BIP-93 test vector 1, the unshared 128-bit secret (id `test`). Verbatim from the fork's codex32/codex32_test.go TestBIPVector1. THE KNOWN DIVERGENCE: valid BIP-93, 48 characters, so outside the constellation profile's length sets."
+    },
+    {
+      "name": "bip93-secret-256",
+      "string": "ms10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqtum9pgv99ycma",
+      "chars": 74,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "BIP-93 test vector 4, the unshared 256-bit secret (id `leet`, seed ffeeddccbbaa99887766554433221100 twice). Verbatim from the fork's codex32/codex32_test.go TestBIPVector4. THE KNOWN DIVERGENCE at the 256-bit size: 74 characters."
+    },
+    {
+      "name": "bip93-share",
+      "string": "ms13cashsllhdmn9m42vcsamx24zrxgs3qqjzqud4m0d6nln",
+      "chars": 48,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "BIP-93 test vector 3, share `s` of a 2-of-3 split (threshold 3, id `cash`). Verbatim from the fork's codex32/codex32_test.go TestBIPVector3. A SHARE is not a constellation record at all -- it fails both gates, the length and the id."
+    },
+    {
+      "name": "constellation-entr-128",
+      "string": "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f",
+      "chars": 50,
+      "host_admits": true,
+      "device_admits": true,
+      "source": "The repo's canonical 128-bit constellation ms1 fixture (crates/me-cli/tests/cli.rs MS1 and eight other sites). ms_codec::inspect reports tag `entr`, kind Entr, 16 payload bytes, checksum valid. Packs today: `me sysw pack` writes a payload from it."
+    },
+    {
+      "name": "constellation-entr-256",
+      "string": "ms10entrsqqg5y2z9pzs3gg5y2z9pzs3gg5y2z9pzs3gg5y2z9pzs3gg5y2z9q5f042qmrw90mw",
+      "chars": 75,
+      "host_admits": true,
+      "device_admits": true,
+      "source": "The 256-bit constellation ms1 of the bip84 `bacon`x24 bundle, emitted by `mnemonic bundle --group-size 0` (crates/me-cli/src/seal/mod.rs bip84()). ms_codec::inspect reports tag `entr`, kind Entr, 32 payload bytes, checksum valid."
+    },
+    {
+      "name": "entr-id-but-off-profile-length-90",
+      "string": "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqutd7mdh2lc8h2",
+      "chars": 90,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "MS1_90 in crates/me-cli/src/seal/record.rs -- a real 42-byte-seed codex32 generated in the fork by `head -c 42 /dev/zero | go run ./cmd/biptool seed -seedlen 42 -id entr`. THE ID IS `entr` AND IT STILL FAILS: 90 is in neither profile length set. This row is why the message may not blame the id alone. It is also the LAST length a seed plate's QR can carry, so the device admits it."
+    },
+    {
+      "name": "past-the-engraveable-cap-91",
+      "string": "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2uk6ly9a0dmw4",
+      "chars": 91,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "MS1_91 in crates/me-cli/src/seal/record.rs, same generator at -seedlen 43. One character past MAX_ENGRAVEABLE_MS1_LEN = 90, which BOTH sides apply (Rust RecordError::MsTooLong; Go sysw.MaxEngraveableMs1Len). An agreement row on the far side of the cap."
+    },
+    {
+      "name": "bip93-bad-checksum",
+      "string": "ms10fauxsxxxxxxxxxxxxxxxxxxxxxxxxxxve740yyge2ghp",
+      "chars": 48,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "BIP-93's own BAD-CHECKSUM vector, verbatim from the fork's codex32/codex32_test.go TestBIPBadChecksums (and codex32/polish_test.go, which pins Describe(err) == \"bad checksum\"). THE NEGATIVE CONTROL: neither side admits it, so a mutation that admits everything cannot pass."
+    }
+  ]
+}
