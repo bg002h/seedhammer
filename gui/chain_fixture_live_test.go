@@ -93,6 +93,35 @@ func TestChainFixturesStillMatchWhatMeEmits(t *testing.T) {
 	for _, p := range doc.Payloads {
 		t.Run(p.Name, func(t *testing.T) {
 			dir := t.TempDir()
+			// A FILE-BACKED fixture names a container this repo already holds
+			// (cmd/emu/sysw_cards_payload.bin), so there is nothing to re-emit
+			// -- and re-emitting it would need `go run ./cmd/buildpayloadcards`
+			// besides. What CAN go stale is the DIGEST, so that is what is
+			// audited here: `me sysw show` over the file, against the pin. The
+			// bytes themselves are checked on every ordinary run, by
+			// chainBytes' sha256.
+			if p.File != "" {
+				blob := filepath.Join("testdata", "chain", p.File)
+				cmd := exec.Command(path, "sysw", "show", blob)
+				var out, errb strings.Builder
+				cmd.Stdout, cmd.Stderr = &out, &errb
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("%s sysw show %s: %v\n%s", path, blob, err, errb.String())
+				}
+				digest := chainDigestLine(out.String() + errb.String())
+				if digest == "" {
+					t.Fatalf("`me sysw show` printed no digest line for %s:\n%s%s",
+						blob, out.String(), errb.String())
+				}
+				if digest != p.Digest {
+					t.Fatalf("the recorded digest for %s is STALE: `me` prints %q, "+
+						"the fixture holds %q. Re-record with "+
+						"./scripts/gen-chain-fixtures.sh -- and note that "+
+						"cmd/emu/sysw_cards_payload.go and cmd/emu/walk_trace_a.js "+
+						"pin the same number.", blob, digest, p.Digest)
+				}
+				return
+			}
 			recs := filepath.Join(dir, "records.txt")
 			if err := os.WriteFile(recs, []byte(strings.Join(p.Records, "\n")+"\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -144,12 +173,7 @@ func TestChainFixturesStillMatchWhatMeEmits(t *testing.T) {
 			// one the walks assert against a device screen. Re-read it from the
 			// CLI rather than recomputing it here: two implementations of one
 			// number is what the pin exists to avoid.
-			var digest string
-			for _, line := range strings.Split(stderr.String(), "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "digest:") {
-					digest = strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
-				}
-			}
+			digest := chainDigestLine(stderr.String())
 			if digest == "" {
 				t.Fatalf("`me sysw pack` printed no digest line; the fixture's "+
 					"`digest` field can no longer be audited.\n%s", stderr.String())
@@ -160,4 +184,18 @@ func TestChainFixturesStillMatchWhatMeEmits(t *testing.T) {
 			}
 		})
 	}
+}
+
+// chainDigestLine pulls the `digest:` line out of an `me` invocation's output.
+// One implementation, because `pack` prints it on stderr and `show` on stderr
+// too but with the record listing on stdout, and two copies of this parse is
+// how one of them ends up looking at the wrong stream.
+func chainDigestLine(s string) string {
+	var digest string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "digest:") {
+			digest = strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
+		}
+	}
+	return digest
 }

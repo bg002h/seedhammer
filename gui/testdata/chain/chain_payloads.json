@@ -94,6 +94,102 @@
       "bytes": 499,
       "sha256": "c302e07b1eab1c93c7b9b06c28075ccb38f3b8806d8c605673af33ae8716a792",
       "digest": "c282 6ca8 4f21 2887 02cc 70f0 91d7 5d34"
+    },
+    {
+      "name": "chain-seed",
+      "note": "ClassMnemonic alone. A SECRET in cleartext, so the device raises F1 and offers KEEP/UNLOAD -- two screens the transaction chains never reach.",
+      "command": [
+        "me",
+        "sysw",
+        "pack",
+        "--in",
+        "<records>",
+        "--no-passphrase",
+        "--out",
+        "chain-seed.bin"
+      ],
+      "records": [
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      ],
+      "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000005d000000006162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e206162616e646f6e2061626f7574",
+      "bytes": 145,
+      "sha256": "0e920c8b4fb6055b2e595a934861729650e73aeac7a0ca372995e0e084f1ec92",
+      "digest": "f36e 9900 a235 0b1e 1c5f c580 2623 32b9"
+    },
+    {
+      "name": "chain-codex32",
+      "note": "ClassCodex32Secret alone -- the 50-char vector, which is the length me accepts. Also a secret, so F1 fires here too.",
+      "command": [
+        "me",
+        "sysw",
+        "pack",
+        "--in",
+        "<records>",
+        "--no-passphrase",
+        "--out",
+        "chain-codex32.bin"
+      ],
+      "records": [
+        "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f"
+      ],
+      "blob": "4d4e454d5359535701000000000000000000000000000000000000000000000000000000000000000000000000000032000000006d733130656e74727371717171717171717171717171717171717171717171717171717171636a3973787261713334763766",
+      "bytes": 102,
+      "sha256": "6ba505da9fe52b92faf81ebff9987d369de3637c0da44942818b849987b50b6f",
+      "digest": "313a 85da 2fb6 5406 da36 ead1 c215 a7e7"
+    },
+    {
+      "name": "chain-text",
+      "note": "ClassFreeText alone. Not secret, so no F1: the load flow goes offer -> digest -> program.",
+      "command": [
+        "me",
+        "sysw",
+        "pack",
+        "--in",
+        "<records>",
+        "--no-passphrase",
+        "--out",
+        "chain-text.bin"
+      ],
+      "records": [
+        "text:5345454448414d4d455220494920434841494e2057414c4b"
+      ],
+      "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000003500000000746578743a353334353435343434383431346434643435353232303439343932303433343834313439346532303537343134633462",
+      "bytes": 105,
+      "sha256": "789e62a355acd1010360cec6340176d766cb644e5a4a2a5912949cf3d2e9828f",
+      "digest": "f802 8b09 a39e bc14 f745 baf2 c55e 918d"
+    },
+    {
+      "name": "chain-pass",
+      "note": "ClassPassphrase alone -- the xkcd string, hex-encoded per \u00a75.3.1. Secret, so F1 fires.",
+      "command": [
+        "me",
+        "sysw",
+        "pack",
+        "--in",
+        "<records>",
+        "--no-passphrase",
+        "--out",
+        "chain-pass.bin"
+      ],
+      "records": [
+        "pass:636f727265637420686f727365206261747465727920737461706c65"
+      ],
+      "blob": "4d4e454d535953570100000000000000000000000000000000000000000000000000000000000000000000000000003d00000000706173733a3633366637323732363536333734323036383666373237333635323036323631373437343635373237393230373337343631373036633635",
+      "bytes": 113,
+      "sha256": "a5c7d6dbc318db36cff4a5ed40fd27551a15d0a2b4c03f9eb1072e66ef7a9300",
+      "digest": "760c 6f11 b4ed 1892 9fff 63a0 ad34 8612"
+    },
+    {
+      "name": "chain-mdmk",
+      "note": "ClassMDMK: cmd/emu/sysw_cards_payload.bin itself -- four cosigner cards (9 mk1 chunks) plus master A's mnemonic. The SAME bytes cmd/emu/walk_trace_a.js loads, read by path so the two cannot drift.",
+      "command": [
+        "go run ./cmd/buildpayloadcards | me sysw pack --no-passphrase --in - --out cmd/emu/sysw_cards_payload.bin"
+      ],
+      "records": [],
+      "file": "../../../cmd/emu/sysw_cards_payload.bin",
+      "bytes": 978,
+      "sha256": "224466a07765da809002f779372ca62401b72339e91e4bca35b3449a9cb919c5",
+      "digest": "2527 1e58 3f3e aa03 ae18 f359 c72b 76e3"
     }
   ]
 }

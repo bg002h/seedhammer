@@ -88,6 +88,47 @@ sys.stdout.write(",\n")
 PY
 }
 
+# emit_file <name> <note> <path-relative-to-repo-root> <command...>
+#
+# Records a container that ALREADY EXISTS in the tree instead of writing a new
+# one. There is exactly one user -- cmd/emu/sysw_cards_payload.bin -- and the
+# reason is the whole point of this function: cmd/emu/walk_trace_a.js drives
+# that blob to a completed engrave in the browser, and a SECOND CLI-built
+# ClassMDMK container beside it would be two payloads that can drift apart with
+# only one of them failing a CI run. So the go test reads the emulator's own
+# bytes, by path, and nothing is copied.
+#
+# The digest comes from `me sysw show` over that file, so the JSON entry is
+# still bound to the CLI rather than to a constant somebody typed.
+# TestChainMdMkFixtureIsTheEmulatorsOwnPayload then requires this digest, the
+# `syswCardsDigest` constant in cmd/emu/sysw_cards_payload.go and
+# walk_trace_a.js's CARDS_DIGEST to be one value.
+emit_file() {
+  local name="$1" note="$2" rel="$3"; shift 3
+  local blob="$root/$rel"
+  "$ME" sysw show "$blob" > "$work/$name.out" 2> "$work/$name.err"
+  python3 - "$name" "$note" "$rel" "$blob" "$work/$name.out" "$work/$name.err" "$@" <<'PY' >> "$work/entries.json"
+import hashlib, json, os, sys
+name, note, rel, blob, outf, errf, *cmd = sys.argv[1:]
+b = open(blob, 'rb').read()
+digest = ""
+for line in open(outf).read().splitlines() + open(errf).read().splitlines():
+    if line.startswith("digest:"):
+        digest = line.split(":", 1)[1].strip()
+# The path is stored RELATIVE TO THE JSON, because that is the only anchor the
+# Go test has: it resolves testdata/chain/<file>. gui/testdata/chain -> root is
+# three levels up.
+json.dump({
+    "name": name, "note": note, "command": cmd, "records": [],
+    "file": os.path.join("..", "..", "..", rel),
+    "bytes": len(b),
+    "sha256": hashlib.sha256(b).hexdigest(),
+    "digest": digest,
+}, sys.stdout, indent=2)
+sys.stdout.write(",\n")
+PY
+}
+
 : > "$work/entries.json"
 
 { cat "$work/even.mt1"; printf 'tx:%s\n' "$signed"; } > "$work/chain-tx.rec"
@@ -104,6 +145,62 @@ printf 'tx:%s\n' "$signed" > "$work/chain-txonly.rec"
 emit chain-txonly \
   "a tx: record alone -- the QR-only payload. No mt1 strings, so TEXT PLATES is not offered." \
   "$work/chain-txonly.rec"
+
+# ─── one payload per remaining PACKABLE class ───────────────────────────────
+#
+# All four are TEST MATERIAL, public by construction, and the two secret ones
+# are published vectors: never put funds behind them. Each holds exactly ONE
+# record, because the subject of these chains is the class and a second record
+# would only add screens.
+#
+# `me sysw pack` REFUSES Descriptor and Address (rc=4, "Descriptors and
+# addresses are not yet classifiable here -- see sysw::classify"), so there is
+# no fixture for either and there cannot be one.
+
+# ClassMnemonic. BIP-39's own all-zero-entropy vector, which is also
+# cmd/emu/sysw_test_payload.bin's seed and gui's fixtureMasterA.
+printf 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\n' \
+  > "$work/chain-seed.rec"
+emit chain-seed \
+  "ClassMnemonic alone. A SECRET in cleartext, so the device raises F1 and offers KEEP/UNLOAD -- two screens the transaction chains never reach." \
+  "$work/chain-seed.rec"
+
+# ClassCodex32Secret. THE LENGTH MATTERS AND IT IS NOT BIP-93's.
+# `me`'s ms_codec v0.1 accepts codex32 string lengths [50, 56, 62, 69, 75] only.
+# The fork's own committed ms1 fixtures are 48 (backup_test.go's `ms13cash…`)
+# and 74 (gui/sysw_cells_test.go's cellMs1); Go's codex32.New accepts both and
+# `me sysw pack` REFUSES both at rc=4. This is the crate's own 50-char vector.
+printf 'ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f\n' > "$work/chain-codex32.rec"
+emit chain-codex32 \
+  "ClassCodex32Secret alone -- the 50-char vector, which is the length me accepts. Also a secret, so F1 fires here too." \
+  "$work/chain-codex32.rec"
+
+# ClassFreeText / ClassPassphrase. Spec §5.3.1 makes both bodies LOWERCASE HEX
+# and refuses a non-hex body as ClassUnknown, so the hex is required rather than
+# stylistic -- the same trap sysw_test_payload.go records.
+python3 - "$work" <<'PY'
+import binascii, sys
+w = sys.argv[1]
+open(w + "/chain-text.rec", "w").write(
+    "text:" + binascii.hexlify(b"SEEDHAMMER II CHAIN WALK").decode() + "\n")
+open(w + "/chain-pass.rec", "w").write(
+    "pass:" + binascii.hexlify(b"correct horse battery staple").decode() + "\n")
+PY
+emit chain-text \
+  "ClassFreeText alone. Not secret, so no F1: the load flow goes offer -> digest -> program." \
+  "$work/chain-text.rec"
+emit chain-pass \
+  "ClassPassphrase alone -- the xkcd string, hex-encoded per §5.3.1. Secret, so F1 fires." \
+  "$work/chain-pass.rec"
+
+# ClassMDMK: THE EMULATOR'S OWN BYTES, BY PATH, NOT A SECOND COPY.
+# cmd/emu/walk_trace_a.js drives this exact blob to a completed engrave in the
+# browser. Packing a second ClassMDMK container here would create two CLI-built
+# payloads that can drift, with only one of them failing a CI run.
+emit_file chain-mdmk \
+  "ClassMDMK: cmd/emu/sysw_cards_payload.bin itself -- four cosigner cards (9 mk1 chunks) plus master A's mnemonic. The SAME bytes cmd/emu/walk_trace_a.js loads, read by path so the two cannot drift." \
+  cmd/emu/sysw_cards_payload.bin \
+  "go run ./cmd/buildpayloadcards | me sysw pack --no-passphrase --in - --out cmd/emu/sysw_cards_payload.bin"
 
 python3 - "$out" "$ME_VERSION" "$MT_VERSION" "$work/entries.json" <<'PY'
 import json, sys

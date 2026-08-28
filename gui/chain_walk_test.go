@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"seedhammer.com/bspline"
+	"seedhammer.com/gui/op"
 	"seedhammer.com/internal/golden"
 	"seedhammer.com/sysw"
 )
@@ -53,9 +56,24 @@ import (
 //   - THE FIXTURE IS PINNED, NOT LIVE. The committed bytes are `me` output, but
 //     this test does not run `me`; chain_fixture_live_test.go (build tag
 //     `oraclelive`) does, and is what catches drift.
-//   - ONE RECORD KIND. Tx and Mt only. The other six packable classes reach no
-//     engrave walk from a payload at all; see design/agent-reports for the
-//     matrix.
+//   - THE WALK PRESSES BUTTONS WHERE A FINGER WOULD DO. Most steps below are
+//     driven by synthesized Button/Down events rather than by taps hit-tested
+//     against the drawn frame. gui/passphrase_flow_test.go's header states why
+//     that is weaker: SeedHammer II has no directional buttons, so a screen
+//     wired to ButtonFilter alone is dead on the machine and green here. The
+//     harness runs under runUITouch and exposes drawer()/tapNav for the steps
+//     that need the stronger check, and the free-text and password chains use
+//     it -- but every step that uses click() is a step this chain does NOT
+//     prove a finger can reach.
+//   - UNSEALED ONLY. `me sysw pack` is deterministic for the unsealed variant
+//     and not for the sealed one, so no fixture here can be byte-pinned as
+//     sealed. The KDF entry path is walked by gui/sysw_load_test.go instead.
+//
+// WHICH RECORD KINDS. Tx and Mt here; the other five packable classes are in
+// gui/chain_class_walk_test.go, which uses this file's harness. ClassDescriptor
+// and ClassAddress have NO chain and cannot have one: `me sysw pack` refuses
+// both at rc=4 ("Descriptors and addresses are not yet classifiable here -- see
+// sysw::classify"), so neither can enter a payload in the first place.
 
 // chainPayload is one entry of gui/testdata/chain/chain_payloads.json.
 type chainPayload struct {
@@ -63,9 +81,18 @@ type chainPayload struct {
 	Note    string   `json:"note"`
 	Command []string `json:"command"`
 	Records []string `json:"records"`
-	Blob    string   `json:"blob"`
-	Bytes   int      `json:"bytes"`
-	SHA256  string   `json:"sha256"`
+	// Blob is the container as hex. EMPTY for a file-backed fixture; exactly
+	// one of Blob and File is set.
+	Blob string `json:"blob"`
+	// File is a path, relative to chain_payloads.json, to a container that
+	// ALREADY EXISTS in the tree. It is how a fixture is SHARED rather than
+	// copied: chain-mdmk names cmd/emu/sysw_cards_payload.bin, the same bytes
+	// cmd/emu/walk_trace_a.js drives to a completed engrave in the browser.
+	// Two CLI-built ClassMDMK containers could drift apart with only one of
+	// them failing a CI run; one file cannot.
+	File   string `json:"file"`
+	Bytes  int    `json:"bytes"`
+	SHA256 string `json:"sha256"`
 	// Digest is what `me sysw show` printed for these bytes. The device
 	// recomputes it from the container; the walk asserts the Payload Digest
 	// screen shows THIS string. That equality is the whole host/device binding
@@ -109,15 +136,58 @@ func chainPayloadNamed(t *testing.T, name string) chainPayload {
 // asserting it in Go is cheaper than storing 64 KiB of 0xFF three times.
 // scripts/gen-chain-fixtures.sh's own `--region` output was checked against
 // this construction when the fixtures were made.
-func chainRegion(t *testing.T, p chainPayload) sysw.Reader {
+// chainBytes resolves a fixture to the container bytes, from EITHER the
+// embedded hex or the file it names, and checks both length and sha256 against
+// what the fixture records.
+//
+// THE HASH CHECK IS WHAT MAKES A FILE-BACKED FIXTURE SAFE. An embedded blob
+// cannot change without this file changing; a file can, because it belongs to
+// another program. So chain-mdmk's sha256 is the alarm: regenerate
+// cmd/emu/sysw_cards_payload.bin and this fails, naming the generator that
+// re-syncs it, instead of the walk quietly measuring a different payload.
+func chainBytes(t *testing.T, p chainPayload) []byte {
 	t.Helper()
-	b, err := hex.DecodeString(p.Blob)
-	if err != nil {
-		t.Fatalf("payload %s: blob is not hex: %v", p.Name, err)
+	if (p.Blob == "") == (p.File == "") {
+		t.Fatalf("payload %s: exactly one of `blob` and `file` must be set "+
+			"(blob=%d chars, file=%q)", p.Name, len(p.Blob), p.File)
+	}
+	var b []byte
+	var err error
+	if p.File != "" {
+		path := filepath.Join("testdata", "chain", p.File)
+		b, err = os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("payload %s names %s, which is unreadable: %v\n"+
+				"That file belongs to another program (cmd/emu); this fixture "+
+				"points at it so the two cannot drift. Re-run "+
+				"./scripts/gen-chain-fixtures.sh if it moved.", p.Name, path, err)
+		}
+	} else {
+		b, err = hex.DecodeString(p.Blob)
+		if err != nil {
+			t.Fatalf("payload %s: blob is not hex: %v", p.Name, err)
+		}
 	}
 	if len(b) != p.Bytes {
-		t.Fatalf("payload %s: blob is %d bytes, the fixture says %d", p.Name, len(b), p.Bytes)
+		t.Fatalf("payload %s: container is %d bytes, the fixture says %d", p.Name, len(b), p.Bytes)
 	}
+	if got := hex.EncodeToString(chainSHA(b)); got != p.SHA256 {
+		t.Fatalf("payload %s: the container hashes to %s, the fixture pins %s.\n"+
+			"Re-record with ./scripts/gen-chain-fixtures.sh and re-run the walks -- "+
+			"a changed container changes the digest the device shows, which is the "+
+			"number every chain asserts.", p.Name, got, p.SHA256)
+	}
+	return b
+}
+
+func chainSHA(b []byte) []byte {
+	s := sha256.Sum256(b)
+	return s[:]
+}
+
+func chainRegion(t *testing.T, p chainPayload) sysw.Reader {
+	t.Helper()
+	b := chainBytes(t, p)
 	region := make([]byte, sysw.RegionLen)
 	for i := range region {
 		region[i] = 0xFF
@@ -133,18 +203,43 @@ func chainRegion(t *testing.T, p chainPayload) sysw.Reader {
 // chainWalk is txWalk with the first two links attached: the session is not
 // built in Go, it is READ from a region holding a container `me` wrote, through
 // syswLoadFlow's real screens.
+//
+// IT IS PARAMETERISED BY THE FLOW, once. Every packable class needs the same
+// first two links and a different third, and the alternative -- a
+// newChainWalk copy per class -- is five harnesses that must be kept in step
+// by hand. The load half is the half most likely to change (an extra warning
+// screen, a reordered offer), so it is the half that must have one home.
 type chainWalk struct {
-	t     *testing.T
-	pay   chainPayload
-	ctx   *Context
-	eng   *testEngraver
-	pl    *engravedAwarePlatform
-	frame func() (string, bool)
-	quit  func()
-	last  string
+	t   *testing.T
+	pay chainPayload
+	ctx *Context
+	eng *testEngraver
+	pl  *engravedAwarePlatform
+	// secret is whether THIS payload raises F1, computed from the fixture's own
+	// bytes through the device's own rule (syswFlags) before the walk starts.
+	// ingest() uses it to require the warning screens rather than probe for
+	// them: a chain that tapped past whatever appeared would pass equally on a
+	// build that stopped warning at all.
+	secret   bool
+	frame    func() (string, bool)
+	drawer   func() *op.Drawer
+	quit     func()
+	last     string
+	widgets  map[string]any
+	returned bool
 }
 
+// chainFlow is the program a chain runs once the payload is loaded. It has the
+// signature every top-level flow in this package already has, so a chain names
+// the production entry point and never a test-local wrapper.
+type chainFlow func(ctx *Context, th *Colors)
+
 func newChainWalk(t *testing.T, name string) *chainWalk {
+	t.Helper()
+	return newChainWalkFlow(t, name, engraveTransactionFlow)
+}
+
+func newChainWalkFlow(t *testing.T, name string, flow chainFlow) *chainWalk {
 	t.Helper()
 	pay := chainPayloadNamed(t, name)
 	e := newEngraver()
@@ -153,17 +248,118 @@ func newChainWalk(t *testing.T, name string) *chainWalk {
 	p.display = sh2DisplaySize
 	p.sysw = chainRegion(t, pay)
 	ctx := NewContext(p)
-	w := &chainWalk{t: t, pay: pay, ctx: ctx, eng: e, pl: p}
-	w.frame, w.quit = runUI(ctx, func() {
+	w := &chainWalk{
+		t: t, pay: pay, ctx: ctx, eng: e, pl: p,
+		secret:  chainRaisesF1(t, pay),
+		widgets: make(map[string]any),
+	}
+	// The widget registry the free-text and password steps need to tap real
+	// drawn geometry. Registered here rather than in each chain so a flow that
+	// never uses it costs nothing but a nil map lookup.
+	passphraseWidgetHook = func(name string, wd any) { w.widgets[name] = wd }
+	t.Cleanup(func() { passphraseWidgetHook = nil })
+	w.frame, w.drawer, w.quit = runUITouch(ctx, func() {
 		// atBoot=true: the offer screen, the digest comparison and the warning
 		// summary, exactly as gui.go:2031 calls it at start-up. ctx.sysw is
 		// assigned by this call and by nothing in the test.
 		if !syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), true) {
 			return
 		}
-		engraveTransactionFlow(ctx, &descriptorTheme)
+		flow(ctx, &descriptorTheme)
+		w.returned = true
 	})
 	return w
+}
+
+// chainRaisesF1 answers "does this payload put a secret in flash unencrypted?"
+// from the fixture's bytes, through syswFlags -- the device's own rule, not a
+// second copy of it keyed on the fixture's name.
+func chainRaisesF1(t *testing.T, p chainPayload) bool {
+	t.Helper()
+	b := chainBytes(t, p)
+	pay, err := sysw.Open(b, "")
+	if err != nil {
+		t.Fatalf("payload %s cannot be opened by the firmware's own sysw.Open: %v", p.Name, err)
+	}
+	s := &syswSession{}
+	// sealed=false because no chain fixture can be sealed (the sealed variant is
+	// not byte-deterministic); cliffAbove is irrelevant to F1, whose rule is
+	// `secret && srcPayload && !sealed`.
+	s.load(pay, sysw.Identity(b), false, true, true, true)
+	return syswHasFlag(s, flagSecretInPlaintext)
+}
+
+// tapNav taps a navigation slot by real drawn geometry, asserting the target
+// actually there is bound to that button. Where a chain step uses this instead
+// of click(), it proves a finger could have done it.
+func (w *chainWalk) tapNav(b Button) {
+	w.t.Helper()
+	tapNavSlot(w.t, w.ctx, w.drawer(), b)
+}
+
+// widget returns a widget the running step registered through
+// passphraseWidgetHook, failing if the step never constructed it.
+func (w *chainWalk) widget(name string) any {
+	w.t.Helper()
+	wd, ok := w.widgets[name]
+	if !ok {
+		var have []string
+		for n := range w.widgets {
+			have = append(have, n)
+		}
+		w.t.Fatalf("the flow never registered a %q widget; have %v", name, have)
+	}
+	return wd
+}
+
+// point returns the centre of tag's hit area, failing if the target is not
+// drawn, is off-panel, or is covered -- each of which makes it unreachable by
+// a finger. Lifted from ppHarness.point, which states the argument in full.
+func (w *chainWalk) point(tag op.Tag, what string) image.Point {
+	w.t.Helper()
+	d := w.drawer()
+	b, ok := d.TagBounds(tag)
+	if !ok {
+		w.t.Fatalf("%s: no hit area was drawn -- unreachable by touch", what)
+	}
+	c := b.Min.Add(b.Max).Div(2)
+	screen := image.Rectangle{Max: w.ctx.Platform.DisplaySize()}
+	if !c.In(screen) {
+		w.t.Fatalf("%s: hit area %v lies off the %v panel -- unreachable by a finger", what, b, screen)
+	}
+	if hit, _, ok := d.Hit(c); !ok || hit != tag {
+		w.t.Fatalf("%s: hit area %v is covered by another target (%v)", what, b, hit)
+	}
+	return c
+}
+
+// tapWidget taps a registered Clickable by name, on real drawn geometry.
+func (w *chainWalk) tapWidget(name string) {
+	w.t.Helper()
+	c, ok := w.widget(name).(*Clickable)
+	if !ok {
+		w.t.Fatalf("widget %q is not a *Clickable", name)
+	}
+	tap(&w.ctx.Router, w.drawer(), w.point(c, "widget "+name))
+	w.frame()
+}
+
+// chooseWidget selects choice i on a registered ChoiceScreen and confirms it.
+// Selecting is not choosing: ChoiceScreen returns on its OWN primary nav
+// button, which it owns privately, so the confirmation is a nav tap.
+func (w *chainWalk) chooseWidget(name string, i int) {
+	w.t.Helper()
+	cs, ok := w.widget(name).(*ChoiceScreen)
+	if !ok {
+		w.t.Fatalf("widget %q is not a *ChoiceScreen", name)
+	}
+	if i >= len(cs.children) {
+		w.t.Fatalf("choice %d out of range on %q (%d drawn)", i, name, len(cs.children))
+	}
+	tap(&w.ctx.Router, w.drawer(), w.point(&cs.children[i].click, "choice "+cs.Choices[i]))
+	w.frame()
+	w.tapNav(Button3)
+	w.frame()
 }
 
 func (w *chainWalk) until(want string) string {
@@ -224,6 +420,37 @@ func (w *chainWalk) ingest() {
 		w.t.Errorf("the screen must name the command that prints the other number: %q", got)
 	}
 	w.confirm() // the comparison IS route 2 of [compared]
+
+	// F1: a payload carrying a secret in cleartext summarises its warnings and
+	// then offers KEEP/UNLOAD (gui/sysw_load.go). Five of the eight fixtures
+	// reach these two screens and three do not, and WHICH is not guessed -- it
+	// is w.secret, computed from the bytes through syswFlags before the walk
+	// started. Requiring the screens rather than probing for them is what makes
+	// the assertion able to fail: a build that stopped warning entirely would
+	// pass a conditional "if it appeared, tap it".
+	if w.secret {
+		got = w.until("Payload Warnings")
+		if !uiContains(got, "unencrypted in flash") {
+			w.t.Errorf("the warning summary must say a secret is unencrypted in "+
+				"flash; got %q", got)
+		}
+		w.confirm()
+		got = w.until("Keep this payload loaded?")
+		w.confirm() // KEEP is choice 0
+	}
+}
+
+// chainNoSecretWarning is ingest()'s negative, asserted once per non-secret
+// chain rather than in ingest itself: if a payload that carries no secret ever
+// starts drawing the F1 screens, the chains would silently start tapping past
+// them.
+func (w *chainWalk) assertF1(want bool) {
+	w.t.Helper()
+	if w.secret != want {
+		w.t.Fatalf("payload %s raises F1 = %v, this chain is written for %v.\n"+
+			"The screens ingest() drives depend on this, so the chain is measuring "+
+			"a different load than it says.", w.pay.Name, w.secret, want)
+	}
 }
 
 // ─── THE CHAIN: a me-packed payload, loaded, walked, cut, rendered ──────────
@@ -385,31 +612,48 @@ func chainGoldenPlate(t *testing.T, w *chainWalk, qr bool, goldenName, wantTitle
 		t.Fatalf("the re-planned plate is titled %q, not %q -- so this is not the "+
 			"plate the walk's own plate screen named", titles[0], wantTitle)
 	}
+	return chainCompareGolden(t, w, goldenName, plates[0], note, "TestTransactionPlateGoldens")
+}
+
+// chainCompareGolden is link (4) itself, shared by every chain: compare ONE
+// plate reached from CLI bytes against the committed golden a Go-built route
+// recorded, and leave the artifact where a human can look at it.
+//
+// update is ALWAYS false here, whatever -update was passed. Each chain asserts
+// an EQUALITY between two routes to one plate; letting the CLI route re-record
+// would let it silently redefine the golden the Go route is measured against,
+// which is the one thing the comparison exists to prevent. `recorder` names the
+// test that MAY re-record, so a failure message points at it.
+//
+// CompareBSpline writes <name>.bin.svg into dumpDir unconditionally, so the
+// artifact exists whether or not the comparison passes. dumpDir is t.TempDir(),
+// and CHAIN_PLATE_OUT copies it out -- the shape TX_JOURNEY_OUT uses, for the
+// same reason: a capture nobody can look at is not evidence, and a file left in
+// the worktree is litter.
+func chainCompareGolden(t *testing.T, w *chainWalk, goldenName string, plate Plate, note, recorder string) string {
+	t.Helper()
 	// A golden over an EMPTY engraving passes forever. Measure unions only
 	// ENGRAVED segments, so this asks about ink and not about travel moves.
-	if bspline.Measure(plates[0].Spline).Bounds.Empty() {
+	if bspline.Measure(plate.Spline).Bounds.Empty() {
 		t.Fatal("the plate cuts nothing")
 	}
 	P := w.ctx.Platform.EngraverParams()
 	bounds := bspline.Bounds{Max: SquarePlate.Dims(P.Millimeter)}
 	dir := t.TempDir()
-	// update is ALWAYS false here, whatever -update was passed. This test
-	// asserts an EQUALITY between two routes to one plate; letting it re-record
-	// would let the CLI route silently redefine the golden the Go route is
-	// measured against, which is the one thing it exists to prevent.
 	if err := golden.CompareBSpline(filepath.Join("testdata", goldenName+".bin"),
-		false, dir, P.StrokeWidth, bounds, plates[0].Spline); err != nil {
+		false, dir, P.StrokeWidth, bounds, plate.Spline); err != nil {
 		t.Fatalf("the plate reached from a `me sysw pack` payload is NOT the plate "+
 			"%s pins: %v\n\n"+
-			"That golden was recorded from a Go-built session. A difference means "+
+			"That golden was recorded from a Go-built route. A difference means "+
 			"the CLI route and the Go-literal route produce different steel -- diff\n"+
 			"  %s   what the CLI route draws\n"+
 			"  %s   what the golden holds\n"+
 			"Do NOT re-record from here; fix the divergence or re-record through "+
-			"TestTransactionPlateGoldens.",
+			"%s.",
 			goldenName, err,
 			filepath.Join(dir, goldenName+".bin.svg"),
-			filepath.Join(dir, goldenName+".bin.orig.svg"))
+			filepath.Join(dir, goldenName+".bin.orig.svg"),
+			recorder)
 	}
 	art := filepath.Join(dir, goldenName+".bin.svg")
 	fi, err := os.Stat(art)
@@ -429,6 +673,50 @@ func chainGoldenPlate(t *testing.T, w *chainWalk, qr bool, goldenName, wantTitle
 		t.Logf("also wrote %s", out)
 	}
 	return art
+}
+
+// engraveOnePlate drives ONE plate from its first screen to the operator
+// accepting the finished cut, and is what every chain but the transaction ones
+// uses.
+//
+// IT WAITS ON THE PLATFORM'S WAKEUPS RATHER THAN COUNTING FRAMES. The
+// package's other helper (engraveOnePlate in gui/multisig_build_walk_test.go)
+// spins `frame()` up to 4096 times, which is enough for an md1 chunk and is
+// NOT enough for a 12-word seed plate -- measured: both class chains failed
+// there first, reporting "the engrave never closed the engraver" on a cut that
+// was progressing perfectly well. A bound expressed in frames is a bound on
+// how much STEEL a plate may cut, which is not a property a harness should
+// have an opinion about.
+func (w *chainWalk) engraveOnePlate() {
+	w.t.Helper()
+	click(&w.ctx.Router, Button3, Button3, Button3)
+	press(&w.ctx.Router, Button3)
+	w.frame()
+	time.Sleep(confirmDelay)
+	for {
+		w.frame()
+		select {
+		case <-w.eng.closes:
+			synctest.Wait()
+			click(&w.ctx.Router, Button3) // accept the finished plate
+			// AND PUMP, because a click only QUEUES an event: events are
+			// consumed on the UI side of iter.Pull and nothing advances that
+			// but frame(). Without this the accept never lands, Engrave
+			// returns "not completed", and the flow loops into a fresh engrave
+			// job -- measured on the codex32 chain, which then blocked in
+			// backupSeedStringFlow's `for { NewEngraveScreen(...).Engrave(...) }`
+			// until the test timed out, twenty seconds AFTER every assertion in
+			// it had already passed.
+			for i := 0; i < 8; i++ {
+				if _, ok := w.frame(); !ok {
+					break
+				}
+			}
+			synctest.Wait()
+			return
+		case <-w.pl.wakeups:
+		}
+	}
 }
 
 // ─── the TEXT half of the same payload ──────────────────────────────────────
