@@ -1,0 +1,1294 @@
+{
+  "_comment": [
+    "THE HOST/DEVICE DESCRIPTOR SEAM, as a gate rather than a comment.",
+    "",
+    "Two independent descriptor parsers will drift. The Rust one in `me` and the Go",
+    "one that ships on the SeedHammer II are the same question asked in two",
+    "languages, and the direction that matters is asymmetric: a host that admits",
+    "what the device refuses packs a payload the device cannot read -- an engraved",
+    "plate for a wallet that will not load.",
+    "",
+    "THE INVARIANT: host_admits(input) => device_admits(canonical(input)).",
+    "It is stated over the CANONICAL string, not the input, and that is deliberate",
+    "(SPEC_descriptor_input.md S7 requirement 4). Two row classes make the",
+    "input-level form wrong:",
+    "  * the S4.6 whitespace rows -- the host trims and normalises CRLF before the",
+    "    cascade, so it is deliberately WIDER than the device on the raw bytes. It",
+    "    is safe only because what gets PACKED is `canonical`, never the operator's",
+    "    file, and a `sysw` record cannot contain a newline by construction.",
+    "  * bluewallet/no-derivation-header -- device-ACCEPTED as INPUT, while its own",
+    "    canonical re-encoding does not re-parse. An input-level assertion is blind",
+    "    to the one row class the invariant exists for.",
+    "So: for every host_admits=true row the Go test parses `canonical`, requires",
+    "ACCEPT, and requires the re-encoding of that parse to equal `canonical` (a",
+    "fixed point). A row where the host is wider and `canonical` is absent is a",
+    "defect both tests reject.",
+    "",
+    "WHAT EACH COLUMN MEANS, exactly:",
+    "  host_admits    -- S5.2's classification predicate: `me` would pack this input",
+    "                    as a `Descriptor` record. NOT \"me's cascade parses it\"",
+    "                    (`me` parses `multi`, and `multi` is host_admits=false) and",
+    "                    NOT \"some --as succeeds\" (--as md1 succeeds on `multi`).",
+    "  device_admits  -- Go: nonstandard.OutputDescriptor accepts the INPUT. The",
+    "                    scan door, nothing else. OMITTED on `device_probe`",
+    "                    \"panic:parse\" rows: the predicate cannot be evaluated",
+    "                    without panicking the parser, so either boolean would be a",
+    "                    false claim, and requirement 5's non-vacuity count skips",
+    "                    such rows.",
+    "  format         -- the branch of S4's cascade that `me` MATCHED. Read",
+    "                    STRICTLY as \"the branch that SUCCEEDED\" (S4.1: first branch",
+    "                    that succeeds wins), so a row `me` refuses AT the cascade",
+    "                    carries \"none\" -- including every BlueWallet shape S4.2",
+    "                    narrows and every refused S4.5 promotion, whose branch fails",
+    "                    for `me` even where the device's parser accepts. A row whose",
+    "                    cascade SUCCEEDED and whose refusal comes from S4.7's",
+    "                    admission predicate or S5.3's representability limits keeps",
+    "                    its branch name. That split is the column's information: it",
+    "                    says whether the refusal is the parser's or the profile's.",
+    "                    S6's \"the branch the input most RESEMBLES\" is a different,",
+    "                    diagnostic-selection rule and does not feed this column.",
+    "  md1_admits     -- whether `me sysw pack --as md1` carries this input. An",
+    "                    INDEPENDENT axis, not a qualifier on host_admits: the",
+    "                    `multi` row is host_admits=false / md1_admits=true, and",
+    "                    /0/* is host_admits=true / md1_admits=false.",
+    "  sysw_class     -- the device CLASSIFIER's answer (a different predicate from",
+    "                    the scan door, S2.3). Asserted by the Go test only once",
+    "                    S5.2's arm lands; until then those rows are SKIPPED with a",
+    "                    named reason. `sysw.Classify` returns ClassUnknown for",
+    "                    every descriptor today -- measured, 39 of 39.",
+    "  canonical      -- REQUIRED wherever host_admits is true: the re-encoded",
+    "                    descriptor string both parsers must produce.",
+    "  device_probe   -- the row's input PANICS the device, and at which site.",
+    "                    \"panic:parse\" (S4.2 defect 4): the Go test must NOT feed",
+    "                    the input to OutputDescriptor. \"panic:encode\" (S4.2 defects",
+    "                    1-2): parse ACCEPTS and Descriptor.Encode() panics, so the",
+    "                    Go test may parse but must NOT call Encode. A panic would",
+    "                    CRASH the suite rather than fail it -- a false-signal shape.",
+    "  covers         -- which S7 required-row bullets this row discharges. The",
+    "                    coverage manifest below is NORMATIVE and is counted, not",
+    "                    read.",
+    "  gate_open / outcome / refusal_row / exit_code",
+    "                 -- the four gate fields, REQUIRED on every `gate`-tagged row",
+    "                    and absent elsewhere. S5.1's gate states an intent and two",
+    "                    invariants; these rows are its executable precision, and",
+    "                    where any reading of the prose disagrees with a row, the",
+    "                    row is the answer. Asserted by the RUST test only -- the",
+    "                    gate is `me`'s surface and the device has no counterpart.",
+    "  address_0/1    -- receive addresses at indices 0 and 1. The Go test derives",
+    "                    each through address.Receive on the parsed INPUT wherever",
+    "                    device_admits is true; the Rust test derives each through",
+    "                    the md1 round trip wherever md1_admits is true. On a row",
+    "                    where both hold, the two routes are asserted to the SAME",
+    "                    value -- which is what S5.3(a')'s materialisation claim",
+    "                    means at the address layer.",
+    "  wallet_id      -- the WalletPolicyId fingerprint, asserted by BOTH suites,",
+    "                    each computing it from its own implementation. The F-212",
+    "                    class -- a cross-language identity divergence no per-repo",
+    "                    test can see -- made into a standing gate. Carried by",
+    "                    MULTISIG rows at the device-default use-site only: that is",
+    "                    the Go route's measured domain, because md.EncodeMultisig",
+    "                    hard-codes <0;1>/* and has no single-sig arm.",
+    "  md_descriptor_contains",
+    "                 -- a substring the `md descriptor` read-back of the encoded",
+    "                    set must contain. The pin on the `multi` row is",
+    "                    \"wsh(multi(\" and NOT \"multi(\", because \"sortedmulti(\"",
+    "                    CONTAINS \"multi(\" and the shorter pin passes on the",
+    "                    multi -> sortedmulti mutant's own read-back.",
+    "",
+    "A MISTYPED VECTOR FAILS LOUDLY. The codex32 file uses a `chars` count for this;",
+    "this file uses a per-row sha256 of `input`, because a descriptor is long enough",
+    "that a character count would not catch a transcription error inside an xpub.",
+    "",
+    "THE COVERAGE MANIFEST (S7, NORMATIVE; S11 item 3 counts against it):",
+    "  formats-happy        4   the four formats, happy path",
+    "  promotion-near-miss 15   S4.5's fifteen-row table",
+    "  narrowed-4.7        14   the shapes S4.7 narrows",
+    "  accepted-extreme     1   sh(wsh(sortedmulti(2, 16 keys)))",
+    "  narrowed-4.2         5   the BlueWallet shapes S4.2 narrows",
+    "  neither              3   wsh(multi), miniscript, full-origin ypub",
+    "  whitespace           3   S4.6's rows",
+    "  md1-splits           6   S5.3's splits",
+    "  gate                37   S5.1's gate, the eight adversarial clauses",
+    "The minima sum to 88 tag-slots; the fifteen shared S4.5 rows absorb 15 of",
+    "`gate`'s slots and the original overlap pair absorbs 2 more, so the file",
+    "carries at least 88 - 17 = 71 PHYSICAL rows. A row may carry more than one tag",
+    "only where the manifest names it, and `covers` entries are distinct within a",
+    "row -- so a dropped row cannot be counted around by retagging or duplication.",
+    "",
+    "`refusal_rows` is the slug vocabulary the gate rows' `refusal_row` field draws",
+    "from: one entry per S6 data row (36), so P2's per-row text tests and P0's gate",
+    "rows cannot drift apart by inventing different names for the same refusal.",
+    "",
+    "PROVENANCE AND REPRODUCTION. Every measured value in this file was produced by",
+    "`scripts/descriptor-seam-vectors/gen.py` against the fork at d402f18 and the",
+    "descriptor-mnemonic DEBUG binary (target/debug/md at 6864f377) -- never",
+    "transcribed from a report. Re-run it to regenerate, then re-pin the sha256 in",
+    "BOTH tests. The 16-key construction is 16 unhardened children of the fixture",
+    "key dc567276 and reproduces the recorded address 39rQdUtKL2dUiiN3tqXYrwPijTMQudnd3Q."
+  ],
+  "invariant": "host_admits(input) => device_admits(canonical(input))",
+  "refusal_rows": {
+    "unparseable": "S6 row 1 -- an unparseable file (the four-forms text, carrying the most-resembled branch's error)",
+    "empty-file": "S6 row 2 -- an empty file (the shipped `no records in <file>` refusal, EXIT_USAGE 2)",
+    "whitespace-only": "S6 row 3 -- a file of only whitespace (the same shipped path, EXIT_USAGE 2)",
+    "as-omitted": "S6 row 4 -- `--as` omitted on an input at least one value carries (S5.1's choice block, EXIT_USAGE 2)",
+    "json-inner-malformed": "S6 row 5 -- a {label, descriptor} wrapper whose inner descriptor is malformed",
+    "bluewallet-no-name": "S6 row 6 -- a BlueWallet file with no `Name:` header",
+    "bluewallet-no-format": "S6 row 7 -- a BlueWallet file with no `Format:` header",
+    "bluewallet-zero-cosigners": "S6 row 8 -- a BlueWallet file with zero cosigner lines (F-419)",
+    "window-not-in-build": "S6 row 9 -- `--as descriptor` in a build where its path has not shipped (S5.1's window, both variants)",
+    "bluewallet-policy-count": "S6 row 10 -- a BlueWallet `Policy: k of n` with a different key count",
+    "bluewallet-no-origin": "S6 row 11 -- BlueWallet keys with no origin path (no `Derivation:` at all, or after the cosigner lines)",
+    "bluewallet-bad-fingerprint": "S6 row 12 -- a BlueWallet cosigner fingerprint that is not 8 hex characters",
+    "multi-under-descriptor": "S6 row 13 -- `wsh(multi(...))` under `--as descriptor` (conjunct 1's permanent refusal)",
+    "miniscript": "S6 row 14 -- a miniscript descriptor, either `--as`",
+    "md1-fixed-index": "S6 row 15 -- a descriptor with `/0/*` under `--as md1` (S5.3(a))",
+    "threshold-exceeds-keys": "S6 row 16 -- `sortedmulti(k, ...)` with k > n (conjunct 2)",
+    "threshold-below-one": "S6 row 17 -- `sortedmulti(0, ...)` or any k < 1 (conjunct 2)",
+    "key-count-exceeded": "S6 row 18 -- `sortedmulti` with too many keys for its wrapper (conjunct 3)",
+    "key-identity": "S6 row 19 -- two keys declaring the same origin with different xpubs (conjunct 8)",
+    "key-identity-duplicate": "S6 row 20 -- the same key at the same derivation in two slots (conjunct 8)",
+    "mixed-network": "S6 row 21 -- a multisig mixing mainnet and testnet keys (conjunct 5)",
+    "unsupported-key-version": "S6 row 22 -- a descriptor or bare key using ypub/upub/vpub/Upub/Vpub (conjunct 4)",
+    "taproot-multisig": "S6 row 23 -- `tr(sortedmulti(...))`",
+    "promotion-path-not-inferable": "S6 row 24 -- a bare key whose origin path matches no promotable script",
+    "promotion-account-not-zero": "S6 row 25 -- a bare key at account != 0",
+    "promotion-fingerprint-no-path": "S6 row 26 -- a bare key with a fingerprint and no path",
+    "promotion-multisig-cosigner-key": "S6 row 27 -- a bare `Zpub` / `Ypub` (a multisig cosigner key is not a wallet)",
+    "promotion-testnet-key": "S6 row 28 -- a bare `tpub`",
+    "bitcoin-address": "S6 row 29 -- a bitcoin address",
+    "multi-in-single-key-script": "S6 row 30 -- a single-key script wrapping a multi (conjunct 1)",
+    "key-in-script-slot": "S6 row 31 -- a bare key in a script slot, `wsh(KEY)` / `sh(KEY)` (conjunct 1)",
+    "use-site-hardened": "S6 row 32 -- a hardened use-site component (conjunct 7)",
+    "use-site-non-consecutive": "S6 row 33 -- a non-consecutive multipath (conjunct 7)",
+    "use-site-out-of-set": "S6 row 34 -- any other use-site path shape (conjunct 7's closed set)",
+    "md1-no-wildcard": "S6 row 35 -- a multipath with no trailing wildcard under `--as md1` (S5.3(a''))",
+    "multi-record-descriptor": "S6 row 36 -- a multi-record input whose records include a descriptor, `--as` absent"
+  },
+  "vectors": [
+    {
+      "name": "formats-happy/bluewallet-sh-fixture",
+      "input": "# BlueWallet Multisig setup file\n# this file contains only public keys and is safe to\n# distribute among cosigners\n#\nName: sh\nPolicy: 2 of 3\nDerivation: m/48'/0'/0'/2'\nFormat: P2WSH\n\n5A0804E3: xpub6F148LnjUhGrHfEN6Pa8VkwF8L6FJqYALxAkuHfacfVhMLVY4MRuUVMxr9pguAv67DHx1YFxqoKN8s4QfZtD9sR2xRCffTqi9E8FiFLAYk8\n\nDD4FADEE: xpub6DnediUuY8Pcc6Fej8Yt2ZntPCyFdpbHBkNV7EawesRMbc6i9MKKMhKEv4JMMzwDJckaV4czBvNdc6ikwLiZqdUqMd5ZKQGYaQT4cXMeVjf\n\n9BACD5C0: xpub6EefrCrMAduhNwnsHb3dAs8DYZSw4f63WyR6DaEByUHjwvPDdhczj15FyBBG4tbEJtf4vRKTv1ng5SPPnWv1Pve1f15EJfiBY5oYDN6VLEC\n",
+      "sha256": "6ced072cc794f48488fde4399dd7ab7107e0b68b19500a41f1804b04ff119cd1",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "bluewallet",
+      "canonical": "wsh(sortedmulti(2,[5a0804e3/48h/0h/0h/2h]xpub6F148LnjUhGrHfEN6Pa8VkwF8L6FJqYALxAkuHfacfVhMLVY4MRuUVMxr9pguAv67DHx1YFxqoKN8s4QfZtD9sR2xRCffTqi9E8FiFLAYk8,[dd4fadee/48h/0h/0h/2h]xpub6DnediUuY8Pcc6Fej8Yt2ZntPCyFdpbHBkNV7EawesRMbc6i9MKKMhKEv4JMMzwDJckaV4czBvNdc6ikwLiZqdUqMd5ZKQGYaQT4cXMeVjf,[9bacd5c0/48h/0h/0h/2h]xpub6EefrCrMAduhNwnsHb3dAs8DYZSw4f63WyR6DaEByUHjwvPDdhczj15FyBBG4tbEJtf4vRKTv1ng5SPPnWv1Pve1f15EJfiBY5oYDN6VLEC))#tk50fvpm",
+      "wallet_id": "a67e07d16b2500fde6c557a76c7390f6",
+      "address_0": "bc1qtahtpjkgtljxl20jgevs2tjhgzvd87jepcrsd92kcyvtzkj34mnsq0j928",
+      "address_1": "bc1qnww8rjenwn24psu5h6exrhqpgkc6t5y27cusa6wylr4khuscl86qevfpx2",
+      "sysw_class": "Descriptor",
+      "covers": [
+        "formats-happy"
+      ],
+      "source": "seedhammer nonstandard/parse_test.go @ d402f18 (the shipped `sh` happy path)"
+    },
+    {
+      "name": "formats-happy/bip380-sortedmulti-multipath",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))",
+      "sha256": "2d12d815a97ffe332f2cc266661222df84b4f9fcb33fd74557c6a306efa866e0",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))#ud8uyjz3",
+      "wallet_id": "9e95257e60aacbb260129dac7b36d9f4",
+      "address_0": "bc1q4taqq6q6l8fvguva6ftvrz3qgdjy6p3w2s0ds0nl6qrjw7t0hfhqgrqcwd",
+      "address_1": "bc1q3m9z4nhe7y376urgftnwl3js3mvyladmuzmgejwuhmdg6v47pwtqetcra8",
+      "sysw_class": "Descriptor",
+      "covers": [
+        "formats-happy"
+      ],
+      "source": "seedhammer bip380/bip380.go @ d402f18, measured; keys from seedhammer nonstandard/parse_test.go @ d402f18"
+    },
+    {
+      "name": "formats-happy/json-label-descriptor",
+      "input": "{\n  \"label\": \"Test Multisig 2-of-3\",\n  \"blockheight\": 481824,\n  \"descriptor\": \"wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/0/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/0/*))#hfwurrvt\",\n  \"devices\": [{\"type\": \"other\", \"label\": \"Test Multisig 2-of-3 Cosigner 1\"}]\n}\n",
+      "sha256": "d0b6302cf1628632b23b7baf35ad3656490247d29c7ca4cb029f28229ff8f7ee",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "json",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/0/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/0/*))#hfwurrvt",
+      "address_0": "bc1q4taqq6q6l8fvguva6ftvrz3qgdjy6p3w2s0ds0nl6qrjw7t0hfhqgrqcwd",
+      "address_1": "bc1q3m9z4nhe7y376urgftnwl3js3mvyladmuzmgejwuhmdg6v47pwtqetcra8",
+      "sysw_class": "Descriptor",
+      "covers": [
+        "formats-happy"
+      ],
+      "source": "seedhammer nonstandard/parse_test.go @ d402f18 (the shipped JSON fixture; /0/* -- see md1-split/fixed-index)"
+    },
+    {
+      "name": "promotion/01-bare-xpub",
+      "input": "xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "fae0f846da927151b64d0cfec8d2862b167e2883491579867806e79314238fd2",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "pkh(xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx)#775scpf7",
+      "address_0": "1G7ZM6uRVewv4NRf28yYVmsS6fZpErh7pz",
+      "sysw_class": "Descriptor",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "formats-happy",
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "seedhammer nonstandard/parse_test.go @ d402f18 (bare-key promotion fixture)"
+    },
+    {
+      "name": "promotion/02-bare-zpub",
+      "input": "zpub6qpFgGWoG7bKmDDMvmwHBvg6inZAb2KF2Vg8h4fKJ2ickSZ71PsMmRg1FyRWAS6PqPCSzd5CB6PHixx64k6q5svZNZd9bEoCWJuMSkSRzJx",
+      "sha256": "5f27d1d8781a1515cd434c9fe4d3306367974bf92058380422f697b3084d4a9e",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "wpkh(xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx)#u8s2vf65",
+      "address_0": "bc1q5hrky4qgk2yqdg334z0g0r4348jvuj8khremkg",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "seedhammer nonstandard/parse_test.go @ d402f18 (bare zpub; the key re-serialises to xpub)"
+    },
+    {
+      "name": "promotion/03-bare-Zpub-refused",
+      "input": "Zpub72iLoWFEq59hBnNjsSQG211uSabRoNzqLmKocKvrfoZ2Nd81moFdrYXw4gNyisKJ4rGRsD5K4Jmnr8ZrMyFnEN3ED2jYzeGCQ3BE2fiCsDJ",
+      "sha256": "7214230b902cb0072243f606ffe52416798710b2d8f81ef3ec7e67f53e00ef92",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-multisig-cosigner-key",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (version => 48'/0'/0'/2', not in the promotion loop)"
+    },
+    {
+      "name": "promotion/04-bare-Ypub-refused",
+      "input": "Ypub6ht5VqaKgPcDLVBd35cdouvQGcSyrm1LReoapw2yHoB9KXJnX965EUso3URPixfNfD9d7jUkbeRExqxHeGqmS8MdLh38QjSi8K7ae5rcihQ",
+      "sha256": "58c98fa20137f06b3dd1900682d898dcf137ddb0e5571bc1e4b15b299a776d48",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-multisig-cosigner-key",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (version => 48'/0'/0'/1', not in the promotion loop)"
+    },
+    {
+      "name": "promotion/05-origin-44h",
+      "input": "[4bbaa801/44'/0'/0']xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "a664ab68dc3988951fd3e8f06eb2f4c58d808f187a13384de5aa65d9ba4fbf6d",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "pkh([4bbaa801/44h/0h/0h]xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx)#4e4s37w3",
+      "address_0": "1G7ZM6uRVewv4NRf28yYVmsS6fZpErh7pz",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (P2PKH path)"
+    },
+    {
+      "name": "promotion/06-origin-49h",
+      "input": "[4bbaa801/49'/0'/0']xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "fe84aaa69d9be0f77d0ae08faf3b8df90528cac0b6209f28c85c5fbfe132387e",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "sh(wpkh([4bbaa801/49h/0h/0h]xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx))#pz5spddu",
+      "address_0": "3QAMb8VVvDudrvXuUTjjBvyfHXPGtDyGJ4",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (P2SH_P2WPKH path)"
+    },
+    {
+      "name": "promotion/07-origin-84h-zpub",
+      "input": "[4bbaa801/84'/0'/0']zpub6qpFgGWoG7bKmDDMvmwHBvg6inZAb2KF2Vg8h4fKJ2ickSZ71PsMmRg1FyRWAS6PqPCSzd5CB6PHixx64k6q5svZNZd9bEoCWJuMSkSRzJx",
+      "sha256": "99a7195113a9f4e5742a24b125d80500f04029c1bc2811fc0eed04fd55f43241",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "wpkh([4bbaa801/84h/0h/0h]xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx)#zzkx5nl8",
+      "address_0": "bc1q5hrky4qgk2yqdg334z0g0r4348jvuj8khremkg",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "seedhammer nonstandard/parse_test.go @ d402f18 (the origin-annotated zpub fixture)"
+    },
+    {
+      "name": "promotion/08-origin-86h-refused",
+      "input": "[4bbaa801/86'/0'/0']xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "8eb9287dfc9363e366ac9d3f8417cb5036d8aa13393ba0239a9f0cefbda46714",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-path-not-inferable",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (taproot single-sig is not promotable)"
+    },
+    {
+      "name": "promotion/09-origin-48h-cosigner-refused",
+      "input": "[4bbaa801/48'/0'/0'/2']xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "5a34c14048b7843a2f2ae8c3e311dd6227945bf5e742b28236522ad1da5c39b4",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-path-not-inferable",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (a multisig cosigner key is not a wallet)"
+    },
+    {
+      "name": "promotion/10-account-one-refused",
+      "input": "[4bbaa801/84'/0'/1']zpub6qpFgGWoG7bKmDDMvmwHBvg6inZAb2KF2Vg8h4fKJ2ickSZ71PsMmRg1FyRWAS6PqPCSzd5CB6PHixx64k6q5svZNZd9bEoCWJuMSkSRzJx",
+      "sha256": "cf1d88d802d68f5a6e5d833007e9f5e824fea6a1123681cb70b6c151a284b941",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-account-not-zero",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (only account 0 qualifies)"
+    },
+    {
+      "name": "promotion/11-origin-unhardened-refused",
+      "input": "[4bbaa801/84/0/0]zpub6qpFgGWoG7bKmDDMvmwHBvg6inZAb2KF2Vg8h4fKJ2ickSZ71PsMmRg1FyRWAS6PqPCSzd5CB6PHixx64k6q5svZNZd9bEoCWJuMSkSRzJx",
+      "sha256": "761bf8196891e4c35d7b8d77e06d52f9248a4f0f6214f0ab59decb521d9a956f",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-path-not-inferable",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (the comparison is on hardened values)"
+    },
+    {
+      "name": "promotion/12-fingerprint-no-path-refused",
+      "input": "[4bbaa801]xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "f026ee0c2ebb586e282174347701262cbe47cd5f8bb06ce4dcd398422db190df",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-fingerprint-no-path",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (ParseKey needs originAndPath[8] == '/')"
+    },
+    {
+      "name": "promotion/13-children-no-origin",
+      "input": "xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx/<0;1>/*",
+      "sha256": "164937e927a9412eb966d70f69b9609ee4333dad1d27a184c6f352c2f4950f85",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "pkh(xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx/<0;1>/*)#fykz3pn8",
+      "address_0": "1G7ZM6uRVewv4NRf28yYVmsS6fZpErh7pz",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 (children do not affect the origin comparison)"
+    },
+    {
+      "name": "promotion/14-bare-xpub-trailing-newline",
+      "input": "xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx\n",
+      "sha256": "2886f5deee0412caf51c12b1cb5335764b2c7dcc4dafbdb4c7ea2454252fd3d7",
+      "host_admits": true,
+      "device_admits": false,
+      "md1_admits": true,
+      "format": "promoted-key",
+      "canonical": "pkh(xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx)#775scpf7",
+      "address_0": "1G7ZM6uRVewv4NRf28yYVmsS6fZpErh7pz",
+      "gate_open": true,
+      "outcome": "as-decides",
+      "exit_code": 2,
+      "covers": [
+        "promotion-near-miss",
+        "whitespace",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 + S4.6 (the host trims; the device refuses the raw bytes)"
+    },
+    {
+      "name": "promotion/15-bare-tpub-host-refused",
+      "input": "tpubDCXMbAzeg2TpLR1yiFM7yfpThyMvhAqJjuDzUpvgsvikPXbMaJPKfk2ZTbb7h7jnp1Vk7FPwnsWEeaDa2D83Nr1ehUyc6wpTYpNURb6Qt26",
+      "sha256": "6701a37e10e0a898c65e85d2f960a0346006e87cfe3959f0d5edc2a94a863580",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "promotion-testnet-key",
+      "covers": [
+        "promotion-near-miss",
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.5 NORMATIVE ruling (host refuses tpub promotion entirely)"
+    },
+    {
+      "name": "narrowed/tr-sortedmulti",
+      "input": "tr(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "15480a4c903da0cee6222381e15809080bbab9a69efbacad812a3fd358f1bf09",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT)"
+    },
+    {
+      "name": "narrowed/wpkh-sortedmulti",
+      "input": "wpkh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "a1abd5796e6f780010db0571abc7761f09d3e83b53b776786cfe04a55ff8a988",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT)"
+    },
+    {
+      "name": "narrowed/pkh-sortedmulti",
+      "input": "pkh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "dae34e670b57526d849af746f956747ba1f691a4b75f78d50db9452fcdc22185",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT)"
+    },
+    {
+      "name": "narrowed/sh-wpkh-sortedmulti",
+      "input": "sh(wpkh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*)))",
+      "sha256": "928607b1bfcad24700b785ee0b0ebb7fa9c689d785c1ae3a5f17bf3c0fca91dc",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT)"
+    },
+    {
+      "name": "narrowed/wsh-of-key",
+      "input": "wsh([dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*)",
+      "sha256": "788fe076416d3ece84bb370e01561adf430348d4c4fe928af7493e3b11691c75",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); Singlesig, address.Supported false"
+    },
+    {
+      "name": "narrowed/sh-of-key",
+      "input": "sh([dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*)",
+      "sha256": "fa6a05f4d14e44899c51978bb25c2b6cef53052976c232a240c230eb5d744a55",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); Singlesig, address.Supported false"
+    },
+    {
+      "name": "narrowed/threshold-zero",
+      "input": "wsh(sortedmulti(0,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "6c86425cfd5855047a0eae0ebcba0ab48d8d1523d4ee07ceb919330499ad136a",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); k=0 is anyone-can-spend"
+    },
+    {
+      "name": "narrowed/threshold-negative",
+      "input": "wsh(sortedmulti(-1,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "908a6a189d32f78948015eb4ebdeeeabfcc041c0615d6dfde800666ef9ccc156",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); strconv.Atoi accepts a sign"
+    },
+    {
+      "name": "narrowed/threshold-exceeds-keys",
+      "input": "wsh(sortedmulti(5,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "432f871a07b9b38467460452a577a518f053e4e4996fdf5972c1bafebb21c353",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); unsatisfiable"
+    },
+    {
+      "name": "narrowed/sh-sortedmulti-16-keys",
+      "input": "sh(sortedmulti(2,[00000001/48h/0h/0h/2h]xpub6G7RFdSejtBWb8geSftskrm1S9KP79NHjNdwAKg5dVffSfxPaSFzTLLxvtFHHR19siKFMxtnQttotz5rjSvn5P6RX84FULUuHDQmf3gen1h/<0;1>/*,[00000002/48h/0h/0h/2h]xpub6G7RFdSejtBWcEgFC245JW5w1i7iqE5gMSFu1CySNajrqVUhvW5e9dQkmMt4nFmBPzUN7WDuqeM8PiYHsJSKnpvX8hK2CfXZPZSoJnSKNes/<0;1>/*,[00000003/48h/0h/0h/2h]xpub6G7RFdSejtBWg3ZSo9HwuiBU7RtLRihYVHdUTe54zduvXsBA4B3fjy2NViTkgVxnnWu6n9sBXAkenkofJxqsPTPnoncGwQYcWbxDnpczGK7/<0;1>/*,[00000004/48h/0h/0h/2h]xpub6G7RFdSejtBWhrttSNG39jpDfgWbmVLhz7uCEXeq9m17nVHiEaGAzEKm5K48C7xbaaqDxsuwGBHRpoYDiDN2Bf9vJGzveeYyNYy3vrELDYZ/<0;1>/*,[00000005/48h/0h/0h/2h]xpub6G7RFdSejtBWkvFkYcMRca795C9v4K2mwsq3HQcPTi6RsQMkkTnrurePY7zYxVMryLjX4zNfRDrFQVNxSGQCbMaxzXawrQGMAbHk8bexLag/<0;1>/*,[00000006/48h/0h/0h/2h]xpub6G7RFdSejtBWoiHpvJtL1jbmaxpxZGtu6cdc7NbBMBFQsnxA67zBhDMR879hekwsnR4pyJ6gyDiv4XvznbC8xnSXhA88GUw9KS4EjJUbuot/<0;1>/*,[00000007/48h/0h/0h/2h]xpub6G7RFdSejtBWqLaqLGRF9XLXd3kzN6U1Jdgz3YkbSKaVmP7e1xvDnoLHk12BuvNG3UM2SkW1GSRze4SuKEC2a744zsTe8EMzfEXBE2TXEEb/<0;1>/*,[00000008/48h/0h/0h/2h]xpub6G7RFdSejtBWsZehJixvYyumUni4q47AANSaVAra9bAgW1gFRHJvx1dUXqGmX4yEugXY6Gpy3qVR6BGpQV98RBcRK5JifuRyaf64zh7meZq/<0;1>/*,[00000009/48h/0h/0h/2h]xpub6G7RFdSejtBWvKsqgp5dZHGGo7HGGmynaNWYa5ppX1ENuKgJnm6Fx9xwEFy2gVsZdDFmccfRhNtJx4FVqMWhGvUsNRRJDA1dfMtrAhnpfAC/<0;1>/*,[0000000a/48h/0h/0h/2h]xpub6G7RFdSejtBWykJVdNsP4KAzK748b7BNVBfpEhYBdSbWzsq3WnaWap8Q1GymLLB6ZJhag28i5zKBocUGnuMEkLCNmtg5PyTkFYkuycwqYcY/<0;1>/*,[0000000b/48h/0h/0h/2h]xpub6G7RFdSejtBWzvneLJdPKW3AhTQutSGejnvJJHVfhPKM8raaoySG2aJUBVazijLbsn6qqZEwyBUXkG4F16SP3aPmhyH2om1SKXyhdmLrxNZ/<0;1>/*,[0000000c/48h/0h/0h/2h]xpub6G7RFdSejtBX5NHs9772QY9Jn81aH2oh27PuUNTcUQfTMBra2ydFGemBHZ8Bd1xkuNNCy25Cex4DLPx45oQeJcTVpbbvU2yGUcSNAvMkiHQ/<0;1>/*,[0000000d/48h/0h/0h/2h]xpub6G7RFdSejtBX6BRF9ubmzpzLGzUnNykhUb8cvE2xaNkwYQMY53x3xyUhQFdH56aMSj6tDLDhseu7v7JN9aRcDuasVpMkcLEhi6zVgjkVhoS/<0;1>/*,[0000000e/48h/0h/0h/2h]xpub6G7RFdSejtBXAt16zgxsXdrMzjaHt2wBbYniaJH3ZvDg8Z9QE1DxusYkKXXrhiMFxcfXKJv7gFUBUJ9B6SQaBHsZBhrjxkzV3SMiH694gGW/<0;1>/*,[0000000f/48h/0h/0h/2h]xpub6G7RFdSejtBXCS5BxyniwdTtNHQxZRtSZuL9P6zwLYdXCURAyqKYmf5L5a392EUL4eHBaPzu63whVqx2rmNHWAp1N8RgjZw9Dwc7sQjJ1Hv/<0;1>/*,[00000010/48h/0h/0h/2h]xpub6G7RFdSejtBXETAZ11DntvFMeo5tbsdFpCZBMQsSRBoQmv8ac1xqwmGeum6UvBag7pr5FEh4GZBwexgVHbVqzENptQG35c6SyUq1rGr76sQ/<0;1>/*))",
+      "sha256": "d2d7277c83d5db77f2ee7d4817321484a3864913361c10be64a9dc0fa001a1d7",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); BIP-383: <=15 keys directly under sh (547-byte redeemScript)"
+    },
+    {
+      "name": "narrowed/wsh-sortedmulti-21-keys",
+      "input": "wsh(sortedmulti(2,[00000001/48h/0h/0h/2h]xpub6G7RFdSejtBWb8geSftskrm1S9KP79NHjNdwAKg5dVffSfxPaSFzTLLxvtFHHR19siKFMxtnQttotz5rjSvn5P6RX84FULUuHDQmf3gen1h/<0;1>/*,[00000002/48h/0h/0h/2h]xpub6G7RFdSejtBWcEgFC245JW5w1i7iqE5gMSFu1CySNajrqVUhvW5e9dQkmMt4nFmBPzUN7WDuqeM8PiYHsJSKnpvX8hK2CfXZPZSoJnSKNes/<0;1>/*,[00000003/48h/0h/0h/2h]xpub6G7RFdSejtBWg3ZSo9HwuiBU7RtLRihYVHdUTe54zduvXsBA4B3fjy2NViTkgVxnnWu6n9sBXAkenkofJxqsPTPnoncGwQYcWbxDnpczGK7/<0;1>/*,[00000004/48h/0h/0h/2h]xpub6G7RFdSejtBWhrttSNG39jpDfgWbmVLhz7uCEXeq9m17nVHiEaGAzEKm5K48C7xbaaqDxsuwGBHRpoYDiDN2Bf9vJGzveeYyNYy3vrELDYZ/<0;1>/*,[00000005/48h/0h/0h/2h]xpub6G7RFdSejtBWkvFkYcMRca795C9v4K2mwsq3HQcPTi6RsQMkkTnrurePY7zYxVMryLjX4zNfRDrFQVNxSGQCbMaxzXawrQGMAbHk8bexLag/<0;1>/*,[00000006/48h/0h/0h/2h]xpub6G7RFdSejtBWoiHpvJtL1jbmaxpxZGtu6cdc7NbBMBFQsnxA67zBhDMR879hekwsnR4pyJ6gyDiv4XvznbC8xnSXhA88GUw9KS4EjJUbuot/<0;1>/*,[00000007/48h/0h/0h/2h]xpub6G7RFdSejtBWqLaqLGRF9XLXd3kzN6U1Jdgz3YkbSKaVmP7e1xvDnoLHk12BuvNG3UM2SkW1GSRze4SuKEC2a744zsTe8EMzfEXBE2TXEEb/<0;1>/*,[00000008/48h/0h/0h/2h]xpub6G7RFdSejtBWsZehJixvYyumUni4q47AANSaVAra9bAgW1gFRHJvx1dUXqGmX4yEugXY6Gpy3qVR6BGpQV98RBcRK5JifuRyaf64zh7meZq/<0;1>/*,[00000009/48h/0h/0h/2h]xpub6G7RFdSejtBWvKsqgp5dZHGGo7HGGmynaNWYa5ppX1ENuKgJnm6Fx9xwEFy2gVsZdDFmccfRhNtJx4FVqMWhGvUsNRRJDA1dfMtrAhnpfAC/<0;1>/*,[0000000a/48h/0h/0h/2h]xpub6G7RFdSejtBWykJVdNsP4KAzK748b7BNVBfpEhYBdSbWzsq3WnaWap8Q1GymLLB6ZJhag28i5zKBocUGnuMEkLCNmtg5PyTkFYkuycwqYcY/<0;1>/*,[0000000b/48h/0h/0h/2h]xpub6G7RFdSejtBWzvneLJdPKW3AhTQutSGejnvJJHVfhPKM8raaoySG2aJUBVazijLbsn6qqZEwyBUXkG4F16SP3aPmhyH2om1SKXyhdmLrxNZ/<0;1>/*,[0000000c/48h/0h/0h/2h]xpub6G7RFdSejtBX5NHs9772QY9Jn81aH2oh27PuUNTcUQfTMBra2ydFGemBHZ8Bd1xkuNNCy25Cex4DLPx45oQeJcTVpbbvU2yGUcSNAvMkiHQ/<0;1>/*,[0000000d/48h/0h/0h/2h]xpub6G7RFdSejtBX6BRF9ubmzpzLGzUnNykhUb8cvE2xaNkwYQMY53x3xyUhQFdH56aMSj6tDLDhseu7v7JN9aRcDuasVpMkcLEhi6zVgjkVhoS/<0;1>/*,[0000000e/48h/0h/0h/2h]xpub6G7RFdSejtBXAt16zgxsXdrMzjaHt2wBbYniaJH3ZvDg8Z9QE1DxusYkKXXrhiMFxcfXKJv7gFUBUJ9B6SQaBHsZBhrjxkzV3SMiH694gGW/<0;1>/*,[0000000f/48h/0h/0h/2h]xpub6G7RFdSejtBXCS5BxyniwdTtNHQxZRtSZuL9P6zwLYdXCURAyqKYmf5L5a392EUL4eHBaPzu63whVqx2rmNHWAp1N8RgjZw9Dwc7sQjJ1Hv/<0;1>/*,[00000010/48h/0h/0h/2h]xpub6G7RFdSejtBXETAZ11DntvFMeo5tbsdFpCZBMQsSRBoQmv8ac1xqwmGeum6UvBag7pr5FEh4GZBwexgVHbVqzENptQG35c6SyUq1rGr76sQ/<0;1>/*,[00000011/48h/0h/0h/2h]xpub6G7RFdSejtBXGrwpuKTBw9zhMEU8bdsrRB8pCqyCkqHTijBkJdCXqApzH6ZeubZjPnWJyhP7xcA3E3DPpKK2bgUtGdoxqp9JgBjrUBym56V/<0;1>/*,[00000012/48h/0h/0h/2h]xpub6G7RFdSejtBXLDsLehHiogKgQs7sZcKYdygv4P8RWo5J5QQUx3R9HB9uamy5wDzZejgYBRoFwzKTW9sNdH4gqXmtsFbsfnyUJCZbxoNGJbU/<0;1>/*,[00000013/48h/0h/0h/2h]xpub6G7RFdSejtBXNpFmWb2GSyLHBat16nYmGx4rjsEQm429NkF73M8Lov1x89x8vuNdDd25iTSj7WASXu4YdwaxpRwnpgSA7zvoaj1Txs4qQ1p/<0;1>/*,[00000014/48h/0h/0h/2h]xpub6G7RFdSejtBXSMVWQcnHd3QsJp26D4jdgMq4xUJZjEYgU41i1Dd1z6hAUbMKTdwqDkbaH3CfbFGtRYaPqPQZohPwavwyyyiyfBqcMq5TYEk/<0;1>/*,[00000015/48h/0h/0h/2h]xpub6G7RFdSejtBXT2a331Xeu3hN4kZVRCixrsWYaWf3DkC7zkeDvzxN4V5jbEXXrVSYbL1P8g9B9KKPWrjLnymL1NoVsvV8BGJMSx8wATmDkE9/<0;1>/*))",
+      "sha256": "989b4930efcf496619a7564ff6712c4b1552c4e9d2c865975540b757c062f7d2",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); OP_CHECKMULTISIG's 20-key limit"
+    },
+    {
+      "name": "narrowed/mixed-network",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]tpubDEA5aTqMAQTRAxkMULa1ZfBT3GFEXqnFMnDR2GPwAEqmoauXvdgUW38mMnCeDaqoLvmzHhuBMyhtYkJFzr2Sb2AbvMzECU8gpJm13rW2CcW/<0;1>/*))",
+      "sha256": "a945779f295347f86047c84ecca3fc0c1a8fa2c48be7a49f58636c661a6b588d",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); address.Receive: multisig descriptor mixes networks"
+    },
+    {
+      "name": "narrowed/use-site-hardened",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*h,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*h))",
+      "sha256": "6f8a3cb713d7f7c4c5f27b4a194783816b6d7f6916c9c5ad8f03c0fd7520c23e",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); the device derives the UNhardened child"
+    },
+    {
+      "name": "narrowed/use-site-non-consecutive",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;2>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;2>/*))",
+      "sha256": "c61710e7a6e526a977de72ad3aac39ceb98f430d975e14235727509a5ea952bb",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "covers": [
+        "narrowed-4.7"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 (host narrows; device measured ACCEPT); address.Receive errors, address.Supported still true"
+    },
+    {
+      "name": "accepted/sh-wsh-sortedmulti-16-keys",
+      "input": "sh(wsh(sortedmulti(2,[00000001/48h/0h/0h/2h]xpub6G7RFdSejtBWb8geSftskrm1S9KP79NHjNdwAKg5dVffSfxPaSFzTLLxvtFHHR19siKFMxtnQttotz5rjSvn5P6RX84FULUuHDQmf3gen1h/<0;1>/*,[00000002/48h/0h/0h/2h]xpub6G7RFdSejtBWcEgFC245JW5w1i7iqE5gMSFu1CySNajrqVUhvW5e9dQkmMt4nFmBPzUN7WDuqeM8PiYHsJSKnpvX8hK2CfXZPZSoJnSKNes/<0;1>/*,[00000003/48h/0h/0h/2h]xpub6G7RFdSejtBWg3ZSo9HwuiBU7RtLRihYVHdUTe54zduvXsBA4B3fjy2NViTkgVxnnWu6n9sBXAkenkofJxqsPTPnoncGwQYcWbxDnpczGK7/<0;1>/*,[00000004/48h/0h/0h/2h]xpub6G7RFdSejtBWhrttSNG39jpDfgWbmVLhz7uCEXeq9m17nVHiEaGAzEKm5K48C7xbaaqDxsuwGBHRpoYDiDN2Bf9vJGzveeYyNYy3vrELDYZ/<0;1>/*,[00000005/48h/0h/0h/2h]xpub6G7RFdSejtBWkvFkYcMRca795C9v4K2mwsq3HQcPTi6RsQMkkTnrurePY7zYxVMryLjX4zNfRDrFQVNxSGQCbMaxzXawrQGMAbHk8bexLag/<0;1>/*,[00000006/48h/0h/0h/2h]xpub6G7RFdSejtBWoiHpvJtL1jbmaxpxZGtu6cdc7NbBMBFQsnxA67zBhDMR879hekwsnR4pyJ6gyDiv4XvznbC8xnSXhA88GUw9KS4EjJUbuot/<0;1>/*,[00000007/48h/0h/0h/2h]xpub6G7RFdSejtBWqLaqLGRF9XLXd3kzN6U1Jdgz3YkbSKaVmP7e1xvDnoLHk12BuvNG3UM2SkW1GSRze4SuKEC2a744zsTe8EMzfEXBE2TXEEb/<0;1>/*,[00000008/48h/0h/0h/2h]xpub6G7RFdSejtBWsZehJixvYyumUni4q47AANSaVAra9bAgW1gFRHJvx1dUXqGmX4yEugXY6Gpy3qVR6BGpQV98RBcRK5JifuRyaf64zh7meZq/<0;1>/*,[00000009/48h/0h/0h/2h]xpub6G7RFdSejtBWvKsqgp5dZHGGo7HGGmynaNWYa5ppX1ENuKgJnm6Fx9xwEFy2gVsZdDFmccfRhNtJx4FVqMWhGvUsNRRJDA1dfMtrAhnpfAC/<0;1>/*,[0000000a/48h/0h/0h/2h]xpub6G7RFdSejtBWykJVdNsP4KAzK748b7BNVBfpEhYBdSbWzsq3WnaWap8Q1GymLLB6ZJhag28i5zKBocUGnuMEkLCNmtg5PyTkFYkuycwqYcY/<0;1>/*,[0000000b/48h/0h/0h/2h]xpub6G7RFdSejtBWzvneLJdPKW3AhTQutSGejnvJJHVfhPKM8raaoySG2aJUBVazijLbsn6qqZEwyBUXkG4F16SP3aPmhyH2om1SKXyhdmLrxNZ/<0;1>/*,[0000000c/48h/0h/0h/2h]xpub6G7RFdSejtBX5NHs9772QY9Jn81aH2oh27PuUNTcUQfTMBra2ydFGemBHZ8Bd1xkuNNCy25Cex4DLPx45oQeJcTVpbbvU2yGUcSNAvMkiHQ/<0;1>/*,[0000000d/48h/0h/0h/2h]xpub6G7RFdSejtBX6BRF9ubmzpzLGzUnNykhUb8cvE2xaNkwYQMY53x3xyUhQFdH56aMSj6tDLDhseu7v7JN9aRcDuasVpMkcLEhi6zVgjkVhoS/<0;1>/*,[0000000e/48h/0h/0h/2h]xpub6G7RFdSejtBXAt16zgxsXdrMzjaHt2wBbYniaJH3ZvDg8Z9QE1DxusYkKXXrhiMFxcfXKJv7gFUBUJ9B6SQaBHsZBhrjxkzV3SMiH694gGW/<0;1>/*,[0000000f/48h/0h/0h/2h]xpub6G7RFdSejtBXCS5BxyniwdTtNHQxZRtSZuL9P6zwLYdXCURAyqKYmf5L5a392EUL4eHBaPzu63whVqx2rmNHWAp1N8RgjZw9Dwc7sQjJ1Hv/<0;1>/*,[00000010/48h/0h/0h/2h]xpub6G7RFdSejtBXETAZ11DntvFMeo5tbsdFpCZBMQsSRBoQmv8ac1xqwmGeum6UvBag7pr5FEh4GZBwexgVHbVqzENptQG35c6SyUq1rGr76sQ/<0;1>/*)))",
+      "sha256": "4504c46a5405615c4b3b7f172f01fac8cf35bbaff1dae98827385a3d61ba954c",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "sh(wsh(sortedmulti(2,[00000001/48h/0h/0h/2h]xpub6EEHPqvmsF3UzjzuP46BAzExdryn5JLrRDKBh1J5vWrvVp8Fexx7AgTXd6nVXQTzFV7FGobGq6rGQLdZ3KftsBCt21cYQaF83EoCWMcp2qA/<0;1>/*,[00000002/48h/0h/0h/2h]xpub6EEHPqvmsF3UyJAXbSVHi6VvGgDb4VDX6jgG3MnwtFTkJZRffJnbVAp8BLZh33i68rtGUjjtLsfnrU8RiG49PKtGXAPVgjVjK2PzedawG7S/<0;1>/*,[00000003/48h/0h/0h/2h]xpub6EEHPqvmsF3UzZDkfby5JmXVReRfv5zfJ3nx1G65ixASQruDTFmThhiYdTHnx6PmtUvubnCe7RSXCuSEh1LPnfCq5qCvyJijbWUBd7gWysd/<0;1>/*,[00000004/48h/0h/0h/2h]xpub6EEHPqvmsF3UypjDmsB5YG6H39VQWxo6rLonHcsM6inG5QnsHvzoaAJjvp2aUWsf3eUwEu4swTLWCMDEdLjFPZpFTu7mENw3cu3nFboHMPJ/<0;1>/*,[00000005/48h/0h/0h/2h]xpub6EEHPqvmsF3UzLG7M9WNzZKEVuaC4teSsZUjqy2QdKQCaFe1U6YL7yvB7P7RFgkzoW18oQM6BXGXjS6QtUe8by6b3jDxyxrNaNwEwfPRuSJ/<0;1>/*,[00000006/48h/0h/0h/2h]xpub6EEHPqvmsF3UzaUDBtHCPBju4vghpxfr5m2RBQChjS5oza1WU2kVXXv1R8Qyxkq5yfxMA6tbpYWQLsgtmtJmn6oSdwHKwsj7tfGW2s5pAZx/<0;1>/*,[00000007/48h/0h/0h/2h]xpub6EEHPqvmsF3UyewF4t42WSQhAG4CttQEMEpud3Zd3DwXJ5x649hNFKBgknRtEijYbprT5x7QCnagsoFEqcBNC8GGqE92MTMvPuJD26M5dQv/<0;1>/*,[00000008/48h/0h/0h/2h]xpub6EEHPqvmsF3UyLB8WNqcuMuy5FSkcxCfGSKca8s6y94LSeHo7k6v2imgGNpsrfpbq8esBsFr5D1KHK7bTx1Aqufv31WHSxdrUmRsHDyARqz/<0;1>/*,[00000009/48h/0h/0h/2h]xpub6EEHPqvmsF3UyYaJMWCEu8CWSpTRKnEZju8hAX2rZCefFt4x9Vu5f4PwgZfZ2uCzum11AbunommR6b8iRuFSWMPeyw93Y3RTiuoQwg6qJE6/<0;1>/*,[0000000a/48h/0h/0h/2h]xpub6EEHPqvmsF3UzRAym7DuPd3G24fkuDbRiB35LbwitHYRmMznXoQAuurDBLphhXzcCx4igQCZHQZVuYPvvXxgnTxTGyv1Gh5XUYEFF77DR1C/<0;1>/*,[0000000b/48h/0h/0h/2h]xpub6EEHPqvmsF3Uy3q9w5DpeGqUTfU1Teqz2F2fuf6iAsntKGXRVGGkysK65KaM6jeBtX5tJL8HFd63ob2LfovXtR196e39EJqAhy1oPYwdCWr/<0;1>/*,[0000000c/48h/0h/0h/2h]xpub6EEHPqvmsF3UzwWQCuwNimsebaW97MYJN2FPbDGAAYfcwXaWNYUar94bu9Fx1pkRHCy9tBn22R2wM7xbHbmVx9vA6qtDSQzx2V3ERFWcp9L/<0;1>/*,[0000000d/48h/0h/0h/2h]xpub6EEHPqvmsF3UyCoogkg3JXei9hQpUQeasxjDYY31VAHjYfra4tpEAf4vjbuTUhr6BfKjatk1L9F3tEMLtTfAg9tpfeAE8YULRRA8RXLwnH9/<0;1>/*,[0000000e/48h/0h/0h/2h]xpub6EEHPqvmsF3V1MZgzaH3poSmvgwoEZzM4P8Ri5UbhMH6YkRXt86yjkRnNdxT88754eWH9GFuDmBKPpEbNQWqSF2oF7BQ2oS4vC67WHFyDud/<0;1>/*,[0000000f/48h/0h/0h/2h]xpub6EEHPqvmsF3UzMooRuLpEFzLMVDwB56t6CQy2MPzgdDa2bUQJEDQDjFArSc9TSiDXmjqrkAAib23Nm5tfpMFZppYK7GXMSagG8uHb5E2tCy/<0;1>/*,[00000010/48h/0h/0h/2h]xpub6EEHPqvmsF3Uyq5Bvy1oB1hqhFLLUczyPxP7W8Tzyuv61xxuagsY22jJQPouNCJdx3vdyyfoz7dVVGrndjMWrbEeixd4FJwwB7gx4LbuJZV/<0;1>/*)))#3ahtyx6z",
+      "address_0": "39rQdUtKL2dUiiN3tqXYrwPijTMQudnd3Q",
+      "address_1": "3AszGumRQUxNkAFngP3Dvs6YPZfifnGauw",
+      "covers": [
+        "accepted-extreme"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 conjunct 3 (r6's recorded construction: 16 unhardened children of the dc567276 fixture key; sh(wsh(...)) redeemScript is 34 bytes)"
+    },
+    {
+      "name": "bluewallet/no-format-header",
+      "input": "# BlueWallet Multisig setup file\n# this file contains only public keys and is safe to\n# distribute among cosigners\n#\nName: sh\nPolicy: 2 of 3\nDerivation: m/48'/0'/0'/2'\n\n5A0804E3: xpub6F148LnjUhGrHfEN6Pa8VkwF8L6FJqYALxAkuHfacfVhMLVY4MRuUVMxr9pguAv67DHx1YFxqoKN8s4QfZtD9sR2xRCffTqi9E8FiFLAYk8\n\nDD4FADEE: xpub6DnediUuY8Pcc6Fej8Yt2ZntPCyFdpbHBkNV7EawesRMbc6i9MKKMhKEv4JMMzwDJckaV4czBvNdc6ikwLiZqdUqMd5ZKQGYaQT4cXMeVjf\n\n9BACD5C0: xpub6EefrCrMAduhNwnsHb3dAs8DYZSw4f63WyR6DaEByUHjwvPDdhczj15FyBBG4tbEJtf4vRKTv1ng5SPPnWv1Pve1f15EJfiBY5oYDN6VLEC\n",
+      "sha256": "ade121fe02c9759f3e4a829a84e0b8bc077021ae6f85bfa4aebcbc28d5523f0b",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "none",
+      "device_probe": "panic:encode",
+      "covers": [
+        "narrowed-4.2"
+      ],
+      "source": "SPEC_descriptor_input.md S4.2 (host refuses; device measured) defect 1: parse ACCEPTS, Descriptor.Encode() panics"
+    },
+    {
+      "name": "bluewallet/zero-cosigner-lines",
+      "input": "Name: only\n",
+      "sha256": "e04f4dcd87847ae95387ca5bcff289c9e6144fb5908038df866ef3b08f181797",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "none",
+      "device_probe": "panic:encode",
+      "covers": [
+        "narrowed-4.2"
+      ],
+      "source": "SPEC_descriptor_input.md S4.2 (host refuses; device measured) defect 2: exact `Name: only` spelling; 0 keys, Script=Unknown"
+    },
+    {
+      "name": "bluewallet/derivation-after-keys",
+      "input": "Name: after\nPolicy: 2 of 2\nFormat: P2WSH\n\ndc567276: xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan\nf245ae38: xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge\nDerivation: m/48'/0'/0'/2'\n",
+      "sha256": "352e215c6f2610f80acd7529e24a569cbaac0a3359aab48670c887f9c2eccaac",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "none",
+      "covers": [
+        "narrowed-4.2"
+      ],
+      "source": "SPEC_descriptor_input.md S4.2 (host refuses; device measured) defect 3: every key origin empty; the canonical does not re-parse"
+    },
+    {
+      "name": "bluewallet/no-derivation-header",
+      "input": "Name: nodrv\nPolicy: 2 of 2\nFormat: P2WSH\n\ndc567276: xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan\nf245ae38: xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge\n",
+      "sha256": "0c4c76ba35f56683c53e5c4566e1e4752a8f34e51175c13ff7fe73256a2bf96d",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "none",
+      "covers": [
+        "narrowed-4.2"
+      ],
+      "source": "SPEC_descriptor_input.md S4.2 (host refuses; device measured) R0's C1: device ACCEPTS the input, its canonical does not re-parse"
+    },
+    {
+      "name": "bluewallet/short-fingerprint",
+      "input": "Name: shortfp\nPolicy: 1 of 1\nDerivation: m/48'/0'/0'/2'\nFormat: P2WSH\n\nab: xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan\n",
+      "sha256": "bfaa571793d1618b1ff53e782e457d5ce62620ca12089707e12a02ba3d533556",
+      "host_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "device_probe": "panic:parse",
+      "covers": [
+        "narrowed-4.2"
+      ],
+      "source": "SPEC_descriptor_input.md S4.2 (host refuses; device measured) defect 4: binary.BigEndian.Uint32 panics below 4 bytes"
+    },
+    {
+      "name": "neither/wsh-multi",
+      "input": "wsh(multi(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "6e1bdfb6a4da7c3fe26b4136f5c91f491aaedbbd92f326a0761a7c8ce212235b",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": true,
+      "format": "bip380",
+      "md_descriptor_contains": "wsh(multi(",
+      "address_0": "bc1qadgf37zk0wtu69j7yclswl99e5jmcv5eh69jp4calgs4ehsecm5sqcjw5a",
+      "address_1": "bc1q24khjdhxz70zs228ymlljjrtppfp7swz90j4l82ph65zcmwujx0sj6v06y",
+      "covers": [
+        "neither"
+      ],
+      "source": "SPEC_descriptor_input.md S4.3/S4.7 conjunct 1: device REFUSES multi; md1 carries it natively"
+    },
+    {
+      "name": "neither/miniscript",
+      "input": "wsh(or_d(pk(xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan),and_v(v:pkh(xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge),older(52560))))",
+      "sha256": "e297b5a6902851c4d586ccc82c1dbf6835dfda0a6e3be68da3734684a60b2cf8",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "covers": [
+        "neither"
+      ],
+      "source": "SPEC_descriptor_input.md S4.3/S10: miniscript is out of scope for both paths"
+    },
+    {
+      "name": "neither/full-origin-ypub",
+      "input": "sh(wpkh([4bbaa801/49h/0h/0h]ypub6WyzNbqt7S3quv2F6R9eyqabYpQieQKk7P9uufmRv2LjhLjskjho9N1sEmTvAXSURk5eF9UdiS2jqgLXM3gpHeExWDvj1KyiEaqi47h3Ef1/<0;1>/*))",
+      "sha256": "bc3a0b75fdf90c63f622f4f75cc6fc473cd7aa04adb1f785274507c30932427c",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "covers": [
+        "neither"
+      ],
+      "source": "SPEC_descriptor_input.md S4.3: ypub has no case in the classification switch -- refused even with a full explicit origin"
+    },
+    {
+      "name": "whitespace/crlf-bip380",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))\r\n",
+      "sha256": "a45111baee37c30ab5a830ded420031bfe5ede3788a7205419724218ff5197bf",
+      "host_admits": true,
+      "device_admits": false,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))#ud8uyjz3",
+      "address_0": "bc1q4taqq6q6l8fvguva6ftvrz3qgdjy6p3w2s0ds0nl6qrjw7t0hfhqgrqcwd",
+      "covers": [
+        "whitespace"
+      ],
+      "source": "SPEC_descriptor_input.md S4.6: CRLF is REFUSED by branch 2; the host normalises first"
+    },
+    {
+      "name": "whitespace/leading-space-bip380",
+      "input": " wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))",
+      "sha256": "ba46281e89e9832acd03079311f5b287b241d7567cdf7425fe34975e9b7c6b11",
+      "host_admits": true,
+      "device_admits": false,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*,[c5d87297/48h/0h/0h/2h]xpub6DjrnfAyuonMaboEb3ZQZzhQ2ZEgaKV2r64BFmqymZqJqviLTe1JzMr2X2RfQF892RH7MyYUbcy77R7pPu1P71xoj8cDUMNhAMGYzKR4noZ/<0;1>/*))#ud8uyjz3",
+      "address_0": "bc1q4taqq6q6l8fvguva6ftvrz3qgdjy6p3w2s0ds0nl6qrjw7t0hfhqgrqcwd",
+      "covers": [
+        "whitespace"
+      ],
+      "source": "SPEC_descriptor_input.md S4.6: a leading space is REFUSED by branch 2; the host trims"
+    },
+    {
+      "name": "md1-split/fixed-index",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/0/*))",
+      "sha256": "cbfe5bf6632013036847c8a9e6dc92718f362be3788aacb18656a02448c694ed",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/0/*))#0cvwt807",
+      "address_0": "bc1qadgf37zk0wtu69j7yclswl99e5jmcv5eh69jp4calgs4ehsecm5sqcjw5a",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3(a): md1 has no representation for a single fixed child index"
+    },
+    {
+      "name": "md1-split/multipath-no-wildcard",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>))",
+      "sha256": "3c3cf30fedcedac0e76c6327d1dc76a0d480ce4f993601f78bb5105a2886ee49",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>))#djhjmngu",
+      "address_0": "bc1qu2cc6t70nm0tw0v3tsmgur33gjnw2a32czk6xatccky9jpjxj4eqcedjh9",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3(a''): md encode collapses <0;1> into <0;1>/*"
+    },
+    {
+      "name": "md1-split/childless",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge))",
+      "sha256": "299988b69cb9202e9bda8ad5b854e7a6b2eb014459f10afea166d448261a4949",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge))#n2cpznut",
+      "wallet_id": "47ecf2de11530f266e9b08640734447a",
+      "address_0": "bc1qadgf37zk0wtu69j7yclswl99e5jmcv5eh69jp4calgs4ehsecm5sqcjw5a",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3(a'): the device defaults an empty children list to <0;1>/*"
+    },
+    {
+      "name": "md1-split/mixed-fixed-and-multipath",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "eaa9889c2ebe37c9b1945dc1e9b6b6995c0819844a3b0ce19c95a7945dc9586b",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/0/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))#n3wrmlhy",
+      "address_0": "bc1qadgf37zk0wtu69j7yclswl99e5jmcv5eh69jp4calgs4ehsecm5sqcjw5a",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3 per-key quantifier (R0 r3's NEW-C1)"
+    },
+    {
+      "name": "md1-split/mixed-nowildcard-and-multipath",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "101dddfa5aabd78f6fe715e74a70e44d30287b3ce9623a0470738ac1055ddb50",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))#hm3te8yt",
+      "address_0": "bc1qghwumhcahkfca7qktym7f3htf5wqakz2tyvxraf3fk5k8w0yrzwsg0m3sd",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3 per-key quantifier (R0 r3's NEW-C1)"
+    },
+    {
+      "name": "md1-split/mixed-childless-and-multipath",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "89f8da3e15a2140369e3cbabe73a58ad2966bda2bb3ed578842bd87aa25f1c9b",
+      "host_admits": true,
+      "device_admits": true,
+      "md1_admits": true,
+      "format": "bip380",
+      "canonical": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))#vh8ktn5p",
+      "wallet_id": "47ecf2de11530f266e9b08640734447a",
+      "address_0": "bc1qadgf37zk0wtu69j7yclswl99e5jmcv5eh69jp4calgs4ehsecm5sqcjw5a",
+      "covers": [
+        "md1-splits"
+      ],
+      "source": "SPEC_descriptor_input.md S5.3 per-key materialisation (R0 r3's NEW-C1)"
+    },
+    {
+      "name": "gate/record-text-parentheses",
+      "input": "text: my wallet (2 of 3)",
+      "sha256": "fee09b92e2059f7ac8cf0aaeed88d36614538129bced9b377589e80d6c544ec8",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/record-pass-parentheses",
+      "input": "pass: hunter (2)",
+      "sha256": "3517e3ba24937ad064b619932ba5d7bf544d0bb68dc87648de9f411b8ed77d2f",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/record-text-inner-colon",
+      "input": "text: note: hello",
+      "sha256": "84d72f0c40437fdb936ebe29acbb6fffcf085591e4a59845b0a8897e960bffe0",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/record-seed-mistyped-mnemonic",
+      "input": "seed: abandon abandon abandoz",
+      "sha256": "f8f5b40e864c527f20c135c534b88c10c10121f24676f3ff39c2783fe9099cda",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/record-tx-zz",
+      "input": "tx: zz",
+      "sha256": "fdac3af077e8e1ddc58da4df6f64c93977972de2e8098054ceccbdec1484480c",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/record-text-xpub-payload",
+      "input": "text: xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "3419bc6b727669055e879b67d0cd10c66863c52ea1a21c442a75c6326a5470f6",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 2: record payloads carrying parentheses, colons or base58"
+    },
+    {
+      "name": "gate/mistyped-bare-mnemonic",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandoz",
+      "sha256": "946992ba2f70897ee9c7b8b42bca452107f6703ef5aa6109b4376bf6e51ef3c9",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 3; the operand class of sysw_cli.rs:1928"
+    },
+    {
+      "name": "gate/deadbeef-fronts-an-xpub",
+      "input": "deadbeef: xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx",
+      "sha256": "2715e697d2a927217420fba3c3cd1526af6f2d797a0c080e5d3a4d6b9ea4706b",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "bluewallet-no-name",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 3 (r17's intended flip; invariant-1 boundary witness). refusal_row is the device's own precedence: parseBlueWalletDescriptor succeeds and OutputDescriptor's Title != \"\" gate is what refuses"
+    },
+    {
+      "name": "gate/malformed-md1",
+      "input": "md1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzzzzzzz",
+      "sha256": "2aba4d70f4d7d4eb10f0a12a9992a969d9417d0bcd804997deed4ff8dc4dccf6",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 4: the bech32 charset is not a base58check envelope"
+    },
+    {
+      "name": "gate/malformed-mk1",
+      "input": "mk1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzzzzzzz",
+      "sha256": "d41356219fa4c42f82cdc250f693340327bbcc09e72734a3fa0ff44b46d2b9cf",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 4: the bech32 charset is not a base58check envelope"
+    },
+    {
+      "name": "gate/malformed-ms1",
+      "input": "ms1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzzzzzzz",
+      "sha256": "29578726759f523d2aaa5bfdbeefc4663e8345c5f13dba7da6531e1ffe592de9",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 4: the bech32 charset is not a base58check envelope"
+    },
+    {
+      "name": "gate/malformed-mt1",
+      "input": "mt1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqzzzzzzz",
+      "sha256": "e92c5b7e86531f25a99d38a19dc077ad2e6918ca05bad151653809ed99aea62a",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 4: the bech32 charset is not a base58check envelope"
+    },
+    {
+      "name": "gate/multi-record-mnemonic-first",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\nwsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[f245ae38/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))\n",
+      "sha256": "19bbc801b12c5e2e0d6d7aff96077e832fec8cebab64950758835097778ce229",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "multi-record",
+      "exit_code": 4,
+      "refusal_row": "multi-record-descriptor",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 5: the MNEMONIC-FIRST ordering is load-bearing (r19)"
+    },
+    {
+      "name": "gate/buried-bare-Zpub",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\nZpub72iLoWFEq59hBnNjsSQG211uSabRoNzqLmKocKvrfoZ2Nd81moFdrYXw4gNyisKJ4rGRsD5K4Jmnr8ZrMyFnEN3ED2jYzeGCQ3BE2fiCsDJ\n",
+      "sha256": "05e69a0527f5be856ac3e5dacd7e7cd9c8238c86cc3cbb39addf97515404822a",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "unparseable",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 6 + S6's scope paragraph: the whole input does not parse as one descriptor and no individual record does, so step 5's generic four-forms text fires"
+    },
+    {
+      "name": "gate/buried-bare-tpub",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\ntpubDCXMbAzeg2TpLR1yiFM7yfpThyMvhAqJjuDzUpvgsvikPXbMaJPKfk2ZTbb7h7jnp1Vk7FPwnsWEeaDa2D83Nr1ehUyc6wpTYpNURb6Qt26\n",
+      "sha256": "130465752dba746b3d1a9f9b1dc96d7e35d18d962e61cedf1d8c55ad97522322",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "unparseable",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 6 + S6's scope paragraph: the whole input does not parse as one descriptor and no individual record does, so step 5's generic four-forms text fires"
+    },
+    {
+      "name": "gate/buried-fingerprint-no-path",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about\n[4bbaa801]xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx\n",
+      "sha256": "733e06d8f8d3d39da61e7d7ce29b9b335de95acf3b0cfaa5e9d3f9a8e2fd14c7",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "unparseable",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 6 + S6's scope paragraph: the whole input does not parse as one descriptor and no individual record does, so step 5's generic four-forms text fires"
+    },
+    {
+      "name": "gate/base58check-77-byte-payload",
+      "input": "1dwqetpVWxpvKKXaeg9B3LQHj1TMN77obMtjgz6DMACcBkpMHbLtCVNJ2JgMjdUV2u2KtMXTgtQsX5JHaGacG79Xf5yLkQuukr5ZqnapeLzkV",
+      "sha256": "cd0fcd8c910a3d4f9bea0bb160a7161c2968d77a6500994653ef4865e5f222fb",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": false,
+      "outcome": "record-refusal",
+      "exit_code": 4,
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 7: valid checksum, 77-byte payload -- one byte short of an extended-key envelope, so T3's leading-segment test fails"
+    },
+    {
+      "name": "gate/lone-open-bracket",
+      "input": "[",
+      "sha256": "245843abef9e72e7efac30138a994bf6301e7e1d7d7042a33d42e863d2638811",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "unparseable",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 7"
+    },
+    {
+      "name": "gate/xpub-trailing-slash",
+      "input": "xpub6C9j4wAxxkWN4cq8G4N2mkV6NrGGhnLFCGdh8GsYY1xreEveW5YEXJMjDZWLAcnZ26xqVft5FmgBxPixdMGoVQZMdtEJRRADxrn4facoGnx/",
+      "sha256": "35c0ee15c68f56437b1b54af260e8491eaee68ed0a62c38d7b71e5a3f49963c7",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "none",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "unparseable",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S7 gate clause 7"
+    },
+    {
+      "name": "gate/colliding-origin-sortedmulti",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[dc567276/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "15a20621a5b317affb573dcd8213512f1c3ccf4e949dc984b67e745e7d16c5df",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "key-identity",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 conjunct 8 / S7 clause 8: one (fingerprint, origin) naming two keys. NO address fields -- a colliding-origin wallet derives byte-identical addresses to a clean control, so the refusal is the witness"
+    },
+    {
+      "name": "gate/duplicate-key-same-use-site",
+      "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*))",
+      "sha256": "e12892bdce2b21e7108dc509932908fb63afaf4b40cf5731785443a2d86cd3f8",
+      "host_admits": false,
+      "device_admits": true,
+      "md1_admits": false,
+      "format": "bip380",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "key-identity-duplicate",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 conjunct 8 / S7 clause 8: the same (xpub, use-site) in two slots"
+    },
+    {
+      "name": "gate/colliding-origin-multi",
+      "input": "wsh(multi(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[dc567276/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
+      "sha256": "eae1fc5fa78655c7ebfa31a1e5fb8cf57356f9252379c8dd6aa82347f6a94e61",
+      "host_admits": false,
+      "device_admits": false,
+      "md1_admits": false,
+      "format": "bip380",
+      "gate_open": true,
+      "outcome": "descriptor-refusal",
+      "exit_code": 3,
+      "refusal_row": "key-identity",
+      "covers": [
+        "gate"
+      ],
+      "source": "SPEC_descriptor_input.md S4.7 conjunct 8 / S7 clause 8: the multi twin; conjunct 8 binds the --as md1 path, and under --as descriptor conjunct 1 refuses first"
+    }
+  ]
+}
