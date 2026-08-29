@@ -62,6 +62,28 @@ func (t Text) fontMM() float32 {
 	return t.FontSize
 }
 
+// FooterRow is the y, in device units, that EngraveText cuts a non-empty Footer
+// at -- and therefore the y a BODY must stay above.
+//
+// IT IS EXPORTED BECAUSE EngraveText DOES NOT BUDGET THE BODY AGAINST IT. The
+// free-text path does (yBudget, fit.go, whose limit is read off this same
+// expression); the paragraph path never had to, because every caller until now
+// put ONE paragraph on a plate and one md1/mk1 string is at most four rows. A
+// caller that PACKS paragraphs can reach row 19, and toPlate cannot see it: the
+// footer sits inside the safety margin, so a body laid over it is still In()
+// the plate and the fit check returns nil. Overlapping ink on steel, reported as
+// a fit.
+//
+// It forwards to footerRowY rather than restating it, for footerRowY's own
+// stated reason: the row the footer is cut at and the row a body is refused
+// above may not be two different expressions.
+//
+// It resolves the size through fontMM, so a caller asks the PLATE where its
+// footer is rather than having to know plateFontSizeUR.
+func (t Text) FooterRow(params engrave.Params) int {
+	return footerRowY(params, t.fontMM())
+}
+
 type Paragraph struct {
 	Text    string
 	QR      *qr.Code
