@@ -137,7 +137,10 @@ func parseBlueWalletDescriptor(txt string) (*bip380.Descriptor, error) {
 			if err != nil {
 				return nil, fmt.Errorf("bluewallet: invalid fingerprint: %q", key)
 			}
-			if len(fp) > 4 {
+			if len(fp) != 4 {
+				// A master fingerprint is exactly 4 bytes. Shorter used to fall
+				// through to binary.BigEndian.Uint32 below and PANIC (S4.2
+				// defect 4); the host refuses the same input cleanly.
 				return nil, fmt.Errorf("bluewallet: invalid fingerprint: %q", key)
 			}
 			network, err := bip32.NetworkFor(xpub)
