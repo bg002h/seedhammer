@@ -3,7 +3,9 @@ package sysw
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"slices"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip380"
@@ -44,7 +46,7 @@ import (
 // A record failing any of it is ClassUnknown and goes INERT -- the existing
 // contract for an unclassifiable record (it stays in the session, is offered to
 // nobody, and reaches no screen).
-func isDescriptorRecord(record string) (admitted bool) {
+func isDescriptorRecord(raw, record string) (admitted bool) {
 	// sysw.Classify runs over EVERY record of every loaded payload
 	// (gui/sysw_session.go), so a panic below is a payload that will not LOAD
 	// rather than a record that will not classify. Both panics this spec
@@ -59,22 +61,141 @@ func isDescriptorRecord(record string) (admitted bool) {
 		}
 	}()
 
-	// THE PARSE FIRST, and the order is a cost decision rather than a semantic
-	// one -- this is a conjunction, so every arm has to hold whichever runs
-	// first. Every record of every payload reaches here, and the overwhelming
-	// majority are not descriptors at all; running the cascade once and only
-	// then re-reading the record's bytes keeps their cost to that one cascade.
+	// §4.6 FIRST, because it decides WHICH STRING the rest of this is about.
+	//
+	// `classifyConstellation` reached here through strings.TrimSpace, which
+	// trims by unicode.IsSpace; the host's §4.6 normalisation is
+	// `replace("\r\n","\n")` then a trim by `char::is_ascii_whitespace`
+	// (crates/me-cli/src/descriptor/cascade.rs:36). The two sets differ by
+	// U+000B and the whole Unicode Zs category, so a record padded with a
+	// no-break space is a DIFFERENT string to the two sides: the device trims
+	// it off and sees a wallet, and `me` does not and refuses at rc 3
+	// (measured, 20 cases, both positions, descriptor and bare-key forms).
+	// That is the device-WIDER direction this whole arm exists to close, so
+	// the arm answers for its own §4.6 rather than inheriting the shared trim
+	// -- which predates S2 and which the md1/mk1 arms rely on being Unicode.
+	if asciiNormalise(raw) != record {
+		return false
+	}
+	// THE PARSE next, and its position is a cost decision rather than a
+	// semantic one -- this is a conjunction, so every arm has to hold whichever
+	// runs first. Every record of every payload reaches here, and the
+	// overwhelming majority are not descriptors at all; running the cascade
+	// once and only then re-reading the record's bytes keeps their cost to that
+	// one cascade.
 	desc, err := nonstandard.OutputDescriptor([]byte(record))
 	if err != nil {
 		return false
 	}
 	// Then the cascade's two single-line-reachable NARROWINGS, which need the
-	// version bytes the parser has just normalised away.
-	if !keyVersionsAdmitted(record, promotesABareKey(record)) {
+	// version bytes the parser has just normalised away -- over the KEY TEXT
+	// the cascade consumed, which is not always the whole record.
+	if !keyVersionsAdmitted(cascadeKeyText(record), promotesABareKey(record)) {
 		return false
 	}
 	// Then §4.7's conjuncts over what the cascade produced.
 	return admitDescriptor(desc)
+}
+
+// asciiWhitespace is exactly `char::is_ascii_whitespace`: SPACE, TAB, LF, FF,
+// CR. **U+000B VERTICAL TAB IS DELIBERATELY ABSENT** -- Rust excludes it and
+// Go's unicode.IsSpace includes it, and that one character is four of the
+// twenty measured divergences.
+const asciiWhitespace = " \t\n\f\r"
+
+// asciiNormalise is §4.6, ported exactly: CRLF becomes LF everywhere, then
+// ASCII whitespace comes off both ends. Nothing else.
+//
+// It does not violate §7's invariant, and the reason is mechanical: what `me`
+// PACKS is the canonical re-encoded descriptor, never the operator's file, and
+// a sysw record cannot contain a newline by construction -- so the device never
+// sees the whitespace the host absorbed. What it must not do is absorb MORE
+// than the host, which is what this exists to prevent.
+func asciiNormalise(s string) string {
+	return strings.Trim(strings.ReplaceAll(s, "\r\n", "\n"), asciiWhitespace)
+}
+
+// cascadeKeyText is the substring of the record whose version bytes the HOST
+// actually checks -- which is NOT the record.
+//
+// The host checks a version inside `parse_extended_key`, which the cascade
+// reaches only through a KEY EXPRESSION. Three of the four branches hand it the
+// whole input or something derived from it, but **branch 3 hands it the
+// `descriptor` field alone**: `{"label": …, "descriptor": …}` copies `label`
+// into `desc.Title` and never parses it (nonstandard/parse.go:44-55). A label
+// is arbitrary operator text, `"`/`{`/`}`/`:`/`,` are all outside the base58
+// alphabet, and an extended key is a legal thing to call a wallet -- so a label
+// is its own maximal base58 run and scanning the whole record refuses a record
+// whose every KEY is an `xpub`.
+//
+// MEASURED, both the reviewer's case and the sharper one it does not cover: a
+// JSON record whose label is an unrelated `ypub`, AND one whose label is the
+// `ypub` spelling of a key that IS in the descriptor, are both `host_admits`
+// (rc 0 under `me sysw pack --as descriptor`) while the whole-record scan
+// refused them. The second is why matching a run's key MATERIAL against the
+// parsed keys is not a fix: the host does not look at the label at all, so
+// neither may this.
+//
+// Branch 1 (BlueWallet) has the same shape -- `Name:`'s value is a title -- so
+// it is scoped the same way, to the values of the headers the parser does NOT
+// recognise, which are the only ones it parses as keys. Order matters and it is
+// JSON FIRST: a single-line `{"label": "x", "descriptor": "y"}` is
+// header-shaped under a `": "` split, and branch 1 fails on it, so testing the
+// header shape first would scope a JSON record to a "value" holding its own
+// label.
+//
+// Where a record is header-shaped and branch 1 nevertheless FAILED, the scope
+// cannot matter: branch 2 needs a known script name before the first `(` and a
+// parseable descriptor contains no `": "` at all, branch 3 is already excluded,
+// and branch 4's ParseKey rejects a `": "` outright -- so OutputDescriptor
+// errors and the arm has already returned.
+func cascadeKeyText(record string) string {
+	// Branch 3 -- {label, descriptor} JSON.
+	var doc struct {
+		Label      string `json:"label"`
+		Descriptor string `json:"descriptor"`
+	}
+	if err := json.Unmarshal([]byte(record), &doc); err == nil {
+		if _, err := bip380.Parse(doc.Descriptor); err == nil {
+			return doc.Descriptor
+		}
+	}
+	// Branch 1 -- BlueWallet. Its key material is the value of every header
+	// whose name is not one of the four the parser recognises.
+	if vals, ok := blueWalletKeyValues(record); ok {
+		return strings.Join(vals, "\n")
+	}
+	// Branches 2 and 4 -- a plain BIP-380 descriptor and a bare key expression.
+	// Both grammars are closed and carry no free-text field, so every run in
+	// them is key material.
+	return record
+}
+
+// blueWalletHeaders is the four names `parseBlueWalletDescriptor` recognises
+// (nonstandard/parse.go:103-127). Everything else is a `fingerprint: xpub`
+// pair, and only those values reach ParseExtendedKey.
+var blueWalletHeaders = [...]string{"Name", "Policy", "Derivation", "Format"}
+
+// blueWalletKeyValues returns branch 1's key material, and reports false when
+// the record is not header-shaped at all -- which is branch 1's own first
+// refusal ("bluewallet: invalid header").
+func blueWalletKeyValues(record string) ([]string, bool) {
+	var vals []string
+	var lines int
+	for _, l := range strings.Split(record, "\n") {
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(l, ": ")
+		if !ok {
+			return nil, false
+		}
+		lines++
+		if !slices.Contains(blueWalletHeaders[:], k) {
+			vals = append(vals, v)
+		}
+	}
+	return vals, lines > 0
 }
 
 // admittedVersions is §4.3's admitted set, and it is exactly five: xpub, tpub,
@@ -97,7 +218,9 @@ const tpubVersion = "043587cf"
 const minExtendedKeyLen = 100
 
 // keyVersionsAdmitted answers §4.3's version conjunct and §4.5's promotion
-// ruling in ONE pass over the record's own bytes.
+// ruling in ONE pass over `keyText` -- the substring the cascade consumed as
+// key material, which [cascadeKeyText] narrows and which is NOT always the
+// whole record.
 //
 // IT HAS TO BE A STRING-LEVEL CHECK, and that is structural rather than a
 // preference: bip380.Key carries no version field, and ParseExtendedKey
@@ -118,9 +241,9 @@ const minExtendedKeyLen = 100
 // conjuncts-only port gets wrong (promotion/15-bare-tpub-host-refused): every
 // §4.7 conjunct passes on it, because `tpub` IS admitted for a key inside a
 // descriptor. The promotion branch is where the narrowing lives.
-func keyVersionsAdmitted(record string, promoted bool) bool {
+func keyVersionsAdmitted(keyText string, promoted bool) bool {
 	ok := true
-	eachExtendedKey(record, func(version string) {
+	eachExtendedKey(keyText, func(version string) {
 		if !slices.Contains(admittedVersions, version) {
 			ok = false
 		}
@@ -145,10 +268,15 @@ func promotesABareKey(record string) bool {
 }
 
 // eachExtendedKey calls f with the hex version bytes of every extended key
-// spelled in the record, in order. Runs shorter than an extended key are
-// skipped without decoding, and a run that is long enough but does not decode
-// is not a key -- the parse refuses it, or never looks at it.
-func eachExtendedKey(record string, f func(version string)) {
+// spelled in `keyText`, in order. Runs shorter than an extended key are skipped
+// without decoding, and a run that is long enough but does not decode is not a
+// key -- the parse refuses it, or never looks at it.
+//
+// The CALLER decides what `keyText` is, and that is the whole of C1's fix: this
+// function cannot tell a key from a wallet's name, so it is never handed a
+// string that can contain one.
+func eachExtendedKey(keyText string, f func(version string)) {
+	record := keyText
 	for i := 0; i < len(record); {
 		if !isBase58(record[i]) {
 			i++

@@ -35,6 +35,11 @@ func classifyConstellation(record string) Class {
 	// Rust reaches these through seal::record::validate_record, which trims
 	// first. Not trimming made the device reject md1 strings the host accepts --
 	// the one row where Go was the STRICTER side.
+	//
+	// THIS TRIM IS UNICODE-WIDE and the descriptor arm's host is not, so the raw
+	// record is kept: §4.6's normalisation is ASCII-only, and the arm answers
+	// for its own rather than inheriting a wider one. See isDescriptorRecord.
+	raw := record
 	record = strings.TrimSpace(record)
 
 	if isStrictMnemonic(record) {
@@ -65,7 +70,7 @@ func classifyConstellation(record string) Class {
 	// The predicate is isDescriptorRecord (sysw/descriptor.go), NOT
 	// nonstandard.OutputDescriptor: the scan door admits 18 single-line strings
 	// this refuses, and every one of them would reach a program and a screen.
-	if isDescriptorRecord(record) {
+	if isDescriptorRecord(raw, record) {
 		return ClassDescriptor
 	}
 	return ClassUnknown
