@@ -89,7 +89,7 @@ func TestBundlePlanSingleMD1OnePlate(t *testing.T) {
 // TestBundlePlanPacksACardOntoFewerPlates is F-423's ARITHMETIC, pinned.
 //
 // The operator's words were "1 plate per string is something to be addressed,
-// it's wasteful", and the case they named is the keyed single-sig md1: two
+// it's wasteful", and the case they named is the bare single-sig md1: two
 // strings of ~85 characters, cut as two plates. It is one plate now, and so is
 // three; the numbers below are the packer's own answers at the SHIPPED font,
 // measured, not the analytic bound (MEASURE-S2-P4-1 confirmed N=3 by trial and
@@ -109,7 +109,7 @@ func TestBundlePlanPacksACardOntoFewerPlates(t *testing.T) {
 		what    string
 	}{
 		{1, 1, "a one-string card is one plate, exactly as before"},
-		{2, 1, "the keyed single-sig card F-423 names: two strings, ONE plate"},
+		{2, 1, "the bare single-sig card F-423 names: two strings, ONE plate"},
 		{3, 1, "three strings, one plate (MEASURE-S2-P4-1's trial ceiling)"},
 		{bundlePlateMD1Capacity, 1, "the last count that fits one plate"},
 		{bundlePlateMD1Capacity + 1, 2, "one more than fits splits, and splits ONCE"},

@@ -540,7 +540,7 @@ func bundlePlateMark(kind bundleCardKind, title, footer string) (string, string)
 //
 // `title` NAMES THE PROGRAM THE OPERATOR CHOSE (F-182). The end-of-engrave ms1
 // reminder used to be hard-coded "Engrave Bundle", and that modal is shown at the
-// end of a Build-policy engrave too -- measured: S2's walk cuts 9 plates and
+// end of a Build-policy engrave too -- measured: pre-F-423 the walk cut 9 plates (4 packed since) and
 // reaches it -- so an operator who picked "Build policy" off the menu was told,
 // by a screen with no other context, that they were somewhere else. It is a
 // PARAMETER and not a rename because bundleEngrave is shared by the bundle flow,
@@ -555,7 +555,7 @@ func bundlePlateMark(kind bundleCardKind, title, footer string) (string, string)
 // "Verify the engraved plates?" over a verify that structurally cannot succeed
 // (the md1 is emitted LAST and was never cut, so it dies at
 // extractReadbackMd1AndMk1s reading as "your plates are unreadable"). Then the
-// restore document printed, headed "This backup is 9 plates ... If any of them
+// restore document printed, headed "This backup is N plates" (9 pre-F-423, 4 packed ... If any of them
 // is missing, this backup is incomplete." -- the artifact this diff itself says
 // is read years later, alone, presented as the last word of a run the device had
 // just said produced no usable backup.
@@ -678,7 +678,7 @@ func bundleSetCarriesASecret(cards []bundleCard) bool {
 // md1 chunk is a warning that gets ignored on the run where it matters.
 //
 // (2) "START THE BUNDLE OVER" THROWS AWAY WORK THAT IS STILL GOOD. The tail cuts
-// 6 to 9 plates over hours, nothing records which were cut, and a power loss
+// several plates (9 pre-F-423; 4 packed) over hours, nothing records which were cut, and a power loss
 // loses that state -- but the encoders are DETERMINISTIC (no rand in md/, mk/ or
 // codex32/, and mk's chunk_set_id derives from the bytecode rather than from
 // randomness), so re-running the same inputs mints byte-identical plates.
@@ -692,7 +692,7 @@ func bundleSetCarriesASecret(cards []bundleCard) bool {
 // the per-plate picker's only rows are validateMdmk's three engraving styles
 // with no skip anywhere in the tree, EngraveScreen.Engrave returns true only
 // after an actual cut, and Back aborts the whole set. An operator taking the
-// sentence at face value at plate 7 of 9 has exactly three options, all bad: cut
+// sentence at face value midway through the run has exactly three options, all bad: cut
 // a SECOND seed plate (which buildEngraveTail refuses to produce on purpose --
 // "the second would be a duplicate secret on steel" -- and which contradicts the
 // census the same run printed), re-run the identical job onto an
