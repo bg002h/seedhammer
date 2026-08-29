@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -13,6 +14,7 @@ import (
 	"seedhammer.com/bip380"
 	"seedhammer.com/md"
 	"seedhammer.com/nonstandard"
+	"seedhammer.com/sysw"
 )
 
 // THE HOST/DEVICE DESCRIPTOR SEAM, as a gate rather than a comment.
@@ -37,7 +39,7 @@ import (
 // The package is `nonstandard_test` (EXTERNAL) deliberately: once §5.2's
 // classifier arm lands, `sysw` imports `nonstandard`, and an internal test
 // importing `sysw` for the sysw_class column would be an import cycle.
-const seamVectorsSHA256 = "542cd492e35149b62c53f940fb755576e0ffd4d086b0e3fcda615fbc43f51974"
+const seamVectorsSHA256 = "e7a4160ce064a6cb7ca31dc530e079c861cf2c8a075d75f793ef0d935f583758"
 
 const seamVectorsPath = "testdata/descriptor_seam_vectors.json"
 
@@ -50,7 +52,6 @@ type seamRow struct {
 	Md1Admits            bool     `json:"md1_admits"`
 	Format               string   `json:"format"`
 	Canonical            string   `json:"canonical"`
-	SyswClass            string   `json:"sysw_class"`
 	DeviceProbe          string   `json:"device_probe"`
 	Address0             string   `json:"address_0"`
 	Address1             string   `json:"address_1"`
@@ -63,18 +64,24 @@ type seamRow struct {
 // as the Rust half pins its own. A field renamed by a typo drops its count and
 // reds the suite instead of silently disabling every assertion that reads it.
 const (
-	wantRows         = 71
-	wantDeviceTrue   = 37
-	wantDeviceFalse  = 33
-	wantDeviceAbsent = 1 // the panic:parse row
-	wantCanonical    = 19
-	wantAddress0     = 20
-	wantAddress1     = 5
-	wantWalletID     = 4
-	wantSyswClass    = 4
-	wantPanicParse   = 1
-	wantPanicEncode  = 2
-	wantHostWider    = 3 // §4.6's whitespace rows, and only those
+	wantRows        = 72
+	wantDeviceTrue  = 38
+	wantDeviceFalse = 34
+	wantCanonical   = 19
+	wantAddress0    = 20
+	wantAddress1    = 5
+	wantWalletID    = 4
+	wantPanicEncode = 2
+	wantHostWider   = 3 // §4.6's whitespace rows, and only those
+	// Rows whose `input` is ONE LINE -- the only rows that can BE a record,
+	// because the public section is split on LF (sysw/open.go:67) and a record
+	// therefore cannot contain one. Measured from the file, not read off it,
+	// and pinned identically in the Rust half (SINGLE_LINE_ROWS /
+	// SINGLE_LINE_ADMITTED, crates/me-cli/tests/descriptor_seam.rs).
+	wantSingleLine = 59
+	// ... of which this many are host_admits, so the derived rule below is
+	// satisfiable in BOTH directions rather than vacuously one-sided.
+	wantSingleLineAdmitted = 15
 	// address_0 is carried on 20 rows; 4 of them the device cannot derive from
 	// the INPUT -- the three §4.6 whitespace rows (raw bytes REFUSED; their
 	// value is the md1 route's, and the Rust half owns it) and
@@ -114,7 +121,7 @@ func loadSeamVectors(t *testing.T) []seamRow {
 // suite rather than fail it, which is a false-signal shape.
 func TestDescriptorSeamDeviceColumn(t *testing.T) {
 	rows := loadSeamVectors(t)
-	var deviceTrue, deviceFalse, absent, panicParse, panicEncode int
+	var deviceTrue, deviceFalse, absent, panicEncode int
 	for _, v := range rows {
 		// A mistyped vector must fail loudly, not quietly stop testing.
 		sum := sha256.Sum256([]byte(v.Input))
@@ -123,15 +130,13 @@ func TestDescriptorSeamDeviceColumn(t *testing.T) {
 			continue
 		}
 		switch v.DeviceProbe {
-		case "panic:parse":
-			panicParse++
-			if v.DeviceAdmits != nil {
-				t.Errorf("%s: a panic:parse row must OMIT device_admits -- the predicate "+
-					"cannot be evaluated, so either boolean is a false claim", v.Name)
-			}
-			// Deliberately NOT parsed. nonstandard/parse.go:136-149 checks only
-			// len(fp) > 4 before binary.BigEndian.Uint32(fp[:]).
-			continue
+		// "panic:parse" is NOT an arm any more, and its absence is the
+		// assertion. S2's convergence fix made nonstandard/parse.go's
+		// fingerprint guard `!= 4`, so the parse panic is gone and the file
+		// carries no row that bars this test from OutputDescriptor. A
+		// reintroduced "panic:parse" therefore falls to `default` and reds --
+		// which is right: the harness rule it needed was retired with it, and
+		// silently continuing past such a row would skip the parse it names.
 		case "panic:encode":
 			panicEncode++
 		case "":
@@ -161,9 +166,8 @@ func TestDescriptorSeamDeviceColumn(t *testing.T) {
 	if absent != 0 {
 		t.Errorf("%d rows missing device_admits", absent)
 	}
-	if panicParse != wantPanicParse || panicEncode != wantPanicEncode {
-		t.Errorf("device_probe population: %d panic:parse / %d panic:encode, want %d / %d",
-			panicParse, panicEncode, wantPanicParse, wantPanicEncode)
+	if panicEncode != wantPanicEncode {
+		t.Errorf("device_probe population: %d panic:encode, want %d", panicEncode, wantPanicEncode)
 	}
 }
 
@@ -261,6 +265,22 @@ func TestDescriptorSeamAddresses(t *testing.T) {
 	if a0 != wantDeviceAddr0 || a1 != wantDeviceAddr1 {
 		t.Errorf("device-route address population: %d address_0 / %d address_1, want %d / %d",
 			a0, a1, wantDeviceAddr0, wantDeviceAddr1)
+	}
+	// The FILE-level populations, separately: wantDeviceAddr0/1 above count
+	// only the rows this route derives, so on their own they cannot see an
+	// address column shrinking on the rows it skips.
+	var f0, f1 int
+	for _, v := range rows {
+		if v.Address0 != "" {
+			f0++
+		}
+		if v.Address1 != "" {
+			f1++
+		}
+	}
+	if f0 != wantAddress0 || f1 != wantAddress1 {
+		t.Errorf("address column population: %d address_0 / %d address_1, want %d / %d",
+			f0, f1, wantAddress0, wantAddress1)
 	}
 }
 
@@ -368,24 +388,107 @@ func walletIDOf(d *bip380.Descriptor) (string, error) {
 	return hex.EncodeToString(id[:]), nil
 }
 
-// TestDescriptorSeamSyswClass is S2's arm. `sysw.Classify` has no descriptor
-// case today (sysw/classify.go:34 -- measured, ClassUnknown for all 39 probed
-// descriptor inputs), so the column states what it will answer once §5.2's arm
-// lands, and this test SKIPS with that reason rather than asserting a value
-// nothing can produce. It still counts the column, so the rows cannot vanish
-// while the assertion is parked.
+// ═══ §5.2's PREDICATE AT THE RECORD LAYER ═══════════════════════════════════
+//
+// `host_admits` IS the predicate -- the Rust half asserts the column against
+// `descriptor::host_admits` row by row -- and these two tests assert that
+// `sysw.Classify` answers WITH it, in both directions, over every row that can
+// be a record. The Rust half runs the SAME derived rule over the SAME file
+// (every_single_line_input_classifies_by_the_admission_column and
+// every_admitted_rows_canonical_classifies_as_a_descriptor_record,
+// crates/me-cli/tests/descriptor_seam.rs), so a Go/Rust divergence anywhere in
+// the file reds one of the two suites instead of hiding in a hand-stated value.
+//
+// THIS REPLACES A FOUR-ROW SAMPLE. Until S2 the file carried a `sysw_class`
+// column on 4 of 71 rows and this test SKIPPED rather than assert it, because
+// no arm existed to produce the value. The column was a sample the plan misread
+// as a population, and its input-vs-canonical basis was ambiguous. The
+// derived rule has neither problem: it is exhaustive, it is stated over both
+// bases separately, and it needs no column of its own.
+//
+// The rule is EXACT EQUALITY, not Descriptor-or-anything. That is also the
+// empirical, per-row answer to "can a descriptor-shaped string collide with
+// another class", which no sampled column could give.
+
+// TestDescriptorSeamSyswClass is the input basis: for every SINGLE-LINE row,
+// sysw.Classify(input) == ClassDescriptor iff host_admits, else ClassUnknown.
+//
+// Single-line because the public section is split on LF (sysw/open.go:67), so a
+// record cannot contain one -- the multi-line rows are inputs to `me`, never
+// records, and asserting a classification for them would assert something the
+// wire cannot carry.
+//
+// This is the gate that caught the C3 divergence: keying the arm on
+// nonstandard.OutputDescriptor -- the scan door -- classifies 18 of these rows
+// as Descriptor that `me` refuses, and every one of them would reach a program
+// and a screen through gui/sysw_admit.go's live cells. It is never relaxed to
+// fit the arm.
 func TestDescriptorSeamSyswClass(t *testing.T) {
+	rows := loadSeamVectors(t)
+	var descriptor, unknown int
+	for _, v := range rows {
+		if strings.Contains(v.Input, "\n") {
+			continue
+		}
+		want := sysw.ClassUnknown
+		if v.HostAdmits {
+			want = sysw.ClassDescriptor
+		}
+		if got := sysw.Classify(v.Input); got != want {
+			t.Errorf("%s: sysw.Classify = %v, want %v -- host_admits is %v, and the "+
+				"classifier must answer §5.2's predicate EXACTLY. A device that "+
+				"classifies what `me` refuses hands a program a wallet the host "+
+				"would not pack; one that refuses what `me` packs makes the record "+
+				"inert on arrival.", v.Name, got, want, v.HostAdmits)
+			continue
+		}
+		if v.HostAdmits {
+			descriptor++
+		} else {
+			unknown++
+		}
+	}
+	if descriptor+unknown != wantSingleLine {
+		t.Errorf("single-line rows: %d, want %d", descriptor+unknown, wantSingleLine)
+	}
+	if descriptor != wantSingleLineAdmitted {
+		t.Errorf("admitted single-line rows: %d, want %d", descriptor, wantSingleLineAdmitted)
+	}
+	if unknown == 0 {
+		t.Error("the REFUSING direction is untested -- every single-line row is admitted")
+	}
+}
+
+// TestDescriptorSeamSyswClassCanonical is the other basis, asserted separately
+// so the input-vs-canonical ambiguity the retired column had cannot come back.
+//
+// The canonical is always one line and it is EXACTLY what `--as descriptor`
+// packs, so a canonical that does not classify is a record `me` writes and this
+// device drops on the floor.
+func TestDescriptorSeamSyswClassCanonical(t *testing.T) {
 	rows := loadSeamVectors(t)
 	var n int
 	for _, v := range rows {
-		if v.SyswClass != "" {
-			n++
+		if !v.HostAdmits {
+			continue
 		}
+		if v.Canonical == "" {
+			t.Errorf("%s: host_admits with no canonical", v.Name)
+			continue
+		}
+		if strings.Contains(v.Canonical, "\n") {
+			t.Errorf("%s: canonical is not one line", v.Name)
+			continue
+		}
+		if got := sysw.Classify(v.Canonical); got != sysw.ClassDescriptor {
+			t.Errorf("%s: sysw.Classify(canonical) = %v, want ClassDescriptor -- this "+
+				"is the record `me sysw pack --as descriptor` writes, and the device "+
+				"would leave it inert", v.Name, got)
+			continue
+		}
+		n++
 	}
-	if n != wantSyswClass {
-		t.Errorf("sysw_class population: %d, want %d", n, wantSyswClass)
+	if n != wantCanonical {
+		t.Errorf("canonical assertions run: %d, want %d", n, wantCanonical)
 	}
-	t.Skipf("S2 (F-418): sysw.Classify has no descriptor arm yet, so the %d sysw_class "+
-		"rows cannot be asserted. Un-skip when §5.2's arm lands -- importing sysw here "+
-		"is why this file is package nonstandard_test.", n)
 }

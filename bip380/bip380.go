@@ -446,6 +446,8 @@ func ParseExtendedKey(k string) (Script, *hdkeychain.ExtendedKey, error) {
 		script = P2PKH
 	case zpubVer:
 		script = P2WPKH
+	case ypubVer:
+		script = P2SH_P2WPKH
 	case YpubVer:
 		script = P2SH_P2WSH
 	case ZpubVer:

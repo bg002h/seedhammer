@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"seedhammer.com/bezier"
 	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/sh"
@@ -414,5 +415,76 @@ func TestTheTitleAndFooterAreEmittedLast(t *testing.T) {
 		t.Errorf("the plate's claim about itself is cut at knot %d, before the body "+
 			"finishes at %d: a plate abandoned mid-cut would already read as finished",
 			firstClaim, lastBody)
+	}
+}
+
+// TestFooterRowIsWhereTheFooterIsCut is Text.FooterRow's non-vacuity check: the
+// number it returns is the row the engraver actually puts a footer on, measured
+// off the ink, not off the formula it forwards to.
+//
+// A one-glyph body and a one-glyph footer are engraved separately, so the
+// footer's own ink can be located: the footer plate's ink runs from the body
+// glyph's top down to the footer glyph's bottom, and its Max.Y is one font size
+// below the row FooterRow names.
+func TestFooterRowIsWhereTheFooterIsCut(t *testing.T) {
+	plate := Text{Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}
+	withFooter := plate
+	withFooter.Footer = "F"
+
+	row := plate.FooterRow(prodParams)
+	if row != withFooter.FooterRow(prodParams) {
+		t.Errorf("FooterRow depends on whether a Footer is set: %d vs %d",
+			row, withFooter.FooterRow(prodParams))
+	}
+	bare := inkBounds(t, prodParams, EngraveText(prodParams, plate))
+	footed := inkBounds(t, prodParams, EngraveText(prodParams, withFooter))
+	if footed.Max.Y <= bare.Max.Y {
+		t.Fatalf("adding a footer did not move the ink down: bare %d, footed %d",
+			bare.Max.Y, footed.Max.Y)
+	}
+	// The footer glyph's ink begins at the row and is at most one font size tall.
+	fontSize := prodParams.F(plate.fontMM())
+	if footed.Max.Y <= row || footed.Max.Y > row+fontSize {
+		t.Errorf("FooterRow says %d but the footer's ink ends at %d, outside [%d, %d]",
+			row, footed.Max.Y, row, row+fontSize)
+	}
+}
+
+// TestAPackedBodyCanCoverTheFooterRow is the REASON FooterRow is exported, and
+// it is a demonstration rather than a claim: a plate whose paragraphs run past
+// the footer row is still In() the engravable area, so the bounds check every
+// paragraph caller uses (gui.toPlate) reports a FIT over ink that lands on top
+// of the footer.
+//
+// If EngraveText ever gains a body budget of its own, this test fails and the
+// packer's extra check (gui.bundlePlateTextFits) can go.
+func TestAPackedBodyCanCoverTheFooterRow(t *testing.T) {
+	const chunk = "md1f9k2szspqjtvyyy4qqxppcgsc97v95zqyudm486mm4xav6hqptc0rd7sr9mfc8yrzcx7sju0ra3jh8llnx"
+	var paras []Paragraph
+	for i := 0; i < 6; i++ {
+		paras = append(paras, Paragraph{Text: chunk})
+	}
+	plate := Text{Paragraphs: paras, Font: sh.Font, Title: "T", Footer: "F"}
+	row := plate.FooterRow(prodParams)
+
+	body := plate
+	body.Footer = ""
+	bodyInk := inkBounds(t, prodParams, EngraveText(prodParams, body))
+	if bodyInk.Max.Y <= row {
+		t.Fatalf("six chunks no longer reach the footer row (%d vs %d); pick a "+
+			"longer body or this test proves nothing", bodyInk.Max.Y, row)
+	}
+	// ...and the whole plate is nevertheless inside the engravable area, which is
+	// the half that makes it dangerous.
+	const safetyMargin = 3 // gui.safetyMargin, mm
+	sz := prodParams.F(plateSize)
+	margin := prodParams.I(safetyMargin)
+	all := inkBounds(t, prodParams, EngraveText(prodParams, plate))
+	if !all.In(bspline.Bounds{
+		Min: bezier.Pt(margin, margin),
+		Max: bezier.Pt(sz-margin, sz-margin),
+	}) {
+		t.Fatal("the overlapping plate is out of bounds, so toPlate would have " +
+			"caught it and FooterRow would not be needed")
 	}
 }

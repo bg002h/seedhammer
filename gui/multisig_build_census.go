@@ -1,10 +1,15 @@
 package gui
 
-import "fmt"
+import (
+	"fmt"
+
+	"seedhammer.com/engrave"
+)
 
 // ─── S4: tell the operator how many plates, before and after ─────────────────
 //
-// Trace B cuts 6-9 plates over hours. Before this the operator committed to that
+// Trace B cuts 3-4 plates over hours -- 6-9 before F-423 packed each card's
+// strings onto as many plates as fit. Before this the operator committed to that
 // with no count, and afterwards neither they nor the person who finds the plates
 // in five years could tell whether the set was complete. F-131 and F-132 are both
 // cases where a backup document's SILENCE cost more than its errors.
@@ -26,19 +31,26 @@ func plateWord(n int, one, many string) string {
 // buildPlateCensusLines tells the operator HOW MANY PLATES before the tail
 // starts.
 //
-// Trace B cuts 6-9 plates over hours. Before this, the operator committed to
-// that with no count, and neither they nor the person who finds the plates in
-// five years could tell whether the set was complete. F-131 and F-132 are both
+// Trace B cuts 3-4 plates over hours (6-9 before F-423's packing). Before this,
+// the operator committed to that with no count, and neither they nor the person
+// who finds the plates in five years could tell whether the set was complete. F-131 and F-132 are both
 // cases where a backup document's SILENCE cost more than its errors.
 //
 // The count is DERIVED from the cards, through bundlePlatePlan -- the same
 // function bundleEngrave loops -- so it cannot drift from what is actually cut.
-func buildPlateCensusLines(cards []bundleCard) []string {
-	plan := bundlePlatePlan(cards)
+//
+// THE PER-CARD COUNTS COME OFF THE SAME PLAN, not off len(c.strings). They were
+// the same number until F-423 packed several strings onto a plate; reading the
+// string count here now would tell the operator "md1 policy: 6 plates" over a
+// total of 2, on the one screen whose whole job is how many blanks to have
+// ready.
+func buildPlateCensusLines(params engrave.Params, cards []bundleCard) []string {
+	plan := bundlePlatePlan(params, cards)
+	perCard := bundleCardPlateCounts(plan, len(cards))
 	lines := []string{fmt.Sprintf("This engraves %s.", plateWord(len(plan), "plate", "plates"))}
-	for _, c := range cards {
+	for i, c := range cards {
 		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
-			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
+			c.label, plateWord(perCard[i], "plate", "plates"), c.summary))
 	}
 	lines = append(lines, "Each plate takes minutes to cut. Have that many blanks ready "+
 		"before you start: a set is only a backup when all of it exists.")
@@ -65,21 +77,36 @@ func buildPlateCensusLines(cards []bundleCard) []string {
 // either would tell a reader it travels WITH the set. Every caller but
 // engraveSingleSigFlow passes false -- the multisig paths have no
 // passphrase-plate offer at all (R-B).
-func buildPlateInventoryLines(cards []bundleCard, seeds []seedPassphraseFact,
+func buildPlateInventoryLines(params engrave.Params, cards []bundleCard, seeds []seedPassphraseFact,
 	capacity seedCapacity, passphrasePlateCut bool) []string {
-	plan := bundlePlatePlan(cards)
+	plan := bundlePlatePlan(params, cards)
+	perCard := bundleCardPlateCounts(plan, len(cards))
 	lines := []string{
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
 	}
-	for _, c := range cards {
+	for i, c := range cards {
 		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
-			c.label, plateWord(len(c.strings), "plate", "plates"), c.summary))
+			c.label, plateWord(perCard[i], "plate", "plates"), c.summary))
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
 	lines = append(lines, buildSeedInventoryLines(cards)...)
 	lines = append(lines, buildPassphraseInventoryLines(seeds, passphrasePlateCut)...)
 	lines = append(lines, buildSeedHandlingRuling(capacity, bundleSetCarriesASecret(cards)))
 	return lines
+}
+
+// bundleCardPlateCounts is how many plates each card contributes to plan.
+//
+// It COUNTS THE PLAN rather than re-running the packer, so the enumerated list
+// and the total above it are two readings of one object and cannot disagree --
+// which is the property this file's header claims and which len(c.strings)
+// quietly stopped providing when plates started holding more than one string.
+func bundleCardPlateCounts(plan []bundlePlate, cards int) []int {
+	counts := make([]int, cards)
+	for _, p := range plan {
+		counts[p.cardIdx-1]++
+	}
+	return counts
 }
 
 // ─── The walk-away ruling, and the two axes it is assembled from ─────────────

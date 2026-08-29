@@ -462,8 +462,9 @@ func hexOf(b []byte) string {
 // TestReRunMintsByteIdenticalPlates is plan test 7's ASSERTION half: re-running
 // the same inputs mints byte-identical plates.
 //
-// It is the designed answer to interruption. Trace B's tail is 6-9 plates over
-// hours, nothing records which were cut, and a power loss loses that state.
+// It is the designed answer to interruption. Trace B's tail is 3-4 plates over
+// hours (6-9 before F-423's packing), nothing records which were cut, and a
+// power loss loses that state.
 // Recovery is possible only because the encoders are deterministic -- no `rand`
 // in md/, mk/ or codex32/, and mk's chunk_set_id derives from the bytecode
 // rather than randomness -- so the operator re-runs and re-cuts only what is

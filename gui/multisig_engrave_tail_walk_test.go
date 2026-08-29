@@ -92,7 +92,7 @@ func s5ChooseRowLabelled(t *testing.T, ctx *Context, frame func() (string, bool)
 // under the test, which is where both of round 1's mutations live. Substituting
 // the flow itself is what makes the loop reachable at all -- a real second
 // attempt would mean driving a whole readback (gather, seed entry, passphrase,
-// ms1) twice, inside a walk that has already cut nine plates.
+// ms1) twice, inside a walk that has already cut every plate of the set.
 //
 // `verdicts` is consumed one per call; the last one repeats.
 func s5StubVerifyFn(t *testing.T, verdicts ...multisigVerifyResult) *int {

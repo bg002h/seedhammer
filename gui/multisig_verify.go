@@ -681,7 +681,7 @@ func verifyClaimPlate(want []string, mk1s [][]string, claimed []bool) (int, bool
 // The loop is unreachable from a unit test without it: reaching the offer means
 // completing a real engrave, and reaching a SECOND attempt means driving an
 // entire readback -- gather, seed entry, passphrase, ms1 -- twice, inside a walk
-// that has already cut nine plates. So I-4's whole mechanism was pinned by four
+// that has already cut every plate of the set. So I-4's whole mechanism was pinned by four
 // strings.Contains calls over the callers' SOURCE, and two independent mutations
 // left the tree green: turning `for {` into a one-iteration loop restored the
 // pre-fold one-shot offer, and swapping the {"VERIFY AGAIN", "CONTINUE"} labels

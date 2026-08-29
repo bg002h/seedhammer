@@ -70,10 +70,14 @@ import (
 //     sealed. The KDF entry path is walked by gui/sysw_load_test.go instead.
 //
 // WHICH RECORD KINDS. Tx and Mt here; the other five packable classes are in
-// gui/chain_class_walk_test.go, which uses this file's harness. ClassDescriptor
-// and ClassAddress have NO chain and cannot have one: `me sysw pack` refuses
-// both at rc=4 ("Descriptors and addresses are not yet classifiable here -- see
-// sysw::classify"), so neither can enter a payload in the first place.
+// gui/chain_class_walk_test.go, which uses this file's harness. ClassAddress
+// has NO chain and cannot have one: `me sysw pack` refuses it, so it cannot
+// enter a payload in the first place. ClassDescriptor was in that same
+// sentence until S2 and no longer is -- `me sysw pack --as descriptor` packs
+// §5.2's re-encoded record, and gui/wallet_policy_descriptor_walk_test.go
+// drives a container `me` wrote to a rendered DescriptorScreen. That walk does
+// not use THIS harness (it starts at an opened payload rather than at
+// syswLoadFlow), so the chain's four links are still three for that class.
 
 // chainPayload is one entry of gui/testdata/chain/chain_payloads.json.
 type chainPayload struct {

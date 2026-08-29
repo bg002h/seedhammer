@@ -91,9 +91,12 @@ func DecodeBody(record string) ([]byte, error) {
 
 // Classify places a record.
 //
-// DESCRIPTOR AND ADDRESS ARE DELIBERATELY ABSENT, matching the Rust primary:
-// classifying them needs a descriptor parser and an address decoder. An
-// unclassifiable record is ClassUnknown and the caller fails closed.
+// ADDRESS IS DELIBERATELY ABSENT, matching the Rust primary: classifying one
+// needs an address decoder, which neither side has. DESCRIPTOR was absent for
+// the same shape of reason until S2 -- see classifyConstellation's last arm and
+// sysw/descriptor.go, which port SPEC_descriptor_input.md §5.2's predicate
+// rather than reusing the scan door's wider one. An unclassifiable record is
+// ClassUnknown and the caller fails closed.
 func Classify(record string) Class {
 	if strings.HasPrefix(record, PassPrefix) {
 		if _, err := DecodeBody(record); err == nil {

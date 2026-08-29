@@ -64,9 +64,14 @@ var syswConsumers = []syswConsumer{
 	{"multisig_build.go", "buildMultisigPolicyFlow", []syswProgram{progMultisig},
 		"the cosigner-card gather (plan stage 13c)"},
 	{"wallet_policy.go", "walletPolicyFlow", []syswProgram{progWalletPolicy},
-		"the Wallet Policy program's first card (plan D5). ClassMDMK only — this " +
-			"program never derives from a secret, so progWalletPolicy admits no " +
-			"seed class at all"},
+		"the Wallet Policy program's payload door (plan D5). TWO offers since " +
+			"S2 — ClassMDMK for the card route and ClassDescriptor for §5.2's " +
+			"re-encoded record, which is an outside wallet policy by definition. " +
+			"Both are entries in this program's admission row and neither is a " +
+			"seed class: the program never derives from a secret, so " +
+			"progWalletPolicy admits none. This entry is keyed file:fn, so the " +
+			"second offer needed no registration — a consumer landing in a NEW " +
+			"function or file would"},
 }
 
 // classNames maps the sysw.Class identifiers a call site can name to their

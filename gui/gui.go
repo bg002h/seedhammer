@@ -2541,27 +2541,59 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 // rows, not paragraph content). Every caller but engraveSingleSigFlow (gui/singlesig.go) passes
 // "", "" -- Go has no default parameters.
 func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, error) {
+	return validateMdmkStrings(pl, []string{s}, title, footer)
+}
+
+// validateMdmkStrings is validateMdmk over a PACKED plate: the strings
+// bundlePlatePlan put on one plate, as separate paragraphs, verbatim (I-4).
+//
+// A ONE-STRING PLATE IS BYTE-FOR-BYTE WHAT IT ALWAYS WAS -- the three variants,
+// the same paragraph, the same order -- which is what keeps every non-bundle
+// caller (mdmkFlow, unlockEngraveFlow, deriveXpubFlow) and their goldens
+// unchanged.
+//
+// A PACKED PLATE IS OFFERED TEXT ONLY, and the QR variants are dropped rather
+// than tried, because on a multi-paragraph plate they are WRONG rather than
+// large. EngraveText advances a paragraph by its TEXT lines only, while a code
+// occupies twelve rows from two rows below that paragraph's top, so paragraph
+// n's code is drawn across paragraphs n+1 onward; and a text-less paragraph's
+// code is centered on the PLATE, so a QR-ONLY packed plate stacks every code on
+// one spot. Both lay out INSIDE the plate, so toPlate reports a fit for them --
+// offering either would cut overlapping ink on steel with the fit check
+// agreeing. (Measured at the shipped font on three 85-char md1 chunks:
+// paragraph 0's code spans y 67840..311040, paragraphs 1 and 2 start at 122880
+// and 202240.) The mt sibling reaches the same arrangement from the other
+// direction: planTransactionTextPlates packs TEXT-ONLY paragraphs and puts the
+// codes on plates of their own.
+func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]string, []Plate, error) {
 	params := pl.EngraverParams()
-	qrc, err := qr.Encode(s, qr.L)
-	if err != nil {
-		return nil, nil, err
-	}
 	const qrScale = 3
 	type textEngraving struct {
-		Label     string
-		Paragraph backup.Paragraph
+		Label      string
+		Paragraphs []backup.Paragraph
 	}
-	engravings := []textEngraving{
-		{"TEXT + QR", backup.Paragraph{Text: s, QR: qrc, QRScale: qrScale}},
-		{"TEXT ONLY", backup.Paragraph{Text: s}},
-		{"QR ONLY", backup.Paragraph{QR: qrc, QRScale: qrScale}},
+	var engravings []textEngraving
+	if len(strs) == 1 {
+		qrc, err := qr.Encode(strs[0], qr.L)
+		if err != nil {
+			return nil, nil, err
+		}
+		engravings = []textEngraving{
+			{"TEXT + QR", []backup.Paragraph{{Text: strs[0], QR: qrc, QRScale: qrScale}}},
+			{"TEXT ONLY", []backup.Paragraph{{Text: strs[0]}}},
+			{"QR ONLY", []backup.Paragraph{{QR: qrc, QRScale: qrScale}}},
+		}
+	} else {
+		engravings = []textEngraving{
+			{"TEXT ONLY", bundlePlateParagraphs(strs)},
+		}
 	}
 	var validLabels []string
 	var validEngravings []Plate
 	var lastErr error
 	for _, e := range engravings {
 		plate := backup.Text{
-			Paragraphs: []backup.Paragraph{e.Paragraph},
+			Paragraphs: e.Paragraphs,
 			Font:       sh.Font,
 			Title:      title,
 			Footer:     footer,
@@ -2588,7 +2620,18 @@ func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, erro
 	}
 	// The plates, not an id slice: lifting the ids out allocates, and
 	// gui/engraved_hook.go does it in a file the firmware never compiles.
-	notifyPlateText(pl, validEngravings, s)
+	//
+	// ONE CENSUS ENTRY PER PLATE, whatever the plate holds: the recorder maps a
+	// finished plate id to the text that plate carries, and the walk gates
+	// compare its length against the census screen's claim -- which is
+	// len(bundlePlatePlan(...)). A packed plate that announced one entry per
+	// STRING would put those two out of step by exactly the packing.
+	//
+	// THE STRINGS GO OVER WHOLE and the joining happens inside
+	// gui/engraved_hook.go, for that file's own recorded reason: a join here
+	// would allocate on the DEVICE, per validated plate, to build a string
+	// nothing on the device reads.
+	notifyPlateText(pl, validEngravings, strs)
 	return validLabels, validEngravings, nil
 }
 

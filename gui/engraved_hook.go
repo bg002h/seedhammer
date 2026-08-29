@@ -63,6 +63,8 @@
 // count by accident.
 package gui
 
+import "strings"
+
 // EngravedAware is an OPTIONAL interface a [Platform] may implement to learn
 // which string each engraved plate carried. See this file's package comment for
 // exactly which plates are announced and which are not -- "md1/mk1/ms1" was an
@@ -105,7 +107,7 @@ type EngravedAware interface {
 // nothing on the device ever read. It is also skipped entirely when no consumer
 // implements the interface, which on the emulator's own non-walk runs is most
 // of the time.
-func notifyPlateText(pl Platform, plates []Plate, text string) {
+func notifyPlateText(pl Platform, plates []Plate, strs []string) {
 	ea, ok := pl.(EngravedAware)
 	if !ok {
 		return
@@ -114,7 +116,12 @@ func notifyPlateText(pl Platform, plates []Plate, text string) {
 	for i, p := range plates {
 		ids[i] = p.id
 	}
-	ea.PlateText(ids, text)
+	// The JOIN LIVES HERE for the same reason the id slice does: since F-423 a
+	// plate can carry several strings, and building the joined text at the call
+	// site would allocate on the device -- per validated plate -- for a consumer
+	// that only exists in a browser. strings.Join returns elems[0] outright for a
+	// one-string plate, so the unpacked case is what it always was.
+	ea.PlateText(ids, strings.Join(strs, "\n"))
 }
 
 func notifyPlateEngraved(pl Platform, id uint64) {

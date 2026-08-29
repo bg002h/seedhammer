@@ -466,10 +466,11 @@ prefix:
 		return
 	}
 
-	// (9a) HOW MANY PLATES, BEFORE THE FIRST ONE. Trace B cuts 6-9 plates over
-	// hours and the operator committed to that with no count at all. Back here
+	// (9a) HOW MANY PLATES, BEFORE THE FIRST ONE. Trace B cuts 3-4 plates over
+	// hours (6-9 before F-423's packing) and the operator committed to that with
+	// no count at all. Back here
 	// aborts before anything is cut, which is the last moment that is free.
-	if !confirmReviewScreen(ctx, th, "Plate Count", buildPlateCensusLines(cardsOut)) {
+	if !confirmReviewScreen(ctx, th, "Plate Count", buildPlateCensusLines(ctx.Platform.EngraverParams(), cardsOut)) {
 		return
 	}
 	// AN ABORT ENDS THE PROGRAM HERE (I-12). Both surfaces below vouch for a
@@ -570,7 +571,7 @@ prefix:
 			buildVerifyStatusLine(rec),
 			// false: this path has no passphrase-plate offer at all -- R-B, a
 			// later phase -- so it can never have cut one (S6b spec 6/6a).
-			buildPlateInventoryLines(cardsOut, reg.passphraseFacts(), seedCapacityMany, false))
+			buildPlateInventoryLines(ctx.Platform.EngraverParams(), cardsOut, reg.passphraseFacts(), seedCapacityMany, false))
 	}
 }
 

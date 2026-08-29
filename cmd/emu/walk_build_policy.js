@@ -305,12 +305,15 @@ export function assertNoNFC(where) {
  *          only.
  * @param {boolean} [opts.engrave=false] drive past the review to a completed
  *          engrave and return the toolpath census.
- * @param {number}  [opts.plates=9]      runEngraveTail's LOOP BOUND — when the
+ * @param {number}  [opts.plates=4]      runEngraveTail's LOOP BOUND — when the
  *          driver stops watching the toolpath. It appears in no term of `ok`
  *          (I-1): a caller-supplied count cannot stand in for content, and this
  *          one was hand-derived in prose, which makes it worse. What the engraved
  *          strings should BE is settled by the derived expectation committed
  *          beside the gate record, never here. See the note on `ok` below.
+ *          FOUR SINCE F-423, and it was nine: a full 2-of-3 build gathers
+ *          ms1(1) + mk1(2) + md1(6) = 9 STRINGS, which bundlePlatePlan now packs
+ *          within each card onto 1 + 1 + 2 plates.
  * @param {string}  [opts.expect="engrave"]  "engrave" or "duplicate". The
  *          refusal arm is a first-class outcome, not a failure.
  * @returns {Promise<object>} the needles proven, the gather screen, and the
@@ -327,7 +330,7 @@ export function assertNoNFC(where) {
  */
 export async function run({ payload = "cards", n = 3, k = 2, selfSlot = 0, includeFp = false,
                             use = 2, picks = null, seedFrom = null, engrave = false,
-                            plates = 9, expect = "engrave",
+                            plates = 4, expect = "engrave",
                             pollMs = 75, settleMs = 150 } = {}) {
   const t0 = performance.now();
   assertNoNFC("at entry");

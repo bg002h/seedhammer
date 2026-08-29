@@ -3,11 +3,13 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"seedhammer.com/mk"
 
 	"seedhammer.com/address"
 	"seedhammer.com/md"
+	"seedhammer.com/nonstandard"
 	"seedhammer.com/sysw"
 )
 
@@ -38,6 +40,48 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 	// to join the set, and only one of them would have the checks.
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
 		ctx.syswBundleSeeds = []string{body}
+	} else if body, ok := syswOffer(ctx, th, sysw.ClassDescriptor, "Wallet policy from where?"); ok {
+		// S2's SECOND offer at the SAME door, and it is a second offer rather
+		// than a widened first one for the reason newInputFlow states at its own
+		// pair (gui.go:2761-2767): syswOffer takes ONE class. So this screen is
+		// reached only when the payload holds a Descriptor record AND either
+		// holds no md1 card or the operator declined it.
+		//
+		// A `Descriptor` record IS an outside wallet policy -- which is this
+		// program's whole subject -- so it belongs here and not behind a new
+		// menu. What it is NOT is a card: it carries no chunks, nothing to
+		// gather, deduplicate or reassemble, and no cosigner plates to cut
+		// alongside. So it routes to the descriptor screen and this call
+		// RETURNS; the md1-card path below is untouched.
+		//
+		// WHAT CLASSIFICATION ACTUALLY PROVED, and it is not what an earlier
+		// version of this comment claimed. It proved something about
+		// `strings.TrimSpace(body)`, because that is the string
+		// classifyConstellation hands the arm -- while `take` returns `r.body`
+		// unmodified (gui/sysw_session.go:123). The shipped corpus row
+		// `whitespace/leading-space-bip380` is the standing counterexample: it
+		// is `host_admits: true` and single-line, so the seam suite REQUIRES it
+		// to classify, and its raw bytes do not re-parse. So the trim is applied
+		// here too, and the two sides are now the same string by construction
+		// rather than by assertion.
+		//
+		// The half that was always true is the one that matters: the record is
+		// §4.7-ADMITTED. DescriptorScreen encodes on the way to a plate, and
+		// admission is what keeps a §4.2 zero-Script descriptor -- the titled
+		// zero-key BlueWallet shape -- out of Descriptor.encode's panicking
+		// default arm. Parsing proves only that a descriptor exists; admission
+		// proves it is one of §4.7's seven forms with every conjunct holding.
+		//
+		// The error return stays. It is no longer guarding an impossibility, and
+		// even when it was, a silent nil dereference would have been a worse
+		// answer than leaving the program.
+		desc, err := nonstandard.OutputDescriptor([]byte(strings.TrimSpace(body)))
+		if err != nil {
+			showError(ctx, th, title, "Couldn't read the wallet policy from the payload.")
+			return
+		}
+		descriptorFlow(ctx, th, desc)
+		return
 	}
 	var gathered []bundleCard
 	for {

@@ -78,7 +78,7 @@ const (
 // test; pinning the string instead means a changed card, a changed derivation
 // or a changed encoder shows up as a diff of this line and a failing chain,
 // with the two strings printed side by side. Re-derive it by running
-// TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates -v, which logs the whole
+// TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates -v, which logs the whole
 // nine-plate census.
 const chainMdMkMd1Chunk1 = "md1fxrvxzspqjtvyyy4qqxppcgsc27rchwsv0jskp2rsal4egz4ep5859p875x67p5s5tk09nzz08lv4"
 
