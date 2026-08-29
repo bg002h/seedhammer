@@ -25,17 +25,28 @@ import (
 //	ClassPassphrase      chain-pass      BIP-39 Password -> a password plate
 //	ClassMDMK            chain-mdmk      Build Multisig Policy -> nine plates
 //
-// AND THAT IS ALL OF THEM. `me sysw pack` accepts eight classes and refuses two:
+// THAT IS EVERY CLASS WITH A CHAIN, and since S2 it is no longer every
+// PACKABLE class. `me sysw pack` refuses an address and takes a descriptor
+// only under an explicit `--as`, re-measured against the S2 tree:
 //
-//	me sysw pack --in <a descriptor>  -> rc=4
-//	me sysw pack --in <an address>    -> rc=4
-//	"record 0 ... is not a form this container can place: ... Descriptors and
-//	 addresses are not yet classifiable here -- see sysw::classify"
+//	me sysw pack --in <an address>                  -> rc=4
+//	"record 0 ... is not a form this container can place: ... Addresses are not
+//	 classifiable here, and neither is a wallet descriptor `me` refuses -- see
+//	 sysw::classify"
+//	me sysw pack --in <a descriptor>                -> rc=2  (§5.1's window:
+//	                                                   `--as` is REQUIRED, and
+//	                                                   there is no default)
+//	me sysw pack --in <a descriptor> --as descriptor -> rc=0, ONE Descriptor
+//	                                                   record
 //
-// A class that cannot enter a payload is not an element of one, so neither has
-// a chain and neither can have one until the Rust primary grows a descriptor
-// parser and an address decoder (crates/me-cli/src/sysw/mod.rs states that this
-// is a known limitation rather than an oversight). ClassUnknown is not a kind
+// So ClassAddress still cannot enter a payload, and a class that cannot enter
+// one is not an element of one -- it has no chain and cannot have one until the
+// Rust primary grows an address decoder (crates/me-cli/src/sysw/mod.rs states
+// that this is a known limitation rather than an oversight). ClassDescriptor
+// now can enter one, and gui/wallet_policy_descriptor_walk_test.go walks it
+// from `me`-written container bytes to a rendered DescriptorScreen; what it
+// does NOT do is use this file's harness, so that class has no FOUR-link chain
+// and is deliberately absent from the table above. ClassUnknown is not a kind
 // at all -- it is the fail-closed arm.
 //
 // EVERY LIMIT IN chain_walk_test.go's HEADER APPLIES HERE UNCHANGED: no

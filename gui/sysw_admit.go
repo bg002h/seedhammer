@@ -34,9 +34,16 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 	progPassword:     {sysw.ClassPassphrase: true},
 	progText:         {sysw.ClassFreeText: true},
 	progXpub:         {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
-	progBundle:       {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
-	progSingleSig:    {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassMDMK: true},
-	progMultisig:     {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
+	// progBundle's ClassDescriptor cell is DECLARED AND INERT as of S2:
+	// bundleFlow offers ClassMDMK alone, so no Descriptor record is ever
+	// offered to it. Same for progMultisig below. The one Descriptor cell with
+	// a consumer is progWalletPolicy's, added at S2 P3.2; the other two are
+	// filed as a follow-up with an owning future cycle rather than deleted,
+	// because §3.3.2's table is the normative oracle and this file transcribes
+	// it.
+	progBundle:    {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
+	progSingleSig: {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassMDMK: true},
+	progMultisig:  {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	// NO seed class. The Wallet Policy program never derives from a secret: its
 	// proof is addresses derived from the policy's OWN public keys plus a named
 	// wallet id, so admitting a mnemonic would grant a capability the flow has

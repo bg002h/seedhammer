@@ -8,6 +8,7 @@ import (
 
 	"seedhammer.com/address"
 	"seedhammer.com/md"
+	"seedhammer.com/nonstandard"
 	"seedhammer.com/sysw"
 )
 
@@ -38,6 +39,34 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 	// to join the set, and only one of them would have the checks.
 	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
 		ctx.syswBundleSeeds = []string{body}
+	} else if body, ok := syswOffer(ctx, th, sysw.ClassDescriptor, "Wallet policy from where?"); ok {
+		// S2's SECOND offer at the SAME door, and it is a second offer rather
+		// than a widened first one for the reason newInputFlow states at its own
+		// pair (gui.go:2761-2767): syswOffer takes ONE class. So this screen is
+		// reached only when the payload holds a Descriptor record AND either
+		// holds no md1 card or the operator declined it.
+		//
+		// A `Descriptor` record IS an outside wallet policy -- which is this
+		// program's whole subject -- so it belongs here and not behind a new
+		// menu. What it is NOT is a card: it carries no chunks, nothing to
+		// gather, deduplicate or reassemble, and no cosigner plates to cut
+		// alongside. So it routes to the descriptor screen and this call
+		// RETURNS; the md1-card path below is untouched.
+		//
+		// Re-parsing cannot fail here -- classification is what proved it
+		// parses, over these exact bytes (sysw/descriptor.go) -- and the record
+		// is §4.7-ADMITTED, which is the stronger half: DescriptorScreen encodes
+		// on the way to a plate, and admission is what keeps a §4.2 zero-Script
+		// descriptor out of Descriptor.Encode's panicking default arm. The error
+		// return is still handled, because a silent nil dereference is a worse
+		// answer to an impossible state than leaving the program.
+		desc, err := nonstandard.OutputDescriptor([]byte(body))
+		if err != nil {
+			showError(ctx, th, title, "Couldn't read the wallet policy from the payload.")
+			return
+		}
+		descriptorFlow(ctx, th, desc)
+		return
 	}
 	var gathered []bundleCard
 	for {
