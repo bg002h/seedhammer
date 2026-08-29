@@ -54,6 +54,20 @@ func classifyConstellation(record string) Class {
 			return ClassMt
 		}
 	}
+	// SPEC_descriptor_input.md §5.2's descriptor record, and it is LAST for the
+	// same reason the Rust primary puts it last (crates/me-cli/src/sysw/mod.rs):
+	// only what would otherwise have fallen through to ClassUnknown can move, so
+	// no record an earlier arm placed changes class. Arm order alone is not the
+	// whole of that guarantee -- it protects records an earlier arm MATCHED, not
+	// records that used to fall through -- which is why the seam file asserts
+	// the class of every single-line row in BOTH directions.
+	//
+	// The predicate is isDescriptorRecord (sysw/descriptor.go), NOT
+	// nonstandard.OutputDescriptor: the scan door admits 18 single-line strings
+	// this refuses, and every one of them would reach a program and a screen.
+	if isDescriptorRecord(record) {
+		return ClassDescriptor
+	}
 	return ClassUnknown
 }
 
