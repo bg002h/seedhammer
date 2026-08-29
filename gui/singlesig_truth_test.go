@@ -333,7 +333,7 @@ func TestRestoreDocSaysWhetherTheSetContainsASeed(t *testing.T) {
 	}
 	doc := func(cards []bundleCard, capacity seedCapacity) string {
 		return strings.Join(
-			buildPlateInventoryLines(cards, oneSeedPassphraseFact(false), capacity, false), "\n")
+			buildPlateInventoryLines(engraverParams, cards, oneSeedPassphraseFact(false), capacity, false), "\n")
 	}
 
 	watch := doc(singleSigEngraveCards(b, false), seedCapacityOne)
@@ -430,7 +430,7 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		{kind: cardMK1, label: "mk1 key", summary: "key", strings: []string{"mk1a"}},
 		{kind: cardMD1, label: "md1 descriptor", summary: "policy", strings: []string{"md1a"}},
 	}
-	doc := strings.Join(buildPlateInventoryLines(
+	doc := strings.Join(buildPlateInventoryLines(engraverParams,
 		watchOnly, oneSeedPassphraseFact(false), seedCapacityOne, false), "\n")
 	if strings.Contains(doc, "the plates are the secret") {
 		t.Errorf("a watch-only document says the plates are the secret, on a set whose "+
@@ -471,7 +471,7 @@ func TestSeedHandlingRulingIsKeyedOnCapacityAndOnThePlates(t *testing.T) {
 		for _, capacity := range []seedCapacity{seedCapacityOne, seedCapacityMany} {
 			for _, uses := range []bool{false, true} {
 				for _, plateCut := range []bool{false, true} {
-					for _, line := range buildPlateInventoryLines(
+					for _, line := range buildPlateInventoryLines(engraverParams,
 						cards, oneSeedPassphraseFact(uses), capacity, plateCut) {
 						if strings.ContainsAny(line, "—–·‘’“”…") {
 							t.Errorf("an inventory line carries a glyph the body face lacks, "+
@@ -1201,11 +1201,18 @@ func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
 		}
 		// AND THE COUNT IS ON IT. A census screen with no number is a screen that
 		// answers nothing; the count is derived through bundlePlatePlan, the same
-		// function bundleEngrave loops, so it cannot drift from what is cut. A FULL
-		// single-sig run is ms1(1) + mk1(2) + md1(3) = 6, and every one of those
-		// terms comes from the plan rather than from this comment.
+		// function bundleEngrave loops, so it cannot drift from what is cut.
+		//
+		// THREE, AND IT USED TO BE SIX. A full single-sig run gathers ms1(1
+		// string) + mk1(2) + md1(3), and F-423 packs each card's strings onto as
+		// many plates as fit -- one plate per card here, because two ~85-char mk1
+		// chunks and three md1 chunks each fit one plate side at the shipped font
+		// (bundlePlateMD1Capacity is 5). This is the operator's own case,
+		// "1 plate per string is something to be addressed, it's wasteful", and
+		// halving it is what the change is for. The terms come from the plan
+		// rather than from this comment.
 		census := seen[len(seen)-1]
-		if !uiContains(census, "This engraves 6 plates") {
+		if !uiContains(census, "This engraves 3 plates") {
 			t.Errorf("the census screen does not state the plate count this run actually "+
 				"cuts:\n%q", census)
 		}

@@ -54,7 +54,7 @@ CASES=(
   "chain-codex32|TestChainCodex32FromAMePackedPayloadToAnMs1Plate|chain-codex32|chain-pass|chain-codex32|chain-seed"
   "chain-text|TestChainFreeTextFromAMePackedPayloadToATextPlate|chain-text|chain-txonly|chain-text|chain-pass"
   "chain-pass|TestChainPassphraseFromAMePackedPayloadToAPasswordPlate|chain-pass|chain-seed|chain-pass|chain-text"
-  "chain-mdmk|TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates|chain-mdmk|chain-seed|chain-mdmk-md1-1|chain-codex32"
+  "chain-mdmk|TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates|chain-mdmk|chain-seed|chain-mdmk-md1-1|chain-codex32"
 )
 
 cp "$json" "$work/chain_payloads.orig.json"

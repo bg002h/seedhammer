@@ -332,8 +332,13 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 
 		// S4's PLATE CENSUS: how many plates, before the first one is cut. The
 		// count is asserted rather than tapped past, because the whole point of
-		// the screen is that the number is right -- a 2-of-3 full build is
-		// ms1(1) + mk1(2) + md1(6) = 9, and every one of those terms comes from
+		// the screen is that the number is right.
+		//
+		// FOUR, AND IT USED TO BE NINE. A 2-of-3 full build gathers ms1(1
+		// string) + mk1(2) + md1(6) = 9 STRINGS, and F-423 packs each card onto
+		// as many plates as fit: 1 + 1 + 2, because five ~85-char md1 chunks fit
+		// one plate side at the shipped font (bundlePlateMD1Capacity) and the
+		// sixth starts a second. Every one of those terms comes from
 		// bundlePlatePlan rather than from this comment.
 		content, ok = pumpUntil(frame, "Plate Count", 64)
 		if !ok {
@@ -344,9 +349,10 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 			t.Errorf("the plate census drew only %d ink pixels (floor %d)",
 				ink(), buildWalkRasterFloor)
 		}
-		if !uiContains(content, "This engraves 9 plates") {
+		if !uiContains(content, "This engraves 4 plates") {
 			t.Errorf("the census does not state the plate count this build actually "+
-				"cuts (ms1 1 + mk1 2 + md1 6 = 9): %q", content)
+				"cuts (ms1 1 + mk1 2 + md1 6 = 9 strings, packed onto 1 + 1 + 2 = 4 "+
+				"plates): %q", content)
 		}
 		click(&ctx.Router, Button3)
 		frame()
@@ -410,13 +416,14 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 		if !done {
 			t.Fatalf("the flow did not return after %d plate(s)", plates)
 		}
-		// NINE, DERIVED NOT GUESSED: a FULL build cuts the operator's ms1 (1),
-		// their mk1 (2 chunks) and the assembled md1 (6 chunks). The count is
-		// asserted exactly, because "at least three" is satisfied by a bundle that
-		// silently lost the descriptor.
-		if plates != 9 {
+		// FOUR, DERIVED NOT GUESSED: a FULL build cuts the operator's ms1 (1
+		// string), their mk1 (2 chunks) and the assembled md1 (6 chunks), packed
+		// within each card onto 1 + 1 + 2 plates. The count is asserted exactly,
+		// because "at least three" is satisfied by a bundle that silently lost
+		// the descriptor.
+		if plates != 4 {
 			t.Fatalf("%d plate(s) were engraved; a full 2-of-3 wsh build cuts 1 ms1 + "+
-				"2 mk1 chunks + 6 md1 chunks = 9", plates)
+				"2 mk1 chunks + 6 md1 chunks, packed onto 1 + 1 + 2 = 4 plates", plates)
 		}
 		t.Logf("Trace A completed: %d plates engraved from a keyboard-typed seed", plates)
 	})

@@ -258,7 +258,7 @@ func TestS6bP7ModalFitSweep(t *testing.T) {
 
 		// --- gui/derive_xpub.go: abortWarning's Sprintf ---
 		// `done`/`total` are plate counts for one key-card set; the census
-		// this program itself documents is "6-9 plates over hours"
+		// this program itself documents is "3-4 plates over hours"
 		// (gui/multisig_build_census.go:29's comment on the same kind of
 		// count). Double digits used for headroom rather than to claim a
 		// specific real ceiling.

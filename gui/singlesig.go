@@ -233,7 +233,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// costs it its uniqueness exactly as a second screen does. The first draft of
 	// this comment named the string and turned the gate red; it is recorded here
 	// because reading the warning next door did not prevent committing it.
-	if !confirmReviewScreen(ctx, th, "Plates To Cut", buildPlateCensusLines(cards)) {
+	if !confirmReviewScreen(ctx, th, "Plates To Cut", buildPlateCensusLines(ctx.Platform.EngraverParams(), cards)) {
 		return
 	}
 
@@ -346,7 +346,7 @@ func engraveSingleSigFlow(ctx *Context, th *Colors) {
 	// "was the offer shown" -- see the comment at the call above.
 	restoreDocFlow(ctx, th, xpub, masterFP, parentFP, script, path,
 		buildVerifyStatusLine(rec),
-		buildPlateInventoryLines(cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne,
+		buildPlateInventoryLines(ctx.Platform.EngraverParams(), cards, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne,
 			plateResult == passphrasePlateCut))
 }
 

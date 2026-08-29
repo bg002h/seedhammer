@@ -129,7 +129,11 @@ const HANDLERS = [
  *        pace, so there is ONE source of truth for it and a future walk that
  *        forgets to set one is still fast. Pass a number only to override --
  *        e.g. 1 to watch a plate cut in real time.
- * @param {number}  [opts.plates=6]     Stop once this many plates are engraved.
+ * @param {number}  [opts.plates=3]     Stop once this many plates are engraved.
+ *        THREE SINCE F-423, and it was six: Trace A gathers three mk1 cards of
+ *        two chunks each, and bundlePlatePlan now packs each card's strings onto
+ *        as many plates as fit -- both chunks of an mk1 card fit one plate side
+ *        at the shipped font, so it is one plate per card.
  *        A LOOP BOUND ONLY, never a verdict (I-1): it decides when the driver
  *        stops watching, and appears in no term of `ok`. A caller-supplied count
  *        cannot stand in for content — see the note on `ok` below.
@@ -151,7 +155,7 @@ const HANDLERS = [
  *        guessed at.
  * @returns {Promise<object>} census, digests, acts and elapsed time.
  */
-export async function run({ pace, plates = 6, perPlateDigest = true,
+export async function run({ pace, plates = 3, perPlateDigest = true,
                             pollMs = 75, settleMs = 150, chunkGapMs = 150 } = {}) {
   if (typeof window.shPace !== "function") {
     throw new Error("shPace is missing -- this is a STALE emu.wasm. " +

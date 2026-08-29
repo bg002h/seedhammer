@@ -268,7 +268,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// is the one place that decides which slots get a plate, so a note that asked
 	// any other source could claim a collapse that did not happen, or miss one
 	// that did.
-	census := buildPlateCensusLines(cardsOut)
+	census := buildPlateCensusLines(ctx.Platform.EngraverParams(), cardsOut)
 	if len(engravedSlots) < len(slots) {
 		census = append([]string{fmt.Sprintf(
 			"NOTE: slots %s hold only %s between them, so this run cuts %s, not one per slot.",
@@ -375,7 +375,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 		buildVerifyStatusLine(rec),
 		// false: this path has no passphrase-plate offer at all -- R-B, a
 		// later phase -- so it can never have cut one (S6b spec 6/6a).
-		buildPlateInventoryLines(cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne, false))
+		buildPlateInventoryLines(ctx.Platform.EngraverParams(), cardsOut, oneSeedPassphraseFact(passphrase != ""), seedCapacityOne, false))
 }
 
 // formatSlotList renders matched slot indices as "@a, @b and @c" for the

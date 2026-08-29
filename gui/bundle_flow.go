@@ -3,11 +3,15 @@ package gui
 import (
 	"fmt"
 	"image"
-	"seedhammer.com/sysw"
 
+	"seedhammer.com/backup"
+	"seedhammer.com/bspline"
+	"seedhammer.com/engrave"
+	"seedhammer.com/font/sh"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/sysw"
 )
 
 // bundleFlow is the engraveBundle program: gather a bundle of PUBLIC md1/mk1
@@ -369,36 +373,146 @@ func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 // ─── Phase 3: guided verbatim engrave ────────────────────────────────────────
 
 // bundlePlate is one plate in the cross-card engrave plan: the verbatim card
-// string to engrave, plus the "Card X of Y | Plate P of Q" guidance context.
+// strings to engrave, plus the "Card X of Y | Plate P of Q" guidance context.
 type bundlePlate struct {
 	cardIdx    int            // 1-based card position
 	cardTotal  int            // total cards in the bundle
 	plateIdx   int            // 1-based plate position within this card
 	plateTotal int            // total plates for this card
-	str        string         // the VERBATIM gathered chunk string (I-4)
+	strs       []string       // the VERBATIM gathered chunk strings (I-4), in index order
 	label      string         // the card label, for the abort warning
 	kind       bundleCardKind // the card's kind (S6b spec 1.3), for bundlePlateMark
 }
 
+// bundlePlateFitMark is the marking every prospective plate is TRIAL-FIT
+// against, whether or not the run marks: backup.MaxTitleLen of the font's widest
+// glyph, as a title AND as a footer.
+//
+// THE PLATE COUNT MAY NOT DEPEND ON THE MARKING. bundlePlatePlan is read by the
+// pre-engrave census (buildPlateCensusLines), by the restore document
+// (buildPlateInventoryLines) and by bundleEngrave itself, and only the last of
+// those knows what S6b's marking resolved to -- singleSigPlateMark is computed
+// after the census screen has already told the operator a number. Packing
+// against the worst case makes the answer the same for all three readers and
+// costs an unmarked plate one row of the twenty.
+const bundlePlateFitMark = "WWWWWWWWWWWWWWWWWW"
+
 // bundlePlatePlan flattens the verified cards into a per-plate engrave plan, in
-// card-then-plate order. Every plate carries a gathered string UNMODIFIED (I-4)
-// — md1 + mk1 alike, no re-encode. A standalone md1 card yields exactly 1 plate.
-func bundlePlatePlan(cards []bundleCard) []bundlePlate {
+// card-then-plate order, PACKING AS MANY STRINGS ONTO EACH PLATE AS FIT (F-423:
+// "1 plate per string is something to be addressed, it's wasteful").
+//
+// Every plate carries its gathered strings UNMODIFIED (I-4) -- md1 + mk1 alike,
+// no re-encode -- as SEPARATE PARAGRAPHS, which is the plate's own mechanism for
+// visually distinct units: EngraveText lays each paragraph out independently and
+// spaces them by 1mm, so no string is ever reflowed into another and a reader
+// still recovers per string. A standalone md1 card still yields exactly 1 plate.
+//
+// IT PACKS WITHIN A CARD AND NEVER ACROSS ONE. Every other field on bundlePlate
+// is card-scoped -- cardIdx/cardTotal drive the "Card X of Y" guidance, label
+// drives the abort warning, kind drives bundlePlateMark -- so a plate holding two
+// cards' strings has no true value for any of them. It would also be the one way
+// a cardMS1 string could land on a plate that bundlePlateMark marks.
+//
+// It takes params because the answer is a question about geometry, and the same
+// params every reader has: pl.EngraverParams() at all three call sites.
+func bundlePlatePlan(params engrave.Params, cards []bundleCard) []bundlePlate {
 	var plan []bundlePlate
 	for ci, c := range cards {
-		for pi, s := range c.strings {
+		groups := bundleCardPlates(params, c.strings)
+		for pi, g := range groups {
 			plan = append(plan, bundlePlate{
 				cardIdx:    ci + 1,
 				cardTotal:  len(cards),
 				plateIdx:   pi + 1,
-				plateTotal: len(c.strings),
-				str:        s,
+				plateTotal: len(groups),
+				strs:       g,
 				label:      c.label,
 				kind:       c.kind,
 			})
 		}
 	}
 	return plan
+}
+
+// bundleCardPlates greedily packs one card's strings onto plates, in index
+// order, and returns the per-plate groups.
+//
+// GREEDY FIRST-FIT IS THE RIGHT ALGORITHM HERE for planTransactionTextPlates'
+// reason (gui/transaction.go, the sibling that already packs mt1 strings this
+// way): a card's chunk strings are all the same length bar the last, so every
+// paragraph costs the same rows and no reordering can save a plate.
+//
+// A PLATE ALWAYS HOLDS AT LEAST ONE STRING, even one that does not pass the
+// trial fit. That is not a fallback, it is the no-regression rule: before this
+// change every string got its own plate and bundleEngrave decided at the picker
+// whether it laid out, aborting the set through bundleAbortWarning if it did
+// not. A planner that refused here would turn that into a different failure, on
+// a path the operator has already committed blanks to.
+func bundleCardPlates(params engrave.Params, strs []string) [][]string {
+	var out [][]string
+	for lo := 0; lo < len(strs); {
+		hi := lo + 1
+		for hi < len(strs) && bundlePlateTextFits(params, strs[lo:hi+1]) {
+			hi++
+		}
+		out = append(out, strs[lo:hi:hi])
+		lo = hi
+	}
+	return out
+}
+
+// bundlePlateTextFits reports whether strs lay out as one plate's paragraphs.
+//
+// TWO CHECKS, AND THE SECOND IS NOT REDUNDANT.
+//
+// The first is toPlate over backup.EngraveText -- the real fit-or-error the
+// engrave path itself applies (validateMdmkStrings), so a plan that says "fits"
+// cannot fail at build.
+//
+// The second is the footer, and toPlate cannot see it: EngraveText draws a
+// non-empty Footer at Text.FooterRow and gives the body no budget against it, so
+// a body laid over the footer is still inside the safety margin and toPlate
+// returns a fit. Measured on 85-char md1 chunks at the shipped font: the sixth
+// paragraph crosses the footer row with the whole plate still In() bounds
+// (backup.TestAPackedBodyCanCoverTheFooterRow). The body is rendered WITHOUT the
+// footer so its own ink can be located, and required to end above the row.
+//
+// THE VARIANT IS TEXT ONLY, and that is forced rather than chosen. EngraveText
+// advances offy by a paragraph's TEXT lines only, while a QR occupies twelve
+// rows from two rows below its paragraph's top -- so on a multi-paragraph plate
+// every QR is drawn over the paragraphs after it (measured: with three 85-char
+// chunks, paragraph 0's code spans y 67840..311040 and paragraphs 1 and 2 start
+// at 122880 and 202240). The QR-ONLY variant is worse still: EngraveText centers
+// a text-less paragraph's code on the PLATE, so N of them land on the same
+// spot. Both render inside the plate, so toPlate calls them a fit. See
+// validateMdmkStrings, which offers a packed plate TEXT ONLY for the same reason.
+func bundlePlateTextFits(params engrave.Params, strs []string) bool {
+	plate := backup.Text{
+		Paragraphs: bundlePlateParagraphs(strs),
+		Font:       sh.Font,
+		Title:      bundlePlateFitMark,
+		Footer:     bundlePlateFitMark,
+	}
+	if _, err := toPlate(backup.EngraveText(params, plate), params); err != nil {
+		return false
+	}
+	body := plate
+	body.Footer = ""
+	ink := bspline.Measure(engrave.PlanEngraving(params.StepperConfig,
+		backup.EngraveText(params, body))).Bounds
+	return ink.Max.Y <= plate.FooterRow(params)
+}
+
+// bundlePlateParagraphs renders strs as one plate's text paragraphs, verbatim
+// (I-4), in the ONE place the planner's trial fit and the engraver's real plate
+// both read -- so a plate cannot be counted against one layout and cut as
+// another.
+func bundlePlateParagraphs(strs []string) []backup.Paragraph {
+	paras := make([]backup.Paragraph, len(strs))
+	for i, s := range strs {
+		paras[i] = backup.Paragraph{Text: s}
+	}
+	return paras
 }
 
 // bundlePlateMark decides the title/footer bundleEngrave applies to ONE plate
@@ -453,10 +567,10 @@ func bundlePlateMark(kind bundleCardKind, title, footer string) (string, string)
 // PROHIBITED (spec 1.3): it would leave order and arity unchecked on the value
 // deciding whether a plate says PASSWORD REQUIRED.
 func bundleEngrave(ctx *Context, th *Colors, title string, cards []bundleCard, markTitle, markFooter string) bundleEngraveResult {
-	plan := bundlePlatePlan(cards)
+	plan := bundlePlatePlan(ctx.Platform.EngraverParams(), cards)
 	for _, p := range plan {
 		plateTitle, plateFooter := bundlePlateMark(p.kind, markTitle, markFooter)
-		labels, plates, err := validateMdmk(ctx.Platform, p.str, plateTitle, plateFooter)
+		labels, plates, err := validateMdmkStrings(ctx.Platform, p.strs, plateTitle, plateFooter)
 		if err != nil || len(plates) == 0 {
 			// A verified card whose string can't fit a plate is unexpected; abort
 			// the whole set rather than engrave a partial bundle.

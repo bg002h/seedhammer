@@ -100,10 +100,10 @@ func TestSingleSigEngravePlatesValidate(t *testing.T) {
 	}
 	cards := singleSigEngraveCards(b, true)
 	plat := newPlatform()
-	for _, p := range bundlePlatePlan(cards) {
-		labels, plates, err := validateMdmk(plat, p.str, "", "")
+	for _, p := range bundlePlatePlan(engraverParams, cards) {
+		labels, plates, err := validateMdmkStrings(plat, p.strs, "", "")
 		if err != nil || len(plates) == 0 || len(labels) == 0 {
-			t.Fatalf("plate %q (card %d) does not fit any variant: err=%v plates=%d", p.str, p.cardIdx, err, len(plates))
+			t.Fatalf("plate %q (card %d) does not fit any variant: err=%v plates=%d", p.strs, p.cardIdx, err, len(plates))
 		}
 	}
 }
@@ -131,9 +131,9 @@ func TestSingleSigEngraveLongestMs1Fits(t *testing.T) {
 		t.Fatalf("75-char ms1 does not fit a plate: err=%v plates=%d", err, len(plates))
 	}
 	// The full plan validates (no whole-bundle abort would fire).
-	for _, p := range bundlePlatePlan(cards) {
-		if _, pl, err := validateMdmk(plat, p.str, "", ""); err != nil || len(pl) == 0 {
-			t.Fatalf("plate %q does not fit (would abort the bundle): err=%v", p.str, err)
+	for _, p := range bundlePlatePlan(engraverParams, cards) {
+		if _, pl, err := validateMdmkStrings(plat, p.strs, "", ""); err != nil || len(pl) == 0 {
+			t.Fatalf("plate %q does not fit (would abort the bundle): err=%v", p.strs, err)
 		}
 	}
 }

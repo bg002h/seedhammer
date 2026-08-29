@@ -31,6 +31,6 @@ package gui
 // removed it. Measured again afterwards: still +1,024 bytes, so the image cost
 // is the field and the calls, and the allocation was pure waste that the size
 // number alone would never have surfaced.
-func notifyPlateText(Platform, []Plate, string) {}
+func notifyPlateText(Platform, []Plate, []string) {}
 
 func notifyPlateEngraved(Platform, uint64) {}

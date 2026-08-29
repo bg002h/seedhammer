@@ -23,7 +23,7 @@ import (
 //	ClassCodex32Secret   chain-codex32   Backup Wallet -> an ms1 plate
 //	ClassFreeText        chain-text      Engrave Text  -> a free-text plate
 //	ClassPassphrase      chain-pass      BIP-39 Password -> a password plate
-//	ClassMDMK            chain-mdmk      Build Multisig Policy -> nine plates
+//	ClassMDMK            chain-mdmk      Build Multisig Policy -> four plates
 //
 // THAT IS EVERY CLASS WITH A CHAIN, and since S2 it is no longer every
 // PACKABLE class. `me sysw pack` refuses an address and takes a descriptor
@@ -511,7 +511,7 @@ type chainMdMkStep struct {
 	why    string
 }
 
-// TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates is the full chain for
+// TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates is the full chain for
 // md1/mk1 records, and it is the one chain whose fixture is a FILE.
 //
 // THE PAYLOAD IS cmd/emu/sysw_cards_payload.bin ITSELF. cmd/emu/walk_trace_a.js
@@ -535,7 +535,7 @@ type chainMdMkStep struct {
 // cmd/buildpayloadcards writes A@0, A@1, B@0, C@0. Reaching Trace A's B@0 + C@0
 // is SKIP, USE, USE over the roster and SKIP, SKIP, USE, USE over this blob. A
 // tap sequence carried across from the other file selects A@1 instead.
-func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
+func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
 	var art string
 	var census []string
 	synctest.Test(t, func(t *testing.T) {
@@ -644,11 +644,12 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
 		w.until("What to engrave?")
 		w.confirm() // Full (seed + keys)
 
-		// The plate census, asserted rather than tapped past: a 2-of-3 full
-		// build is ms1(1) + mk1(2) + md1(6) = 9, and every term comes from
+		// The plate census, asserted rather than tapped past: a 2-of-3 full build
+		// gathers ms1(1) + mk1(2) + md1(6) = 9 STRINGS, which F-423 packs within
+		// each card onto 1 + 1 + 2 = 4 plates. Every term comes from
 		// bundlePlatePlan rather than from this comment.
 		got = w.until("Plate Count")
-		if !uiContains(got, "This engraves 9 plates") {
+		if !uiContains(got, "This engraves 4 plates") {
 			t.Fatalf("the census does not state the plate count this build cuts: %q", got)
 		}
 		w.confirm()
@@ -665,9 +666,10 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
 				t.Fatal("the engrave loop did not terminate")
 			}
 		}
-		if plates != 9 {
+		if plates != 4 {
 			t.Fatalf("%d plate(s) were engraved; a full 2-of-3 wsh build cuts "+
-				"1 ms1 + 2 mk1 chunks + 6 md1 chunks = 9", plates)
+				"1 ms1 + 2 mk1 chunks + 6 md1 chunks, packed onto 1 + 1 + 2 = 4 "+
+				"plates", plates)
 		}
 
 		words, digest := w.eng.engraved()
@@ -678,8 +680,9 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
 
 		// THE CENSUS IS THE STRINGS THAT WERE ACTUALLY CUT, by id, through the
 		// production seam cmd/emu's own gate uses (gui/engraved_hook.go). It is
-		// what makes "nine plates" a statement about content rather than a
-		// count.
+		// what makes "four plates" a statement about content rather than a
+		// count. ONE ENTRY PER PLATE, so a packed plate's entry holds its
+		// strings newline-joined -- see validateMdmkStrings.
 		census = append(census, w.pl.engraved...)
 		if w.pl.unknown != 0 {
 			t.Errorf("%d plate(s) finished carrying an id nobody announced -- "+
@@ -692,12 +695,18 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
 			t.Logf("plate %d: %s", i+1, s)
 		}
 
-		// (4) THE PLATE. The md1's FIRST chunk, re-planned through the same
-		// validateMdmk call bundleEngrave makes (title and footer empty on the
-		// Build path) and taking variant 0, TEXT + QR, which is the variant the
-		// loop above chose. Compared against a golden recorded from the pinned
-		// string in gui/chain_plate_goldens_test.go -- so a policy assembled
-		// from different keys moves the spline and fails.
+		// (4) THE PLATE. The md1's FIRST chunk, re-planned standalone through
+		// validateMdmk and taking variant 0, TEXT + QR. Compared against a golden
+		// recorded from the pinned string in gui/chain_plate_goldens_test.go --
+		// so a policy assembled from different keys moves the spline and fails.
+		//
+		// IT IS NO LONGER THE PLATE THAT WAS CUT, and saying so is the honest
+		// half of F-423. The md1 card's six chunks are now packed onto two
+		// plates, TEXT ONLY (a code on a packed plate would be drawn over its
+		// neighbours -- validateMdmkStrings), so what the loop above chose was
+		// the packed TEXT-ONLY plate. This remains an identity check on the
+		// ASSEMBLED WALLET, geometric where the byte comparison directly above
+		// is lexical, and the packing itself is asserted separately below.
 		md1 := chainMdMkFirstMd1(t, census)
 		if md1 != chainMdMkMd1Chunk1 {
 			t.Fatalf("the build cut a DIFFERENT wallet policy than the one pinned:\n"+
@@ -716,12 +725,24 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToNinePlates(t *testing.T) {
 }
 
 // chainMdMkFirstMd1 returns the first md1 string in an engraved census.
+//
+// A CENSUS ENTRY IS ONE PLATE, and since F-423 a plate can hold several strings
+// (newline-joined by validateMdmkStrings). It therefore splits, and it ASSERTS
+// the packing on the way past: the md1 card's six chunks must arrive as a
+// packed plate rather than as six, or the walk would report four plates while
+// the census said otherwise.
 func chainMdMkFirstMd1(t *testing.T, census []string) string {
 	t.Helper()
 	for _, s := range census {
-		if hasMDPrefix(s) {
-			return s
+		if !hasMDPrefix(s) {
+			continue
 		}
+		chunks := strings.Split(s, "\n")
+		if len(chunks) < 2 {
+			t.Fatalf("the md1 plate carries %d string(s); the six assembled chunks "+
+				"were meant to pack onto plates of five", len(chunks))
+		}
+		return chunks[0]
 	}
 	t.Fatalf("the census holds no md1 at all, so the wallet policy was never cut: %v", census)
 	return ""

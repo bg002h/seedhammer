@@ -225,19 +225,26 @@ func TestBundleGatherOutOfOrderPlatesInIndexOrder(t *testing.T) {
 		if len(g.cards) != 1 {
 			t.Fatalf("trial %d: %d cards, want 1", trial, len(g.cards))
 		}
-		plan := bundlePlatePlan(g.cards)
-		if len(plan) != len(mk1ThreeChunks) {
-			t.Fatalf("trial %d: %d plates, want %d", trial, len(plan), len(mk1ThreeChunks))
+		plan := bundlePlatePlan(engraverParams, g.cards)
+		// F-423 packs strings onto plates, so the assertion is on the ORDER of
+		// the strings the plan carries, not on a plate count: plate P's strings
+		// come before plate P+1's, and read end to end they are chunk 0, 1, 2.
+		var got []string
+		for _, p := range plan {
+			got = append(got, p.strs...)
 		}
-		for i, p := range plan {
-			h, err := mk.ParseHeader(p.str)
+		if len(got) != len(mk1ThreeChunks) {
+			t.Fatalf("trial %d: the plan carries %d strings, want %d", trial, len(got), len(mk1ThreeChunks))
+		}
+		for i, s := range got {
+			h, err := mk.ParseHeader(s)
 			if err != nil {
-				t.Fatalf("trial %d: plate %d does not parse: %v", trial, i, err)
+				t.Fatalf("trial %d: string %d does not parse: %v", trial, i, err)
 			}
 			if int(h.ChunkIndex) != i {
-				t.Fatalf("trial %d: plate %d (labelled \"Plate %d of %d\") carries ChunkIndex %d — "+
-					"the label is a claim about which chunk this is",
-					trial, i, p.plateIdx, p.plateTotal, h.ChunkIndex)
+				t.Fatalf("trial %d: string %d of the plan carries ChunkIndex %d — "+
+					"the plates are cut in the order the plan lists them",
+					trial, i, h.ChunkIndex)
 			}
 		}
 	}

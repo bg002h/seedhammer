@@ -9,7 +9,8 @@ import (
 // ─── S5: the abort screen, which is the only screen an interrupted operator ──
 //     ever reaches
 //
-// The engrave tail cuts 6 to 9 plates over hours. Nothing records which of them
+// The engrave tail cuts 3 to 4 plates over hours (6 to 9 before F-423 packed a
+// card's strings onto as many plates as fit). Nothing records which of them
 // were cut, and a power loss loses that state. The restore document says what the
 // set is -- but it is printed at the END of a SUCCESSFUL run, so the operator
 // whose engrave died never sees it. The abort warning is what they see instead,
@@ -153,7 +154,7 @@ func TestAbortWarningPromisesOnlyWhatTheDeviceCanDo(t *testing.T) {
 // the coupling that went missing the first time.
 func TestBundleEngraveHasNoResumeMechanism(t *testing.T) {
 	body := funcBody(t, "bundle_flow.go", "func bundleEngrave(")
-	if !strings.Contains(body, "bundlePlatePlan(cards)") {
+	if !strings.Contains(body, "bundlePlatePlan(") {
 		t.Fatalf("funcBody did not capture bundleEngrave; got %d bytes", len(body))
 	}
 	if !strings.Contains(body, "for _, p := range plan {") {
@@ -229,7 +230,8 @@ func TestBundleSetCarriesASecret(t *testing.T) {
 //	showError(ctx, th, "Engrave Bundle", bundleMs1ReminderText())
 //
 // and that modal is shown at the END of a Build-policy engrave too -- measured:
-// S2's walk cuts 9 plates and reaches it. An operator who chose "Build policy"
+// S2's walk cuts 4 plates and reaches it (9 when this was written, before
+// F-423's packing). An operator who chose "Build policy"
 // off the menu is told, by a screen with no other context, that they are in
 // "Engrave Bundle". It is a DIFFERENT screen from D-4's, and bundleEngrave is
 // shared by the bundle flow, single-sig and the supplied-md1 path as well, so

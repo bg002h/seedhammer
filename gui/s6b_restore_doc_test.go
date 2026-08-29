@@ -94,10 +94,10 @@ func TestRestoreDocUnchangedWhenPlateNotCut(t *testing.T) {
 // repeats the separation instruction.
 func TestPassphrasePlateNotCountedInBackupSet(t *testing.T) {
 	cards := s6bFullSingleSigCards()
-	wantPlan := len(bundlePlatePlan(cards))
+	wantPlan := len(bundlePlatePlan(engraverParams, cards))
 
-	notCut := buildPlateInventoryLines(cards, oneSeedPassphraseFact(true), seedCapacityOne, false)
-	cut := buildPlateInventoryLines(cards, oneSeedPassphraseFact(true), seedCapacityOne, true)
+	notCut := buildPlateInventoryLines(engraverParams, cards, oneSeedPassphraseFact(true), seedCapacityOne, false)
+	cut := buildPlateInventoryLines(engraverParams, cards, oneSeedPassphraseFact(true), seedCapacityOne, true)
 
 	// THE CENSUS LINE ITSELF MUST NOT MOVE. It is line 0 in both builds and is
 	// computed from `plan`, never from the cut flag.
