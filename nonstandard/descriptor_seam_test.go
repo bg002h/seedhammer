@@ -37,7 +37,7 @@ import (
 // The package is `nonstandard_test` (EXTERNAL) deliberately: once §5.2's
 // classifier arm lands, `sysw` imports `nonstandard`, and an internal test
 // importing `sysw` for the sysw_class column would be an import cycle.
-const seamVectorsSHA256 = "0393592f234b0a5264eb7f49553ab3b3911085cd2d1cd8052690018c7fe80584"
+const seamVectorsSHA256 = "542cd492e35149b62c53f940fb755576e0ffd4d086b0e3fcda615fbc43f51974"
 
 const seamVectorsPath = "testdata/descriptor_seam_vectors.json"
 
