@@ -16,9 +16,15 @@ import (
 // SPEC_descriptor_input.md §4.3 is NORMATIVE that `me` admits exactly five
 // versions -- xpub, tpub, zpub, Ypub, Zpub -- and `ypub` is not one; measured
 // against the S2 `me`, both spellings of this very key refuse at rc 3
-// ("the device admits exactly `xpub`, `tpub`, `zpub`, `Ypub`, `Zpub`. This key
-// is `ypub`, whose equivalent is `xpub`: ..."), bare and inside a descriptor.
+// ("`me` admits exactly `xpub`, `tpub`, `zpub`, `Ypub`, `Zpub`. This key is
+// `ypub`, whose equivalent is `xpub`: ..."), bare and inside a descriptor.
 // The convergence widening of the host is F-426's own LATER cycle.
+//
+// (The quote was "the device admits exactly ..." when P3.4 landed, and it was
+// true then. P3.5's fold re-subjected the message -- the sentence is about what
+// `me` admits, not about the device -- and falsified this comment from the
+// other repo, without its diff touching this file. Re-measured against the
+// engrave tree at P3.5, and this is what `me` prints now.)
 //
 // So this arm widens the SCAN DOOR only, and that is the seam-SAFE direction:
 // the file's invariant is host_admits(input) => device_admits(canonical), and

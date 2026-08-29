@@ -3,6 +3,7 @@ package gui
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"seedhammer.com/mk"
 
@@ -53,14 +54,28 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 		// alongside. So it routes to the descriptor screen and this call
 		// RETURNS; the md1-card path below is untouched.
 		//
-		// Re-parsing cannot fail here -- classification is what proved it
-		// parses, over these exact bytes (sysw/descriptor.go) -- and the record
-		// is §4.7-ADMITTED, which is the stronger half: DescriptorScreen encodes
-		// on the way to a plate, and admission is what keeps a §4.2 zero-Script
-		// descriptor out of Descriptor.Encode's panicking default arm. The error
-		// return is still handled, because a silent nil dereference is a worse
-		// answer to an impossible state than leaving the program.
-		desc, err := nonstandard.OutputDescriptor([]byte(body))
+		// WHAT CLASSIFICATION ACTUALLY PROVED, and it is not what an earlier
+		// version of this comment claimed. It proved something about
+		// `strings.TrimSpace(body)`, because that is the string
+		// classifyConstellation hands the arm -- while `take` returns `r.body`
+		// unmodified (gui/sysw_session.go:123). The shipped corpus row
+		// `whitespace/leading-space-bip380` is the standing counterexample: it
+		// is `host_admits: true` and single-line, so the seam suite REQUIRES it
+		// to classify, and its raw bytes do not re-parse. So the trim is applied
+		// here too, and the two sides are now the same string by construction
+		// rather than by assertion.
+		//
+		// The half that was always true is the one that matters: the record is
+		// §4.7-ADMITTED. DescriptorScreen encodes on the way to a plate, and
+		// admission is what keeps a §4.2 zero-Script descriptor -- the titled
+		// zero-key BlueWallet shape -- out of Descriptor.encode's panicking
+		// default arm. Parsing proves only that a descriptor exists; admission
+		// proves it is one of §4.7's seven forms with every conjunct holding.
+		//
+		// The error return stays. It is no longer guarding an impossibility, and
+		// even when it was, a silent nil dereference would have been a worse
+		// answer than leaving the program.
+		desc, err := nonstandard.OutputDescriptor([]byte(strings.TrimSpace(body)))
 		if err != nil {
 			showError(ctx, th, title, "Couldn't read the wallet policy from the payload.")
 			return

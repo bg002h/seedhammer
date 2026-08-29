@@ -174,3 +174,53 @@ func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *tes
 		}
 	})
 }
+
+// REVIEW-S2-P3-r1 I1, as a walk rather than as a comment.
+//
+// The consumer used to argue that re-parsing "cannot fail here … over these
+// exact bytes". It is not the same bytes: classification parses
+// `strings.TrimSpace(record)` and `syswSession.take` returns `r.body`
+// unmodified. The shipped corpus row `whitespace/leading-space-bip380` is the
+// standing counterexample -- `host_admits: true`, single-line, so
+// `TestDescriptorSeamSyswClass` REQUIRES it to classify, and its raw bytes do
+// not re-parse.
+//
+// So this walk feeds the fixture's own record with a leading space and requires
+// the DescriptorScreen to RENDER. Before the fold it reached
+// "Couldn't read the wallet policy from the payload." instead -- a wallet the
+// operator can see on the host, refused at the machine.
+func TestWalkWalletPolicyRendersARecordWithLeadingWhitespace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, record := s2DescriptorSession(t)
+		padded := " " + record
+		// The premise, asserted rather than assumed: the padded record still
+		// classifies, which is what puts it in front of the consumer at all.
+		if got := sysw.Classify(padded); got != sysw.ClassDescriptor {
+			t.Fatalf("Classify(leading-space record) = %v, want ClassDescriptor -- "+
+				"§4.6 trims ASCII whitespace on the host too", got)
+		}
+		e := newEngraver()
+		p := newEngravedAwarePlatform()
+		p.engraver = e
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.sysw = sessionWith(padded)
+
+		frame, quit := runUI(ctx, func() { walletPolicyFlow(ctx, &descriptorTheme) })
+		defer quit()
+
+		got, ok := pumpUntil(frame, "Wallet policy from where?", 16)
+		if !ok {
+			t.Fatalf("the Descriptor offer never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button3)
+		got, ok = pumpUntil(frame, "Engrave Descriptor", 64)
+		if !ok {
+			t.Fatalf("a record the classifier ADMITTED did not reach the screen.\n"+
+				"Last frame: %q", got)
+		}
+		if uiContains(got, "Couldn't read the wallet policy") {
+			t.Errorf("the consumer refused a record classification admitted.\nFrame: %q", got)
+		}
+	})
+}
