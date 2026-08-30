@@ -531,8 +531,10 @@ func bundleCardPlates(params engrave.Params, strs []string) [][]string {
 // chunks, paragraph 0's code spans y 67840..311040 and paragraphs 1 and 2 start
 // at 122880 and 202240). The QR-ONLY variant is worse still: EngraveText centers
 // a text-less paragraph's code on the PLATE, so N of them land on the same
-// spot. Both render inside the plate, so toPlate calls them a fit. See
-// validateMdmkStrings, which offers a packed plate TEXT ONLY for the same reason.
+// spot. Both render inside the plate, so toPlate calls them a fit -- which is
+// why, since F-434, backup.EngraveText refuses the arrangement itself
+// (backup.ErrMultiParagraphQR). See validateMdmkStrings, which offers a packed
+// plate TEXT ONLY for the same reason.
 func bundlePlateTextFits(params engrave.Params, strs []string) bool {
 	plate := backup.Text{
 		Paragraphs: bundlePlateParagraphs(strs),
@@ -540,13 +542,20 @@ func bundlePlateTextFits(params engrave.Params, strs []string) bool {
 		Title:      bundlePlateFitMark,
 		Footer:     bundlePlateFitMark,
 	}
-	if _, err := toPlate(backup.EngraveText(params, plate), params); err != nil {
+	plan, err := backup.EngraveText(params, plate)
+	if err != nil {
+		return false
+	}
+	if _, err := toPlate(plan, params); err != nil {
 		return false
 	}
 	body := plate
 	body.Footer = ""
-	ink := bspline.Measure(engrave.PlanEngraving(params.StepperConfig,
-		backup.EngraveText(params, body))).Bounds
+	bodyPlan, err := backup.EngraveText(params, body)
+	if err != nil {
+		return false
+	}
+	ink := bspline.Measure(engrave.PlanEngraving(params.StepperConfig, bodyPlan)).Bounds
 	return ink.Max.Y <= plate.FooterRow(params)
 }
 

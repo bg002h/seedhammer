@@ -1175,7 +1175,11 @@ func planTransactionTextPlates(pl Platform, c txCandidate) ([]Plate, []string, e
 			FontSize:   transactionFontMM,
 			Title:      title,
 		}
-		return toPlate(backup.EngraveText(params, plate), params)
+		plan, err := backup.EngraveText(params, plate)
+		if err != nil {
+			return Plate{}, err
+		}
+		return toPlate(plan, params)
 	}
 	// Pass 1: how many strings fit each plate. The title used for counting has
 	// the widest realistic shape so the count cannot loosen when m grows.
@@ -1428,7 +1432,11 @@ func buildQRPlates(params engrave.Params, c txCandidate, symbols int, legendAlon
 		txt.Font = sh.Font
 		txt.FontSize = transactionFontMM
 		txt.Title = title
-		p, err := toPlate(backup.EngraveText(params, txt), params)
+		plan, err := backup.EngraveText(params, txt)
+		if err != nil {
+			return false
+		}
+		p, err := toPlate(plan, params)
 		if err != nil {
 			return false
 		}

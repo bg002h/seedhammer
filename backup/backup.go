@@ -382,7 +382,40 @@ func stringColumn(t engrave.Transform, constant *engrave.ConstantStringer, font 
 	}
 }
 
-func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
+// ErrMultiParagraphQR is EngraveText's refusal of a QR on a plate that holds
+// more than one paragraph (F-434).
+//
+// A paragraph advances the running y by its TEXT lines only, while a code
+// occupies twelve rows from two rows below its paragraph's top -- so paragraph
+// n's code is drawn ACROSS paragraphs n+1 onward, and a text-less paragraph's
+// code is centred on the PLATE, stacking every code in a packed plate on one
+// spot. Both lay out INSIDE the plate, so gui.toPlate reports a FIT: overlapping
+// ink on steel, announced as a fit.
+//
+// The real fix is to advance by max(textLines, qrLines), which moves every
+// golden; until then this turns a silently wrong plate into an immediate
+// refusal. Nothing in the tree constructs the arrangement -- every QR-carrying
+// Paragraph is alone on its plate -- so the refusal costs no caller anything and
+// disarms the trap for the next one.
+var ErrMultiParagraphQR = errors.New("backup: a QR belongs to a plate of its own; this plate has more than one paragraph")
+
+// EngraveText lays out a plate of paragraphs, per S6b spec 1.1/1.2.
+//
+// It REFUSES rather than draws what it cannot lay out, the way its siblings
+// EngraveSeed and EngraveSeedString do, because the alternative lands on the
+// device: a plate is cut from whatever this returns, and there is no camera to
+// read it back. Two impossibilities are refused, both of which gui.toPlate calls
+// a fit -- a QR on a multi-paragraph plate (ErrMultiParagraphQR) and a body that
+// runs past its vertical budget (ErrTooLarge).
+func EngraveText(params engrave.Params, plate Text) (engrave.Engraving, error) {
+	if len(plate.Paragraphs) > 1 {
+		for i, p := range plate.Paragraphs {
+			if p.QR != nil {
+				return nil, fmt.Errorf("%w (paragraph %d of %d carries one)",
+					ErrMultiParagraphQR, i+1, len(plate.Paragraphs))
+			}
+		}
+	}
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
 		fontSize := params.F(plate.fontMM())
@@ -536,5 +569,5 @@ func EngraveText(params engrave.Params, plate Text) engrave.Engraving {
 		// offset and would still look finished.
 		centerRow(plate.Title, titleRow)
 		centerRow(plate.Footer, footerRow)
-	}
+	}, nil
 }

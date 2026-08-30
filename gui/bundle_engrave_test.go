@@ -204,8 +204,11 @@ func TestBundlePlanPlatesClearTheFooterRow(t *testing.T) {
 		}
 		body := plate
 		body.Footer = ""
-		ink := bspline.Measure(engrave.PlanEngraving(engraverParams.StepperConfig,
-			backup.EngraveText(engraverParams, body))).Bounds
+		bodyPlan, err := backup.EngraveText(engraverParams, body)
+		if err != nil {
+			t.Fatalf("plate %d: %v", i, err)
+		}
+		ink := bspline.Measure(engrave.PlanEngraving(engraverParams.StepperConfig, bodyPlan)).Bounds
 		if row := plate.FooterRow(engraverParams); ink.Max.Y > row {
 			t.Errorf("plate %d (%d strings): the body ends at %d, past the footer row %d — "+
 				"the marking would be cut through the last line of the backup",

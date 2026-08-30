@@ -113,7 +113,7 @@ func TestQROnlyParagraphCentersQR(t *testing.T) {
 		Paragraphs: []Paragraph{{QR: qrc, QRScale: 3}},
 		Font:       sh.Font,
 	}
-	b := inkBounds(t, params, EngraveText(params, plate))
+	b := inkBounds(t, params, mustEngraveText(t, params, plate))
 	plate85 := params.F(plateSize)
 	// Centered means the left gap equals the right gap, and likewise
 	// vertically. Half a stroke of slack, no more.
@@ -141,8 +141,8 @@ func TestEmptyTextEngravesZeroLines(t *testing.T) {
 		Paragraphs: []Paragraph{{QR: qrc, QRScale: 3}},
 		Font:       sh.Font,
 	}
-	bEmpty := inkBounds(t, params, EngraveText(params, empty))
-	bText := inkBounds(t, params, EngraveText(params, withText))
+	bEmpty := inkBounds(t, params, mustEngraveText(t, params, empty))
+	bText := inkBounds(t, params, mustEngraveText(t, params, withText))
 	// A single blank line still reserves a row, so the QR of the one-line
 	// variant sits where the text path puts it -- NOT centered. If empty text
 	// took the same path, these two would agree.
@@ -223,7 +223,7 @@ func TestEngraveTextSurvivesAQRWiderThanTheLine(t *testing.T) {
 		Paragraphs: []Paragraph{{Text: strings.Repeat("x", 200), QR: qrc, QRScale: 3}},
 		Font:       sh.Font,
 	}
-	b := inkBounds(t, params, EngraveText(params, plate))
+	b := inkBounds(t, params, mustEngraveText(t, params, plate))
 	if b.Empty() {
 		t.Fatal("nothing engraved")
 	}
@@ -240,7 +240,7 @@ func TestEmptyParagraphAdvancesNoRow(t *testing.T) {
 			Paragraphs: []Paragraph{{Text: firstText}, {Text: "X"}},
 			Font:       sh.Font,
 		}
-		return inkBounds(t, params, EngraveText(params, plate)).Min.Y
+		return inkBounds(t, params, mustEngraveText(t, params, plate)).Min.Y
 	}
 	empty, oneBlank := after(""), after(" ")
 	if empty == oneBlank {
@@ -270,27 +270,27 @@ func textRowBand(row int) (top, bottom int) {
 func TestTextTitleFooterAreAbsoluteRows(t *testing.T) {
 	rows := LinesPerPlate(prodParams, plateFontSizeUR)
 
-	title := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: "TITLE", Font: sh.Font}))
+	title := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Title: "TITLE", Font: sh.Font}))
 	top, bottom := textRowBand(0)
 	if title.Min.Y < top || title.Max.Y > bottom {
 		t.Errorf("title inks y[%d,%d], outside row 0's band [%d,%d]", title.Min.Y, title.Max.Y, top, bottom)
 	}
 
-	footer := inkBounds(t, prodParams, EngraveText(prodParams, Text{Footer: "FOOTER", Font: sh.Font}))
+	footer := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Footer: "FOOTER", Font: sh.Font}))
 	top, bottom = textRowBand(rows - 1)
 	if footer.Min.Y < top || footer.Max.Y > bottom {
 		t.Errorf("footer inks y[%d,%d], outside row %d's band [%d,%d]", footer.Min.Y, footer.Max.Y, rows-1, top, bottom)
 	}
 
 	// The body drops a row when -- and only when -- a title is present.
-	noTitle := inkBounds(t, prodParams, EngraveText(prodParams, Text{Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
-	withTitle := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: "T", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	noTitle := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	withTitle := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Title: "T", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
 	if got, want := withTitle.Max.Y-noTitle.Max.Y, prodParams.F(plateFontSizeUR); got != want {
 		t.Errorf("a title moved the body by %d, want exactly one row of %d", got, want)
 	}
 	// A footer must not move the body at all: its row is absolute, anchored
 	// from the plate's bottom rather than "after the text".
-	withFooter := inkBounds(t, prodParams, EngraveText(prodParams, Text{Footer: "F", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
+	withFooter := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Footer: "F", Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}))
 	if withFooter.Min.Y != noTitle.Min.Y {
 		t.Errorf("a footer moved the body's top from %d to %d", noTitle.Min.Y, withFooter.Min.Y)
 	}
@@ -325,7 +325,7 @@ func TestTextTitleFooterBudget(t *testing.T) {
 	hi := prodParams.F(plateSize) - prodParams.I(innerMargin)
 	const budget = 28 // measured; see doc comment -- SPIKE §3c's 25 was raw-width, not layout-based
 	capStr := strings.Repeat("W", budget)
-	b := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: capStr, Footer: capStr, Font: sh.Font}))
+	b := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Title: capStr, Footer: capStr, Font: sh.Font}))
 	if b.Min.X < lo || b.Max.X > hi {
 		t.Errorf("%d-character title/footer inks x[%.3f,%.3f]mm, outside the screw-hole-free span [%.1f,%.1f]mm",
 			budget, float64(b.Min.X)/mm, float64(b.Max.X)/mm, float64(lo)/mm, float64(hi)/mm)
@@ -333,7 +333,7 @@ func TestTextTitleFooterBudget(t *testing.T) {
 	// budget+1 must NOT fit -- pinning the budget rather than merely a safe
 	// value.
 	over := strings.Repeat("W", budget+1)
-	if bOver := inkBounds(t, prodParams, EngraveText(prodParams, Text{Title: over, Font: sh.Font})); bOver.Min.X >= lo && bOver.Max.X <= hi {
+	if bOver := inkBounds(t, prodParams, mustEngraveText(t, prodParams, Text{Title: over, Font: sh.Font})); bOver.Min.X >= lo && bOver.Max.X <= hi {
 		t.Errorf("a %d-character title fits the screw-hole-free span; the %d-character budget has stopped binding", budget+1, budget)
 	}
 	// Every title/footer S6b introduces (spec 1.2), on the budget:
@@ -385,7 +385,7 @@ func TestTheTitleAndFooterAreEmittedLast(t *testing.T) {
 	// 499200.
 	firstClaim, lastBody, nTitle, nFooter, nBody := -1, -1, 0, 0, 0
 	i := 0
-	for c := range EngraveText(params, plate) {
+	for c := range mustEngraveText(t, params, plate) {
 		k, ok := c.AsKnot()
 		if !ok {
 			continue
@@ -436,8 +436,8 @@ func TestFooterRowIsWhereTheFooterIsCut(t *testing.T) {
 		t.Errorf("FooterRow depends on whether a Footer is set: %d vs %d",
 			row, withFooter.FooterRow(prodParams))
 	}
-	bare := inkBounds(t, prodParams, EngraveText(prodParams, plate))
-	footed := inkBounds(t, prodParams, EngraveText(prodParams, withFooter))
+	bare := inkBounds(t, prodParams, mustEngraveText(t, prodParams, plate))
+	footed := inkBounds(t, prodParams, mustEngraveText(t, prodParams, withFooter))
 	if footed.Max.Y <= bare.Max.Y {
 		t.Fatalf("adding a footer did not move the ink down: bare %d, footed %d",
 			bare.Max.Y, footed.Max.Y)
@@ -469,7 +469,7 @@ func TestAPackedBodyCanCoverTheFooterRow(t *testing.T) {
 
 	body := plate
 	body.Footer = ""
-	bodyInk := inkBounds(t, prodParams, EngraveText(prodParams, body))
+	bodyInk := inkBounds(t, prodParams, mustEngraveText(t, prodParams, body))
 	if bodyInk.Max.Y <= row {
 		t.Fatalf("six chunks no longer reach the footer row (%d vs %d); pick a "+
 			"longer body or this test proves nothing", bodyInk.Max.Y, row)
@@ -479,12 +479,81 @@ func TestAPackedBodyCanCoverTheFooterRow(t *testing.T) {
 	const safetyMargin = 3 // gui.safetyMargin, mm
 	sz := prodParams.F(plateSize)
 	margin := prodParams.I(safetyMargin)
-	all := inkBounds(t, prodParams, EngraveText(prodParams, plate))
+	all := inkBounds(t, prodParams, mustEngraveText(t, prodParams, plate))
 	if !all.In(bspline.Bounds{
 		Min: bezier.Pt(margin, margin),
 		Max: bezier.Pt(sz-margin, sz-margin),
 	}) {
 		t.Fatal("the overlapping plate is out of bounds, so toPlate would have " +
 			"caught it and FooterRow would not be needed")
+	}
+}
+
+// TestEngraveTextRefusesAQROnAMultiParagraphPlate is F-434.
+//
+// EngraveText advances a paragraph by its TEXT lines only, while a code
+// occupies twelve rows from two rows below its paragraph's top -- so on a
+// multi-paragraph plate paragraph n's code is drawn ACROSS paragraphs n+1
+// onward, and a text-less paragraph's code is centred on the PLATE, so every
+// code in a QR-ONLY packed plate lands on the same spot. Both lay out INSIDE
+// the plate, so the bounds check every caller uses (gui.toPlate) reports a FIT
+// over ink that overlaps: overlapping ink on steel, announced as a fit.
+//
+// The arrangement is unreachable from production today -- every QR-carrying
+// Paragraph the tree constructs is alone on its plate -- so this is a trap laid
+// for the next caller, and the refusal is what disarms it. It is an ERROR and
+// not a panic because it lands on the DEVICE, in the same position EngraveSeed's
+// unencodable-QR error lands: a caller that offers variants drops this one and
+// keeps the others, as validateMdmkStrings already does by hand.
+func TestEngraveTextRefusesAQROnAMultiParagraphPlate(t *testing.T) {
+	qrc := QR(t, goldenMultisig)
+	const chunk = "md1f9k2szspqjtvyyy4qqxppcgsc97v95zqyudm486mm4xav6hqptc0rd7sr9mfc8yrzcx7sju0ra3jh8llnx"
+
+	for _, tc := range []struct {
+		name  string
+		paras []Paragraph
+	}{
+		{"the QR is on the first of two paragraphs", []Paragraph{
+			{Text: chunk, QR: qrc, QRScale: 3}, {Text: chunk},
+		}},
+		{"the QR is on the last of two paragraphs", []Paragraph{
+			{Text: chunk}, {Text: chunk, QR: qrc, QRScale: 3},
+		}},
+		{"a text-less QR paragraph among text ones", []Paragraph{
+			{Text: chunk}, {QR: qrc, QRScale: 3}, {Text: chunk},
+		}},
+	} {
+		plate := Text{Paragraphs: tc.paras, Font: sh.Font}
+		e, err := EngraveText(prodParams, plate)
+		if err == nil {
+			t.Errorf("%s: EngraveText accepted it", tc.name)
+			continue
+		}
+		if e != nil {
+			t.Errorf("%s: refused AND returned an engraving", tc.name)
+		}
+		// The message must name the constraint, not merely fail: the caller
+		// reading it is choosing between variants.
+		if got := err.Error(); !strings.Contains(got, "QR") ||
+			!strings.Contains(got, "paragraph") {
+			t.Errorf("%s: %q names neither the QR nor the paragraphs", tc.name, got)
+		}
+	}
+
+	// A QR ALONE on its plate is the production arrangement and must still lay
+	// out -- both with text beside it and without.
+	for _, tc := range []struct {
+		name  string
+		paras []Paragraph
+	}{
+		{"TEXT + QR, one paragraph", []Paragraph{{Text: chunk, QR: qrc, QRScale: 3}}},
+		{"QR ONLY, one paragraph", []Paragraph{{QR: qrc, QRScale: 3}}},
+		{"two paragraphs, no QR", []Paragraph{{Text: chunk}, {Text: chunk}}},
+		{"three paragraphs, no QR", []Paragraph{{Text: chunk}, {Text: chunk}, {Text: chunk}}},
+	} {
+		plate := Text{Paragraphs: tc.paras, Font: sh.Font}
+		if _, err := EngraveText(prodParams, plate); err != nil {
+			t.Errorf("%s: EngraveText refused a plate it must accept: %v", tc.name, err)
+		}
 	}
 }
