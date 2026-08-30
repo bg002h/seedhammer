@@ -348,14 +348,53 @@ type ErrorScreen struct {
 	Body  string
 	w     Warning
 	ok    Clickable
+	// back dismisses exactly as `ok` does. It is a second Clickable rather than
+	// `ok.AltButton = Button1` because a NavButton is also the TOUCH target: an
+	// AltButton has no drawn region, so it would leave the affordance invisible
+	// and untappable, which is most of what F-440 was.
+	back Clickable
 }
 
+// Layout draws the modal and reports whether it was dismissed.
+//
+// BACK DISMISSES, AND SAYS SO (F-440, from the bench 2026-08-29). This bound
+// `ok` to Button3 and nothing else, so the back button was wired to nothing on
+// every dismiss-only modal in the firmware -- 143 showError/showNotice call
+// sites, all reached through here. EventRouter.Reset discards a head event no
+// filter matched, so the presses were not queued either; they were dropped,
+// frame after frame, in silence. An operator who backed out of an engrave met
+// "Bundle Incomplete" (gui/bundle_flow.go) and reported the device hung.
+// Measured before the fix: thirty Button1 presses changed nothing, and one
+// Button3 press dismissed it.
+//
+// WHY THIS IS SAFE AT ALL 143, and it was checked rather than assumed: this
+// function returns ONE boolean, carrying no "which button", and all five of its
+// caller loops are `if dismissed { return/break }`. There is exactly one exit
+// and it leads to exactly one place, so BACK cannot skip anything -- there is
+// nothing to skip. Every screen that must FORCE an acknowledgment is a
+// ConfirmWarningScreen instead: a different type, with a cancel/confirm pair and
+// a hold-to-confirm delay, and untouched here.
+//
+// IT SHORT-CIRCUITS, AND THAT IS DELIBERATE -- it consumes at most ONE click.
+// Draining both unconditionally looked tidier and was wrong: the router is a
+// single queue whose head is consumed by the first matching filter, so a frame
+// that polled `ok` and then `back` swallowed a Button1 press queued BEHIND the
+// dismissing Button3 -- a press meant for the screen underneath. Measured:
+// TestRecoverRejectsNonCodex32 enqueues `Button3, Button3, Button1` (OK the
+// entry, dismiss the modal, Back out of recovery) and hung forever, because the
+// modal ate the Back that was to leave the flow. So a pending event is LEFT for
+// whoever comes next, which is also why this returns before ctx.Frame and
+// therefore before Router.Reset: nothing is discarded on the way out.
 func (s *ErrorScreen) Layout(ctx *Context, th *Colors, dims image.Point) (op.Op, bool) {
 	s.ok.Button = Button3
-	if s.ok.Clicked(ctx) {
+	s.back.Button = Button1
+	if s.ok.Clicked(ctx) || s.back.Clicked(ctx) {
 		return op.Op{}, true
 	}
-	nav, _ := layoutNavigation(&ctx.B, th, dims, NavButton{Clickable: &s.ok, Style: StylePrimary, Icon: assets.IconCheckmark})
+	nav, _ := layoutNavigation(&ctx.B, th, dims,
+		NavButton{Clickable: &s.back, Style: StyleSecondary, Icon: assets.IconBack},
+		NavButton{Clickable: &s.ok, Style: StylePrimary, Icon: assets.IconCheckmark},
+	)
 	content := s.w.Layout(ctx, th, dims, s.Title, s.Body)
 	return op.Layer(nav, content), false
 }

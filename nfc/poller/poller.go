@@ -4,7 +4,9 @@ package poller
 
 import (
 	"bufio"
+	"errors"
 	"io"
+	"time"
 
 	"seedhammer.com/nfc/ndef"
 	"seedhammer.com/nfc/type2"
@@ -89,12 +91,48 @@ func (p *Poller) Read(buf []byte) (int, error) {
 	}
 }
 
+// CloseTimeout bounds how long Close waits for an in-flight Read to stop.
+//
+// Generous on purpose: a healthy read stops as soon as Interrupt lands, so this
+// is never reached in normal operation. It exists for the case where it CANNOT
+// land, and there the only thing that matters is that the wait ends at all.
+const CloseTimeout = 2 * time.Second
+
+// ErrCloseTimeout reports that the in-flight read did not stop, so the device is
+// still owned by it and must not be touched.
+//
+// A caller receiving this must ABANDON the poller and carry on. It must not
+// retry, must not block, and must not treat it as fatal: the whole point of the
+// error is that continuing with a degraded reader beats freezing.
+var ErrCloseTimeout = errors.New("poller: the reader did not stop; abandoning it")
+
+// Close stops the poller. It returns ErrCloseTimeout if the in-flight read could
+// not be stopped within CloseTimeout.
+//
+// F-441: THE WAIT IS BOUNDED, and it was not. This blocked forever on
+// `p.reading <- struct{}{}` whenever Interrupt failed to reach the read -- which
+// the driver's dropped-signal bug made reachable, and which any future stall in
+// the device would make reachable again. The wait runs on the UI goroutine, so
+// "forever" meant a frozen panel and a dead machine. The bound is the second
+// half of the fix precisely because it does not depend on the first being
+// correct: a signal that goes missing for any reason now costs a degraded reader
+// instead of the device.
+//
+// ON TIMEOUT IT DOES NOT TOUCH THE DEVICE. The read still owns the bus, and
+// d.Close writes a register; issuing that concurrently would put two writers on
+// one I2C transaction. Leaving the chip alone is the safe half of giving up.
 func (p *Poller) Close() error {
 	select {
 	case p.reading <- struct{}{}:
 	default:
 		p.d.Interrupt()
-		p.reading <- struct{}{}
+		t := time.NewTimer(CloseTimeout)
+		defer t.Stop()
+		select {
+		case p.reading <- struct{}{}:
+		case <-t.C:
+			return ErrCloseTimeout
+		}
 	}
 	return p.d.Close()
 }
