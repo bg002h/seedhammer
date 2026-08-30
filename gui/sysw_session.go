@@ -220,8 +220,19 @@ func (s *syswSession) cardSet(want sysw.Class) ([]string, bool) {
 	return groupRecordsByCard(records), true
 }
 
-// syswAltEnter is the alternative to FROM PAYLOAD: decline, and type it.
-const syswAltEnter = "ENTER IT"
+// The two alternatives to FROM PAYLOAD, and the whole of F-437.
+//
+// A choice must name what it DOES. `ENTER IT` is honest for a seed, a
+// passphrase or free text, where declining opens the keyboard. It was a
+// FALSEHOOD at the four offers whose decline arm is a card gather — the three
+// md1-card doors and S2's Descriptor offer, which falls through to the same
+// gather — because this device has no keyboard for a card. The operator was
+// offered a route that does not exist and, with no camera and a payload in
+// hand, one that cannot be made to exist.
+const (
+	syswAltEnter = "ENTER IT"
+	syswAltScan  = "SCAN CARDS"
+)
 
 // syswChoose draws the source picker and reports whether FROM PAYLOAD won.
 //
@@ -251,10 +262,16 @@ func syswOffer(ctx *Context, th *Colors, want sysw.Class, lead string) (string, 
 // syswOfferTitled is syswOffer under a caller-chosen title, so a per-seed
 // passphrase prompt can say which seed it is for (SPEC 4.1).
 func syswOfferTitled(ctx *Context, th *Colors, want sysw.Class, title, lead string) (string, bool) {
+	return syswOfferAlt(ctx, th, want, title, lead, syswAltEnter)
+}
+
+// syswOfferAlt is syswOfferTitled naming its own decline route, for the doors
+// whose decline arm is a card gather rather than a keyboard (F-437).
+func syswOfferAlt(ctx *Context, th *Colors, want sysw.Class, title, lead, alt string) (string, bool) {
 	if ctx.sysw == nil || !ctx.sysw.has(want) {
 		return "", false
 	}
-	if !syswChoose(ctx, th, title, lead, syswAltEnter) {
+	if !syswChoose(ctx, th, title, lead, alt) {
 		return "", false
 	}
 	return ctx.sysw.take(want)
@@ -282,7 +299,7 @@ func syswOfferCards(ctx *Context, th *Colors, want sysw.Class, lead string) ([]s
 	if ctx.sysw == nil || !ctx.sysw.has(want) {
 		return nil, false
 	}
-	if !syswChoose(ctx, th, "Input", lead, syswAltEnter) {
+	if !syswChoose(ctx, th, "Input", lead, syswAltScan) {
 		return nil, false
 	}
 	return ctx.sysw.cardSet(want)
