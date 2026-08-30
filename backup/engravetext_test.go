@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"math"
 	"slices"
 	"strings"
@@ -418,23 +419,28 @@ func TestTheTitleAndFooterAreEmittedLast(t *testing.T) {
 	}
 }
 
-// TestFooterRowIsWhereTheFooterIsCut is Text.FooterRow's non-vacuity check: the
+// TestFooterRowIsWhereTheFooterIsCut is footerRowY's non-vacuity check: the
 // number it returns is the row the engraver actually puts a footer on, measured
-// off the ink, not off the formula it forwards to.
+// off the ink, not off the formula.
+//
+// It is the SAME expression the body's budget is refused above (yBudget's limit
+// branch), which is footerRowY's own stated reason for being a function -- so
+// this measurement stands for both readers.
 //
 // A one-glyph body and a one-glyph footer are engraved separately, so the
 // footer's own ink can be located: the footer plate's ink runs from the body
 // glyph's top down to the footer glyph's bottom, and its Max.Y is one font size
-// below the row FooterRow names.
+// below the row.
 func TestFooterRowIsWhereTheFooterIsCut(t *testing.T) {
 	plate := Text{Paragraphs: []Paragraph{{Text: "X"}}, Font: sh.Font}
 	withFooter := plate
 	withFooter.Footer = "F"
 
-	row := plate.FooterRow(prodParams)
-	if row != withFooter.FooterRow(prodParams) {
-		t.Errorf("FooterRow depends on whether a Footer is set: %d vs %d",
-			row, withFooter.FooterRow(prodParams))
+	row := footerRowY(prodParams, plate.fontMM())
+	if _, limit := yBudget(prodParams, withFooter.Title, withFooter.Footer,
+		withFooter.fontMM(), withFooter.fontMM()); limit != row {
+		t.Errorf("the body is budgeted against %d but the footer is cut at %d; "+
+			"they must be one expression", limit, row)
 	}
 	bare := inkBounds(t, prodParams, mustEngraveText(t, prodParams, plate))
 	footed := inkBounds(t, prodParams, mustEngraveText(t, prodParams, withFooter))
@@ -445,28 +451,53 @@ func TestFooterRowIsWhereTheFooterIsCut(t *testing.T) {
 	// The footer glyph's ink begins at the row and is at most one font size tall.
 	fontSize := prodParams.F(plate.fontMM())
 	if footed.Max.Y <= row || footed.Max.Y > row+fontSize {
-		t.Errorf("FooterRow says %d but the footer's ink ends at %d, outside [%d, %d]",
+		t.Errorf("the footer row is %d but the footer's ink ends at %d, outside [%d, %d]",
 			row, footed.Max.Y, row, row+fontSize)
 	}
 }
 
-// TestAPackedBodyCanCoverTheFooterRow is the REASON FooterRow is exported, and
-// it is a demonstration rather than a claim: a plate whose paragraphs run past
-// the footer row is still In() the engravable area, so the bounds check every
-// paragraph caller uses (gui.toPlate) reports a FIT over ink that lands on top
-// of the footer.
+// TestABodyThatWouldCoverTheFooterIsRefused is F-435, and it is the test
+// TestAPackedBodyCanCoverTheFooterRow announced: that one DEMONSTRATED a plate
+// whose paragraphs run past the footer row while still In() the engravable
+// area, so gui.toPlate reported a FIT over ink landing on top of the footer,
+// and it said in as many words that it would fail once EngraveText gained a
+// body budget of its own. It has, so this replaces it -- refusing what that one
+// measured, and keeping the measurement as the refusal's non-vacuity.
 //
-// If EngraveText ever gains a body budget of its own, this test fails and the
-// packer's extra check (gui.bundlePlateTextFits) can go.
-func TestAPackedBodyCanCoverTheFooterRow(t *testing.T) {
+// THE DEMONSTRATION IS THE SECOND HALF. Take the footer away and the SAME six
+// paragraphs lay out, ink past the footer row and inside the safety margin --
+// which is the arrangement that used to be cut. So the plate is refused because
+// of the footer and nothing else, and a budget that refused everything would
+// not pass this.
+//
+// That the footerless plate still lays out is DELIBERATE and not an oversight:
+// without a footer the limit is the bottom margin, which gui.toPlate already
+// enforces off the INK rather than off the nominal row. Refusing there instead
+// would reject backup/testdata/text-0-shards-1.bin -- a golden whose body ends
+// 5120 units past the margin nominally and short of it in ink -- and would
+// change which variants validateDescriptor offers. See EngraveText.
+func TestABodyThatWouldCoverTheFooterIsRefused(t *testing.T) {
 	const chunk = "md1f9k2szspqjtvyyy4qqxppcgsc97v95zqyudm486mm4xav6hqptc0rd7sr9mfc8yrzcx7sju0ra3jh8llnx"
 	var paras []Paragraph
 	for i := 0; i < 6; i++ {
 		paras = append(paras, Paragraph{Text: chunk})
 	}
 	plate := Text{Paragraphs: paras, Font: sh.Font, Title: "T", Footer: "F"}
-	row := plate.FooterRow(prodParams)
+	row := footerRowY(prodParams, plate.fontMM())
 
+	e, err := EngraveText(prodParams, plate)
+	if err == nil {
+		t.Fatal("EngraveText accepted a body that covers the footer row")
+	}
+	if !errors.Is(err, ErrTooLarge) {
+		t.Errorf("the refusal is %v, want an ErrTooLarge", err)
+	}
+	if e != nil {
+		t.Error("EngraveText refused the plate AND returned an engraving")
+	}
+
+	// The demonstration. Without a footer the budget is the bottom margin, so
+	// the same six paragraphs lay out...
 	body := plate
 	body.Footer = ""
 	bodyInk := inkBounds(t, prodParams, mustEngraveText(t, prodParams, body))
@@ -474,18 +505,27 @@ func TestAPackedBodyCanCoverTheFooterRow(t *testing.T) {
 		t.Fatalf("six chunks no longer reach the footer row (%d vs %d); pick a "+
 			"longer body or this test proves nothing", bodyInk.Max.Y, row)
 	}
-	// ...and the whole plate is nevertheless inside the engravable area, which is
-	// the half that makes it dangerous.
+	// ...inside the engravable area, which is the half that made it dangerous:
+	// nothing downstream of EngraveText can see the collision.
 	const safetyMargin = 3 // gui.safetyMargin, mm
 	sz := prodParams.F(plateSize)
 	margin := prodParams.I(safetyMargin)
-	all := inkBounds(t, prodParams, mustEngraveText(t, prodParams, plate))
-	if !all.In(bspline.Bounds{
+	if !bodyInk.In(bspline.Bounds{
 		Min: bezier.Pt(margin, margin),
 		Max: bezier.Pt(sz-margin, sz-margin),
 	}) {
-		t.Fatal("the overlapping plate is out of bounds, so toPlate would have " +
-			"caught it and FooterRow would not be needed")
+		t.Fatal("the overlapping body is out of bounds, so toPlate would have " +
+			"caught it and the budget would not be needed")
+	}
+
+	// The boundary, from the other side: one paragraph fewer is accepted WITH
+	// the footer. A budget that refused a row too early would move every packed
+	// plate in the field, so the count is pinned here as well as in gui
+	// (bundlePlateMD1Capacity).
+	five := plate
+	five.Paragraphs = paras[:5]
+	if _, err := EngraveText(prodParams, five); err != nil {
+		t.Errorf("five chunks with a footer must fit one plate: %v", err)
 	}
 }
 

@@ -62,28 +62,6 @@ func (t Text) fontMM() float32 {
 	return t.FontSize
 }
 
-// FooterRow is the y, in device units, that EngraveText cuts a non-empty Footer
-// at -- and therefore the y a BODY must stay above.
-//
-// IT IS EXPORTED BECAUSE EngraveText DOES NOT BUDGET THE BODY AGAINST IT. The
-// free-text path does (yBudget, fit.go, whose limit is read off this same
-// expression); the paragraph path never had to, because every caller until now
-// put ONE paragraph on a plate and one md1/mk1 string is at most four rows. A
-// caller that PACKS paragraphs can reach row 19, and toPlate cannot see it: the
-// footer sits inside the safety margin, so a body laid over it is still In()
-// the plate and the fit check returns nil. Overlapping ink on steel, reported as
-// a fit.
-//
-// It forwards to footerRowY rather than restating it, for footerRowY's own
-// stated reason: the row the footer is cut at and the row a body is refused
-// above may not be two different expressions.
-//
-// It resolves the size through fontMM, so a caller asks the PLATE where its
-// footer is rather than having to know plateFontSizeUR.
-func (t Text) FooterRow(params engrave.Params) int {
-	return footerRowY(params, t.fontMM())
-}
-
 type Paragraph struct {
 	Text    string
 	QR      *qr.Code
@@ -416,16 +394,146 @@ func EngraveText(params engrave.Params, plate Text) (engrave.Engraving, error) {
 			}
 		}
 	}
+
+	fontSize := params.F(plate.fontMM())
+	fnt := plate.Font
+	margin := params.I(outerMargin)
+	plateDims := image.Point{
+		X: params.F(plateSize),
+		Y: params.F(plateSize),
+	}
+
+	// THE SAME WINDOW THE FREE-TEXT PATH WRAPS AGAINST -- fit.go's yBudget, at
+	// this plate's one face and size -- and it answers both of the questions the
+	// body's geometry used to answer separately here.
+	//
+	// start is where the body begins: row 0 when the plate is unmarked, row 1
+	// when a title has spoken for it (spec 1.2b). limit is the y no row's bottom
+	// may pass: the FOOTER'S OWN ROW when there is a footer, the bottom margin
+	// when there is not. Reading both off yBudget is what makes the row a body
+	// is refused above and the row the footer is cut on one expression -- see
+	// footerRowY, which exists for exactly that reason.
+	titleRow := margin
+	start, limit := yBudget(params, plate.Title, plate.Footer, plate.fontMM(), plate.fontMM())
+
+	// THE BODY IS LAID OUT BEFORE ANY OF IT IS DRAWN (F-435). The paragraph path
+	// had no budget at all: a body could be cut straight over a non-empty
+	// footer and still be In() the safety margin, so gui.toPlate reported a FIT
+	// -- the footer sits INSIDE that margin, so nothing downstream could see the
+	// collision. The packer carried a second check of its own to cover it; this
+	// makes the collision impossible instead, for every caller rather than the
+	// one that remembered.
+	//
+	// Each paragraph's layout, wrapped lines and code placement are resolved
+	// ONCE, here, and READ by the closure below. Laying out twice -- once to
+	// measure, once to draw -- would let the rows the budget admitted and the
+	// rows the engraver cuts drift apart, which is the drift textLayout's own
+	// comment says must not be possible.
+	//
+	// IT BUDGETS TEXT ROWS, exactly as yBudget does on the free-text side: a
+	// code's band is not part of this window there either (it is refused
+	// separately, against the bottom margin, as ErrQRTooTall) and a QR-ONLY
+	// paragraph's code is centred on the PLATE rather than laid on rows at all.
+	type paragraphPlan struct {
+		lay lineLayout
+		// lines is the wrap; emptyText records that the ORIGINAL text was empty,
+		// which is a different question -- see the centering override below.
+		lines     []string
+		emptyText bool
+		qrp       *qrPlacement
+		qr        engrave.Engraving
+	}
+	plans := make([]paragraphPlan, len(plate.Paragraphs))
+	offy := start
+	for i, p := range plate.Paragraphs {
+		qrScale := p.QRScale
+		if qrScale == 0 {
+			qrScale = 2
+		}
+		// The descriptor's code belongs to its PARAGRAPH and moves with it,
+		// so the placement is anchored at offy -- this paragraph's top --
+		// and resolved once, here. The layout below narrows the lines
+		// against it and the offset below draws the code from it: one
+		// object, one y, read twice and derived never.
+		pp := paragraphPlan{emptyText: len(p.Text) == 0}
+		if p.QR != nil {
+			at := qrPlaceAt(params, p.QR, qrScale, fontSize, offy)
+			pp.qrp = &at
+			pp.qr = engrave.QR(params.StrokeWidth, qrScale, p.QR)
+		}
+		// baseY is this paragraph's top edge in DEVICE units. widthAt is
+		// indexed by output line, so the plate-row offset has to live
+		// inside the layout -- and for the descriptor path that offset is
+		// not row-aligned, because paragraphs after the first advance offy
+		// by lineno*fontSize + 1mm.
+		pp.lay = textLayout(params, fnt, fontSize, offy, pp.qrp)
+		if !pp.emptyText {
+			// The descriptor and mdmk callers (validateDescriptor,
+			// validateMdmk) keep an UNBOUNDED path here: they offer
+			// whichever of TEXT+QR / TEXT-ONLY / QR-ONLY fit, which
+			// depends on toPlate rejecting overflow, so a maxLines
+			// refusal here would silently change which variants they
+			// offer.
+			//
+			// These three are NOT a TEXT+QR -> TEXT-ONLY -> QR-ONLY
+			// fallback chain, despite an earlier version of this comment
+			// claiming that order (F-119). Measured by growing the input
+			// string through validateMdmk and watching each variant drop
+			// out: TEXT+QR fails first (works through 268 chars, fails at
+			// 269), then QR-ONLY (641, fails at 642), and TEXT-ONLY fails
+			// LAST (645, fails at 646). QR-ONLY is the LEAST robust of
+			// the two single-mode variants, not the most: a QR code's
+			// capacity is a hard ceiling, while wrapped text keeps
+			// fitting a few characters longer at the same plate size. The
+			// variants themselves are correct -- validateMdmk/
+			// validateDescriptor try all three and offer whichever fit,
+			// not a first-match chain -- only the comment's stated order
+			// was wrong.
+			//
+			// Empty text is special-cased rather than wrapped, because
+			// spec 5.2's empty-block rule returns ONE empty line and that
+			// rule serves the free-text plate only. Here zero characters
+			// must mean zero rows, which is what the QR-ONLY variant --
+			// and text-2-shards-1.bin -- depends on.
+			pp.lines, _ = WrapText(p.Text, func(i int) int {
+				n, _ := pp.lay.at(i)
+				return n
+			}, math.MaxInt)
+		}
+		plans[i] = pp
+		offy += len(pp.lines) * fontSize
+		if i != len(plate.Paragraphs)-1 {
+			// Space UR sections.
+			offy += params.I(1)
+		}
+	}
+	// THE BUDGET BINDS WHERE SOMETHING IS CUT AT THE LIMIT, which is the footer
+	// and only the footer.
+	//
+	// Without a footer, limit is the bottom margin -- and that y is ALREADY
+	// enforced, better, by gui.toPlate, which measures the INK rather than the
+	// nominal row. The difference is the last row's descender space, and it is
+	// real capacity: MEASURED, a nominal refusal at the bottom margin rejects
+	// backup/testdata/text-0-shards-1.bin (body ends at 529920, margin 524800,
+	// ink 5120 short of it) -- a golden that engraves correctly today. It would
+	// also silently change which variants validateDescriptor and validateMdmk
+	// offer, which the unbounded wrap above exists to avoid.
+	//
+	// The footer is different in kind: it is INSIDE the safety margin, so ink
+	// laid on top of it is still In() the plate and toPlate cannot see the
+	// collision at all. There is no downstream check to defer to, which is why
+	// this one is here.
+	if plate.Footer != "" && offy > limit {
+		// ErrTooLarge, wrapped: this is the paragraph path's answer to the
+		// question fit.go answers with the same value on the free-text side, and
+		// every caller already treats "does not fit a plate" as the signal to
+		// drop this variant or split this plate.
+		return nil, fmt.Errorf("%w: the body ends at %d, past the footer row %d",
+			ErrTooLarge, offy, limit)
+	}
+
 	return func(yield func(engrave.Command) bool) {
 		t := engrave.NewTransform(yield)
-		fontSize := params.F(plate.fontMM())
-		fnt := plate.Font
-
-		margin := params.I(outerMargin)
-		plateDims := image.Point{
-			X: params.F(plateSize),
-			Y: params.F(plateSize),
-		}
 
 		// centerRow engraves s, verbatim, centered in the screw-hole-free
 		// inset span of one plate row at y -- the same arithmetic
@@ -445,103 +553,26 @@ func EngraveText(params engrave.Params, plate Text) (engrave.Engraving, error) {
 			cmd.Engrave(t.Yield)
 		}
 
-		// THE TITLE AND FOOTER ARE EMITTED LAST -- see the loop's tail. Their
-		// ROWS are decided here, because the body's first row depends on
-		// whether row 0 is spoken for, and position comes from the y offset
-		// rather than from emission order. Nothing is drawn yet.
-		titleRow := params.I(outerMargin)
-		offy := titleRow
-		if plate.Title != "" {
-			// Row 0 is spoken for; the body starts on row 1 (spec 1.2b,
-			// pinned by TestTextTitleFooterAreAbsoluteRows).
-			offy += fontSize
-		}
-		// The footer is the LAST plate row, anchored from the bottom -- not
-		// "after the body" -- so a short body never leaves it sitting
-		// mid-plate, inside the QR keep-out band (spec 1.1.2).
-		footerRow := footerRowY(params, plate.fontMM())
-
-		for i, p := range plate.Paragraphs {
-			qrScale := p.QRScale
-			if qrScale == 0 {
-				qrScale = 2
-			}
-			// The descriptor's code belongs to its PARAGRAPH and moves with it,
-			// so the placement is anchored at offy -- this paragraph's top --
-			// and resolved once, here. The layout below narrows the lines
-			// against it and the offset below draws the code from it: one
-			// object, one y, read twice and derived never.
-			var qrp *qrPlacement
-			var qr engrave.Engraving
-			if p.QR != nil {
-				at := qrPlaceAt(params, p.QR, qrScale, fontSize, offy)
-				qrp = &at
-				qr = engrave.QR(params.StrokeWidth, qrScale, p.QR)
-			}
-			// baseY is this paragraph's top edge in DEVICE units. widthAt is
-			// indexed by output line, so the plate-row offset has to live
-			// inside the layout -- and for the descriptor path that offset is
-			// not row-aligned, because paragraphs after the first advance offy
-			// by lineno*fontSize + 1mm.
-			lay := textLayout(params, fnt, fontSize, offy, qrp)
-			var lines []string
-			if len(p.Text) > 0 {
-				// The descriptor and mdmk callers (validateDescriptor,
-				// validateMdmk) keep an UNBOUNDED path here: they offer
-				// whichever of TEXT+QR / TEXT-ONLY / QR-ONLY fit, which
-				// depends on toPlate rejecting overflow, so a maxLines
-				// refusal here would silently change which variants they
-				// offer.
-				//
-				// These three are NOT a TEXT+QR -> TEXT-ONLY -> QR-ONLY
-				// fallback chain, despite an earlier version of this comment
-				// claiming that order (F-119). Measured by growing the input
-				// string through validateMdmk and watching each variant drop
-				// out: TEXT+QR fails first (works through 268 chars, fails at
-				// 269), then QR-ONLY (641, fails at 642), and TEXT-ONLY fails
-				// LAST (645, fails at 646). QR-ONLY is the LEAST robust of
-				// the two single-mode variants, not the most: a QR code's
-				// capacity is a hard ceiling, while wrapped text keeps
-				// fitting a few characters longer at the same plate size. The
-				// variants themselves are correct -- validateMdmk/
-				// validateDescriptor try all three and offer whichever fit,
-				// not a first-match chain -- only the comment's stated order
-				// was wrong.
-				//
-				// Empty text is special-cased rather than wrapped, because
-				// spec 5.2's empty-block rule returns ONE empty line and that
-				// rule serves the free-text plate only. Here zero characters
-				// must mean zero rows, which is what the QR-ONLY variant --
-				// and text-2-shards-1.bin -- depends on.
-				lines, _ = WrapText(p.Text, func(i int) int {
-					n, _ := lay.at(i)
-					return n
-				}, math.MaxInt)
-			}
-			for lineno, s := range lines {
-				_, offx := lay.at(lineno)
-				t.Offset(offx+margin, lay.baseY+lineno*fontSize)
+		for i := range plans {
+			pp := &plans[i]
+			for lineno, s := range pp.lines {
+				_, offx := pp.lay.at(lineno)
+				t.Offset(offx+margin, pp.lay.baseY+lineno*fontSize)
 				engrave.String(fnt, fontSize, s).Engrave(t.Yield)
 			}
-			lineno := len(lines)
-			if qr != nil {
-				qrx, qry := qrp.X, qrp.Y
+			if pp.qr != nil {
+				qrx, qry := pp.qrp.X, pp.qrp.Y
 				// Keyed to the ORIGINAL text, never to len(lines): under
 				// spec 5.2 an empty string wraps to one empty line, and
 				// keying this to the line count displaces the QR-ONLY plate
 				// by (6.450, 2.300)mm at production stroke.
-				if len(p.Text) == 0 {
+				if pp.emptyText {
 					// Center QR. A placement OVERRIDE, not a band question:
 					// the paragraph has no rows for a band to narrow.
-					qrx, qry = (plateDims.X-qrp.Size)/2, (plateDims.Y-qrp.Size)/2
+					qrx, qry = (plateDims.X-pp.qrp.Size)/2, (plateDims.Y-pp.qrp.Size)/2
 				}
 				t.Offset(qrx, qry)
-				qr(t.Yield)
-			}
-			offy += lineno * fontSize
-			if i != len(plate.Paragraphs)-1 {
-				// Space UR sections.
-				offy += params.I(1)
+				pp.qr(t.Yield)
 			}
 		}
 
@@ -568,6 +599,12 @@ func EngraveText(params engrave.Params, plate Text) (engrave.Engraving, error) {
 		// traced to Y-axis play from a loose screw. A resumed cut would be
 		// offset and would still look finished.
 		centerRow(plate.Title, titleRow)
-		centerRow(plate.Footer, footerRow)
+		if plate.Footer != "" {
+			// Guarded on the STRING and not on centerRow's own empty check,
+			// because limit is only the footer's row when there IS a footer:
+			// without one it is the bottom margin, which is not a row anything
+			// is cut on.
+			centerRow(plate.Footer, limit)
+		}
 	}, nil
 }

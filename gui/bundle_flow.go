@@ -5,7 +5,6 @@ import (
 	"image"
 
 	"seedhammer.com/backup"
-	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/sh"
 	"seedhammer.com/gui/assets"
@@ -510,19 +509,18 @@ func bundleCardPlates(params engrave.Params, strs []string) [][]string {
 
 // bundlePlateTextFits reports whether strs lay out as one plate's paragraphs.
 //
-// TWO CHECKS, AND THE SECOND IS NOT REDUNDANT.
+// ONE CHECK, SINCE F-435. It is toPlate over backup.EngraveText -- the real
+// fit-or-error the engrave path itself applies (validateMdmkStrings), so a plan
+// that says "fits" cannot fail at build.
 //
-// The first is toPlate over backup.EngraveText -- the real fit-or-error the
-// engrave path itself applies (validateMdmkStrings), so a plan that says "fits"
-// cannot fail at build.
-//
-// The second is the footer, and toPlate cannot see it: EngraveText draws a
-// non-empty Footer at Text.FooterRow and gives the body no budget against it, so
-// a body laid over the footer is still inside the safety margin and toPlate
-// returns a fit. Measured on 85-char md1 chunks at the shipped font: the sixth
-// paragraph crosses the footer row with the whole plate still In() bounds
-// (backup.TestAPackedBodyCanCoverTheFooterRow). The body is rendered WITHOUT the
-// footer so its own ink can be located, and required to end above the row.
+// It used to carry a second one, against the footer row, because EngraveText
+// gave the body no budget: a body laid over a non-empty Footer is still inside
+// the safety margin, so toPlate returned a fit over ink cut on top of the
+// marking. EngraveText now budgets the body against that row itself and refuses
+// the plate (ErrTooLarge), so the check the packer had to remember is a
+// property of the layout -- and every other caller gets it too. The measurement
+// that made it necessary is kept as the refusal's non-vacuity, in
+// backup.TestABodyThatWouldCoverTheFooterIsRefused.
 //
 // THE VARIANT IS TEXT ONLY, and that is forced rather than chosen. EngraveText
 // advances offy by a paragraph's TEXT lines only, while a QR occupies twelve
@@ -546,17 +544,8 @@ func bundlePlateTextFits(params engrave.Params, strs []string) bool {
 	if err != nil {
 		return false
 	}
-	if _, err := toPlate(plan, params); err != nil {
-		return false
-	}
-	body := plate
-	body.Footer = ""
-	bodyPlan, err := backup.EngraveText(params, body)
-	if err != nil {
-		return false
-	}
-	ink := bspline.Measure(engrave.PlanEngraving(params.StepperConfig, bodyPlan)).Bounds
-	return ink.Max.Y <= plate.FooterRow(params)
+	_, err = toPlate(plan, params)
+	return err == nil
 }
 
 // bundlePlateParagraphs renders strs as one plate's text paragraphs, verbatim
