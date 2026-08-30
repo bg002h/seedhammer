@@ -34,13 +34,18 @@ import (
 // walletPolicyFlow is the walletPolicy program front door.
 func walletPolicyFlow(ctx *Context, th *Colors) {
 	const title = "Wallet Policy"
-	// A payload card is offered ONCE, before gathering, through the SAME offer()
-	// a scanned card enters by — bundleFlow does it this way and for the reason
-	// stated there: a separate insertion path would be a second way for a card
-	// to join the set, and only one of them would have the checks.
-	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeeds = []string{body}
-	} else if body, ok := syswOffer(ctx, th, sysw.ClassDescriptor, "Wallet policy from where?"); ok {
+	// The payload's cards are offered ONCE, before gathering, through the SAME
+	// offer() a scanned card enters by — bundleFlow does it this way and for the
+	// reason stated there: a separate insertion path would be a second way for a
+	// card to join the set, and only one of them would have the checks.
+	//
+	// EVERY md1/mk1 RECORD, not the first (F-76): a card is a chunk SET, and one
+	// record of it completes nothing. Measured here as `md1 descriptors: 0` for
+	// a payload holding a whole six-chunk card.
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
+		ctx.syswBundleSeeds = bodies
+	} else if body, ok := syswOfferAlt(ctx, th, sysw.ClassDescriptor, "Input",
+		"Wallet policy from where?", syswAltScan); ok {
 		// S2's SECOND offer at the SAME door, and it is a second offer rather
 		// than a widened first one for the reason newInputFlow states at its own
 		// pair (gui.go:2761-2767): syswOffer takes ONE class. So this screen is
@@ -53,6 +58,12 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 		// gather, deduplicate or reassemble, and no cosigner plates to cut
 		// alongside. So it routes to the descriptor screen and this call
 		// RETURNS; the md1-card path below is untouched.
+		//
+		// `SCAN CARDS`, not `ENTER IT` (F-437). This screen shipped offering to
+		// let the operator "enter" a wallet policy, and DECLINING it falls
+		// through to the md1 card gather below -- an NFC wait, on a device with
+		// no keyboard and no camera. The choice now names the route it actually
+		// takes.
 		//
 		// WHAT CLASSIFICATION ACTUALLY PROVED, and it is not what an earlier
 		// version of this comment claimed. It proved something about

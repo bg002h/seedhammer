@@ -70,6 +70,9 @@ func (g *mk1Gatherer) offer(s string) gatherStatus {
 
 func (g *mk1Gatherer) complete() bool { return g.primed && len(g.set) == g.total }
 
+// isPrimed is chunkSink's half of F-76's payload priming; see md1Gatherer's.
+func (g *mk1Gatherer) isPrimed() bool { return g.primed }
+
 // collected returns the gathered chunk strings in ascending ChunkIndex order
 // (0..total-1), deterministically — NEVER Go's randomized map-iteration order.
 //
@@ -167,14 +170,18 @@ func mk1DisplayFlow(ctx *Context, th *Colors, card mk.Card) {
 	}
 }
 
-// mk1GatherFlow collects a complete mk1 chunk set via NFC, starting from the
-// first scanned chunk, then decodes and returns the Card. It owns its own
-// scanner goroutine (StartScreen.Flow has already closed its reader before
-// engraveObjectFlow runs). Returns (Card, true) on a complete valid set, or
-// (zero, false) on Back / decode error.
+// mk1GatherFlow collects a complete mk1 chunk set — from the LOADED PAYLOAD
+// first, then via NFC — starting from the first scanned chunk, then decodes and
+// returns the Card. It owns its own scanner goroutine (StartScreen.Flow has
+// already closed its reader before engraveObjectFlow runs). Returns (Card,
+// true) on a complete valid set, or (zero, false) on Back / decode error.
+//
+// F-76, as in md1GatherFlow: a payload-derived key card has no tags to tap, so
+// the payload is offered to the gatherer before the reader is opened.
 func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
 	g := &mk1Gatherer{}
 	g.offer(first) // first came from a ValidMK mdmkText; primes the set.
+	syswPrimeCard(ctx, g)
 	if g.complete() {
 		return decodeGathered(ctx, th, g)
 	}

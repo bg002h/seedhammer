@@ -87,14 +87,17 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// supply BEFORE any seed is typed (no secret exists yet).
 	//
 	// §3.3.2 admits ClassMDMK to this program for exactly this supplied-md1
-	// path (plan stage 13c). A payload card is offered ONCE, before gathering,
-	// and enters through the SAME offer() a scanned card does — so it is
-	// deduplicated, chunk-assembled and validated identically. bundleFlow does
-	// it this way and for the same reason: a separate insertion path would be a
-	// second way for a card to become part of a bundle, and only one of them
-	// would have the checks.
-	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeeds = []string{body}
+	// path (plan stage 13c). The payload's cards are offered ONCE, before
+	// gathering, and enter through the SAME offer() a scanned card does — so
+	// they are deduplicated, chunk-assembled and validated identically.
+	// bundleFlow does it this way and for the same reason: a separate insertion
+	// path would be a second way for a card to become part of a bundle, and only
+	// one of them would have the checks.
+	//
+	// EVERY md1/mk1 RECORD, not the first (F-76): one record of a chunked card
+	// completes nothing, so the supplied-md1 gate below never saw a card at all.
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
+		ctx.syswBundleSeeds = bodies
 	}
 	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")
 	if !ok {

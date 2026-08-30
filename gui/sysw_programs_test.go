@@ -28,7 +28,15 @@ func TestEveryNonSeamProgramReachesThePayload(t *testing.T) {
 		}
 		var calls bool
 		ast.Inspect(f, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && id.Name == "syswOffer" {
+			// PREFIX, not equality — the same rule
+			// TestEverySyswConsumptionSiteNamesAnAdmittedClass states for its
+			// own matcher, and for the same reason. Equality held until F-76
+			// gave the card doors syswOfferCards (the WHOLE card set, not the
+			// first record): an exact match then reported that Engrave Bundle
+			// "never calls syswOffer, so the payload cannot reach it" about a
+			// door that plainly reaches it, and would miss any future variant
+			// the same way. Both matchers now agree on what a payload offer is.
+			if id, ok := n.(*ast.Ident); ok && strings.HasPrefix(id.Name, "syswOffer") {
 				calls = true
 			}
 			return !calls
@@ -49,8 +57,17 @@ func TestTheBundleSeedIsBothWrittenAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(src)
-	if !strings.Contains(s, "ctx.syswBundleSeeds = []string{body}") {
-		t.Error("nothing writes the bundle seed")
+	if !strings.Contains(s, "ctx.syswBundleSeeds = bodies") {
+		t.Error("nothing writes the bundle seeds")
+	}
+	// F-76, as a REGRESSION GUARD rather than a spelling check. The shipped
+	// door wrote `[]string{body}` — one record of a card that may be six — and
+	// the gather then counted `md1 descriptors: 0` for a payload holding every
+	// chunk. The whole-set write is what makes the count right, so the
+	// single-record shape is forbidden here by name.
+	if strings.Contains(s, "ctx.syswBundleSeeds = []string{") {
+		t.Error("the door seeds a SINGLE record again; a chunked card is a set, " +
+			"and one record of it completes nothing (F-76)")
 	}
 	if !strings.Contains(s, "range ctx.syswBundleSeeds") {
 		t.Error("nothing READS the bundle seeds — the cards would be taken and dropped")

@@ -23,11 +23,16 @@ import (
 // REFUSED in this channel (hand-typed only); a single mk1 is refused (malformed,
 // no integrity). No secret is ever gathered, displayed, or engraved.
 func bundleFlow(ctx *Context, th *Colors) {
-	// A payload card is offered ONCE, before gathering, and then the operator
-	// continues scanning as usual — the bundle is a SET, and a source that
-	// short-circuited the gather would cap it at whatever the payload held.
-	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeeds = []string{body}
+	// The payload's cards are offered ONCE, before gathering, and then the
+	// operator continues scanning as usual — the bundle is a SET, and the offer
+	// adds to it rather than closing it.
+	//
+	// EVERY md1/mk1 RECORD, not the first (F-76). This said "a payload card" and
+	// seeded exactly one record, so a payload holding all six chunks of one good
+	// card reached the screen below as `md1 descriptors: 0` — measured. The
+	// records still arrive through the same offer() a scanned card does.
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
+		ctx.syswBundleSeeds = bodies
 	}
 	var gathered []bundleCard
 	for {
@@ -64,6 +69,11 @@ type bundleGatherScreen struct {
 	// hasReader is FeatureNFC for this machine. Every operator instruction on
 	// this screen that names scanning is conditioned on it — see tally().
 	hasReader bool
+	// hasPayload is whether a loaded payload holds md1/mk1 records, so a card on
+	// this screen COULD have come from it. It exists for the same reason
+	// hasReader does: an instruction that names a route the operator does not
+	// have is worse than no instruction. See bundlePendingMessage.
+	hasPayload bool
 }
 
 // feedback maps a per-offer status to the operator message (R0-C1/C2). The ms1
@@ -178,8 +188,9 @@ func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, boo
 // here.
 func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundleCard) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{
-		g:         &bundleGatherer{},
-		hasReader: ctx.Platform.Features().Has(FeatureNFC),
+		g:          &bundleGatherer{},
+		hasReader:  ctx.Platform.Features().Has(FeatureNFC),
+		hasPayload: ctx.sysw != nil && ctx.sysw.has(sysw.ClassMDMK),
 	}
 	// A payload card enters through the SAME offer() every scanned card does,
 	// so it is deduplicated, chunk-assembled and validated identically. A
@@ -238,12 +249,7 @@ func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundl
 				// pre-gather refusal does not fire and this message is what the
 				// operator reads. It said "scan all its chunks".
 				scr.g.dropPending()
-				pendingMsg := "Dropped an incomplete card. Scan all its chunks to include it."
-				if !scr.hasReader {
-					pendingMsg = "Dropped an incomplete card: the payload does not carry " +
-						"all of its chunks. Rewrite it on the host with `me sysw pack` to include it."
-				}
-				showError(ctx, th, title, pendingMsg)
+				showError(ctx, th, title, bundlePendingMessage(scr.hasReader, scr.hasPayload))
 				if len(scr.g.cards) > 0 {
 					return scr.g.cards, true
 				}
@@ -280,6 +286,47 @@ func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundl
 		ctx.Frame(op.Layer(frameOps...))
 	}
 	return nil, false
+}
+
+// bundlePendingMessage is the "Dropped an incomplete card" advice, and it names
+// ONLY routes that exist on this machine for this card.
+//
+// F-76's second widening, measured in the S2 journey walk: at the zero screen
+// this said *"Dropped an incomplete card. Scan all its chunks to include it."*
+// on a reader-equipped machine and *"…the payload does not carry all of its
+// chunks. Rewrite it on the host…"* on a reader-less one — and BOTH BLAMED A
+// PAYLOAD THAT CARRIED EVERY CHUNK, because the door had handed the gatherer
+// one record of six. The advice was therefore unfollowable in both directions:
+// re-packing yields a byte-identical container, and there were no tags to scan.
+//
+// Fixing the door removes the false case, and this makes the remaining one
+// TRUE. A payload genuinely short a chunk is a real, reachable input — someone
+// packs five strings of a six-string card, and `me sysw pack` warns but does not
+// refuse — so the message is kept and made correct rather than deleted:
+//
+//   - a reader AND a payload: the card could have come from either, so name
+//     both routes and let the operator pick the one they have.
+//   - a reader only: the card came from a tag; scanning the rest is right.
+//   - a payload only (phase-1 hardware): the payload is the only source, so it
+//     IS short a chunk and re-packing is the only fix. This arm is now correct
+//     rather than merely plausible.
+//   - neither: nothing on this machine can complete the card, and saying so
+//     beats prescribing an action that does not exist.
+func bundlePendingMessage(hasReader, hasPayload bool) string {
+	const dropped = "Dropped an incomplete card"
+	switch {
+	case hasReader && hasPayload:
+		return dropped + ": some of its chunks are missing. Scan them, or " +
+			"re-pack the payload on the host with `me sysw pack`."
+	case hasReader:
+		return dropped + ". Scan all its chunks to include it."
+	case hasPayload:
+		return dropped + ": the payload does not carry all of its chunks. " +
+			"Rewrite it on the host with `me sysw pack` to include it."
+	default:
+		return dropped + ": some of its chunks are missing, and this device has " +
+			"no card reader to scan them with."
+	}
 }
 
 // bundleDoneOutcome is the result of pressing "Done adding cards".

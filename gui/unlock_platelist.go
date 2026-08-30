@@ -191,14 +191,34 @@ func unlockPlateListFlow(ctx *Context, th *Colors, plates []unlockPlate) {
 //
 // It does NOT reuse mdmkFlow, and that is deliberate. mdmkFlow prepends an
 // "Inspect key" / "Inspect descriptor" entry that calls mk1GatherFlow or
-// md1GatherFlow, and both prime a FRESH gatherer with only the single string
-// handed to them; when that alone is not a complete card — true for every
-// chunked record, which is the ordinary case — they open the NFC reader and
-// wait for the operator to tap the remaining physical tags. A payload-derived
-// record has no tags to tap: every chunk is already in p.Public, and the
-// gatherer has no way to reach them. Inspecting a payload-sourced card is a
-// legitimate thing to want and is filed as F-76; it needs a gatherer primed
-// from the payload, and it is not B1.
+// md1GatherFlow, and neither can complete a chunked record from THIS list.
+//
+// CORRECTED 2026-08-29 (F-76 fold, review r1 N2). Until F-76 both gather flows
+// primed a FRESH gatherer with only the single string handed to them and then
+// opened the NFC reader for the rest, so a chunked record — the ordinary case —
+// stranded the operator waiting for tags a payload-derived card does not have.
+// That half is no longer true: syswPrimeCard now offers the gatherer every
+// md1/mk1 record first, before the reader is opened.
+//
+// THE CONCLUSION IS UNCHANGED, and for a sharper reason than the one it
+// replaces. syswPrimeCard primes from ctx.sysw — the SYSTEMWIDE payload, read
+// from Platform.SyswReader — while the records on this list come from a
+// DECRYPTED SEALED payload, read from Platform.PayloadReader. Two sources, and
+// loading one does not populate the other. So a card on THIS list has its other
+// chunks on this list, where the gatherer still cannot reach them, and Inspect
+// here would still have nothing to gather from unless the operator happened to
+// have loaded a systemwide payload carrying the same card.
+//
+// AND NO OPERATOR ROUTE REACHES INSPECT ON A PAYLOAD RECORD AT ALL, from either
+// payload. "Inspect key" / "Inspect descriptor" exist only in mdmkFlow, whose
+// one non-test caller is engraveObjectFlow, whose one non-test caller is fed by
+// a SCAN. This screen is the record list a payload record could plausibly be
+// inspected from, and it offers engraving only. What F-76 delivered is the
+// reachable half — an operator who taps ONE chunk of a card the systemwide
+// payload also carries gets the rest from the payload instead of tapping them —
+// so the Inspect ENTRY POINT for payload records remains unbuilt, and this
+// comment is the record of that. It stays filed under F-76.
+//
 // It reports whether a plate was engraved to COMPLETION, which is what the
 // list's "(cut)" mark is keyed on.
 func unlockEngraveFlow(ctx *Context, th *Colors, rec seal.AdmittedRecord, label string) bool {

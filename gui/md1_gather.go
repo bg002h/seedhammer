@@ -52,6 +52,11 @@ func (g *md1Gatherer) offer(s string) gatherStatus {
 
 func (g *md1Gatherer) complete() bool { return g.primed && len(g.set) == g.total }
 
+// isPrimed is chunkSink's half of F-76's payload priming: syswPrimeCard refuses
+// to feed an unprimed gatherer, because an unprimed one adopts whatever chunk
+// set it is offered first.
+func (g *md1Gatherer) isPrimed() bool { return g.primed }
+
 // collected returns the gathered chunk strings in ascending ChunkIndex order
 // (0..total-1), deterministically — NEVER Go's randomized map-iteration order.
 // The deterministic comparator (bundle.Verify) compares md1 positionally against
@@ -67,16 +72,21 @@ func (g *md1Gatherer) collected() []string {
 	return out
 }
 
-// md1GatherFlow collects a complete md1 chunk set via NFC, starting from the
-// first scanned chunk, then reassembles + expands + displays it. It owns its own
-// scanner goroutine (a near-clone of mk1GatherFlow, gui/mk1_inspect.go:156-256;
-// the completion action differs). On completion it hands off to
-// gatheredDescriptorFlow. Returns true if a complete set was processed, false on
-// Back. testPlatform.NFCReader()==nil → no goroutine, Back-only (multi-chunk
-// sets can't complete without a reader).
+// md1GatherFlow collects a complete md1 chunk set — from the LOADED PAYLOAD
+// first, then via NFC — starting from the first scanned chunk, then reassembles
+// + expands + displays it. It owns its own scanner goroutine (a near-clone of
+// mk1GatherFlow, gui/mk1_inspect.go; the completion action differs). On
+// completion it hands off to gatheredDescriptorFlow. Returns true if a complete
+// set was processed, false on Back.
+//
+// F-76: the payload is tried BEFORE the reader because a payload-derived card
+// has no tags to tap. When the payload carries the rest of the set the flow
+// never draws a scan screen at all; when it does not, the reader path is
+// exactly what it was.
 func md1GatherFlow(ctx *Context, th *Colors, first string) bool {
 	g := &md1Gatherer{}
 	g.offer(first) // first came from a chunked md1 mdmkText; primes the set.
+	syswPrimeCard(ctx, g)
 	if g.complete() {
 		gatheredDescriptorFlow(ctx, th, g.collected())
 		return true
