@@ -31,7 +31,7 @@ func bundleFlow(ctx *Context, th *Colors) {
 	// seeded exactly one record, so a payload holding all six chunks of one good
 	// card reached the screen below as `md1 descriptors: 0` — measured. The
 	// records still arrive through the same offer() a scanned card does.
-	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
 		ctx.syswBundleSeeds = bodies
 	}
 	var gathered []bundleCard

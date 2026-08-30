@@ -96,7 +96,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	//
 	// EVERY md1/mk1 RECORD, not the first (F-76): one record of a chunked card
 	// completes nothing, so the supplied-md1 gate below never saw a card at all.
-	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
 		ctx.syswBundleSeeds = bodies
 	}
 	cards, ok := bundleGatherFlow(ctx, th, "Engrave Bundle")

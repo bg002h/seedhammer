@@ -155,8 +155,11 @@ func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
 //
 // S1 SPLIT THE TWO FLOWS' MECHANISM, so this test carries both shapes:
 //
-//   - SUPPLIED policy still offers ONE card and expects the operator to keep
-//     scanning, so it keeps the "First card from where?" picker.
+//   - SUPPLIED policy still SHOWS the picker, because it still has two answers
+//     to pick between: the payload, or the reader. (F-76 later changed WHAT the
+//     payload arm hands over — every md1/mk1 card rather than the first record
+//     — and the lead was reworded from "First card from where?" to "Cards from
+//     where?" to match. The picker itself is what this row is about.)
 //   - BUILT policy takes the WHOLE cosigner set from the payload — that is S1's
 //     deliverable — so there is nothing to pick between and the picker is gone.
 //     The seam is not: buildCosignerSource is the one place that answers "where
@@ -200,7 +203,7 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 			// one Button3 per screen walks them.
 			var content string
 			var found bool
-			needle := "First card from where?"
+			needle := "Cards from where?"
 			if !tc.picker {
 				needle = tc.want
 			}
@@ -219,7 +222,7 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 				if content, found = pumpUntil(frame, tc.want, 32); !found {
 					t.Fatalf("the payload card never reached the gatherer's tally; got %q", content)
 				}
-			} else if uiContains(content, "First card from where?") {
+			} else if uiContains(content, "Cards from where?") {
 				t.Errorf("the built path still draws a source picker; S1 leaves it "+
 					"exactly one answer, and a one-option Input screen is a tap that "+
 					"teaches nothing: %q", content)

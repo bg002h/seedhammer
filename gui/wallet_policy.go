@@ -42,7 +42,7 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 	// EVERY md1/mk1 RECORD, not the first (F-76): a card is a chunk SET, and one
 	// record of it completes nothing. Measured here as `md1 descriptors: 0` for
 	// a payload holding a whole six-chunk card.
-	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
 		ctx.syswBundleSeeds = bodies
 	} else if body, ok := syswOfferAlt(ctx, th, sysw.ClassDescriptor, "Input",
 		"Wallet policy from where?", syswAltScan); ok {

@@ -142,7 +142,7 @@ func TestF76WalletPolicyCountsACompleteMd1CardFromThePayload(t *testing.T) {
 	frame, quit := runUI(ctx, func() { walletPolicyFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "First card from where?", 16)
+	got, ok := pumpUntil(frame, "Cards from where?", 16)
 	if !ok {
 		t.Fatalf("the md1 card offer never drew.\nLast frame: %q", got)
 	}
@@ -163,7 +163,7 @@ func TestF76BundleCountsACompleteMd1CardFromThePayload(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "First card from where?", 16)
+	got, ok := pumpUntil(frame, "Cards from where?", 16)
 	if !ok {
 		t.Fatalf("the md1 card offer never drew.\nLast frame: %q", got)
 	}
@@ -186,7 +186,7 @@ func TestF76BundleCountsACompleteMk1CardFromThePayload(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "First card from where?", 16)
+	got, ok := pumpUntil(frame, "Cards from where?", 16)
 	if !ok {
 		t.Fatalf("the mk1 card offer never drew.\nLast frame: %q", got)
 	}
@@ -286,7 +286,7 @@ func TestF76IncompletePayloadGetsTheRepackAdvice(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "First card from where?", 16)
+	got, ok := pumpUntil(frame, "Cards from where?", 16)
 	if !ok {
 		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
 	}
@@ -318,7 +318,7 @@ func TestF76IncompletePayloadNamesBothRoutesOnAnNFCMachine(t *testing.T) {
 		frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 		defer quit()
 
-		got, ok := pumpUntil(frame, "First card from where?", 16)
+		got, ok := pumpUntil(frame, "Cards from where?", 16)
 		if !ok {
 			t.Fatalf("the card offer never drew.\nLast frame: %q", got)
 		}
@@ -349,7 +349,7 @@ func TestF76CompletePayloadNeverSeesTheIncompleteRefusal(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	if got, ok := pumpUntil(frame, "First card from where?", 16); !ok {
+	if got, ok := pumpUntil(frame, "Cards from where?", 16); !ok {
 		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
 	}
 	click(&ctx.Router, Button3)
@@ -406,7 +406,7 @@ func TestF76ACorruptedChunkInThePayloadIsStillRefused(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	if got, ok := pumpUntil(frame, "First card from where?", 16); !ok {
+	if got, ok := pumpUntil(frame, "Cards from where?", 16); !ok {
 		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
 	}
 	click(&ctx.Router, Button3)

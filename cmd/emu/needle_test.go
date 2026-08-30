@@ -15,7 +15,7 @@ package main
 // identical and still proved nothing, because every needle it used is
 // AMBIGUOUS. Measured, not assumed:
 //
-//	"First card from where?"   3 production sites
+//	"Cards from where?"        3 production sites
 //	"Which md1?"               2 production sites
 //	"Choose policy type"       1
 //
@@ -151,7 +151,15 @@ var decoyNeedles = []struct {
 	// a second insertion path would be a second way for a card to join a set
 	// with only one of them checked. Still a decoy, and MORE of one now — "the
 	// walk reached a card gather" distinguishes nothing among three flows.
-	{"First card from where?", 3},
+	//
+	// SPELT "Cards from where?" SINCE F-76 (review r1, M1). It read "First card
+	// from where?" while the door handed the gatherer one record; the door now
+	// hands over every md1/mk1 card the payload holds, so the lead was reworded
+	// to what it does. The COUNT is the load-bearing part and is unchanged at
+	// three — a rename that quietly took it to one would make this string a
+	// needle by accident, which is the promotion this list exists to keep
+	// deliberate.
+	{"Cards from where?", 3},
 	// CORRECTED BY S2/D-4. This used to read "the gather's title comes from the
 	// SHARED gatherer, so it reads 'Engrave Bundle' even when the operator
 	// arrived via Build policy" — true when it was written, false since D-4 made
@@ -223,7 +231,7 @@ func TestNeedleSiteCounterCanCount(t *testing.T) {
 // sync with cmd/emu/needle_test.go's buildFlowNeedles, which is what proves
 // 'unique'". Nothing enforced that — measured, no Go file read the driver at
 // all — so a stage author could point a NEEDLE_* constant at an AMBIGUOUS string
-// ("First card from where?", 2 sites; "Which md1?", 2 sites, both already
+// ("Cards from where?", 3 sites; "Which md1?", 2 sites, both already
 // waitFor'd elsewhere in the same walk), and the pinned list would still pass
 // because it validates its own untouched copy. The walk's central claim — this
 // is the Build-policy flow and not Engrave Bundle — would then be false while
