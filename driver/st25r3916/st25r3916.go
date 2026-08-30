@@ -301,7 +301,52 @@ func (d *Device) Close() error {
 	return nil
 }
 
+// Interrupt cancels an in-flight read: the next waitForInterrupt returns
+// io.EOF. It is the ONLY way to stop a read that is parked waiting on the chip.
+//
+// F-441 HYGIENE, NOT THE F-441 CAUSE, and the distinction is measured rather
+// than argued. This used to be a bare non-blocking send on a capacity-1 channel,
+// so a call arriving while a token was already pending took `default` and did
+// nothing at all -- a signal that must be delivered, silently discarded. That is
+// worth removing on its own account: a no-op with no error and no way for the
+// caller to know is the shape defects hide in.
+//
+// What it is NOT is the reason the device froze. A pending token is
+// INDISTINGUISHABLE from a fresh one to the next waiter -- both make
+// waitForInterrupt return io.EOF -- so at capacity 1 a dropped send delivers
+// exactly the same cancellation the send would have. Checked by exhausting the
+// cases rather than by reasoning about them:
+//
+//	stale=false  bare delivers=true   drain-then-send delivers=true   same=true
+//	stale=true   bare delivers=true   drain-then-send delivers=true   same=true
+//
+// The freeze therefore required something else: an in-flight read that never
+// reaches waitForInterrupt again, and so consumes no cancellation of either
+// kind. Poller.Close then waited on it forever, on the UI goroutine, which is
+// what bricked the machine. The remedy for THAT is the bound in Poller.Close --
+// a caller must not stake the frame loop on a stop it cannot guarantee -- and it
+// holds whatever stalls the read.
+//
+// Draining first is kept because it makes the post-condition unconditional: when
+// this returns, a cancellation is pending unless a waiter has already taken it,
+// which is delivery. resetInterruptMask (below) already used this idiom on
+// d.interrupts; this is the same rule applied to the channel that lacked it.
+//
+// IT CARRIES NO GO TEST, and that is a constraint rather than an omission: this
+// whole package is `//go:build tinygo`, so it does not compile on the host and
+// nothing but the device build ever type-checks it. That is the second reason
+// the field defect was invisible to the suite -- the first being that
+// testPlatform.NFCReader() returns nil. The behaviour that CAN be tested on the
+// host is Poller.Close's contract, and nfc/poller/poller_close_test.go tests it
+// against a device that will not stop, which is the assumption that actually
+// protects the machine.
 func (d *Device) Interrupt() {
+	// Discard a stale token so the send below cannot be swallowed. Without
+	// this, an Interrupt arriving while one is pending is a silent no-op.
+	select {
+	case <-d.cancel:
+	default:
+	}
 	select {
 	case d.cancel <- struct{}{}:
 	default:
