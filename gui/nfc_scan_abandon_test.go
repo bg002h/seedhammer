@@ -93,3 +93,41 @@ func TestStopScannerJoinsAReaderThatStops(t *testing.T) {
 			elapsed, scannerJoinTimeout)
 	}
 }
+
+// The join-timeout arm itself, pinned (REVIEW-F440-F441-r1 M-1): a reader whose
+// Close SUCCEEDS while its Read stays parked -- Poller.Close's free arm leaves a
+// token in p.reading, so a Read issued after Close blocks forever -- must be
+// abandoned by the JOIN bound, the one arm the other two tests never reach.
+// Unreachable on the device today (-scheduler tasks has no yield point between
+// the closer check and the reading send), so this is a regression pin.
+func TestStopScannerJoinTimeoutArmAbandons(t *testing.T) {
+	r := &unstoppableReader{
+		release: make(chan struct{}),
+		entered: make(chan struct{}),
+		// closeErr nil: Close reports success, the goroutine stays parked.
+	}
+	defer close(r.release)
+
+	ctx := NewContext(newPlatform())
+	_, stop := startScanner(ctx, r)
+
+	select {
+	case <-r.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("INCONCLUSIVE: the scanner never entered Read, so nothing was stalled")
+	}
+
+	begin := time.Now()
+	done := make(chan struct{})
+	go func() { stop(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stopScanner never returned: the join bound did not fire (F-441)")
+	}
+	if e := time.Since(begin); e < scannerJoinTimeout {
+		t.Fatalf("stop returned in %v -- before the join bound, so this test did "+
+			"not exercise the timeout arm and cannot pin it", e)
+	}
+}

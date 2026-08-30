@@ -38,6 +38,12 @@ const nfcIdlePoll = 50 * time.Millisecond
 // scannerJoinTimeout bounds the wait for the scanner goroutine to exit after
 // its reader has been closed. It is longer than the scanner's own worst-case
 // sleep (1 s on a failed scan) so a healthy stop is never cut short.
+//
+// The two bounds COMPOSE: a Close that succeeds just under its own 2 s limit
+// still pays this join, so the worst-case back-edge stall is ~5 s, not 3 --
+// visible only when the reader is already misbehaving (the healthy path
+// measures ~50 ms end to end). Stated because a 5 s dead panel reads exactly
+// like the freeze this bound exists to prevent (REVIEW-F440-F441-r1 M-2).
 const scannerJoinTimeout = 3 * time.Second
 
 // startScanner runs the NFC poll loop on its own goroutine.
@@ -116,6 +122,10 @@ func startScanner(ctx *Context, r io.ReadCloser) (chan scanResult, func()) {
 		// bricked machine, so that is the trade taken here. The error is logged
 		// rather than surfaced because there is no screen to surface it on: the
 		// caller is a deferred teardown on the way OUT of a flow.
+		// Any Close error skips the join, not just the abandon: a healthy-arm
+		// I2C failure exits the same way, and the goroutine leaves on its own
+		// at the top of its next iteration. Not errors.Is(ErrCloseTimeout)
+		// because gui does not import nfc/poller (REVIEW-F440-F441-r1 N-1).
 		if err := r.Close(); err != nil {
 			log.Printf("nfc: %v", err)
 			return
