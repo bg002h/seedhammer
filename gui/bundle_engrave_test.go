@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"seedhammer.com/backup"
-	"seedhammer.com/bspline"
-	"seedhammer.com/engrave"
 	"seedhammer.com/font/sh"
 )
 
@@ -176,14 +174,21 @@ func TestBundlePlanNeverPacksAcrossCards(t *testing.T) {
 	}
 }
 
-// TestBundlePlanPlatesClearTheFooterRow is the check toPlate cannot make.
+// TestBundlePlanPlatesClearTheFooterRow is the check toPlate cannot make, at the
+// end of the chain that now makes it.
 //
-// EngraveText gives the body no budget against the footer: a body drawn over
-// the footer row is still inside the safety margin, so the bounds check reports
-// a fit (backup.TestAPackedBodyCanCoverTheFooterRow measures exactly that). Every
-// plate the planner emits is therefore checked HERE against the row, at the
-// worst-case marking every plate is packed against -- because the marking is
+// A body drawn over the footer row is still inside the safety margin, so the
+// bounds check reports a fit; since F-435 backup.EngraveText budgets the body
+// against that row and REFUSES the plate instead
+// (backup.TestABodyThatWouldCoverTheFooterIsRefused measures both halves). This
+// asserts the planner's own output against it: every plate it emits lays out at
+// the worst-case marking every plate is packed against -- because the marking is
 // resolved after the census has already committed to a number.
+//
+// AND THAT THE PLATES ARE FULL, so the clearance above is the packer's doing
+// rather than slack in the plate: one more string on any plate but the last is
+// refused. Without that clause a planner that emitted one string per plate would
+// pass this test.
 func TestBundlePlanPlatesClearTheFooterRow(t *testing.T) {
 	chunk := md1CardA(t)[0]
 	strs := make([]string, 17)
@@ -195,21 +200,29 @@ func TestBundlePlanPlatesClearTheFooterRow(t *testing.T) {
 	if len(plan) < 2 {
 		t.Fatalf("the fixture packed onto %d plate(s); this test needs a split", len(plan))
 	}
-	for i, p := range plan {
-		plate := backup.Text{
-			Paragraphs: bundlePlateParagraphs(p.strs),
+	laysOut := func(strs []string) error {
+		_, err := backup.EngraveText(engraverParams, backup.Text{
+			Paragraphs: bundlePlateParagraphs(strs),
 			Font:       sh.Font,
 			Title:      bundlePlateFitMark,
 			Footer:     bundlePlateFitMark,
-		}
-		body := plate
-		body.Footer = ""
-		ink := bspline.Measure(engrave.PlanEngraving(engraverParams.StepperConfig,
-			backup.EngraveText(engraverParams, body))).Bounds
-		if row := plate.FooterRow(engraverParams); ink.Max.Y > row {
-			t.Errorf("plate %d (%d strings): the body ends at %d, past the footer row %d — "+
+		})
+		return err
+	}
+	for i, p := range plan {
+		if err := laysOut(p.strs); err != nil {
+			t.Errorf("plate %d (%d strings) does not lay out at the worst-case marking: %v — "+
 				"the marking would be cut through the last line of the backup",
-				i, len(p.strs), ink.Max.Y, row)
+				i, len(p.strs), err)
+		}
+		if i == len(plan)-1 {
+			// The last plate holds the remainder and is not expected to be full.
+			continue
+		}
+		if err := laysOut(append(append([]string{}, p.strs...), chunk)); err == nil {
+			t.Errorf("plate %d holds %d strings and a %dth still lays out; the packer "+
+				"left a string behind and this test's clearance is slack, not packing",
+				i, len(p.strs), len(p.strs)+1)
 		}
 	}
 }

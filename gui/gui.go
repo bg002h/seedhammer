@@ -725,7 +725,11 @@ func validateDescriptor(params engrave.Params, desc *bip380.Descriptor) ([]strin
 			Paragraphs: []backup.Paragraph{e.Paragraph},
 			Font:       sh.Font,
 		}
-		plan := backup.EngraveText(params, descPlate)
+		plan, err := backup.EngraveText(params, descPlate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 		plate, err := toPlate(plan, params)
 		if err != nil {
 			lastErr = err
@@ -2560,7 +2564,10 @@ func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, erro
 // code is centered on the PLATE, so a QR-ONLY packed plate stacks every code on
 // one spot. Both lay out INSIDE the plate, so toPlate reports a fit for them --
 // offering either would cut overlapping ink on steel with the fit check
-// agreeing. (Measured at the shipped font on three 85-char md1 chunks:
+// agreeing. Since F-434 backup.EngraveText REFUSES that arrangement outright
+// (backup.ErrMultiParagraphQR), so dropping the variants here is a deliberate
+// choice and no longer the only thing standing between a packed plate and an
+// overlaid code. (Measured at the shipped font on three 85-char md1 chunks:
 // paragraph 0's code spans y 67840..311040, paragraphs 1 and 2 start at 122880
 // and 202240.) The mt sibling reaches the same arrangement from the other
 // direction: planTransactionTextPlates packs TEXT-ONLY paragraphs and puts the
@@ -2598,7 +2605,11 @@ func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]st
 			Title:      title,
 			Footer:     footer,
 		}
-		plan := backup.EngraveText(params, plate)
+		plan, err := backup.EngraveText(params, plate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 		p, err := toPlate(plan, params)
 		if err != nil {
 			lastErr = err

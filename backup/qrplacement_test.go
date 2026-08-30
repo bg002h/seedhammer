@@ -304,31 +304,36 @@ func TestEngraveFittedDrawsTheQRAtTheStoredPlacement(t *testing.T) {
 // placement is anchored at the paragraph's own offy -- not at the plate margin,
 // which is the anchor the free-text plate uses and the one an engraver reaching
 // for the nearest constant would pick.
+//
+// THE DISTINGUISHER IS A TITLE ROW, not a preceding paragraph. This test used to
+// put the code on paragraph 2 of 2, which since F-434 is a refused plate
+// (ErrMultiParagraphQR) -- so the only arrangement left in which a paragraph
+// starts anywhere but the plate margin is a plate whose row 0 is spent on a
+// title. The property is the same one and the non-vacuity check below is what
+// keeps it honest: an anchor equal to the margin cannot tell the two apart.
 func TestEngraveTextDrawsTheQRAtItsParagraphsPlacement(t *testing.T) {
 	P := prodParams
 	const scale = 2
-	qrc := QR(t, "a code in the second paragraph")
-	// Short lines, so the only ink at the plate's right edge and at its bottom
-	// is the code's. The control below proves that rather than assuming it.
-	const first = "one\ntwo\nthree"
-	const firstRows = 3
+	qrc := QR(t, "a code under a title row")
+	// Short text, so the only ink at the plate's right edge and at its bottom is
+	// the code's. The control below proves that rather than assuming it.
 	plate := Text{
-		Font: sh.Font,
+		Font:  sh.Font,
+		Title: "T",
 		Paragraphs: []Paragraph{
-			{Text: first},
 			{Text: "x", QR: qrc, QRScale: scale},
 		},
 	}
 	fontSize := P.F(plate.fontMM())
-	// offy as EngraveText advances it: paragraph 1's rows, plus the 1mm gap
-	// between sections.
-	offy := P.I(outerMargin) + firstRows*fontSize + P.I(1)
+	// offy as EngraveText advances it: row 0 is spoken for by the title, so the
+	// body -- and the code anchored at its top -- starts on row 1.
+	offy := P.I(outerMargin) + fontSize
 	if offy == P.I(outerMargin) {
 		t.Fatal("the code's paragraph starts at the plate margin; this test cannot tell the two anchors apart")
 	}
 	want := qrPlaceAt(P, qrc, scale, fontSize, offy)
 
-	b := inkBounds(t, P, EngraveText(P, plate))
+	b := inkBounds(t, P, mustEngraveText(t, P, plate))
 	if got, w := b.Max.X, want.X+want.Size-P.StrokeWidth/2; got != w {
 		t.Errorf("the plate inks to x=%d, want the code's right edge %d", got, w)
 	}
@@ -339,10 +344,10 @@ func TestEngraveTextDrawsTheQRAtItsParagraphsPlacement(t *testing.T) {
 
 	// The control. With the code gone, nothing on this plate reaches either
 	// edge, so the two assertions above are measuring the code and not the
-	// text that happens to share the bounds with it.
+	// title or the text that happen to share the bounds with it.
 	plain := plate
-	plain.Paragraphs = []Paragraph{{Text: first}, {Text: "x"}}
-	c := inkBounds(t, P, EngraveText(P, plain))
+	plain.Paragraphs = []Paragraph{{Text: "x"}}
+	c := inkBounds(t, P, mustEngraveText(t, P, plain))
 	if c.Max.X >= want.X || c.Max.Y >= want.Y {
 		t.Fatalf("the text alone inks to (%d, %d), reaching the code's box at (%d, %d); "+
 			"the assertions above are not measuring the code", c.Max.X, c.Max.Y, want.X, want.Y)

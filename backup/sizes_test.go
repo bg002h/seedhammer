@@ -115,7 +115,7 @@ func TestEngraveTextHonoursFontSize(t *testing.T) {
 			Font:       sh.Font,
 			FontSize:   size,
 		}
-		return slices.Collect(engrave.PlanEngraving(conf, EngraveText(params, txt)))
+		return slices.Collect(engrave.PlanEngraving(conf, mustEngraveText(t, params, txt)))
 	}
 	zero, explicitUR, bigger := plan(0), plan(plateFontSizeUR), plan(6.0)
 	if !slices.Equal(zero, explicitUR) {

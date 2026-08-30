@@ -77,7 +77,8 @@ func BenchmarkEngraving(b *testing.B) {
 		{
 			"singlesig-descriptor-with-qr",
 			func() engrave.Engraving {
-				return EngraveText(
+				return mustEngraveText(
+					b,
 					params,
 					Text{
 						Paragraphs: []Paragraph{{Text: singlesig, QR: QR(b, compactSinglesig), QRScale: 3}},
@@ -89,7 +90,8 @@ func BenchmarkEngraving(b *testing.B) {
 		{
 			"large-descriptor-no-qr",
 			func() engrave.Engraving {
-				return EngraveText(
+				return mustEngraveText(
+					b,
 					params,
 					Text{
 						Paragraphs: []Paragraph{{Text: multisig}},
@@ -101,7 +103,8 @@ func BenchmarkEngraving(b *testing.B) {
 		{
 			"large-qr",
 			func() engrave.Engraving {
-				return EngraveText(
+				return mustEngraveText(
+					b,
 					params,
 					Text{
 						Paragraphs: []Paragraph{{QR: QR(b, compactMultisig), QRScale: 3}},
@@ -139,6 +142,19 @@ func textAndQR(t *testing.T, s string) Paragraph {
 	return Paragraph{Text: s, QR: qrc}
 }
 
+// mustEngraveText is EngraveText for the tests that expect a plate to lay out.
+// EngraveText refuses impossible plates (a QR on a multi-paragraph plate, a
+// body past its vertical budget) the way EngraveSeed refuses an unencodable
+// QR, so every test that is not ABOUT a refusal says so here once.
+func mustEngraveText(t testing.TB, p engrave.Params, plate Text) engrave.Engraving {
+	t.Helper()
+	e, err := EngraveText(p, plate)
+	if err != nil {
+		t.Fatalf("EngraveText: %v", err)
+	}
+	return e
+}
+
 func QR(t testing.TB, s string) *qr.Code {
 	qrc, err := qr.Encode(s, qr.L)
 	if err != nil {
@@ -173,7 +189,7 @@ func TestText(t *testing.T) {
 				Paragraphs: test.data,
 				Font:       sh.Font,
 			}
-			compareGolden(t, "text-"+name, EngraveText(params, txt))
+			compareGolden(t, "text-"+name, mustEngraveText(t, params, txt))
 		})
 	}
 }
