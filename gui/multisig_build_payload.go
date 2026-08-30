@@ -63,15 +63,20 @@ const (
 //
 // Records come back in PAYLOAD RECORD ORDER (takeAll's contract) and nothing
 // downstream reorders them.
+//
+// The takeAll + groupRecordsByCard pair now lives in syswSession.cardSet, which
+// is what F-76 gave the three card doors as well. This function keeps only what
+// is its own: which of the three refusals to name. The behaviour is identical
+// -- cardSet is those two lines, moved.
 func buildCosignerSource(ctx *Context) ([]string, cosignerSourceState) {
 	if ctx.sysw == nil || !ctx.sysw.loaded {
 		return nil, cosignerSourceNoPayload
 	}
-	records, ok := ctx.sysw.takeAll(sysw.ClassMDMK)
+	records, ok := ctx.sysw.cardSet(sysw.ClassMDMK)
 	if !ok {
 		return nil, cosignerSourceUncompared
 	}
-	return groupRecordsByCard(records), cosignerSourceLoaded
+	return records, cosignerSourceLoaded
 }
 
 // groupRecordsByCard makes each card's chunks CONTIGUOUS, with the cards in

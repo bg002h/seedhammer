@@ -34,12 +34,16 @@ import (
 // walletPolicyFlow is the walletPolicy program front door.
 func walletPolicyFlow(ctx *Context, th *Colors) {
 	const title = "Wallet Policy"
-	// A payload card is offered ONCE, before gathering, through the SAME offer()
-	// a scanned card enters by — bundleFlow does it this way and for the reason
-	// stated there: a separate insertion path would be a second way for a card
-	// to join the set, and only one of them would have the checks.
-	if body, ok := syswOffer(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
-		ctx.syswBundleSeeds = []string{body}
+	// The payload's cards are offered ONCE, before gathering, through the SAME
+	// offer() a scanned card enters by — bundleFlow does it this way and for the
+	// reason stated there: a separate insertion path would be a second way for a
+	// card to join the set, and only one of them would have the checks.
+	//
+	// EVERY md1/mk1 RECORD, not the first (F-76): a card is a chunk SET, and one
+	// record of it completes nothing. Measured here as `md1 descriptors: 0` for
+	// a payload holding a whole six-chunk card.
+	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "First card from where?"); ok {
+		ctx.syswBundleSeeds = bodies
 	} else if body, ok := syswOffer(ctx, th, sysw.ClassDescriptor, "Wallet policy from where?"); ok {
 		// S2's SECOND offer at the SAME door, and it is a second offer rather
 		// than a widened first one for the reason newInputFlow states at its own

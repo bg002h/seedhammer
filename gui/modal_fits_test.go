@@ -312,6 +312,26 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"Couldn't show the keys this policy holds, so it was not engraved. Build " +
 				"again; if it happens twice, rewrite the payload on the host with `me sysw pack`.",
 		},
+		// F-76's rewritten "incomplete card" advice, all four arms. This block
+		// authored them, so it owns their exposure: the ROUTE is the last
+		// sentence of each, which is precisely the position F-185's original
+		// defect cut off ("...rewrite the payload on the host with `").
+		{
+			"the incomplete-card refusal, reader + payload",
+			bundlePendingMessage(true, true),
+		},
+		{
+			"the incomplete-card refusal, reader only",
+			bundlePendingMessage(true, false),
+		},
+		{
+			"the incomplete-card refusal, payload only",
+			bundlePendingMessage(false, true),
+		},
+		{
+			"the incomplete-card refusal, neither",
+			bundlePendingMessage(false, false),
+		},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)

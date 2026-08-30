@@ -191,6 +191,49 @@ func (s *syswSession) has(want sysw.Class) bool {
 	return false
 }
 
+// cardSet is THE payload→gatherer seam: every md1/mk1 record the loaded payload
+// holds, with each card's chunks made contiguous.
+//
+// It exists because a CARD is not the shape `take` serves. `take` is
+// first-match, which is right for a seed or a passphrase — there is one, and a
+// program consumes it once. A card is a chunk SET: single-sig's md1 alone is 3
+// records and the BlueWallet 2-of-3 is 6, so handing a gatherer the first record
+// hands it a fraction of a card, which completes nothing and counts zero (F-76).
+//
+// ONE function, four call sites — the Build path's cosigner source and the
+// three card doors — because "which records make up the payload's cards" must
+// have exactly one answer. groupRecordsByCard is what makes payload record
+// order survive an interleaved payload; see it for the measurement.
+//
+// `want` IS ALWAYS sysw.ClassMDMK, and it is a parameter rather than a constant
+// on purpose: §13 D7 requires every consumption site to HARD-CODE the one class
+// it admits, so that TestEverySyswConsumptionSiteNamesAnAdmittedClass can
+// reconcile each door against §3.3.2. A helper that chose the class for its
+// callers would take four sites out of that oracle's reach — which is the
+// defect the oracle exists to catch, not an exemption to claim. The chunk
+// grouping below is md1/mk1-specific and no other class is a card.
+func (s *syswSession) cardSet(want sysw.Class) ([]string, bool) {
+	records, ok := s.takeAll(want)
+	if !ok {
+		return nil, false
+	}
+	return groupRecordsByCard(records), true
+}
+
+// syswAltEnter is the alternative to FROM PAYLOAD: decline, and type it.
+const syswAltEnter = "ENTER IT"
+
+// syswChoose draws the source picker and reports whether FROM PAYLOAD won.
+//
+// PAYLOAD FIRST: every caller checks `has(want)` before drawing, so the loaded
+// record is the expected answer and ChoiceScreen opens on index 0. Back still
+// declines, as everywhere else.
+func syswChoose(ctx *Context, th *Colors, title, lead, alt string) bool {
+	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: []string{"FROM PAYLOAD", alt}}
+	choice, ok := cs.Choose(ctx, th)
+	return ok && choice == 0
+}
+
 // syswOffer asks whether to take a record of `want` from the loaded payload.
 //
 // Returns ok=false when there is nothing to offer OR the operator declines, so
@@ -211,13 +254,79 @@ func syswOfferTitled(ctx *Context, th *Colors, want sysw.Class, title, lead stri
 	if ctx.sysw == nil || !ctx.sysw.has(want) {
 		return "", false
 	}
-	// PAYLOAD FIRST: this screen is only reached when a payload HOLDS the wanted
-	// class (the guard above), so the loaded record is the expected answer and
-	// ChoiceScreen opens on index 0. Back still declines, as everywhere else.
-	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: []string{"FROM PAYLOAD", "ENTER IT"}}
-	choice, ok := cs.Choose(ctx, th)
-	if !ok || choice == 1 {
+	if !syswChoose(ctx, th, title, lead, syswAltEnter) {
 		return "", false
 	}
 	return ctx.sysw.take(want)
+}
+
+// syswOfferCards is syswOffer for a CARD SET: it hands back every md1/mk1
+// record the payload holds, not the first one.
+//
+// F-76. The three card doors used syswOffer and seeded the gatherer with the
+// single record it returned, so a payload holding all six chunks of one good
+// md1 card reached the gather screen as `md1 descriptors: 0` — measured at the
+// Wallet Policy and Engrave Bundle doors, and `mk1 keys: 0` for a two-chunk mk1
+// key card. Seeding the same chunks past the door counted 1 every time, which
+// is what proved the cards were fine and the door was the constraint.
+//
+// The records still enter through bundleGatherer.offer() exactly as a scanned
+// card does — this changes HOW MANY records reach the gather, never how they
+// are admitted — so dedup, chunk assembly and the BCH integrity gate are
+// unchanged. Build Policy has fed its gather this way since S1.
+//
+// `want` is passed in rather than hard-coded here for the reason cardSet
+// states: every consumption site names its own admitted class, where §3.3.2 can
+// be checked against it.
+func syswOfferCards(ctx *Context, th *Colors, want sysw.Class, lead string) ([]string, bool) {
+	if ctx.sysw == nil || !ctx.sysw.has(want) {
+		return nil, false
+	}
+	if !syswChoose(ctx, th, "Input", lead, syswAltEnter) {
+		return nil, false
+	}
+	return ctx.sysw.cardSet(want)
+}
+
+// chunkSink is what the two single-card gatherers (md1Gatherer, mk1Gatherer)
+// have in common: an offer() that VALIDATES on the way in — BCH checksum, chunk
+// header, chunk-set-id match, duplicate index — and a way to say whether a set
+// has been identified yet.
+type chunkSink interface {
+	offer(string) gatherStatus
+	isPrimed() bool
+}
+
+// syswPrimeCard completes an ALREADY-IDENTIFIED chunk set from the loaded
+// payload, so Inspect works on a payload-sourced card.
+//
+// F-76's original scope. mk1GatherFlow and md1GatherFlow primed a fresh
+// gatherer with the ONE string handed to them and then opened
+// ctx.Platform.NFCReader() for the rest. A payload-derived card has no tags:
+// every chunk is already in p.Public and the gatherer had no way to reach them,
+// so Inspect on a chunked record — the ordinary case — stranded the operator on
+// a scan-waiting screen whose only exit was Back.
+//
+// THROUGH offer(), NEVER AROUND IT. offer() is where a chunk is checked, so a
+// second insertion path would be a second way for a chunk to join a card and
+// only one of them would validate. A corrupted chunk in a payload is answered
+// gatherIgnored here exactly as it is on a scan, and the card simply does not
+// complete.
+//
+// PRIMED-ONLY, and that is a safety property rather than an optimisation: an
+// unprimed gatherer ADOPTS the first set it is offered, so feeding it the
+// payload could silently substitute a payload card for the card the operator
+// asked about. Once `first` has primed the set, every record fed here can only
+// ADD to that set — offer() answers gatherForeign to any other chunk-set-id.
+func syswPrimeCard(ctx *Context, g chunkSink) {
+	if ctx.sysw == nil || !g.isPrimed() {
+		return
+	}
+	pool, ok := ctx.sysw.cardSet(sysw.ClassMDMK)
+	if !ok {
+		return
+	}
+	for _, r := range pool {
+		g.offer(r)
+	}
 }
