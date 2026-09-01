@@ -44,6 +44,22 @@ func plateWord(n int, one, many string) string {
 // string count here now would tell the operator "md1 policy: 6 plates" over a
 // total of 2, on the one screen whose whole job is how many blanks to have
 // ready.
+//
+// csidMarker(c) BELOW IS DEFENSIVE, NOT LIVE TODAY (C1, whole-diff review
+// design/agent-reports/whole-diff-device-csid-review.md). As of this cycle
+// NO production caller routes a gathered card into `cards` here — Build
+// Policy's cosigner cards come from buildEngraveTail/multisigEngraveCardsMulti
+// (device-minted bundleCard literals, gui/multisig_engrave.go), never from
+// the bundle gatherer that computes csidMismatch, so this marker cannot fire
+// on any reachable path (confirmed: deleting both calls here and in
+// buildPlateInventoryLines below fails exactly one test —
+// TestBuildPlateCensusLinesMarksCSIDMismatch, which constructs the mismatched
+// card directly). Kept anyway because it is data-driven and zero cost, and it
+// lights up for free if a future flow ever DOES route a gathered card here —
+// but that routing must NOT be added AS THE FIX for the reachability gap: a
+// restore doc may list only plates this device actually cut, so a
+// mis-stamped COSIGNER card belongs on the warning surfaces (the
+// set-completion notice, the payload-cards review), never here.
 func buildPlateCensusLines(params engrave.Params, cards []bundleCard) []string {
 	plan := bundlePlatePlan(params, cards)
 	perCard := bundleCardPlateCounts(plan, len(cards))
@@ -77,6 +93,11 @@ func buildPlateCensusLines(params engrave.Params, cards []bundleCard) []string {
 // either would tell a reader it travels WITH the set. Every caller but
 // engraveSingleSigFlow passes false -- the multisig paths have no
 // passphrase-plate offer at all (R-B).
+//
+// csidMarker(c) below is the SAME defensive-only marker as
+// buildPlateCensusLines above, for the same reason: unreachable on any
+// production path today, kept for free, and NOT to be "fixed" by routing
+// gathered cosigner cards into this restore doc (C1, whole-diff review).
 func buildPlateInventoryLines(params engrave.Params, cards []bundleCard, seeds []seedPassphraseFact,
 	capacity seedCapacity, passphrasePlateCut bool) []string {
 	plan := bundlePlatePlan(params, cards)

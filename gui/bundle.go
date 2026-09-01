@@ -112,6 +112,16 @@ func bundleCSIDNote(cards []bundleCard) string {
 // (every tap ACCEPTED, R1). Engrave Multisig and the two verify readbacks
 // deliberately never call this (Contract 3: refused-before-render / line-
 // marker-only respectively).
+//
+// RE-FIRES ON RE-ENTRY, BY DESIGN (whole-diff review M3, accepted). All
+// three callers loop back into their own gather on a review Back
+// (bundleFlow's `gathered = cards; continue`, walletPolicyFlow's five
+// `continue` paths, buildStepGather's "this step can run more than once
+// now"), and each re-entry recomputes csidMismatch from scratch and calls
+// this again -- so a still-mismatched card's warning re-fires once per
+// round trip rather than latching "already shown this session". Warning-
+// only and non-blocking, so accepted rather than debounced; pinned live by
+// TestBundleFlowNoticeRefiresOnReviewBackReentry (gui/csid_warning_test.go).
 func showBundleCSIDMismatchNotices(ctx *Context, th *Colors, title string, cards []bundleCard) {
 	for _, c := range cards {
 		if c.kind == cardMK1 && c.csidMismatch {

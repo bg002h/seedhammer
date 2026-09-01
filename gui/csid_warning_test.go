@@ -2,7 +2,12 @@ package gui
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	gscanner "go/scanner"
+	"go/token"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -117,6 +122,16 @@ func TestCSIDFixturePairIsWhatTheSpecClaims(t *testing.T) {
 	}
 	if pinnedHdr.ChunkSetID == pinnedDerived {
 		t.Fatalf("pinned row's declared == derived (%05x) -- not a mismatch fixture", pinnedDerived)
+	}
+	// M1 (whole-diff review): every OTHER assertion in this cycle goes through
+	// uiContains, which lower-cases and space-strips both sides -- so an
+	// uppercased or differently-spaced warning would still pass every rendered
+	// test. This is the one STRICT, case- and whitespace-sensitive check:
+	// csidMismatchWarningText's actual return value, byte for byte, against
+	// the corpus's own warning_text.
+	if got := csidMismatchWarningText(wantDeclared, wantDerived); got != pinned.WarningText {
+		t.Errorf("csidMismatchWarningText(%05x, %05x) = %q, want corpus warning_text %q (byte-exact, not uiContains-normalized)",
+			wantDeclared, wantDerived, got, pinned.WarningText)
 	}
 
 	clean := csidCleanTwinRow(t)
@@ -379,11 +394,21 @@ func TestBundleReviewFlowMarksCSIDMismatch(t *testing.T) {
 
 // ─── The Build Policy census / restore-doc / payload-cards markers ───────────
 
-// TestBuildPlateCensusLinesMarksCSIDMismatch covers buildPlateCensusLines AND
-// buildPlateInventoryLines (multisig_build_census.go) — the restore-doc
-// consumer named "the funds-most path" (SPEC Contract 3): a mis-stamped id
-// archived there, unmarked, is the name-drift hazard the host cycle
-// documented.
+// TestBuildPlateCensusLinesMarksCSIDMismatch is a HELPER-LEVEL PIN on
+// buildPlateCensusLines AND buildPlateInventoryLines (multisig_build_census.go),
+// corrected 2026-09-01 per the whole-diff review's C1: it constructs the
+// mismatched bundleCard directly and calls both functions, which is the ONLY
+// way either currently sees one. NO PRODUCTION FLOW FEEDS THESE TWO FUNCTIONS
+// A GATHERED CARD — Build Policy's cosigner cards are device-minted
+// bundleCard literals from buildEngraveTail/multisigEngraveCardsMulti, never
+// routed through the bundle gatherer that computes csidMismatch, so
+// csidMarker(c) at multisig_build_census.go:53,89 returns "" on every
+// production path today. This test proves the two helpers render the marker
+// correctly WHEN GIVEN a mismatched card; it does NOT prove any on-device
+// path reaches that state, and does not stand in for the reachable
+// "restore-doc consumer" acceptance row (see design/journeys/csid-tags/
+// README.md and design/SPEC_device_csid_warning.md Contract 3, both amended
+// to match).
 func TestBuildPlateCensusLinesMarksCSIDMismatch(t *testing.T) {
 	mismatched := gatherRowIntoBundle(t, csidPinnedRow(t))
 	clean := gatherRowIntoBundle(t, csidCleanTwinRow(t))
@@ -544,8 +569,11 @@ func TestBuildPolicyGatherSilentOnCleanTwinLive(t *testing.T) {
 	}
 	click(&ctx.Router, Button3) // Done adding cards
 	// After Done, silence must hold too -- not just before the notice would
-	// have had a chance to fire.
-	for i := 0; i < 8; i++ {
+	// have had a chance to fire. M4 (whole-diff review): this budget must
+	// match the mismatch twin's pumpUntil(..., 64) above -- an 8-frame budget
+	// let a notice firing on frame 9 pass unnoticed, weaker than what the
+	// positive live test actually proves reachable.
+	for i := 0; i < 64; i++ {
 		c, ok := frame()
 		if !ok {
 			break
@@ -705,14 +733,252 @@ func TestSingleSigVerifyCSIDNoteSilentOnCleanTwinLive(t *testing.T) {
 // drops the append is a source-level regression this test catches even
 // though nothing here renders a frame.
 func TestMultisigVerifyFlowWiresCSIDNoteIntoVerdicts(t *testing.T) {
-	body := funcBody(t, "multisig_verify.go", "func multisigVerifyFlow(")
+	// M2 (whole-diff review): funcBody returns RAW source, so a commented-out
+	// call would satisfy a bare strings.Contains below. stripGoComments
+	// removes every Go comment via go/scanner first.
+	body := stripGoComments(t, funcBody(t, "multisig_verify.go", "func multisigVerifyFlow("))
 	if !strings.Contains(body, "bundleCSIDNote(cards)") {
 		t.Fatal("multisigVerifyFlow no longer computes bundleCSIDNote(cards) -- Contract 3's verify-readback line-marker is unwired")
 	}
 	if !strings.Contains(body, "multisigVerifyOKMessage(len(legs), full)+csidNote") {
 		t.Error("the PASS verdict (showNotice) does not append csidNote")
 	}
-	if got := strings.Count(body, "multisigVerifyFailureText(err)+csidNote"); got != 2 {
-		t.Errorf("expected exactly 2 comparator-FAIL verdicts appending csidNote (the partial and the full sweep), found %d", got)
+	// M2: >= 2, not == 2 -- the exact-equality form fails on a LEGITIMATE third
+	// comparator-FAIL site (e.g. a future verdict split), which is the wrong
+	// direction for a wiring guard to be brittle in. The two sites this cycle
+	// wired (the partial and the full sweep) must still both be present.
+	if got := strings.Count(body, "multisigVerifyFailureText(err)+csidNote"); got < 2 {
+		t.Errorf("expected at least 2 comparator-FAIL verdicts appending csidNote (the partial and the full sweep), found %d", got)
+	}
+}
+
+// stripGoComments removes every Go comment from src using the standard
+// tokenizer (go/scanner), so a commented-out call cannot satisfy a wiring
+// guard's strings.Contains the way funcBody's raw source slice can (M2,
+// whole-diff review). src need not be a syntactically complete declaration --
+// funcBody deliberately returns a fragment (signature to the next top-level
+// `func`) -- the scanner only needs valid token boundaries, not a parseable
+// tree, so it tokenizes a fragment exactly as it would the whole file. Output
+// is NOT valid Go source (tokens are rejoined with single spaces, discarding
+// original formatting); callers only run strings.Contains/strings.Count
+// against it.
+func stripGoComments(t *testing.T, src string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(src))
+	var s gscanner.Scanner
+	s.Init(file, []byte(src), nil, gscanner.ScanComments)
+	// Deletes comment BYTE RANGES from the original src and keeps every other
+	// byte exactly as written, including its original spacing. Reconstructing
+	// from token literals instead (joining with a single space) would insert
+	// spaces around punctuation and break substring checks like
+	// strings.Contains(body, "bundleCSIDNote(cards)") -- caught live: an
+	// earlier version of this helper failed that exact check.
+	keep := make([]bool, len(src))
+	for i := range keep {
+		keep[i] = true
+	}
+	base := file.Base()
+	for {
+		pos, tok, lit := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok != token.COMMENT {
+			continue
+		}
+		start := int(pos) - base
+		end := start + len(lit)
+		if start < 0 || end > len(src) {
+			continue
+		}
+		for i := start; i < end; i++ {
+			keep[i] = false
+		}
+	}
+	var b strings.Builder
+	b.Grow(len(src))
+	for i := 0; i < len(src); i++ {
+		if keep[i] {
+			b.WriteByte(src[i])
+		}
+	}
+	return b.String()
+}
+
+// ─── M2: nothing else guards the CONSUMER SET; a seventh caller must trip ────
+
+// bundleGatherConsumer records what a caller of bundleGatherFlow(Resume) is
+// expected to also call, per Contract 3 (SPEC design/SPEC_device_csid_warning.md
+// "ALL SIX consumers, enumerated").
+type bundleGatherConsumer struct {
+	modal bool // must call showBundleCSIDMismatchNotices (the three interactive-gather surfaces)
+	note  bool // must call bundleCSIDNote (the two verify-readback line-markers)
+	// exempt names an identifier the function must still call, standing in
+	// for the reason neither of the above applies (Engrave Multisig: refused
+	// before a card could render).
+	exempt string
+}
+
+// expectedBundleGatherConsumers is Contract 3's six named consumers, keyed by
+// the enclosing top-level function's name. Anything that calls
+// bundleGatherFlow/bundleGatherFlowResume and is NOT one of these is a
+// SEVENTH consumer this cycle never audited.
+var expectedBundleGatherConsumers = map[string]bundleGatherConsumer{
+	"bundleFlow":               {modal: true},
+	"walletPolicyFlow":         {modal: true},
+	"buildMultisigPolicyFlow":  {modal: true},
+	"supplyMultisigPolicyFlow": {exempt: "extractSuppliedMd1"},
+	"multisigVerifyFlow":       {note: true},
+	"singleSigVerifyFlow":      {note: true},
+}
+
+// TestBundleGatherConsumersAreAccountedFor is Contract 3's "ALL SIX
+// consumers, enumerated" turned into a regression guard (whole-diff review
+// M2). Unlike funcBody's raw strings.Index (comment-blind -- see
+// stripGoComments above), this walks the real AST (go/parser) of every
+// non-test gui/*.go source file: a commented-out call cannot satisfy an AST
+// CallExpr, and a genuinely new caller of bundleGatherFlow/
+// bundleGatherFlowResume anywhere outside the six functions below fails this
+// test rather than shipping unaudited.
+func TestBundleGatherConsumersAreAccountedFor(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("globbing gui/*.go: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("filepath.Glob(\"*.go\") found nothing -- this guard is not running from gui/ (cwd wrong?)")
+	}
+
+	fset := token.NewFileSet()
+	// found maps a top-level function's name to the set of plain-identifier
+	// calls (CallExpr with an *ast.Ident callee) anywhere in its body,
+	// including nested closures -- for every function that calls
+	// bundleGatherFlow or bundleGatherFlowResume at least once.
+	found := map[string]map[string]bool{}
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			// bundleGatherFlow's OWN body delegates to bundleGatherFlowResume
+			// (the thin wrapper, gui/bundle_flow.go) -- that is the
+			// definition, not a consumer, and must not count as one.
+			if fn.Name.Name == "bundleGatherFlow" || fn.Name.Name == "bundleGatherFlowResume" {
+				continue
+			}
+			calls := map[string]bool{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if id, ok := call.Fun.(*ast.Ident); ok {
+					calls[id.Name] = true
+				}
+				return true
+			})
+			if calls["bundleGatherFlow"] || calls["bundleGatherFlowResume"] {
+				found[fn.Name.Name] = calls
+			}
+		}
+	}
+
+	for name, calls := range found {
+		want, ok := expectedBundleGatherConsumers[name]
+		if !ok {
+			t.Errorf("%s calls bundleGatherFlow(Resume) but is not on this guard's named "+
+				"list of six audited consumers -- a SEVENTH caller has appeared and Contract "+
+				"3's csid comparison has not been reviewed for it", name)
+			continue
+		}
+		switch {
+		case want.modal:
+			if !calls["showBundleCSIDMismatchNotices"] {
+				t.Errorf("%s gathers mk1 cards but no longer calls showBundleCSIDMismatchNotices "+
+					"-- a csid mismatch would now be silent here", name)
+			}
+		case want.note:
+			if !calls["bundleCSIDNote"] {
+				t.Errorf("%s gathers mk1 cards but no longer calls bundleCSIDNote -- the "+
+					"verify-readback line-marker is unwired", name)
+			}
+		case want.exempt != "":
+			if !calls[want.exempt] {
+				t.Errorf("%s no longer calls %s -- its exemption (refuses before a card "+
+					"could render) no longer holds, and Contract 3's csid comparison may now "+
+					"be reachable here unmarked", name, want.exempt)
+			}
+		}
+	}
+	// Every expected consumer must actually have been found -- a renamed or
+	// deleted function would otherwise pass this test vacuously.
+	for name := range expectedBundleGatherConsumers {
+		if _, ok := found[name]; !ok {
+			t.Errorf("expected consumer %s no longer calls bundleGatherFlow(Resume) anywhere "+
+				"in gui/*.go -- this guard's site list is stale", name)
+		}
+	}
+}
+
+// ─── M3: the notice re-fires on every re-entry into a gather ────────────────
+
+// TestBundleFlowNoticeRefiresOnReviewBackReentry pins the ACCEPTED M3 shape
+// (whole-diff review): all three modal callers loop back into the SAME
+// gather on a review Back (bundleFlow: `gathered = cards; continue`), so a
+// still-mismatched card's set-completion notice fires again on re-entry
+// rather than latching "already shown this session" -- see
+// showBundleCSIDMismatchNotices's doc comment (gui/bundle.go). Warning-only
+// and non-blocking, so accepted rather than debounced (not a correctness
+// defect, per the review); this test exists so the behaviour is pinned
+// rather than an unreviewed accident -- a future change that adds a latch,
+// or that stops re-firing for an unrelated reason, shows up here rather than
+// only at the flash gate.
+func TestBundleFlowNoticeRefiresOnReviewBackReentry(t *testing.T) {
+	row := csidPinnedRow(t)
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	ctx.syswBundleSeeds = append([]string(nil), row.Strings...)
+	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
+	defer quit()
+
+	// The preloaded seeds complete the card immediately, but the gather
+	// screen still waits for Done -- it does not auto-proceed.
+	if _, ok := pumpUntil(frame, "mk1 keys: 1", 32); !ok {
+		t.Fatal("the initial gather never reached the completed-card tally")
+	}
+	click(&ctx.Router, Button3) // Done adding cards
+
+	// First fire, at initial set completion.
+	if _, ok := pumpUntil(frame, row.WarningText, 32); !ok {
+		t.Fatal("the first notice never fired for the mismatched card")
+	}
+	click(&ctx.Router, Button1) // BACK dismisses the notice
+	if _, ok := pumpUntil(frame, "Bundle", 32); !ok {
+		t.Fatal("the review screen was not reached after the first notice was dismissed")
+	}
+	click(&ctx.Router, Button1) // Back at review -- resumes the gather WITH the card still on it
+
+	// Re-entry: bundleGatherFlowResume re-offers the same card from `prev`, so
+	// it is already complete -- Done proceeds immediately, without a rescan.
+	if _, ok := pumpUntil(frame, "mk1 keys: 1", 32); !ok {
+		t.Fatal("the gather was not resumed with the card still on the pile")
+	}
+	click(&ctx.Router, Button3) // Done adding cards, again
+
+	// SECOND fire: the same card, the same mismatch, re-computed and re-shown.
+	if _, ok := pumpUntil(frame, row.WarningText, 32); !ok {
+		t.Fatal("the notice did not re-fire on review-Back re-entry -- if this is now " +
+			"debounced, update this test to assert the new (intentional) behaviour " +
+			"rather than deleting the coverage")
 	}
 }
