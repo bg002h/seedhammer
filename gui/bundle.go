@@ -1,6 +1,9 @@
 package gui
 
 import (
+	"fmt"
+	"strings"
+
 	"seedhammer.com/codex32"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
@@ -35,6 +38,96 @@ type bundleCard struct {
 	label   string   // "mk1 key" / "md1 descriptor", for the review screen
 	strings []string // verbatim chunk strings in index order (or [single])
 	summary string   // a one-line metadata summary for the review screen
+
+	// device-csid-warning Contract 3: computed ONCE, at offerChunkedMK1 set
+	// completion, for a cardMK1 whose wire-declared chunk_set_id disagrees
+	// with mk.DerivedChunkSetID of its own decoded content. Every kind but
+	// cardMK1 leaves these at their zero value (csidMismatch false). The
+	// comparison travels ON the card as data so every downstream consumer —
+	// however many hops from the gatherer — reads the SAME evaluation rather
+	// than risking a second, possibly-drifted one.
+	csidMismatch bool
+	declaredCSID uint32
+	derivedCSID  uint32
+}
+
+// csidMismatchWarningText is the R6 host-verbatim mismatch-warning body (SPEC
+// design/SPEC_device_csid_warning.md, Contract 2): byte-identical to
+// crates/me-cli/src/csid_warn.rs's chunk_set_id_mismatch_warning(declared,
+// derived), ASCII-only (device strings are ASCII-only: a non-ASCII rune
+// blanks the WHOLE modal body, gui/font_coverage_test.go — R0 r1 I2), and
+// measured to fit the panel with 302 chars of headroom (R0 r1/r2). Shared by
+// every csid-mismatch surface: the inspect flow's notice (mk1_inspect.go) and
+// the bundle-gatherer flow's set-completion notice (Engrave Bundle / Wallet
+// Policy / Build Policy).
+func csidMismatchWarningText(declared, derived uint32) string {
+	return fmt.Sprintf(
+		"warning: this key card's stamped chunk-set id (%05x) was not derived from "+
+			"its content, which computes %05x. The card decodes fine, but diagnostics that "+
+			"name plates by id will call it %05x. To fix it, re-mint: run mk encode again "+
+			"without --chunk-set-id and the id is derived from the key data automatically.",
+		declared, derived, declared)
+}
+
+// csidMarker is the compact per-card mismatch marker (Contract 3: "the
+// marker's compact form ... is the implementer's proposal, frozen at the
+// screenshot gate"), appended to a card's line on every review/census/
+// inventory/payload surface: "" for a matched (or non-mk1) card, else
+// " [csid <declared>!<derived>]" — legible at a glance, ASCII, and identical
+// across every list surface so the same card reads the same way everywhere.
+func csidMarker(c bundleCard) string {
+	if !c.csidMismatch {
+		return ""
+	}
+	return fmt.Sprintf(" [csid %05x!%05x]", c.declaredCSID, c.derivedCSID)
+}
+
+// bundleCSIDNote is Contract 3's "line-marker only, NO modal" for the two
+// verify-readback surfaces (multisig_verify.go, singlesig_verify.go): one
+// line per csid-mismatched mk1 card among cards, appended to the terminal
+// PASS/FAIL verdict text those screens already show — never a separate
+// modal, because a mid-verify modal would blur the pass/fail reading these
+// screens exist to give (R0, stated reason). "" when nothing mismatches.
+func bundleCSIDNote(cards []bundleCard) string {
+	var lines []string
+	for _, c := range cards {
+		if c.kind == cardMK1 && c.csidMismatch {
+			lines = append(lines, "Note: mk1 key"+csidMarker(c)+
+				" -- chunk-set id mismatch; see Inspect key for detail.")
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n")
+}
+
+// showBundleCSIDMismatchNotices is Contract 3's "notice modal at set
+// completion" for the three interactive-gather surfaces that want one
+// (Engrave Bundle, Wallet Policy, Build Policy — via bundleFlow,
+// walletPolicyFlow and buildMultisigPolicyFlow respectively). Called ONCE,
+// right after that surface's gather returns, over the whole completed set:
+// one non-blocking showNotice per csid-mismatched mk1 card, same body as the
+// inspect flow's (csidMismatchWarningText), same non-blocking semantics
+// (every tap ACCEPTED, R1). Engrave Multisig and the two verify readbacks
+// deliberately never call this (Contract 3: refused-before-render / line-
+// marker-only respectively).
+//
+// RE-FIRES ON RE-ENTRY, BY DESIGN (whole-diff review M3, accepted). All
+// three callers loop back into their own gather on a review Back
+// (bundleFlow's `gathered = cards; continue`, walletPolicyFlow's five
+// `continue` paths, buildStepGather's "this step can run more than once
+// now"), and each re-entry recomputes csidMismatch from scratch and calls
+// this again -- so a still-mismatched card's warning re-fires once per
+// round trip rather than latching "already shown this session". Warning-
+// only and non-blocking, so accepted rather than debounced; pinned live by
+// TestBundleFlowNoticeRefiresOnReviewBackReentry (gui/csid_warning_test.go).
+func showBundleCSIDMismatchNotices(ctx *Context, th *Colors, title string, cards []bundleCard) {
+	for _, c := range cards {
+		if c.kind == cardMK1 && c.csidMismatch {
+			showNotice(ctx, th, title, csidMismatchWarningText(c.declaredCSID, c.derivedCSID))
+		}
+	}
 }
 
 // scanClass is the per-scan classification (R0-C1/C2), computed BEFORE any
@@ -199,12 +292,25 @@ func (g *bundleGatherer) offerChunkedMK1(csid uint32, str string) bundleOfferSta
 			delete(g.mkSets, csid)
 			return bundleDropped
 		}
-		g.cards = append(g.cards, bundleCard{
+		bc := bundleCard{
 			kind:    cardMK1,
 			label:   "mk1 key",
 			strings: collected,
 			summary: mk1Summary(card),
-		})
+		}
+		// device-csid-warning Contract 3: the comparison runs ONCE, here, at
+		// set completion, and its result travels ON bc so no downstream
+		// consumer re-evaluates it. A DerivedChunkSetID error is a defensive
+		// no-op (silent): the card just passed mk.Decode, so encodeBytecode
+		// re-encoding it should never fail in practice (the parity test
+		// proves round-trip on 20/20 clean corpus rows) — this only guards
+		// against treating "could not compute" as "mismatched".
+		if derived, derr := mk.DerivedChunkSetID(card); derr == nil && derived != csid {
+			bc.csidMismatch = true
+			bc.declaredCSID = csid
+			bc.derivedCSID = derived
+		}
+		g.cards = append(g.cards, bc)
 		return bundleCardComplete
 	case gatherDup:
 		return bundleDuplicate

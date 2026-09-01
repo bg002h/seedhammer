@@ -785,6 +785,12 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		// there is nothing to re-offer them a second attempt at.
 		return verifyAbandoned
 	}
+	// device-csid-warning Contract 3: "line-marker only, NO modal" for a verify
+	// readback. Computed ONCE, over the raw readback cards, and appended to
+	// the terminal PASS/comparator-FAIL verdict text below -- never a separate
+	// modal, since a mid-verify popup would blur the pass/fail reading these
+	// screens exist to give (R0, stated reason). "" when nothing mismatches.
+	csidNote := bundleCSIDNote(cards)
 	readbackMd1, readbackMk1s, ok := extractReadbackMd1AndMk1s(cards)
 	if !ok {
 		// ADVERSE: cards came off the plates and could not be accounted for. The
@@ -1162,7 +1168,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 			// ADVERSE: the comparator ran over the plates that WERE presented and
 			// disagreed. Stopping early does not make a bad plate provisional.
 			rec.adverse = true
-			showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
+			showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err)+csidNote)
 			return verifyFailed
 		}
 		checked := make([]int, 0, len(legs))
@@ -1187,7 +1193,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		// eleven of bundle.Verify's errors classify identically here -- the
 		// provenance distinction inside it is one nothing on the document consumes.
 		rec.adverse = true
-		showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err))
+		showError(ctx, th, "Verify Failed", multisigVerifyFailureText(err)+csidNote)
 		return verifyFailed
 	}
 	// THE SUCCESS RETURN, AND THE ONLY PLACE A PASS IS RECORDED. `full` is the
@@ -1199,7 +1205,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		legs:              len(legs),
 		suppliedCosigners: countUncoveredPolicyKeys(keys, covered),
 	}
-	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKMessage(len(legs), full))
+	showNotice(ctx, th, multisigVerifyOKTitle, multisigVerifyOKMessage(len(legs), full)+csidNote)
 	return verifyComplete
 }
 

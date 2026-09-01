@@ -37,14 +37,20 @@ const csidCorpusSHA256 = "88bbe056e85dde694353475e774a78a00defe75cb8694654c4be1d
 
 // csidCorpusRow mirrors the fields of the Rust corpus's row schema that
 // this test needs. Other fields present in the JSON (declared_csid,
-// description, warning_text, strings) are intentionally omitted -- Go's
+// description, warning_text) are intentionally omitted -- Go's
 // json.Unmarshal ignores unknown fields, so the struct only needs to
 // name what it reads.
+//
+// Strings was added for the device-csid-warning cycle's Contract 1: the
+// per-row chunk strings, needed to drive Decode(strings) -> DerivedChunkSetID,
+// the HOST-SHAPE operand (top20 of the re-encoded, ALREADY-DECODED card),
+// as opposed to top20 of the corpus's own canonical_bytecode_hex directly.
 type csidCorpusRow struct {
-	Name                  string `json:"name"`
-	CanonicalBytecodeHex  string `json:"canonical_bytecode_hex"`
-	DerivedCSID           string `json:"derived_csid"` // 5 lowercase hex digits, zero-padded ({:05x})
-	ExpectMismatchWarning bool   `json:"expect_mismatch_warning"`
+	Name                  string   `json:"name"`
+	CanonicalBytecodeHex  string   `json:"canonical_bytecode_hex"`
+	DerivedCSID           string   `json:"derived_csid"` // 5 lowercase hex digits, zero-padded ({:05x})
+	ExpectMismatchWarning bool     `json:"expect_mismatch_warning"`
+	Strings               []string `json:"strings"`
 }
 
 // csidCorpus mirrors the top-level shape of the corpus JSON.
@@ -109,6 +115,27 @@ func TestChunkSetIDDerivationParity(t *testing.T) {
 			got := fmt.Sprintf("%05x", top20(bytecode))
 			if got != row.DerivedCSID {
 				t.Fatalf("top20(bytecode) = %s, want %s (corpus derived_csid)", got, row.DerivedCSID)
+			}
+			// device-csid-warning Contract 1: DerivedChunkSetID(Decode(strings))
+			// reproduces the corpus's derived_csid too -- the HOST-SHAPE operand
+			// (a comparison DERIVED CHUNK CARD's re-encode), not merely top20 of
+			// the corpus's own already-canonical bytecode above. This is the exact
+			// call the device's csid-mismatch warning makes.
+			if len(row.Strings) == 0 {
+				t.Fatalf("corpus row %s carries no strings -- Contract 1's parity extension has nothing to decode", row.Name)
+			}
+			card, err := Decode(row.Strings)
+			if err != nil {
+				t.Fatalf("Decode(row.Strings): %v", err)
+			}
+			derivedFromCard, err := DerivedChunkSetID(card)
+			if err != nil {
+				t.Fatalf("DerivedChunkSetID(decoded card): %v", err)
+			}
+			gotFromCard := fmt.Sprintf("%05x", derivedFromCard)
+			if gotFromCard != row.DerivedCSID {
+				t.Fatalf("DerivedChunkSetID(Decode(strings)) = %s, want %s (corpus derived_csid)",
+					gotFromCard, row.DerivedCSID)
 			}
 		})
 		if len(row.DerivedCSID) == 5 && row.DerivedCSID[0] == '0' {

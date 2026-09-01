@@ -44,6 +44,31 @@ func Encode(card Card) ([]string, error) {
 	return encodeChunks(bytecode)
 }
 
+// DerivedChunkSetID is the SPEC "device-csid-warning" Contract 1 export: the
+// chunk_set_id that card's OWN CONTENT computes to, independent of whatever
+// chunk_set_id the wire header of the strings it was decoded from happens to
+// declare -- top20(encodeBytecode(card)), a thin wrapper over the encoder's
+// ALREADY-FACTORED bytecode builder (Encode itself is untouched: Encode is
+// still the two-line composition at :39-45).
+//
+// This is the HOST OPERAND, matching
+// crates/me-cli/src/csid_warn.rs's derived_chunk_set_id(card) exactly:
+// derive_chunk_set_id(encode_bytecode(card)) -- the canonical RE-ENCODE of an
+// already-decoded card, not a re-derivation from the raw reassembled wire
+// bytes (a foreign encoder whose canonicalization drifts would otherwise
+// stamp an id consistent with its own bytes; only the re-encode route
+// detects that drift). A caller compares this against the DECLARED id off
+// the wire header (mk.ParseHeader's ChunkSetID / Header.ChunkSetID) to
+// detect a card whose chunk_set_id was pinned rather than derived (e.g. `mk
+// encode --chunk-set-id ...`).
+func DerivedChunkSetID(card Card) (uint32, error) {
+	bytecode, err := encodeBytecode(card)
+	if err != nil {
+		return 0, err
+	}
+	return top20(bytecode), nil
+}
+
 // encodeBytecode builds the bytecode body (the inverse of decodeBytecode):
 //
 //	header(1) | stub_count(1) | stubs(4*N) | [fp(4) iff header&0x04] | path | compact73
