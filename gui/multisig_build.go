@@ -195,6 +195,10 @@ prefix:
 					}
 					continue
 				}
+				// device-csid-warning Contract 3: notice modal at gather set completion
+				// -- the funds-most path (SPEC), so silence here is exactly what this
+				// cycle exists to remove.
+				showBundleCSIDMismatchNotices(ctx, th, "Build Policy", cards)
 				// md1 records ride along on a systemwide payload and must not fail the build
 				// (spec P0 item 3); buildCosignerCards refuses on one, so they are dropped
 				// here rather than there.

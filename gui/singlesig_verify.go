@@ -146,6 +146,11 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template, engravedWithP
 	if !ok {
 		return false
 	}
+	// device-csid-warning Contract 3: "line-marker only, NO modal" for a verify
+	// readback -- see multisigVerifyFlow's twin comment (gui/multisig_verify.go)
+	// for the full reasoning. Appended to the terminal PASS/comparator-FAIL
+	// verdict text below.
+	csidNote := bundleCSIDNote(cards)
 	mk1, md1, ok := singleSigReadbackCards(cards)
 	if !ok {
 		// ADVERSE, AND RETRYABLE (S6b P9 F2). bundleGatherFlow returned ok, so
@@ -217,17 +222,17 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template, engravedWithP
 		case passphrase != "":
 			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. "+
 				"Check the passphrase before you doubt the plates: one wrong character "+
-				"derives a different wallet.")
+				"derives a different wallet."+csidNote)
 		case engravedWithPassphrase:
 			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. "+
 				"This set was engraved WITH a passphrase, and none was typed just now. Add "+
-				"the passphrase and try again before you doubt the plates.")
+				"the passphrase and try again before you doubt the plates."+csidNote)
 		default:
-			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates.")
+			showError(ctx, th, "Verify Failed", "The read-back bundle does NOT match the seed. Check the engraved plates."+csidNote)
 		}
 		return true
 	}
-	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed.")
+	showNotice(ctx, th, "Verify OK", "The engraved bundle matches the seed."+csidNote)
 	// THE SUCCESS EXIT. `rec.pass` is written ONLY here, and nowhere else in
 	// the function.
 	//

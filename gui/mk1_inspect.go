@@ -46,6 +46,15 @@ type mk1Gatherer struct {
 	total  int
 	setID  uint32
 	primed bool
+	// chunked is Contract 2's explicit discriminator (device-csid-warning
+	// R0-I3): whether the header that PRIMED this gatherer was itself
+	// Header.Chunked. Set once, at prime time, from the header directly --
+	// NEVER inferred from setID == 0 (a real mis-stamp value: `mk encode
+	// --chunk-set-id 00000` on a genuinely chunked card) or total == 1 (a
+	// chunked header can legally declare TotalChunks == 1: mk/mk.go's
+	// parseHeaderSyms only guards total > maxChunks || index >= total). Both
+	// proxies are wrong; this field is not a proxy.
+	chunked bool
 }
 
 func (g *mk1Gatherer) offer(s string) gatherStatus {
@@ -57,6 +66,7 @@ func (g *mk1Gatherer) offer(s string) gatherStatus {
 		g.set = map[int]string{}
 		g.total = h.TotalChunks
 		g.setID = h.ChunkSetID
+		g.chunked = h.Chunked
 		g.primed = true
 	} else if !h.Chunked || h.ChunkSetID != g.setID || h.TotalChunks != g.total {
 		return gatherForeign
@@ -243,6 +253,18 @@ func decodeGathered(ctx *Context, th *Colors, g *mk1Gatherer) (mk.Card, bool) {
 	if err != nil {
 		showError(ctx, th, "Inspect key", "Can't decode this key set.")
 		return mk.Card{}, false
+	}
+	// device-csid-warning Contract 2: gated on the EXPLICIT g.chunked field
+	// (R0-I3), never on g.setID == 0 or g.total == 1 (both real, representable
+	// non-mismatch values). A NON-BLOCKING notice, shown BEFORE the card
+	// display below returns to its caller (mk1DisplayFlow): every modal
+	// answers BACK, and proceeding continues to the card (R1 — warning,
+	// never refusal). A DerivedChunkSetID error is a defensive no-op, same
+	// reasoning as offerChunkedMK1's (gui/bundle.go).
+	if g.chunked {
+		if derived, derr := mk.DerivedChunkSetID(card); derr == nil && derived != g.setID {
+			showNotice(ctx, th, "Inspect key", csidMismatchWarningText(g.setID, derived))
+		}
 	}
 	return card, true
 }

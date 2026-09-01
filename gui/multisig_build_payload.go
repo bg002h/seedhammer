@@ -292,7 +292,7 @@ func buildPayloadCardsLines(cards []bundleCard, open int, selecting bool) []stri
 		fmt.Sprintf("This policy has %d open slot(s).", open),
 	}
 	for i, c := range cards {
-		lines = append(lines, fmt.Sprintf("%d. %s", i+1, c.summary))
+		lines = append(lines, fmt.Sprintf("%d. %s%s", i+1, c.summary, csidMarker(c)))
 	}
 	if selecting {
 		lines = append(lines, fmt.Sprintf("Choose %d of them next; they fill the "+

@@ -49,8 +49,8 @@ func buildPlateCensusLines(params engrave.Params, cards []bundleCard) []string {
 	perCard := bundleCardPlateCounts(plan, len(cards))
 	lines := []string{fmt.Sprintf("This engraves %s.", plateWord(len(plan), "plate", "plates"))}
 	for i, c := range cards {
-		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
-			c.label, plateWord(perCard[i], "plate", "plates"), c.summary))
+		lines = append(lines, fmt.Sprintf("%s: %s (%s)%s",
+			c.label, plateWord(perCard[i], "plate", "plates"), c.summary, csidMarker(c)))
 	}
 	lines = append(lines, "Each plate takes minutes to cut. Have that many blanks ready "+
 		"before you start: a set is only a backup when all of it exists.")
@@ -85,8 +85,8 @@ func buildPlateInventoryLines(params engrave.Params, cards []bundleCard, seeds [
 		fmt.Sprintf("This backup is %s:", plateWord(len(plan), "plate", "plates")),
 	}
 	for i, c := range cards {
-		lines = append(lines, fmt.Sprintf("%s: %s (%s)",
-			c.label, plateWord(perCard[i], "plate", "plates"), c.summary))
+		lines = append(lines, fmt.Sprintf("%s: %s (%s)%s",
+			c.label, plateWord(perCard[i], "plate", "plates"), c.summary, csidMarker(c)))
 	}
 	lines = append(lines, "If any of them is missing, this backup is incomplete.")
 	lines = append(lines, buildSeedInventoryLines(cards)...)

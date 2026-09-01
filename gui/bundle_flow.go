@@ -42,6 +42,8 @@ func bundleFlow(ctx *Context, th *Colors) {
 		if !ok {
 			return // Back / empty bundle.
 		}
+		// device-csid-warning Contract 3: notice modal at gather set completion.
+		showBundleCSIDMismatchNotices(ctx, th, "Engrave Bundle", cards)
 		if !bundleReviewFlow(ctx, th, cards) {
 			// SUPERSEDED 2026-08-19. This used to read: "The gather flow starts a
 			// fresh accumulator; the operator re-scans (mirrors single-card flows,
@@ -359,7 +361,7 @@ func bundleDoneDecision(g *bundleGatherer) bundleDoneOutcome {
 func bundleReviewFlow(ctx *Context, th *Colors, cards []bundleCard) bool {
 	lines := []string{fmt.Sprintf("%d cards verified:", len(cards))}
 	for i, c := range cards {
-		lines = append(lines, fmt.Sprintf("%d. %s OK", i+1, c.label))
+		lines = append(lines, fmt.Sprintf("%d. %s OK%s", i+1, c.label, csidMarker(c)))
 		if c.summary != "" {
 			lines = append(lines, chunkString(c.summary, 24)...)
 		}

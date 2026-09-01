@@ -104,6 +104,8 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 			return
 		}
 		gathered = cards
+		// device-csid-warning Contract 3: notice modal at gather set completion.
+		showBundleCSIDMismatchNotices(ctx, th, title, cards)
 		md1, ok := walletPolicyMd1(cards)
 		if !ok {
 			showError(ctx, th, title, "Supply exactly one wallet policy (md1) card.")
