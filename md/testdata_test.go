@@ -305,16 +305,15 @@ func buildNode(t *testing.T, jn jsonNode) node {
 		}
 		b = tb
 	case "Hash256Body":
-		var arr []byte
-		mustJSON(t, jn.Body.Data, &arr)
+		// A hex STRING in every vendored vector (as pubkeys and fingerprints
+		// are); the []byte reading below it would base64-decode "a8a8..." into
+		// 6b c6 bc ... and never fail loudly.
 		var h hash256Body
-		copy(h[:], arr)
+		copy(h[:], hexBody(t, jn.Body.Data, 32))
 		b = h
 	case "Hash160Body":
-		var arr []byte
-		mustJSON(t, jn.Body.Data, &arr)
 		var h hash160Body
-		copy(h[:], arr)
+		copy(h[:], hexBody(t, jn.Body.Data, 20))
 		b = h
 	case "Timelock":
 		var v uint32
@@ -368,8 +367,16 @@ func buildTLV(t *testing.T, jt jsonTLV) tlvSection {
 			mustJSON(t, e, &pair)
 			var idx uint8
 			mustJSON(t, pair[0], &idx)
-			var arr []byte
-			mustJSON(t, pair[1], &arr)
+			// The primary writes each pubkey as a 130-char hex string (as it does
+			// fingerprints); older readings of this branch expected a JSON byte
+			// array, which no vector carries -- the branch had never been reached,
+			// because keyed vectors were loaded from their phrase, not their JSON.
+			var hexstr string
+			mustJSON(t, pair[1], &hexstr)
+			arr, err := hex.DecodeString(hexstr)
+			if err != nil || len(arr) != 65 {
+				t.Fatalf("bad pubkey %q", hexstr)
+			}
 			var xpub [65]byte
 			copy(xpub[:], arr)
 			s.pubkeys = append(s.pubkeys, idxPub{idx: idx, xpub: xpub})
@@ -395,4 +402,17 @@ func mustJSON(t *testing.T, raw json.RawMessage, v any) {
 	if err := json.Unmarshal(raw, v); err != nil {
 		t.Fatalf("unmarshal %s: %v", string(raw), err)
 	}
+}
+
+// hexBody decodes a JSON hex string of exactly n bytes (the primary's
+// serialization for hash bodies, fingerprints and pubkeys).
+func hexBody(t *testing.T, raw json.RawMessage, n int) []byte {
+	t.Helper()
+	var hexstr string
+	mustJSON(t, raw, &hexstr)
+	b, err := hex.DecodeString(hexstr)
+	if err != nil || len(b) != n {
+		t.Fatalf("bad %d-byte hex body %q", n, hexstr)
+	}
+	return b
 }
