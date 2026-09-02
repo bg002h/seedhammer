@@ -50,10 +50,23 @@ type Branch struct {
 	// even when K/N are not, so a branch is never reported as keyless.
 	Keys int
 	// Timelock/Hashlock report whether the branch requires one ANYWHERE within
-	// it. They are presence flags, not counts: an operator needs to know a
-	// spend path is time- or hash-gated, and the exact value is a render.
-	Timelock bool
-	Hashlock bool
+	// it. Locks and Sha256Digests carry the values, in wire order, so the
+	// composer's consent surface (SPEC_wallet_policy_composer.md §7e) can say
+	// "older 26280 blocks" instead of "time-locked"; a value is a fact from the
+	// decoded tree, not a rendering, so the no-text rule above still holds. A
+	// Lock carries its KIND, because the bare operand cannot: §4c's bands
+	// overlap on the wire (blocks 1..65535 and units 4194305..4259839 both sit
+	// inside the height band 1..499999999), so 26280 alone is equally
+	// older(26280) and after(26280). Only sha256 digests are carried (the
+	// composer emits no other hash); the other hash tags still set Hashlock.
+	Timelock      bool
+	Hashlock      bool
+	Locks         []Lock
+	Sha256Digests [][32]byte
+	// Sorted is set with K/N: true for sortedmulti/sortedmulti_a, false for
+	// multi/multi_a, so §7e's "unsorted where sorted was legal" mark is read
+	// from the decoded md1 rather than from builder state.
+	Sorted bool
 	// Depth is the taptree depth of this leaf (0 for wsh/sh).
 	Depth int
 }
@@ -113,18 +126,18 @@ func policyShape(tree node) PolicyShape {
 			}
 			inner = ib.children[0]
 		}
-		br, ok := branchOf(inner, 0)
+		brs, ok := splitBranches(inner, 0)
 		if !ok {
 			return PolicyShape{}
 		}
-		s.Branches = append(s.Branches, br)
+		s.Branches = append(s.Branches, brs...)
 	default:
 		// wpkh/pkh and anything else: a single-key or unclassifiable root.
-		br, ok := branchOf(tree, 0)
+		brs, ok := splitBranches(tree, 0)
 		if !ok {
 			return PolicyShape{}
 		}
-		s.Branches = append(s.Branches, br)
+		s.Branches = append(s.Branches, brs...)
 	}
 	return s
 }
@@ -145,12 +158,60 @@ func walkTapTree(n node, depth int, s *PolicyShape) {
 	if depth-1 > s.TapDepth {
 		s.TapDepth = depth - 1
 	}
-	br, ok := branchOf(n, depth-1)
+	brs, ok := splitBranches(n, depth-1)
 	if !ok {
 		s.Complete = false
 		return
 	}
-	s.Branches = append(s.Branches, br)
+	s.Branches = append(s.Branches, brs...)
+}
+
+// splitBranches turns a node into one Branch per ALTERNATIVE: or_b/or_c/or_d/
+// or_i are two alternatives each (recursively), andor(X,Y,Z) is (X and Y) or
+// Z, and anything else is one branch. thresh(k,...) with k < n is also a set
+// of alternatives but a combinatorial one; it stays one branch, honestly
+// described by collect. ok=false propagates an unknown tag exactly as
+// branchOf does.
+func splitBranches(n node, depth int) ([]Branch, bool) {
+	switch n.tag {
+	case tagOrB, tagOrC, tagOrD, tagOrI:
+		b, ok := n.body.(childrenBody)
+		if !ok || len(b.children) != 2 {
+			return nil, false
+		}
+		left, ok := splitBranches(b.children[0], depth)
+		if !ok {
+			return nil, false
+		}
+		right, ok := splitBranches(b.children[1], depth)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	case tagAndOr:
+		b, ok := n.body.(childrenBody)
+		if !ok || len(b.children) != 3 {
+			return nil, false
+		}
+		// The X-and-Y half is summarized as a conjunction; the synthetic node is
+		// never emitted or encoded, only walked.
+		xy := node{tag: tagAndV, body: childrenBody{children: []node{b.children[0], b.children[1]}}}
+		left, ok := splitBranches(xy, depth)
+		if !ok {
+			return nil, false
+		}
+		right, ok := splitBranches(b.children[2], depth)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	default:
+		br, ok := branchOf(n, depth)
+		if !ok {
+			return nil, false
+		}
+		return []Branch{br}, true
+	}
 }
 
 // branchOf summarizes ONE spend path. ok=false means an unrecognised tag, which
@@ -162,9 +223,10 @@ func branchOf(n node, depth int) (Branch, bool) {
 		return Branch{}, false
 	}
 	br.Keys = len(keys)
-	// A bare threshold-over-keys, possibly wrapped: report k-of-N.
-	if k, nkeys, ok := plainMulti(n); ok {
-		br.K, br.N = k, nkeys
+	// A bare threshold-over-keys, possibly wrapped: report k-of-N and whether
+	// it was the sorted spelling.
+	if k, nkeys, sorted, ok := plainMulti(n); ok {
+		br.K, br.N, br.Sorted = k, nkeys, sorted
 	}
 	return br, true
 }
@@ -172,22 +234,22 @@ func branchOf(n node, depth int) (Branch, bool) {
 // plainMulti unwraps wrappers to find a bare multi/sortedmulti/multi_a/
 // sortedmulti_a. Anything else returns ok=false, so K/N stay zero rather than
 // being invented for a shape that is not a plain threshold over keys.
-func plainMulti(n node) (int, int, bool) {
+func plainMulti(n node) (int, int, bool, bool) {
 	for {
 		switch n.tag {
 		case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 			if b, ok := n.body.(multiKeysBody); ok {
-				return int(b.k), len(b.indices), true
+				return int(b.k), len(b.indices), n.tag == tagSortedMulti || n.tag == tagSortedMultiA, true
 			}
-			return 0, 0, false
+			return 0, 0, false, false
 		case tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
 			b, ok := n.body.(childrenBody)
 			if !ok || len(b.children) != 1 {
-				return 0, 0, false
+				return 0, 0, false, false
 			}
 			n = b.children[0]
 		default:
-			return 0, 0, false
+			return 0, 0, false, false
 		}
 	}
 }
@@ -215,8 +277,17 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 		return true
 	case tagAfter, tagOlder:
 		br.Timelock = true
+		if v, ok := n.body.(timelockBody); ok {
+			br.Locks = append(br.Locks, lockFromWire(n.tag, uint32(v)))
+		}
 		return true
-	case tagSha256, tagHash256, tagRipemd160, tagHash160:
+	case tagSha256:
+		br.Hashlock = true
+		if h, ok := n.body.(hash256Body); ok {
+			br.Sha256Digests = append(br.Sha256Digests, [32]byte(h))
+		}
+		return true
+	case tagHash256, tagRipemd160, tagHash160:
 		br.Hashlock = true
 		return true
 	case tagTrue, tagFalse:
