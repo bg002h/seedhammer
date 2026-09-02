@@ -122,6 +122,9 @@ func derivedSlotOrigin(script md.MultisigScript, account uint32) bip32.Path {
 // is this device's convention rather than an authority's, which is exactly why
 // §0.1a requires it to be ANNOUNCED loudly rather than merely applied
 // (buildOriginAnnouncement).
+//
+// The wallet-policy composer's md.ComposeWrapper.ScriptType() is the same table
+// extended by tr = 3'; gui/composer_origin_test.go keeps the two in step.
 func multisigScriptTypeComponent(script md.MultisigScript) uint32 {
 	if script == md.MultisigShWsh {
 		return 1
