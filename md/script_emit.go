@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"sort"
+
+	btcaddr "github.com/btcsuite/btcd/address/v2"
 )
 
 // Witness-script emission for segwit v0 (Stage 3).
@@ -47,6 +49,7 @@ const (
 	// terminator multi_a uses in place of CHECKMULTISIG's implicit compare.
 	opCHECKSIGADD      = 0xba
 	opNUMEQUAL         = 0x9c
+	opNUMEQUALVERIFY   = 0x9d
 	opCHECKMULTISIGVER = 0xaf
 	opCSV              = 0xb2 // OP_CHECKSEQUENCEVERIFY
 	opCLTV             = 0xb1 // OP_CHECKLOCKTIMEVERIFY
@@ -177,6 +180,29 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		*out = append(*out, opCHECKSIG)
 		return nil
 
+	case tagPkH:
+		// `pkh(K)` on the wire is miniscript's `c:pk_h(K)`, the same implicit
+		// `c:` as PkK above (SPEC §5.1 Q12), so the arm emits the whole
+		// DUP HASH160 <hash160(K)> EQUALVERIFY CHECKSIG. The key is hashed AS
+		// SUPPLIED: 33-byte compressed in segwit-v0, 32-byte x-only under tap
+		// (BIP-342's pk_h hashes the x-only key), exactly as PkK pushes it.
+		//
+		// The composer is the first producer of this fragment on this device
+		// (Multisig Build only ever wrote sortedmulti); md/compose_pkh_emit_test.go
+		// pins it to the Rust primary's addresses for five vectors.
+		b, ok := n.body.(keyArgBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		k, ok := e.keys[b.index]
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opDUP, opHASH160)
+		pushData(out, btcaddr.Hash160(k))
+		*out = append(*out, opEQUALVERIFY, opCHECKSIG)
+		return nil
+
 	case tagCheck:
 		// `c:X` — X then OP_CHECKSIG.
 		c, ok := n.body.(childrenBody)
@@ -212,6 +238,16 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 			(*out)[len(*out)-1] = opCHECKMULTISIGVER
 		case opEQUAL:
 			(*out)[len(*out)-1] = opEQUALVERIFY
+		case opNUMEQUAL:
+			// `v:multi_a(...)`: multi_a terminates in OP_NUMEQUAL, and miniscript
+			// folds it to OP_NUMEQUALVERIFY exactly as it folds CHECKSIG and
+			// EQUAL. Missing here until the composer's corpus carried the first
+			// verify-wrapped multi_a (keyed_compose_tr_nums_three_leaves), which
+			// derived a WRONG taproot address against Rust's
+			// (composer-S2-implementation-report F-1). A Go-only convergence
+			// fix: the Rust primary emits scripts through rust-miniscript, whose
+			// verify fold has always covered NUMEQUAL.
+			(*out)[len(*out)-1] = opNUMEQUALVERIFY
 		default:
 			*out = append(*out, opVERIFY)
 		}

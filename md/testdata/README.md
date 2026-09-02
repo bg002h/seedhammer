@@ -138,3 +138,47 @@ NOT a conformance vector, and must not be swept into
 `md/conformance_keyed_test.go`'s glob, which expects identities it has no reason
 to carry. Pinned by shape — when the emitter grows `and_v`/`older` leaves the
 test FAILS saying the gap is closed, rather than going quiet.
+
+**Status 2026-09-02: CLOSED.** The paragraph above describes the gap as it was
+filed. F-214's emitter grew `and_v`/`older` leaves, the pinned test failed with
+"THE GAP IS CLOSED", the derived address matched the vendored one byte for byte,
+and the test is now the positive `TestTheTimelockedTapLeafGapIsCLOSED`
+(`gui/policy_address_test.go`). The vector stays, as the only timelocked tap leaf
+in this repo.
+
+## The compose corpus (wallet-policy composer, Stage 2)
+
+The 26 `compose_*` / `keyed_compose_*` vectors are the Rust primary's
+`MANIFEST` entries for the composer (descriptor-mnemonic
+`crates/md-codec/tests/compose_support.rs::family()`), vendored by
+`scripts/vendor-compose-vectors.sh` and pinned in
+`compose_vectors.provenance.json` (checked by `md/compose_vectors_pin_test.go`).
+They are all FORCE-CHUNKED, so they are deliberately absent from
+`singleStringVectorNames`/`byteParityVectorNames`; their byte and chunk parity
+is asserted by `md/compose_test.go` against the BUILDER (`md.Compose`), not
+against a hand-loaded descriptor. Two further `family()` entries
+(`compose_wsh_keyless_hash_path`, `compose_wsh_keyless_hash_only`) are
+`no-corpus`: the primary's exporter refuses a signature-free path, so they are
+mirrored as chunk-set literals in `md/compose_test.go`, produced by
+`md compose ... --experimental | md encode --experimental --force-chunked`.
+
+### `gap_wsh_andor` (composer Stage 2 fold, added 2026-09-02)
+
+`wsh(andor(pk(@0),older(144),pk(@1)))`, keyed with the journey's cosigners @0
+and @1 (fingerprint 73c5da0a), encoded by the Rust primary at descriptor-mnemonic
+`66bdf2f4`:
+
+    md encode --force-chunked "<the .template>" --key @0=<xpub> --key @1=<xpub> \
+      --fingerprint @0=73c5da0a --fingerprint @1=73c5da0a
+
+It exists because `gap_tr_leaf_pkh` stopped being a gap: Stage 2's `pk_h` arm
+derives it (`gui/policy_address_test.go`, `TestThePkhTapLeafGapIsCLOSED`), and
+`TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses` needed a KEYED shape the
+emitter still refuses to show the "can't derive" consent wording on. `andor` is
+that shape (`md/script_emit.go` has no `tagAndOr` arm). No `.conformance.json`:
+nothing asserts its addresses, and the `keyed_*` globs do not enrol `gap_*`. When
+an `andor` arm lands, this test fails; unlike its two predecessors this fixture
+carries no vendored Rust addresses, so whoever closes the gap must first generate
+`gap_wsh_andor.conformance.json` from the primary (`md address` at the pinned
+commit) to have ground truth to be right against.
+

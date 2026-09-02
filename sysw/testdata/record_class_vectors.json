@@ -1,0 +1,284 @@
+[
+  {
+    "name": "key-journey-cosigner-0",
+    "record": "key:5b37336335646130612f3438272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Key",
+    "host_line": null
+  },
+  {
+    "name": "key-h-spelling",
+    "record": "key:5b37336335646130612f3438682f30682f30682f32685d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Key",
+    "host_line": null
+  },
+  {
+    "name": "key-bare-xpub",
+    "record": "key:7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-origin-shorter-than-depth",
+    "record": "key:5b37336335646130612f3438272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-last-component-mismatch",
+    "record": "key:5b37336335646130612f3438272f30272f30272f33275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-body-not-hex",
+    "record": "key:zz",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-body-uppercase-hex",
+    "record": "key:5B",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-body-empty",
+    "record": "key:",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-depth-3-valid",
+    "record": "key:5b37336335646130612f3438272f30272f30275d7870756236434b5a7455614b3159487051626736434c6147526d734d4b4c514231694b7a73766d7874794844365837677a4c71434232564e5a596431584378726363516e453868684478745962523153616b6b76697379324a3443635478576565476a6d6b6173436f4e5339765a6d",
+    "class": "Key",
+    "host_line": null
+  },
+  {
+    "name": "key-testnet-tpub-valid",
+    "record": "key:5b37336335646130612f3438272f31272f30272f32275d747075624446483964677a76657944387a5462505546754c72476d4379644e76786568794e6455584b4a41514e387834615a346a36555a7147666e71467244344e7179615456474b62764557353474737650544b32556f5362434331504a593869434e6977544c3352575a45686551",
+    "class": "Key",
+    "host_line": null
+  },
+  {
+    "name": "key-depth-2-refused",
+    "record": "key:5b37336335646130612f3438272f30275d787075623639784456786235326d37484c693856346242556f7351646a41343771476b5142354b6738454b6867417737386e41615066625a3761765a544862506f58716a7a5743337761766b375a75524e7737325843533343795339587568594a7141764d457245644562366e3254",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-depth-5-refused",
+    "record": "key:5b37336335646130612f3438272f30272f30272f32272f305d78707562364767475a4369657850337170683533486a50694c7237476b5846746669635455677661706e4a32583275696737795a763578674538635163445367396f6538597062626f4b43476b68724742565a525973354776585a39366835556b32514845554d735a7250374d764c",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-fingerprint-uppercase",
+    "record": "key:5b37334335444130412f3438272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-fingerprint-7-hex",
+    "record": "key:5b373363356461302f3438272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-origin-no-path",
+    "record": "key:5b37336335646130615d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-origin-longer-than-depth",
+    "record": "key:5b37336335646130612f3438272f30272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-origin-unterminated",
+    "record": "key:5b37336335646130612f3438272f30272f30272f32277870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-body-not-utf8",
+    "record": "key:ff",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-uppercase-H-marker-out-of-scope",
+    "record": "key:5b37336335646130612f3438482f30482f30482f32485d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "hash-valid",
+    "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-valid-zeros",
+    "record": "hash:0000000000000000000000000000000000000000000000000000000000000000",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-63-chars",
+    "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a",
+    "class": "Unknown",
+    "host_line": "record 0: hash: must be exactly 64 hex characters"
+  },
+  {
+    "name": "hash-66-chars",
+    "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: must be exactly 64 hex characters"
+  },
+  {
+    "name": "hash-uppercase",
+    "record": "hash:A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: must be exactly 64 hex characters"
+  },
+  {
+    "name": "hash-empty",
+    "record": "hash:",
+    "class": "Unknown",
+    "host_line": "record 0: hash: must be exactly 64 hex characters"
+  },
+  {
+    "name": "hash-31-bytes",
+    "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: must be exactly 64 hex characters"
+  },
+  {
+    "name": "now-seconds-only",
+    "record": "now:31373536363834383030",
+    "class": "Now",
+    "host_line": null
+  },
+  {
+    "name": "now-seconds-and-height",
+    "record": "now:313735363638343830302c393130303030",
+    "class": "Now",
+    "host_line": null
+  },
+  {
+    "name": "now-min",
+    "record": "now:31",
+    "class": "Now",
+    "host_line": null
+  },
+  {
+    "name": "now-max-both",
+    "record": "now:323134373438333634372c343939393939393939",
+    "class": "Now",
+    "host_line": null
+  },
+  {
+    "name": "now-zero-seconds",
+    "record": "now:30",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-seconds-2^31",
+    "record": "now:32313437343833363438",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-height-zero",
+    "record": "now:313735363638343830302c30",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-height-at-time-threshold",
+    "record": "now:313735363638343830302c353030303030303030",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-trailing-comma",
+    "record": "now:313735363638343830302c",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-letters",
+    "record": "now:616263",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-body-not-hex",
+    "record": "now:zz",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-body-not-utf8",
+    "record": "now:ff",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-empty",
+    "record": "now:",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-body-uppercase-hex",
+    "record": "now:313735363638343830302C393130303030",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-unicode-digits",
+    "record": "now:d9a1d9a7d9a5d9a6d9a6d9a8d9a4d9a8d9a0d9a0",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-leading-zeros-valid",
+    "record": "now:30303031373536383030",
+    "class": "Now",
+    "host_line": null
+  },
+  {
+    "name": "key-body-odd-length",
+    "record": "key:5b3",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "now-seconds-eleven-digits",
+    "record": "now:3031373536363834383030",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "now-height-ten-digits",
+    "record": "now:313735363638343830302c30343939393939393939",
+    "class": "Unknown",
+    "host_line": "record 0: now: must be <seconds>[,<height>] in range"
+  },
+  {
+    "name": "key-origin-component-unhardened-2^31",
+    "record": "key:5b37336335646130612f323134373438333634382f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "key-origin-component-plus-sign",
+    "record": "key:5b37336335646130612f2b3438272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
+    "class": "Unknown",
+    "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  }
+]

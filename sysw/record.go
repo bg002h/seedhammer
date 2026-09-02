@@ -41,6 +41,17 @@ const (
 	// path. Classification already proved it parses; no confirmation walk
 	// exists for it. Same secrecy reasoning as ClassMt.
 	ClassTx
+	// ClassKey, ClassHash, ClassNow are the wallet-policy COMPOSER's records
+	// (SPEC_wallet_policy_composer.md §6a; SPEC_systemwide_payloads.md 5.3):
+	// a cosigner's [fingerprint/path]xpub, a sha256 digest for a hashlock, and
+	// the pack time with an optional height. None is secret or bearer. Body
+	// rules and prefixes live in composer_records.go, ported as one unit from
+	// the host's composer_records.rs and pinned row-for-row by the vendored
+	// record_class_vectors.json (§12 item 8). A malformed one is ClassUnknown
+	// and the device leaves it inert; the §8n line is the HOST's.
+	ClassKey
+	ClassHash
+	ClassNow
 )
 
 // IsSecret extends the shipped predicate (seal/session.go:17, which is
@@ -120,6 +131,9 @@ func Classify(record string) Class {
 			}
 		}
 		return ClassUnknown
+	}
+	if IsComposerRecord(record) {
+		return classifyComposer(record)
 	}
 	return classifyConstellation(record)
 }

@@ -104,7 +104,38 @@ func TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses(t *testing.T) {
 		t.Errorf("the keyless case does not say why there are none:\n%s", keyless)
 	}
 
-	gap := consentText(t, "gap_tr_leaf_pkh")
+	// gap_tr_leaf_pkh was the underivable example until the composer's Stage 2
+	// grew the pk_h arm (2026-09-02; TestThePkhTapLeafGapIsCLOSED). The emitter
+	// has no `andor` arm, so a keyed wsh(andor(...)) card is the shape this
+	// device still cannot derive; the fixture was encoded by the Rust primary
+	// (md/testdata/README.md, "gap_wsh_andor").
+	// It has to be the PROBE (the emitter) that refuses, not an earlier guard:
+	// the same "can't derive" wording is produced when a use-site is not
+	// derivable or when the projection to bip380 fails, and a fixture that
+	// tripped one of those would test a different layer while this test kept
+	// passing (composer-S2-exec-review-r0 M-1).
+	{
+		chunks := loadVectorChunks(t, "gap_wsh_andor")
+		tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
+		if err != nil {
+			t.Fatalf("gap_wsh_andor must decode: %v", err)
+		}
+		for _, k := range keys {
+			if !k.XpubPresent {
+				t.Fatal("gap_wsh_andor must carry real xpubs, or it tests the no-keys guard instead")
+			}
+		}
+		if _, ok := expandedKeysToBip380(keys); !ok {
+			t.Fatal("gap_wsh_andor must have derivable use-sites, or it tests the use-site guard instead")
+		}
+		if _, status := expandedToDescriptor(tpl, keys); status != expandUnsupported {
+			t.Fatalf("gap_wsh_andor must reach the complex branch, got status %v", status)
+		}
+		if _, ok := complexAddressSource(chunks, keys); ok {
+			t.Fatal("gap_wsh_andor now derives: the emitter grew an andor arm; pick a new underivable fixture")
+		}
+	}
+	gap := consentText(t, "gap_wsh_andor")
 	if !strings.Contains(gap, "can't derive") {
 		t.Errorf("an underivable KEYED policy does not say so:\n%s", gap)
 	}
