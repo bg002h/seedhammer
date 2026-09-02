@@ -138,3 +138,19 @@ NOT a conformance vector, and must not be swept into
 `md/conformance_keyed_test.go`'s glob, which expects identities it has no reason
 to carry. Pinned by shape — when the emitter grows `and_v`/`older` leaves the
 test FAILS saying the gap is closed, rather than going quiet.
+
+## The compose corpus (wallet-policy composer, Stage 2)
+
+The 26 `compose_*` / `keyed_compose_*` vectors are the Rust primary's
+`MANIFEST` entries for the composer (descriptor-mnemonic
+`crates/md-codec/tests/compose_support.rs::family()`), vendored by
+`scripts/vendor-compose-vectors.sh` and pinned in
+`compose_vectors.provenance.json` (checked by `md/compose_vectors_pin_test.go`).
+They are all FORCE-CHUNKED, so they are deliberately absent from
+`singleStringVectorNames`/`byteParityVectorNames`; their byte and chunk parity
+is asserted by `md/compose_test.go` against the BUILDER (`md.Compose`), not
+against a hand-loaded descriptor. Two further `family()` entries
+(`compose_wsh_keyless_hash_path`, `compose_wsh_keyless_hash_only`) are
+`no-corpus`: the primary's exporter refuses a signature-free path, so they are
+mirrored as chunk-set literals in `md/compose_test.go`, produced by
+`md compose ... --experimental | md encode --experimental --force-chunked`.
