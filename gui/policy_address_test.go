@@ -370,48 +370,42 @@ func TestTheTimelockedTapLeafGapIsCLOSED(t *testing.T) {
 	}
 }
 
-// TestPkhTapLeafGapIsPinnedByShape is the NEW tripwire, and it covers what the
-// old one did: complexAddressSource's DERIVE PROBE.
+// TestThePkhTapLeafGapIsCLOSED. `pkh()` in a tap leaf was the shape that pinned
+// complexAddressSource's DERIVE PROBE after F-214 closed the timelocked leaf:
+// the emitter had no `tagPkH` case, and this test FAILED the moment it grew one
+// ("THE GAP IS CLOSED", 2026-09-02, the wallet-policy composer's Stage 2, which
+// added the arm because a single-key wsh path lowers to pkh). The address it
+// produced was byte-identical to the vendored Rust one, so -- as its
+// predecessor above -- it is kept as a POSITIVE test rather than deleted: the
+// vector is the only pkh tap leaf in this repo and would notice a regression.
 //
-// The probe exists so "can this device show addresses for this policy" comes
-// from the emitter rather than a hand-kept list. Every conformance vector
-// derives, so removing the probe breaks nothing without a shape that cannot —
-// which is precisely what the closed gap above stopped being.
-//
-// `pkh()` in a tap leaf is that shape today. The PRIMARY derives it; this port's
-// emitter has no `tagPkH` case, and adding one means hashing the derived key,
-// which would pull RIPEMD-160 into a codec that currently does no key work at
-// all. Refused rather than approximated.
-//
-// PINNED BY SHAPE: when the emitter grows `pk_h`, this FAILS saying the gap is
-// closed rather than going quiet. Rust's addresses are vendored beside it.
-func TestPkhTapLeafGapIsPinnedByShape(t *testing.T) {
+// The probe itself is still exercised by shape: every vector now derives, so
+// removing complexAddressSource's refusal branch breaks nothing visible here;
+// TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses covers the "cannot
+// derive" consent wording with a hand-built shape instead.
+func TestThePkhTapLeafGapIsCLOSED(t *testing.T) {
 	chunks := loadVectorChunks(t, "gap_tr_leaf_pkh")
-	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
 	if err != nil {
-		t.Fatalf("the card itself must decode: %v", err)
+		t.Fatalf("expand: %v", err)
 	}
-	// It has to be the PROBE that refuses, not an earlier guard.
-	for _, k := range keys {
-		if !k.XpubPresent {
-			t.Fatal("fixture must carry real xpubs, or it tests the no-keys guard instead")
+	at, ok := complexAddressSource(chunks, keys)
+	if !ok {
+		t.Fatal("a pkh tap leaf no longer derives -- the pk_h arm has regressed")
+	}
+	for _, c := range []struct {
+		chain  string
+		change bool
+	}{{"0", false}, {"1", true}} {
+		for i := 0; i < 2; i++ {
+			want := vectorAddress(t, "gap_tr_leaf_pkh", c.chain, i)
+			got, err := at(uint32(i), c.change)
+			if err != nil {
+				t.Fatalf("chain %s index %d: %v", c.chain, i, err)
+			}
+			if got != want {
+				t.Fatalf("chain %s index %d:\n got  %s\n want %s (rust)", c.chain, i, got, want)
+			}
 		}
-	}
-	if _, ok := expandedKeysToBip380(keys); !ok {
-		t.Fatal("fixture must have derivable use-sites, or it tests the use-site guard instead")
-	}
-	if _, status := expandedToDescriptor(tpl, keys); status != expandUnsupported {
-		t.Fatalf("fixture must reach the complex branch, got status %v", status)
-	}
-
-	if at, ok := complexAddressSource(chunks, keys); ok {
-		want := vectorAddress(t, "gap_tr_leaf_pkh", "0", 0)
-		got, err := at(0, false)
-		if err == nil && got == want {
-			t.Fatalf("THE GAP IS CLOSED: this port now derives %s for a pkh tap leaf, "+
-				"matching Rust. Convert this to a positive test, as its predecessor was.", got)
-		}
-		t.Fatalf("complexAddressSource claims a shape the emitter cannot build "+
-			"(got %q, err %v) — Rust derives %s", got, err, want)
 	}
 }

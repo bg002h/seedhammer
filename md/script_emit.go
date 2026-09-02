@@ -49,6 +49,7 @@ const (
 	// terminator multi_a uses in place of CHECKMULTISIG's implicit compare.
 	opCHECKSIGADD      = 0xba
 	opNUMEQUAL         = 0x9c
+	opNUMEQUALVERIFY   = 0x9d
 	opCHECKMULTISIGVER = 0xaf
 	opCSV              = 0xb2 // OP_CHECKSEQUENCEVERIFY
 	opCLTV             = 0xb1 // OP_CHECKLOCKTIMEVERIFY
@@ -237,6 +238,16 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 			(*out)[len(*out)-1] = opCHECKMULTISIGVER
 		case opEQUAL:
 			(*out)[len(*out)-1] = opEQUALVERIFY
+		case opNUMEQUAL:
+			// `v:multi_a(...)`: multi_a terminates in OP_NUMEQUAL, and miniscript
+			// folds it to OP_NUMEQUALVERIFY exactly as it folds CHECKSIG and
+			// EQUAL. Missing here until the composer's corpus carried the first
+			// verify-wrapped multi_a (keyed_compose_tr_nums_three_leaves), which
+			// derived a WRONG taproot address against Rust's
+			// (composer-S2-implementation-report F-1). A Go-only convergence
+			// fix: the Rust primary emits scripts through rust-miniscript, whose
+			// verify fold has always covered NUMEQUAL.
+			(*out)[len(*out)-1] = opNUMEQUALVERIFY
 		default:
 			*out = append(*out, opVERIFY)
 		}

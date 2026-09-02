@@ -141,6 +141,55 @@ func TestPkhScriptDependsOnTheKey(t *testing.T) {
 	}
 }
 
+// v:multi_a must fold OP_NUMEQUAL into OP_NUMEQUALVERIFY (0x9d), never append
+// OP_VERIFY after it: the two scripts differ, so the leaf hash and the address
+// differ. keyed_compose_tr_nums_three_leaves carries the first verify-wrapped
+// multi_a in this repo; before the fold arm existed it derived a wrong address
+// (composer-S2-implementation-report F-1; the gui address gate is the oracle,
+// this is the byte-level pin).
+func TestVerifyWrappedMultiAFoldsIntoNumEqualVerify(t *testing.T) {
+	chunks := loadPhraseChunks(t, "keyed_compose_tr_nums_three_leaves")
+	keys := map[uint8][]byte{}
+	for i := uint8(0); i < 4; i++ {
+		k := make([]byte, 32)
+		for j := range k {
+			k[j] = byte(i + 1)
+		}
+		keys[i] = k
+	}
+	_, isNUMS, leaves, err := EmitTapLeavesChunks(chunks, keys)
+	if err != nil {
+		t.Fatalf("EmitTapLeavesChunks: %v", err)
+	}
+	if !isNUMS || len(leaves) != 3 {
+		t.Fatalf("isNUMS=%v leaves=%d, want NUMS with three leaves", isNUMS, len(leaves))
+	}
+	folded := 0
+	for i, l := range leaves {
+		s := l.Script
+		for j := 0; j+1 < len(s); j++ {
+			if s[j] == opNUMEQUAL && s[j+1] == opVERIFY {
+				t.Errorf("leaf %d emits OP_NUMEQUAL OP_VERIFY at %d; miniscript folds to OP_NUMEQUALVERIFY", i, j)
+			}
+		}
+		if bytesContain(s, opNUMEQUALVERIFY) {
+			folded++
+		}
+	}
+	if folded != 1 {
+		t.Fatalf("%d leaves carry OP_NUMEQUALVERIFY, want exactly one (the v:multi_a leaf)", folded)
+	}
+}
+
+func bytesContain(s []byte, b byte) bool {
+	for _, x := range s {
+		if x == b {
+			return true
+		}
+	}
+	return false
+}
+
 // Tapscript context: the composer never emits pkh under tr (path_body uses pk /
 // multi_a there), but §9 item 2 asks for the arm in both contexts. A hand-built
 // tr(NUMS, pkh(@0)) leaf must emit DUP HASH160 <hash160(xonly)> EQUALVERIFY

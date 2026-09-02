@@ -154,3 +154,22 @@ against a hand-loaded descriptor. Two further `family()` entries
 `no-corpus`: the primary's exporter refuses a signature-free path, so they are
 mirrored as chunk-set literals in `md/compose_test.go`, produced by
 `md compose ... --experimental | md encode --experimental --force-chunked`.
+
+### `gap_wsh_andor` (composer Stage 2 fold, added 2026-09-02)
+
+`wsh(andor(pk(@0),older(144),pk(@1)))`, keyed with the journey's cosigners @0
+and @1 (fingerprint 73c5da0a), encoded by the Rust primary at descriptor-mnemonic
+`66bdf2f4`:
+
+    md encode --force-chunked "<the .template>" --key @0=<xpub> --key @1=<xpub> \
+      --fingerprint @0=73c5da0a --fingerprint @1=73c5da0a
+
+It exists because `gap_tr_leaf_pkh` stopped being a gap: Stage 2's `pk_h` arm
+derives it (`gui/policy_address_test.go`, `TestThePkhTapLeafGapIsCLOSED`), and
+`TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses` needed a KEYED shape the
+emitter still refuses to show the "can't derive" consent wording on. `andor` is
+that shape (`md/script_emit.go` has no `tagAndOr` arm). No `.conformance.json`:
+nothing asserts its addresses, and the `keyed_*` globs do not enrol `gap_*`. When
+an `andor` arm lands, this test fails and this fixture becomes the next positive
+one, exactly as its two predecessors did.
+

@@ -104,7 +104,12 @@ func TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses(t *testing.T) {
 		t.Errorf("the keyless case does not say why there are none:\n%s", keyless)
 	}
 
-	gap := consentText(t, "gap_tr_leaf_pkh")
+	// gap_tr_leaf_pkh was the underivable example until the composer's Stage 2
+	// grew the pk_h arm (2026-09-02; TestThePkhTapLeafGapIsCLOSED). The emitter
+	// has no `andor` arm, so a keyed wsh(andor(...)) card is the shape this
+	// device still cannot derive; the fixture was encoded by the Rust primary
+	// (md/testdata/README.md, "gap_wsh_andor").
+	gap := consentText(t, "gap_wsh_andor")
 	if !strings.Contains(gap, "can't derive") {
 		t.Errorf("an underivable KEYED policy does not say so:\n%s", gap)
 	}
