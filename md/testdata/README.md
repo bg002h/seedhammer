@@ -139,6 +139,13 @@ NOT a conformance vector, and must not be swept into
 to carry. Pinned by shape — when the emitter grows `and_v`/`older` leaves the
 test FAILS saying the gap is closed, rather than going quiet.
 
+**Status 2026-09-02: CLOSED.** The paragraph above describes the gap as it was
+filed. F-214's emitter grew `and_v`/`older` leaves, the pinned test failed with
+"THE GAP IS CLOSED", the derived address matched the vendored one byte for byte,
+and the test is now the positive `TestTheTimelockedTapLeafGapIsCLOSED`
+(`gui/policy_address_test.go`). The vector stays, as the only timelocked tap leaf
+in this repo.
+
 ## The compose corpus (wallet-policy composer, Stage 2)
 
 The 26 `compose_*` / `keyed_compose_*` vectors are the Rust primary's
@@ -155,13 +162,6 @@ against a hand-loaded descriptor. Two further `family()` entries
 mirrored as chunk-set literals in `md/compose_test.go`, produced by
 `md compose ... --experimental | md encode --experimental --force-chunked`.
 
-
-**Status 2026-09-02: CLOSED.** The paragraph above describes the gap as it was
-filed. F-214's emitter grew `and_v`/`older` leaves, the pinned test failed with
-"THE GAP IS CLOSED", the derived address matched the vendored one byte for byte,
-and the test is now the positive `TestTheTimelockedTapLeafGapIsCLOSED`
-(`gui/policy_address_test.go`). The vector stays, as the only timelocked tap leaf
-in this repo.
 ### `gap_wsh_andor` (composer Stage 2 fold, added 2026-09-02)
 
 `wsh(andor(pk(@0),older(144),pk(@1)))`, keyed with the journey's cosigners @0
