@@ -382,7 +382,7 @@ func TestTheTimelockedTapLeafGapIsCLOSED(t *testing.T) {
 // The probe itself is still exercised by shape: every vector now derives, so
 // removing complexAddressSource's refusal branch breaks nothing visible here;
 // TestWalletPolicyConsentNeverHidesTheAbsenceOfAddresses covers the "cannot
-// derive" consent wording with a hand-built shape instead.
+// derive" consent wording with the vendored `gap_wsh_andor` fixture instead.
 func TestThePkhTapLeafGapIsCLOSED(t *testing.T) {
 	chunks := loadVectorChunks(t, "gap_tr_leaf_pkh")
 	_, keys, err := md.ExpandWalletPolicyChunks(chunks)

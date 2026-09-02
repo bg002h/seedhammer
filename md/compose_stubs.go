@@ -15,7 +15,7 @@ func ComposerStubs(templateChunks, keyedChunks []string) ([][4]byte, error) {
 		return nil, err
 	}
 	out := [][4]byte{tmpl}
-	if keyedChunks != nil {
+	if len(keyedChunks) > 0 {
 		pol, err := FormAwareStubChunks(keyedChunks)
 		if err != nil {
 			return nil, err

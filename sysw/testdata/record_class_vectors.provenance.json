@@ -11,10 +11,10 @@
   "repo": "mnemonic-engrave",
   "remote": "git@github.com:bg002h/mnemonic-engrave.git",
   "path": "crates/me-cli/testdata/record_class_vectors.json",
-  "commit": "38e3ed13eb0d903ae2d24e64edc830a9484dcc6e",
-  "file_commit": "5720e3c0747f72e7c6a6225b2993db9d0d40d24e",
+  "commit": "c05074f1d45970ca416785dfa9d9a812aaa21dbd",
+  "file_commit": "c05074f1d45970ca416785dfa9d9a812aaa21dbd",
   "repo_clean_when_recorded": true,
-  "sha256": "eed6b177d1a3406a69c4a0102635f5d59c6412fa65e106f85b831c4736ac464e",
-  "vectors": 45,
+  "sha256": "5b3960cad7f924f6f1e7f19ef49599814733cee4874d0f5eb48c28af4cd8b312",
+  "vectors": 47,
   "recorded_at": "2026-09-02"
 }

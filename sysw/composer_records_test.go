@@ -52,8 +52,8 @@ func loadRecordClassRows(t *testing.T) []recordClassRow {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatalf("parsing fixture: %v", err)
 	}
-	if len(rows) != pin.Vectors || len(rows) != 45 {
-		t.Fatalf("fixture has %d rows, pin says %d, plan says 45", len(rows), pin.Vectors)
+	if len(rows) != pin.Vectors || len(rows) != 47 {
+		t.Fatalf("fixture has %d rows, pin says %d, plan says 47", len(rows), pin.Vectors)
 	}
 	return rows
 }
@@ -196,6 +196,9 @@ func TestKeyRecordPathGrammarMatchesTheHost(t *testing.T) {
 		"73c5da0a/48H/0H/0H/2H", "73c5da0a/+48'/0'/0'/2'", "73c5da0a/-48'/0'/0'/2'", "73c5da0a/48'/0'/0'/2'/",
 		"73c5da0a/48'/0'//2'", "73c5da0a/ 48'/0'/0'/2'", "73c5da0a/48'/0'/0'/2147483648'", "73C5DA0A/48'/0'/0'/2'",
 		"73c5da0/48'/0'/0'/2'", "73c5da0a", "73c5da0a/", "73c5da0a/48'/0'/0'/3'", "73c5da0a/48'/0'/2'",
+		// An unhardened index of 2^31 would alias hardened 0 through bip32's in-band
+		// hardening bit (composer-S2-exec-review-r0 C-1); 2^31-1 is the last legal one.
+		"73c5da0a/2147483648/0'/0'/2'", "73c5da0a/48'/2147483648/0'/2'",
 	} {
 		if _, err := ParseKeyRecord(rec(bad)); err == nil {
 			t.Errorf("%q accepted", bad)

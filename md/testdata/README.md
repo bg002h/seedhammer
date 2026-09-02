@@ -155,6 +155,13 @@ against a hand-loaded descriptor. Two further `family()` entries
 mirrored as chunk-set literals in `md/compose_test.go`, produced by
 `md compose ... --experimental | md encode --experimental --force-chunked`.
 
+
+**Status 2026-09-02: CLOSED.** The paragraph above describes the gap as it was
+filed. F-214's emitter grew `and_v`/`older` leaves, the pinned test failed with
+"THE GAP IS CLOSED", the derived address matched the vendored one byte for byte,
+and the test is now the positive `TestTheTimelockedTapLeafGapIsCLOSED`
+(`gui/policy_address_test.go`). The vector stays, as the only timelocked tap leaf
+in this repo.
 ### `gap_wsh_andor` (composer Stage 2 fold, added 2026-09-02)
 
 `wsh(andor(pk(@0),older(144),pk(@1)))`, keyed with the journey's cosigners @0
@@ -170,6 +177,8 @@ derives it (`gui/policy_address_test.go`, `TestThePkhTapLeafGapIsCLOSED`), and
 emitter still refuses to show the "can't derive" consent wording on. `andor` is
 that shape (`md/script_emit.go` has no `tagAndOr` arm). No `.conformance.json`:
 nothing asserts its addresses, and the `keyed_*` globs do not enrol `gap_*`. When
-an `andor` arm lands, this test fails and this fixture becomes the next positive
-one, exactly as its two predecessors did.
+an `andor` arm lands, this test fails; unlike its two predecessors this fixture
+carries no vendored Rust addresses, so whoever closes the gap must first generate
+`gap_wsh_andor.conformance.json` from the primary (`md address` at the pinned
+commit) to have ground truth to be right against.
 

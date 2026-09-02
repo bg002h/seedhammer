@@ -159,9 +159,14 @@ func ParseNowRecord(record string) (NowRecord, error) {
 	return out, nil
 }
 
-// parseOriginPath is the host's DerivationPath::from_str as applied to the
-// text between "fp/" and "]": one or more elements, each ASCII digits with an
-// optional ' or h hardening marker, no signs, no blanks, no empty element.
+// parseOriginPath is the host's key: path grammar as applied to the text
+// between "fp/" and "]": one or more elements, each ASCII digits with an
+// optional ' or h hardening marker, no signs, no blanks, no empty element, and
+// every index below 2^31. The range check is not decorative: bip32's in-band
+// hardening convention spells hardened 0 as 2147483648, so an UNHARDENED
+// component written "2147483648" would otherwise be re-read as 0h -- a
+// different origin from the one on the record (composer-S2-exec-review-r0 C-1;
+// the host refuses it via ChildNumber::from_normal_idx).
 func parseOriginPath(s string) (bip32.Path, bool) {
 	if s == "" {
 		return nil, false
@@ -177,8 +182,13 @@ func parseOriginPath(s string) (bip32.Path, bool) {
 		if digits == "" {
 			return nil, false
 		}
+		var idx uint64
 		for i := 0; i < len(digits); i++ {
 			if digits[i] < '0' || digits[i] > '9' {
+				return nil, false
+			}
+			idx = idx*10 + uint64(digits[i]-'0')
+			if idx >= 1<<31 {
 				return nil, false
 			}
 		}
