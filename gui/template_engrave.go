@@ -67,7 +67,14 @@ func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int, sh
 			"TEMPLATE-ONLY md1 (advanced)",
 			fmt.Sprintf("Policy: %s", policyTypeLabel(tmpl)),
 			fmt.Sprintf("Key slots: %d", tmpl.N),
-			fmt.Sprintf("Template-ID: %x", templateID),
+			// mk1 stub, NOT the wallet id. This value is the 4-byte
+			// WDT-Id STUB (md.FormAwareStubChunks), and md.WalletIdKind
+			// already prints "Template-ID" for the 16-byte id
+			// (md/template_id.go:152) -- two different values under one
+			// label is how an operator comes to compare the wrong one
+			// against a coordinator and read a match as a mismatch.
+			// SPEC_wallet_policy_composer.md §7c relabels it.
+			fmt.Sprintf("mk1 stub (template): %x", templateID),
 		)
 	} else {
 		// C3 honest-minimal, PLUS a structural summary when one can be given
@@ -76,7 +83,9 @@ func templateConsentLines(tmpl md.Template, templateID [4]byte, tapDepth int, sh
 			"COMPLEX POLICY (advanced)",
 			fmt.Sprintf("Script: %s", complexScriptFamily(tmpl, tapDepth)),
 			fmt.Sprintf("Key slots: %d", tmpl.N),
-			fmt.Sprintf("Template-ID: %x", templateID),
+			// mk1 stub, NOT the wallet id -- see the comment on the same
+			// line in the classifiable branch above (SPEC §7c).
+			fmt.Sprintf("mk1 stub (template): %x", templateID),
 		)
 		// THE CONTRACT: shape.Complete is the ONLY thing that admits a summary.
 		// A partial one is worse than none — SPEC §4.2/C3's objection is exactly

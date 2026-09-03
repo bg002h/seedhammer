@@ -72,6 +72,16 @@ var syswConsumers = []syswConsumer{
 			"progWalletPolicy admits none. This entry is keyed file:fn, so the " +
 			"second offer needed no registration — a consumer landing in a NEW " +
 			"function or file would"},
+	{"multisig_build_payload.go", "buildCosignerSource", []syswProgram{progMultisig},
+		"Build Policy's cosigner cards, through cardSet -- unchecked here until the " +
+			"matcher grew takeAll/cardSet at composer S3"},
+	{"transaction.go", "payloadTransactions", []syswProgram{progTransaction},
+		"Engrave Transaction's two record sweeps (ClassMt and ClassTx), through takeAll"},
+	{"composer_sources.go", "composerKeySources", []syswProgram{progWalletPolicy},
+		"the composer's key: records (§6a), admitted at Wallet Policy alone"},
+	{"composer_sources.go", "composerCardSources", []syswProgram{progWalletPolicy},
+		"the composer's mk1 card sources; their stubs are ignored at seating because " +
+			"the composed policy does not exist yet (§7d)"},
 }
 
 // classNames maps the sysw.Class identifiers a call site can name to their
@@ -85,6 +95,20 @@ var classNames = map[string]sysw.Class{
 	"ClassMDMK":          sysw.ClassMDMK,
 	"ClassAddress":       sysw.ClassAddress,
 	"ClassUnknown":       sysw.ClassUnknown,
+	// The composer's three (SPEC_wallet_policy_composer §6a), admitted at
+	// progWalletPolicy alone. A site naming one of these without an entry here
+	// is reported as "names no sysw.Class constant", which is a true failure
+	// with a false cause -- the worst kind to debug.
+	// ClassMt and ClassTx, for the SAME reason and found by the same widening.
+	// transaction.go:payloadTransactions hard-codes both and consumes through
+	// takeAll, so it was invisible to the matcher until composer S3 grew it;
+	// with the site now visible but its classes unmapped, the oracle reported
+	// "names no sysw.Class constant" about a site that names two of them.
+	"ClassMt":   sysw.ClassMt,
+	"ClassTx":   sysw.ClassTx,
+	"ClassKey":  sysw.ClassKey,
+	"ClassHash": sysw.ClassHash,
+	"ClassNow":  sysw.ClassNow,
 }
 
 func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
@@ -135,7 +159,18 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 				case *ast.Ident:
 					isOffer = strings.HasPrefix(fun.Name, "syswOffer")
 				case *ast.SelectorExpr:
-					isTake = fun.Sel.Name == "take"
+					// `take`, AND the two set-shaped consumptions. Matching
+					// `take` alone left three shipped sites unchecked --
+					// multisig_build_payload.go's cosigner source and
+					// transaction.go's two record sweeps -- because a set is
+					// not the shape `take` serves and they reach for takeAll
+					// and cardSet instead. The composer's own sources would
+					// have been a fourth, which is what made the gap worth
+					// closing rather than noting.
+					switch fun.Sel.Name {
+					case "take", "takeAll", "cardSet":
+						isTake = true
+					}
 				}
 				if !isOffer && !isTake {
 					return true

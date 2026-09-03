@@ -141,7 +141,9 @@ export async function run({ shotURL = "http://127.0.0.1:8732", md1 = [], keyCard
   await waitFor("WalletPolicy");
   taken.push(await screenShot(shotURL, `${prefix}01-carousel.png`));
 
-  // (3) Enter it. The gather screen is what it opens on.
+  // (3) Enter it. The composer's door is now the first screen in every state
+  //     (SPEC_wallet_policy_composer §7a) and opens on "Scan cards".
+  await tap(CONFIRM);
   await tap(CONFIRM);
   await waitFor("md1descriptors:0");
   taken.push(await screenShot(shotURL, `${prefix}02-gather-empty.png`));

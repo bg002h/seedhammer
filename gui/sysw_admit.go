@@ -44,13 +44,34 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 	progBundle:    {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	progSingleSig: {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassMDMK: true},
 	progMultisig:  {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
-	// NO seed class. The Wallet Policy program never derives from a secret: its
-	// proof is addresses derived from the policy's OWN public keys plus a named
-	// wallet id, so admitting a mnemonic would grant a capability the flow has
-	// no use for. Least privilege, and it is enforced here rather than by the
-	// flow declining to ask.
-	progWalletPolicy: {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
-	progBip85:        {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
+	// SEED CLASSES ADMITTED SINCE THE COMPOSER (C12, SPEC_wallet_policy_composer
+	// §6a). This row said "NO seed class ... least privilege", and that was
+	// right for as long as the program only PROVED a wallet policy built
+	// elsewhere: its proof is addresses derived from the policy's own public
+	// keys plus a named wallet id, so a mnemonic granted a capability the flow
+	// had no use for.
+	//
+	// C12 reverses it deliberately. "Build a new policy" AUTHORS a wallet here,
+	// and a slot may be filled from a seed this device holds, so Mnemonic,
+	// Cdx32 and Passphrase are now capabilities the flow USES. Key, Hash and Now
+	// are the composer's own three record classes (§6a) and are admitted at this
+	// program ALONE.
+	//
+	// Least privilege did not stop applying; the privilege the program needs
+	// changed. FreeText and Address are still refused, and that is what the
+	// admission test checks alongside the additions -- a row that admitted
+	// everything would pass an additions-only assertion.
+	progWalletPolicy: {
+		sysw.ClassDescriptor:    true,
+		sysw.ClassMDMK:          true,
+		sysw.ClassMnemonic:      true,
+		sysw.ClassCodex32Secret: true,
+		sysw.ClassPassphrase:    true,
+		sysw.ClassKey:           true,
+		sysw.ClassHash:          true,
+		sysw.ClassNow:           true,
+	},
+	progBip85: {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
 	// Engrave Transaction consumes exactly the two transaction record forms.
 	// NO seed class and no passphrase: the program signs nothing and derives
 	// nothing, so admitting a secret would grant a capability the flow has no

@@ -19,6 +19,24 @@ import (
 	"seedhammer.com/mk"
 )
 
+// DEPRECATED.
+//
+// Deprecated 2026-09-01 in favour of Wallet Policy > Build a new policy.
+// No enforcement by operator ruling (C7, SPEC_wallet_policy_composer.md §8e).
+//
+// THE SENTENCE ABOVE IS UNWRAPPED ON PURPOSE: it is §8e verbatim and
+// TestComposerMultisigBuildCarriesTheDeprecationComment matches substrings of
+// it, so a comment re-flow that splits "Build a new policy" across two lines
+// turns the suite red for a wording change. Reflow the paragraphs below it
+// freely; leave those two lines alone.
+//
+// This flow keeps working, keeps its tests, and is not gated, redirected or
+// removed. What the composer does that this cannot is author anything other
+// than one sortedmulti k-of-n -- taproot, several spend paths, timelocks,
+// hashlocks, key-less paths.
+//
+// A comment with no enforcement is the whole of the ruling. F-150 item 1's
+// dead end stays as filed and is not fixed here.
 // ─── T6c Phase B: the on-device "Build policy" authoring path ────────────────
 //
 // buildMultisigPolicyFlow assembles a sortedmulti k-of-n wallet-policy md1 ON

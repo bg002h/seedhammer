@@ -34,65 +34,87 @@ import (
 // walletPolicyFlow is the walletPolicy program front door.
 func walletPolicyFlow(ctx *Context, th *Colors) {
 	const title = "Wallet Policy"
-	// The payload's cards are offered ONCE, before gathering, through the SAME
-	// offer() a scanned card enters by — bundleFlow does it this way and for the
-	// reason stated there: a separate insertion path would be a second way for a
-	// card to join the set, and only one of them would have the checks.
-	//
-	// EVERY md1/mk1 RECORD, not the first (F-76): a card is a chunk SET, and one
-	// record of it completes nothing. Measured here as `md1 descriptors: 0` for
-	// a payload holding a whole six-chunk card.
-	if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
-		ctx.syswBundleSeeds = bodies
-	} else if body, ok := syswOfferAlt(ctx, th, sysw.ClassDescriptor, "Input",
-		"Wallet policy from where?", syswAltScan); ok {
-		// S2's SECOND offer at the SAME door, and it is a second offer rather
-		// than a widened first one for the reason newInputFlow states at its own
-		// pair (gui.go:2761-2767): syswOffer takes ONE class. So this screen is
-		// reached only when the payload holds a Descriptor record AND either
-		// holds no md1 card or the operator declined it.
-		//
-		// A `Descriptor` record IS an outside wallet policy -- which is this
-		// program's whole subject -- so it belongs here and not behind a new
-		// menu. What it is NOT is a card: it carries no chunks, nothing to
-		// gather, deduplicate or reassemble, and no cosigner plates to cut
-		// alongside. So it routes to the descriptor screen and this call
-		// RETURNS; the md1-card path below is untouched.
-		//
-		// `SCAN CARDS`, not `ENTER IT` (F-437). This screen shipped offering to
-		// let the operator "enter" a wallet policy, and DECLINING it falls
-		// through to the md1 card gather below -- an NFC wait, on a device with
-		// no keyboard and no camera. The choice now names the route it actually
-		// takes.
-		//
-		// WHAT CLASSIFICATION ACTUALLY PROVED, and it is not what an earlier
-		// version of this comment claimed. It proved something about
-		// `strings.TrimSpace(body)`, because that is the string
-		// classifyConstellation hands the arm -- while `take` returns `r.body`
-		// unmodified (gui/sysw_session.go:123). The shipped corpus row
-		// `whitespace/leading-space-bip380` is the standing counterexample: it
-		// is `host_admits: true` and single-line, so the seam suite REQUIRES it
-		// to classify, and its raw bytes do not re-parse. So the trim is applied
-		// here too, and the two sides are now the same string by construction
-		// rather than by assertion.
-		//
-		// The half that was always true is the one that matters: the record is
-		// §4.7-ADMITTED. DescriptorScreen encodes on the way to a plate, and
-		// admission is what keeps a §4.2 zero-Script descriptor -- the titled
-		// zero-key BlueWallet shape -- out of Descriptor.encode's panicking
-		// default arm. Parsing proves only that a descriptor exists; admission
-		// proves it is one of §4.7's seven forms with every conjunct holding.
-		//
-		// The error return stays. It is no longer guarding an impossibility, and
-		// even when it was, a silent nil dereference would have been a worse
-		// answer than leaving the program.
-		desc, err := nonstandard.OutputDescriptor([]byte(strings.TrimSpace(body)))
-		if err != nil {
-			showError(ctx, th, title, "Couldn't read the wallet policy from the payload.")
+	// THE DOOR IS A SCREEN IN EVERY STATE SINCE THE COMPOSER (§7a, C6).
+	// Before it, a payload holding neither a card nor a descriptor fell
+	// straight through to the NFC gather below with no screen at all, so an
+	// operator with an empty machine met a wait instead of a choice. Each
+	// choice names the route it takes, which is F-437's ruling applied to the
+	// door rather than to one offer inside it.
+	// THE DOOR IS A LOOP, so Back out of Build lands on the door rather than
+	// on the carousel: Build is one level down from the door, and every other
+	// Back on this device steps back one level.
+	var route composerRoute
+	for {
+		var ok bool
+		route, ok = composerDoorFlow(ctx, th)
+		if !ok {
 			return
 		}
-		descriptorFlow(ctx, th, desc)
-		return
+		if route != composerRouteBuild {
+			break
+		}
+		composerFlow(ctx, th)
+	}
+	if route == composerRouteFromPayload {
+		// The payload's cards are offered ONCE, before gathering, through the SAME
+		// offer() a scanned card enters by -- bundleFlow does it this way and for
+		// the reason stated there: a separate insertion path would be a second way
+		// for a card to join the set, and only one of them would have the checks.
+		//
+		// EVERY md1/mk1 RECORD, not the first (F-76): a card is a chunk SET, and one
+		// record of it completes nothing.
+		if bodies, ok := syswOfferCards(ctx, th, sysw.ClassMDMK, "Cards from where?"); ok {
+			ctx.syswBundleSeeds = bodies
+		} else if body, ok := syswOfferAlt(ctx, th, sysw.ClassDescriptor, "Input",
+			"Wallet policy from where?", syswAltScan); ok {
+			// S2's SECOND offer at the SAME door, and it is a second offer rather
+			// than a widened first one for the reason newInputFlow states at its own
+			// pair (gui.go:2761-2767): syswOffer takes ONE class. So this screen is
+			// reached only when the payload holds a Descriptor record AND either
+			// holds no md1 card or the operator declined it.
+			//
+			// A `Descriptor` record IS an outside wallet policy -- which is this
+			// program's whole subject -- so it belongs here and not behind a new
+			// menu. What it is NOT is a card: it carries no chunks, nothing to
+			// gather, deduplicate or reassemble, and no cosigner plates to cut
+			// alongside. So it routes to the descriptor screen and this call
+			// RETURNS; the md1-card path below is untouched.
+			//
+			// `SCAN CARDS`, not `ENTER IT` (F-437). This screen shipped offering to
+			// let the operator "enter" a wallet policy, and DECLINING it falls
+			// through to the md1 card gather below -- an NFC wait, on a device with
+			// no keyboard and no camera. The choice now names the route it actually
+			// takes.
+			//
+			// WHAT CLASSIFICATION ACTUALLY PROVED, and it is not what an earlier
+			// version of this comment claimed. It proved something about
+			// `strings.TrimSpace(body)`, because that is the string
+			// classifyConstellation hands the arm -- while `take` returns `r.body`
+			// unmodified (gui/sysw_session.go:123). The shipped corpus row
+			// `whitespace/leading-space-bip380` is the standing counterexample: it
+			// is `host_admits: true` and single-line, so the seam suite REQUIRES it
+			// to classify, and its raw bytes do not re-parse. So the trim is applied
+			// here too, and the two sides are now the same string by construction
+			// rather than by assertion.
+			//
+			// The half that was always true is the one that matters: the record is
+			// §4.7-ADMITTED. DescriptorScreen encodes on the way to a plate, and
+			// admission is what keeps a §4.2 zero-Script descriptor -- the titled
+			// zero-key BlueWallet shape -- out of Descriptor.encode's panicking
+			// default arm. Parsing proves only that a descriptor exists; admission
+			// proves it is one of §4.7's seven forms with every conjunct holding.
+			//
+			// The error return stays. It is no longer guarding an impossibility, and
+			// even when it was, a silent nil dereference would have been a worse
+			// answer than leaving the program.
+			desc, err := nonstandard.OutputDescriptor([]byte(strings.TrimSpace(body)))
+			if err != nil {
+				showError(ctx, th, title, "Couldn't read the wallet policy from the payload.")
+				return
+			}
+			descriptorFlow(ctx, th, desc)
+			return
+		}
 	}
 	var gathered []bundleCard
 	for {
