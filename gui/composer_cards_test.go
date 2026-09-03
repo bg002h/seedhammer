@@ -226,3 +226,54 @@ func TestComposerMintCardsSkipsUnseatedSlotsAndNamesTheRest(t *testing.T) {
 			"is a plate that vouches for a wallet nobody composed")
 	}
 }
+
+// TestComposerReMintCarriesTheSourceCardsIdentityFields is review r0 N-1.
+//
+// The re-mint path starts from src.card and appends stubs.
+// TestComposerReMintPreservesExistingStubsInOrder asserts stub count, stub
+// order and the append-once property -- and nothing asserted the identity
+// fields the plate actually carries, so `card.Fingerprint = "00000000"`
+// survived the whole ^TestComposer suite. The code is right by construction
+// (a.fingerprint and a.xpub come from src at seating, so they agree with
+// src.card); the assertion was missing, which is the difference between a
+// property that holds and a property that is held.
+func TestComposerReMintCarriesTheSourceCardsIdentityFields(t *testing.T) {
+	st, template, keyed := composerCardFixture(t)
+	src := composerSource{
+		kind: composerSourceCard, seedID: -1, xpub: composerTestXpubA,
+		card: mk.Card{
+			Network: "mainnet", Path: "m/48'/0'/0'/2'",
+			Fingerprint: "73c5da0a", Stubs: [][4]byte{{1, 2, 3, 4}},
+			Xpub: composerTestXpubA,
+		},
+	}
+	st.sources[0] = src
+	strs, err := composerMintCard(st, 0, template, keyed)
+	if err != nil {
+		t.Fatalf("composerMintCard: %v", err)
+	}
+	card, err := mk.Decode(strs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card.Fingerprint != src.card.Fingerprint {
+		t.Errorf("the re-minted card carries fingerprint %q, the source card carries %q -- "+
+			"the plate would name a key the operator does not hold",
+			card.Fingerprint, src.card.Fingerprint)
+	}
+	if card.Xpub != src.card.Xpub {
+		t.Errorf("the re-minted card carries a different xpub than its source, so the "+
+			"plate would seat into a wallet it cannot spend from:\n got:  %s\n want: %s",
+			card.Xpub, src.card.Xpub)
+	}
+	if card.Network != src.card.Network {
+		t.Errorf("the re-minted card declares network %q, the source card declares %q",
+			card.Network, src.card.Network)
+	}
+	// PATH IS NOT COMPARED AS A STRING HERE. mk's codec re-renders an origin in
+	// `h` notation ("m/48h/0h/0h/2h") where the source card wrote `'`, so a
+	// string comparison fails on a CORRECT card -- which is why
+	// TestComposerMintCardCarriesBothStubsAndRoundTrips compares it
+	// structurally. N-1's subject is the identity the plate names, and that is
+	// the fingerprint and the xpub above.
+}

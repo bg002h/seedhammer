@@ -3,6 +3,8 @@ package gui
 import (
 	"strings"
 	"testing"
+
+	"seedhammer.com/md"
 )
 
 // TestComposerInvariantRefusesTwoSlotsAtOneOriginWithOneFingerprint is §4f's
@@ -136,6 +138,56 @@ func TestComposerMappingLinesPrintOriginsVerbatimAndSayWhatIsNotChecked(t *testi
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the mapping review does not say %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestComposerC29GroupsRenderInSlotOrder is review r0 N-2.
+//
+// byPath is a map[[4]byte][]uint8, so two distinct seeds each duplicated inside
+// one path used to reach the mapping review in map-iteration order -- different
+// on different runs. Cosmetic, but a screenshot walk cannot pin a screen whose
+// row order moves, and an operator comparing two runs of the same build sees
+// two different screens.
+//
+// RUN MANY TIMES, because a nondeterminism test that runs once passes half the
+// time by construction.
+func TestComposerC29GroupsRenderInSlotOrder(t *testing.T) {
+	build := func() []composerSharedSeed {
+		st := &composerState{}
+		st.list = md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+			{Keys: &md.KeySet{K: 2, N: 4, Sorted: true}},
+		}}
+		st.sources = []composerSource{{kind: composerSourceKey}, {kind: composerSourceKey}}
+		composerSizeAssignments(st)
+		// Two DISTINCT masters, each seated twice inside the one path: slots
+		// @0/@2 share one fingerprint, @1/@3 the other.
+		for i := range st.assigned {
+			fp := [4]byte{0xaa}
+			if i%2 == 1 {
+				fp = [4]byte{0xbb}
+			}
+			st.assigned[i] = composerAssignment{src: i % 2, fingerprint: fp, fpPresent: true}
+		}
+		return composerSharedSeedInPath(st)
+	}
+	first := build()
+	if len(first) != 2 {
+		t.Fatalf("INCONCLUSIVE: the fixture produced %d C29 groups, want 2 -- it cannot "+
+			"show an ordering at all", len(first))
+	}
+	if first[0].slots[0] != 0 || first[1].slots[0] != 1 {
+		t.Errorf("the groups are not in slot order: first slots %d and %d",
+			first[0].slots[0], first[1].slots[0])
+	}
+	for i := 0; i < 200; i++ {
+		got := build()
+		for j := range got {
+			if got[j].slots[0] != first[j].slots[0] {
+				t.Fatalf("the C29 groups render in a different order on run %d "+
+					"(group %d starts at slot @%d, was @%d): map iteration order "+
+					"reaches the mapping review", i, j, got[j].slots[0], first[j].slots[0])
+			}
 		}
 	}
 }

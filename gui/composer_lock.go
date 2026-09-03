@@ -209,14 +209,7 @@ func composerLockEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 				// "Relative locks reach at most 455 days..." before typing a
 				// digit -- a refusal for a limit they had not approached. The
 				// date and height pads already say what to type first.
-				if s == "" {
-					return "1 to 65535 blocks", false
-				}
-				n, err := strconv.ParseUint(s, 10, 32)
-				if err != nil || n < 1 || n > 65535 {
-					return composerCopyRelativeCeiling(), false
-				}
-				return composerCopyLockEchoBlocks(uint32(n)), true
+				return composerBlocksBandEcho(s)
 			})
 			if !ok {
 				return false
@@ -225,14 +218,7 @@ func composerLockEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			lock = md.Lock{Kind: md.LockOlderBlocks, Value: uint32(n)}
 		} else {
 			frag, ok := composerDigitEntry(ctx, th, title, "How many days?", 3, func(s string) (string, bool) {
-				if s == "" {
-					return "1 to 388 days", false
-				}
-				n, err := strconv.ParseUint(s, 10, 32)
-				if err != nil || n < 1 || n > 388 {
-					return composerCopyRelativeCeiling(), false
-				}
-				return composerCopyLockEchoDays(uint32(n), composerDaysToUnits(uint32(n))), true
+				return composerDaysBandEcho(s)
 			})
 			if !ok {
 				return false
@@ -288,11 +274,7 @@ func composerLockEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			lock = md.Lock{Kind: md.LockAfterTime, Value: u}
 		} else {
 			frag, ok := composerDigitEntry(ctx, th, title, "Block height", 9, func(s string) (string, bool) {
-				n, err := strconv.ParseUint(s, 10, 64)
-				if err != nil || n < 1 || n > 499_999_999 {
-					return "1 to 499999999", false
-				}
-				return composerCopyLockEchoHeight(uint32(n)), true
+				return composerHeightBandEcho(s)
 			})
 			if !ok {
 				return false
@@ -313,4 +295,49 @@ func composerLockEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 	}
 	st.list.Paths[idx].Lock = &lock
 	return true
+}
+
+// The three RELATIVE/ABSOLUTE entry bands, named rather than written inline in
+// composerLockEdit's closures (review r0 M-1).
+//
+// They bound what the operator can TYPE. md.Lock.Check is the emitter's gate
+// and catches an out-of-band value either way (§12 item 7), so a drift here
+// costs no wrong plate -- it costs the COPY: composerLockAccept would draw
+// "This device will not write that lock value.", the builder-defect line,
+// instead of §8u or the band hint, at an operator who typed one too many. As
+// closures they had no caller a test could reach, so widening any of them by
+// one left the whole suite green.
+//
+// AN EMPTY FIELD SAYS WHAT TO TYPE, not what is too much (§8u, journey M-2):
+// echoing the ceiling at someone who has typed nothing answers a question they
+// have not asked.
+
+func composerBlocksBandEcho(s string) (string, bool) {
+	if s == "" {
+		return "1 to 65535 blocks", false
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || n < 1 || n > 65535 {
+		return composerCopyRelativeCeiling(), false
+	}
+	return composerCopyLockEchoBlocks(uint32(n)), true
+}
+
+func composerDaysBandEcho(s string) (string, bool) {
+	if s == "" {
+		return "1 to 388 days", false
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || n < 1 || n > 388 {
+		return composerCopyRelativeCeiling(), false
+	}
+	return composerCopyLockEchoDays(uint32(n), composerDaysToUnits(uint32(n))), true
+}
+
+func composerHeightBandEcho(s string) (string, bool) {
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || n < 1 || n > 499_999_999 {
+		return "1 to 499999999", false
+	}
+	return composerCopyLockEchoHeight(uint32(n)), true
 }

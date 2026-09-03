@@ -106,6 +106,11 @@ func composerCopyTable() []composerCopyRow {
 			"This build writes dates up to 2038-01-19. For a later time, use a block height instead."},
 		{"composerCopyRelativeCeiling", "8u", composerCopyRelativeCeiling(),
 			"Relative locks reach at most 455 days in blocks or 388 days in time. Use an absolute date."},
+		// §7d's same-key refusal. NOT a §8 blockquote -- §7d states the rule and
+		// §11 admits "a quoted string in its table", which is what this is
+		// (review r0 M-4).
+		{"composerCopySameXpub", "7d", composerCopySameXpub(0, 1),
+			"Slots @0 and @1 hold the same key. Every slot needs a different key."},
 		{"composerCopySameOriginFewFingerprints", "8v", composerCopySameOriginFewFingerprints(),
 			"Two keys declare the same origin and not both carry a fingerprint. This template could not be restored. Use cards or records with fingerprints."},
 	}
@@ -183,8 +188,38 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// exist" -- false of 2045-06-01, on the archetype §4d lists first. The new
 	// body is filed as a §8 addition (F-456) so the spec stays the source this
 	// table is diffed against.
-	if declared != 40 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 40 -- "+
+	// 41 SINCE REVIEW r0 M-4 moved §7d's same-xpub refusal in here: it was an
+	// fmt.Sprintf at its own showError, so §12 item 5's four gates did not
+	// reach it and this scan did not count it.
+	if declared != 41 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 41 -- "+
 			"if that is deliberate, update both", declared)
 	}
+}
+
+// TestComposerCopyTableCoversTheSameXpubRefusal is review r0 M-4.
+//
+// §11: "the copy of each refusal is a blockquote in §8 or a quoted string in
+// its table, so the glyph and modal-fits gates cover it." The same-xpub body
+// §7d requires was neither -- it was an fmt.Sprintf at its own showError, and
+// TestComposerCopyTableCoversEveryBody only scans composerCopy* declarations,
+// so nothing counted it and none of §12 item 5's four gates reached it.
+func TestComposerCopyTableCoversTheSameXpubRefusal(t *testing.T) {
+	body := composerCopySameXpub(0, 1)
+	var found bool
+	for _, r := range composerCopyTable() {
+		if r.fn == "composerCopySameXpub" {
+			found = true
+			if normalizeDrawn(r.got) != normalizeDrawn(body) {
+				t.Errorf("the table's row and the function disagree:\n got:  %q\n want: %q",
+					r.got, body)
+			}
+		}
+	}
+	if !found {
+		t.Error("composerCopySameXpub is not in composerCopyTable, so §12 item 5's glyph, " +
+			"raster, modal-fits and fires-on-condition gates do not reach the same-xpub " +
+			"refusal (§11)")
+	}
+	assertModalBodyFits(t, "the §7d same-xpub refusal", errorScreenBody, body)
 }

@@ -48,6 +48,15 @@ func composerRefusalBody(err error) (string, bool) {
 		return composerCopyRefuseLegacyShape(), true
 	case errors.Is(err, md.ErrComposeTooManySlots):
 		return composerCopyRefuseSlotCap(), true
+	// §8v IS the body for this condition, and without the arm composerShowRefusal
+	// drew the codec's own text -- "md: compose: two slots declare the same
+	// origin without two distinct fingerprints ... slots @0 and @1" -- an
+	// internal `md:` prefix on an operator screen, which §11 forbids (review
+	// r0 M-5). Unreachable today, because composerInvariantViolation refuses at
+	// the mapping review before composerArtifactsFor runs; an unmapped sentinel
+	// is one refactor away from being reachable with no body.
+	case errors.Is(err, md.ErrComposeIndistinguishableSlots):
+		return composerCopySameOriginFewFingerprints(), true
 	}
 	return "", false
 }

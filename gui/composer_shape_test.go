@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -235,4 +236,27 @@ func TestComposerEveryPathHashedWarns(t *testing.T) {
 			"the operator learns to tap past")
 	}
 	assertModalBodyFits(t, "the §8h every-path-hashed warning", errorScreenBody, composerCopyHashEveryPath())
+}
+
+// TestComposerRefusalBodyMapsTheIndistinguishableSlotsSentinel is review r0 M-5.
+//
+// §8v is the body for exactly this condition. Without the arm
+// composerShowRefusal drew md's own text -- an internal `md:` prefix on an
+// operator screen, which §11 forbids. It is unreachable today because
+// composerInvariantViolation refuses at the mapping review first; an unmapped
+// sentinel is one refactor away from being reachable with no body.
+func TestComposerRefusalBodyMapsTheIndistinguishableSlotsSentinel(t *testing.T) {
+	body, ok := composerRefusalBody(md.ErrComposeIndistinguishableSlots)
+	if !ok {
+		t.Fatal("md.ErrComposeIndistinguishableSlots has no §8m/§8v arm, so " +
+			"composerShowRefusal draws the codec's own `md:`-prefixed text (§11)")
+	}
+	if body != composerCopySameOriginFewFingerprints() {
+		t.Errorf("the sentinel maps to %q, want §8v's body", body)
+	}
+	// The CONTROL: an unmapped error still falls through, or this test would
+	// pass on a mapper that returns §8v for everything.
+	if _, ok := composerRefusalBody(errors.New("something else entirely")); ok {
+		t.Error("composerRefusalBody claims a §8 body for an unmapped error")
+	}
 }

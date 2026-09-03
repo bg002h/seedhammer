@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"seedhammer.com/md"
@@ -127,10 +128,20 @@ func composerSharedSeedInPath(st *composerState) []composerSharedSeed {
 		if p.Keys == nil {
 			continue
 		}
+		// BY FIRST SLOT, not by map iteration order (review r0 N-2). Two
+		// distinct seeds each duplicated inside one path produce two §8g
+		// bodies, and ranging a map put them on the mapping review in a
+		// different order every run -- which a screenshot walk cannot pin and
+		// an operator comparing two runs cannot trust. The slots WITHIN a
+		// group are already appended in ascending index.
+		groups := make([][]uint8, 0, len(byPath[i+1]))
 		for _, slots := range byPath[i+1] {
-			if len(slots) < 2 {
-				continue
+			if len(slots) >= 2 {
+				groups = append(groups, slots)
 			}
+		}
+		sort.Slice(groups, func(a, b int) bool { return groups[a][0] < groups[b][0] })
+		for _, slots := range groups {
 			out = append(out, composerSharedSeed{slots: slots, k: int(p.Keys.K), n: int(p.Keys.N)})
 		}
 	}
@@ -220,8 +231,7 @@ func composerMappingReview(ctx *Context, th *Colors, st *composerState) bool {
 		return false
 	}
 	if a, b, dup := composerDuplicateXpub(st); dup {
-		showError(ctx, th, "Key mapping", fmt.Sprintf(
-			"Slots @%d and @%d hold the same key. Every slot needs a different key.", a, b))
+		showError(ctx, th, "Key mapping", composerCopySameXpub(a, b))
 		return false
 	}
 	return composerReadScreen(ctx, th, "Key mapping", composerMappingLines(st))

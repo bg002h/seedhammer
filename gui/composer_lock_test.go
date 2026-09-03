@@ -182,3 +182,67 @@ func TestComposerBelowBoundRefusals(t *testing.T) {
 		assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)
 	}
 }
+
+// TestComposerLockEntryBandsRefuseOnePastTheirCeiling is review r0 M-1.
+//
+// The three entry validators bound what the operator can TYPE. Widening any of
+// them by one left the whole ^TestComposer suite green: md.Lock.Check is the
+// emitter's gate and catches the value either way (§12 item 7, tested at every
+// §4c boundary), so no wrong value reaches a plate. What a drift costs is the
+// COPY -- composerLockAccept would draw "This device will not write that lock
+// value.", the builder-defect line, instead of §8u or the band hint, at an
+// operator who simply typed one too many.
+//
+// Each band is asserted AT its ceiling and ONE PAST it, which is what makes the
+// row fail when the bound moves in either direction.
+func TestComposerLockEntryBandsRefuseOnePastTheirCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		band  func(string) (string, bool)
+		input string
+		want  bool
+	}{
+		{"blocks at the ceiling", composerBlocksBandEcho, "65535", true},
+		{"blocks one past", composerBlocksBandEcho, "65536", false},
+		{"blocks at the floor", composerBlocksBandEcho, "1", true},
+		{"blocks below the floor", composerBlocksBandEcho, "0", false},
+		{"days at the ceiling", composerDaysBandEcho, "388", true},
+		{"days one past", composerDaysBandEcho, "389", false},
+		{"days at the floor", composerDaysBandEcho, "1", true},
+		{"days below the floor", composerDaysBandEcho, "0", false},
+		{"height at the ceiling", composerHeightBandEcho, "499999999", true},
+		{"height one past", composerHeightBandEcho, "500000000", false},
+		{"height at the floor", composerHeightBandEcho, "1", true},
+		{"height below the floor", composerHeightBandEcho, "0", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			echo, ok := tc.band(tc.input)
+			if ok != tc.want {
+				t.Errorf("the band %s %q, want %v -- the entry bound has drifted, so the "+
+					"operator meets composerLockAccept's builder-defect line instead of "+
+					"the band hint", map[bool]string{true: "ACCEPTED", false: "refused"}[ok],
+					tc.input, tc.want)
+			}
+			if echo == "" {
+				t.Errorf("the band returned an empty echo for %q; every entry screen draws "+
+					"this string", tc.input)
+			}
+		})
+	}
+	// The EMPTY field says what to type before what is too much (§8u, journey
+	// M-2), and that is a different string from the ceiling refusal.
+	for _, tc := range []struct {
+		name string
+		band func(string) (string, bool)
+		want string
+	}{
+		{"blocks", composerBlocksBandEcho, "1 to 65535 blocks"},
+		{"days", composerDaysBandEcho, "1 to 388 days"},
+	} {
+		if echo, ok := tc.band(""); ok || echo != tc.want {
+			t.Errorf("the empty %s field echoes %q/%v, want %q/false -- an empty field that "+
+				"quotes the ceiling answers a question the operator has not asked",
+				tc.name, echo, ok, tc.want)
+		}
+	}
+}

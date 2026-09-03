@@ -335,3 +335,15 @@ func composerCopySameOriginFewFingerprints() string {
 		"This template could not be restored. Use cards or records with " +
 		"fingerprints."
 }
+
+// composerCopySameXpub is §7d's same-key refusal.
+//
+// IT LIVES HERE, and that is review r0 M-4's fix rather than a move for
+// tidiness: §11 requires every refusal's copy to be a §8 blockquote or a quoted
+// string in this table, and this body was an fmt.Sprintf at its own showError.
+// composer_copy_test.go's AST scan only counts composerCopy* declarations, so
+// nothing counted it and none of §12 item 5's four gates reached it.
+func composerCopySameXpub(a, b uint8) string {
+	return fmt.Sprintf("Slots @%d and @%d hold the same key. Every slot needs a "+
+		"different key.", a, b)
+}
