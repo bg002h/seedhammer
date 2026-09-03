@@ -329,9 +329,7 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 			if !composerShapeGuard(ctx, th, st) {
 				continue
 			}
-			composerApplyShapeEdit(st, func() {
-				st.list.Paths[idx-1], st.list.Paths[idx] = st.list.Paths[idx], st.list.Paths[idx-1]
-			})
+			composerMoveUp(st, idx)
 			return
 		}
 	}
@@ -412,4 +410,31 @@ func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 		}
 	}
 	return false
+}
+
+// composerMoveUp swaps a path with the one above it and ALWAYS discards the
+// seats, reporting that it did.
+//
+// It does not go through composerApplyShapeEdit, and that is the fix rather
+// than an inconsistency (review r0 I-1). composerShapeSignature carries the
+// wrapper, the path count and each path's key count -- §7d's own list, right
+// for §7d's own enumerated edits -- so reordering two paths with EQUAL key
+// counts left the signature identical and discarded nothing, after
+// composerShapeGuard had already drawn §8j: "Slot numbers change with the
+// shape. Every key you seated will be cleared." §5 numbers slots by first
+// appearance in the emitted text and that text follows LISTED order, so the
+// retained assignments then denoted different spend paths -- the family's keys
+// behind the timelock, the recovery keys spending immediately -- with no screen
+// saying so, and composerSelfCheck agreed because st.list had moved with them.
+//
+// Discarding unconditionally is what §8j already promised. Move up is the one
+// edit whose numbering effect the signature cannot see, because it changes the
+// ORDER of paths and not their shape.
+func composerMoveUp(st *composerState, idx int) bool {
+	if idx <= 0 || idx >= len(st.list.Paths) {
+		return false
+	}
+	st.list.Paths[idx-1], st.list.Paths[idx] = st.list.Paths[idx], st.list.Paths[idx-1]
+	composerDiscardAssignments(st)
+	return true
 }

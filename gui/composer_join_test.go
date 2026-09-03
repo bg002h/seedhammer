@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"seedhammer.com/md"
 )
 
 // ═══ THE JOIN ═══════════════════════════════════════════════════════════════
@@ -272,4 +274,198 @@ func TestComposerWalkFromAKeyedPayloadReachesTheEngraveScreen(t *testing.T) {
 			t.Errorf("the census never says how recovery detects an error.\nLast frame: %q", got)
 		}
 	})
+}
+
+// TestComposerBackAtTheMappingReviewKeepsTheSeatedKeys is C-1's regression, and
+// it is a WALK because the defect is a state, not a value.
+//
+// composerSeatFlow marked each consumed key:/mk1 source `used` and re-asked
+// EVERY slot from index 0 whenever seating was re-entered, while the pick list
+// filters `used` sources out. So the second pass offered
+// ["Type a seed", "Leave unseated"] and nothing else: the operator's own two
+// keys were unreachable, and §7d's "Back keeps assignments" -- stated twice --
+// was unmet. The assignments survived in st.assigned and were then overwritten
+// by a re-ask that could not offer them back.
+//
+// THE ASSERTION IS THAT THE SECOND PASS STILL NAMES A FINGERPRINT. A frame
+// holding only "Type a seed" and "Leave unseated" is the defect exactly.
+func TestComposerBackAtTheMappingReviewKeepsTheSeatedKeys(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newEngravedAwarePlatform()
+		p.engraver = newEngraver()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.sysw = composerSessionWith([]string{
+			composerTestKeyRecord, composerTestKeyRecord2,
+		}, nil)
+
+		frame, quit := runUI(ctx, func() { composerFlow(ctx, &descriptorTheme) })
+		defer quit()
+
+		// Wrapper -> wsh, decline the preset, one 2-of-2 path, Done, Sorted.
+		if got, ok := pumpUntil(frame, "Which script?", 24); !ok {
+			t.Fatalf("the wrapper picker never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Down)
+		click(&ctx.Router, Button3)
+		if got, ok := pumpUntil(frame, "Start from?", 24); !ok {
+			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button1)
+		if got, ok := pumpUntil(frame, "Add a spend path", 24); !ok {
+			t.Fatalf("the path list never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "What can spend on this path?", 24)
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "how many keys?", 24)
+		click(&ctx.Router, Down)
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "how many must sign?", 24)
+		click(&ctx.Router, Down)
+		click(&ctx.Router, Button3)
+		if got, ok := pumpUntil(frame, "Path 1: 2-of-2", 24); !ok {
+			t.Fatalf("the path was never added.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Down, Down, Down) // -> Done
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "Sorted keys, or your order?", 24)
+		click(&ctx.Router, Button3)
+
+		// The stub screen, paged to the end so the checkmark is offered.
+		if got, ok := pumpUntil(frame, "mk1 stub (template)", 32); !ok {
+			t.Fatalf("the stub screen never drew.\nLast frame: %q", got)
+		}
+		composerPageToEnd(t, ctx, frame)
+
+		// PASS 1: seat both slots from the payload's own key: records.
+		got, ok := pumpUntil(frame, "choose a key", 32)
+		if !ok {
+			t.Fatalf("seating never drew.\nLast frame: %q", got)
+		}
+		if !uiContains(got, "73c5da0a") {
+			t.Fatalf("INCONCLUSIVE: the FIRST pass does not offer the payload's keys, so "+
+				"this test cannot tell a lost seat from a payload that never had "+
+				"one.\nFrame: %q", got)
+		}
+		click(&ctx.Router, Button3)
+		if got, ok = pumpUntil(frame, "Slot @1", 32); !ok {
+			t.Fatalf("the second slot was never offered.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button3)
+
+		// The mapping review, then BACK out of it.
+		if got, ok = pumpUntil(frame, "Key mapping", 32); !ok {
+			t.Fatalf("the mapping review never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button1) // Back
+
+		// PASS 2: whatever screen the Back lands on, the operator's own keys
+		// must still be reachable. Before the fix this frame read
+		// "Slot @0 ... Type a seed Leave unseated" and nothing else.
+		if got, ok = pumpUntil(frame, "choose a key", 32); !ok {
+			t.Fatalf("Back at the mapping review did not land on a seating screen.\n"+
+				"Last frame: %q", got)
+		}
+		// IT LANDS ON THE LAST SEATED SLOT, @1 -- not back at @0. This is the
+		// half that tells RESUMING from RE-ASKING: with the re-ask, seating
+		// restarts at slot @0, and because the Back released only @1 the frame
+		// would still name a fingerprint while the operator is a screen further
+		// back than they were. So the slot number is the assertion, not just
+		// the presence of a key.
+		if !uiContains(got, "Slot @1") {
+			t.Errorf("Back at the mapping review did not land on the last seated slot: "+
+				"seating re-asked from slot @0 instead of resuming at @1, so every "+
+				"earlier assignment is overwritten by a pass that cannot offer the "+
+				"sources those assignments still hold (SPEC §7d).\nFrame: %q", got)
+		}
+		if !uiContains(got, "73c5da0a") {
+			t.Errorf("after a Back at the mapping review the payload's own keys are no "+
+				"longer offered: every source is still marked used and the slot was "+
+				"re-asked from scratch, so the policy the operator just reviewed "+
+				"cannot be rebuilt (SPEC §7d, \"Back keeps assignments\").\nFrame: %q", got)
+		}
+	})
+}
+
+// TestComposerSeatingReleasesASourceWhenItsAssignmentIsDropped is C-1's unit
+// half: a released assignment must release the source it held, or the source
+// is filtered out of every later pick list while seating nothing.
+func TestComposerSeatingReleasesASourceWhenItsAssignmentIsDropped(t *testing.T) {
+	st := &composerState{}
+	st.list = md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+	}}
+	st.sources = []composerSource{
+		{kind: composerSourceKey, label: "a", fingerprint: [4]byte{1}, fpPresent: true, used: true},
+		{kind: composerSourceKey, label: "b", fingerprint: [4]byte{2}, fpPresent: true, used: true},
+	}
+	composerSizeAssignments(st)
+	st.assigned[0] = composerAssignment{src: 0}
+	st.assigned[1] = composerAssignment{src: 1}
+
+	if !composerReleaseSeat(st, 1) {
+		t.Fatal("releasing a seated slot reported nothing to release")
+	}
+	if st.assigned[1].src != -1 {
+		t.Errorf("slot @1 still holds source %d after release", st.assigned[1].src)
+	}
+	if st.sources[1].used {
+		t.Error("source 1 is still marked used after its only assignment was released, " +
+			"so no later pick list will offer it while nothing holds it")
+	}
+	if !st.sources[0].used {
+		t.Error("releasing slot @1 released slot @0's source too")
+	}
+	if composerReleaseSeat(st, 1) {
+		t.Error("releasing an already-unseated slot reported that it released something")
+	}
+}
+
+// TestComposerMoveUpDiscardsUnconditionally is I-1.
+//
+// composerShapeSignature carries the wrapper, the path count and each path's
+// key count -- §7d's own list -- so swapping two paths with EQUAL key counts
+// left it identical and composerApplyShapeEdit discarded nothing, AFTER §8j had
+// already told the operator "Every key you seated will be cleared". §5 numbers
+// slots by first appearance in listed order, so the retained assignments then
+// denoted different spend paths, and composerSelfCheck agreed because st.list
+// moved with them.
+//
+// Move up now discards unconditionally, which is what §8j promised.
+func TestComposerMoveUpDiscardsUnconditionally(t *testing.T) {
+	st := &composerState{}
+	st.list = md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+		{Keys: &md.KeySet{K: 1, N: 3, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 1000}},
+	}}
+	st.sources = []composerSource{
+		{kind: composerSourceKey, label: "a", used: true},
+		{kind: composerSourceKey, label: "b", used: true},
+	}
+	composerSizeAssignments(st)
+	for i := range st.assigned {
+		st.assigned[i] = composerAssignment{src: i % 2}
+	}
+
+	before := composerShapeSignature(st.list)
+	discarded := composerMoveUp(st, 1)
+	if after := composerShapeSignature(st.list); after != before {
+		t.Fatalf("INCONCLUSIVE: this fixture's swap MOVED the signature (%q -> %q), so it "+
+			"cannot show that an equal-key-count reorder discards", before, after)
+	}
+	if !discarded {
+		t.Error("Move up discarded nothing on an equal-key-count swap, after §8j had " +
+			"already promised the operator every seated key would be cleared")
+	}
+	for i, a := range st.assigned {
+		if a.src != -1 {
+			t.Errorf("slot @%d still holds source %d after a Move up", i, a.src)
+		}
+	}
+	for i, s := range st.sources {
+		if s.used {
+			t.Errorf("source %d is still marked used after a Move up discarded every seat", i)
+		}
+	}
 }

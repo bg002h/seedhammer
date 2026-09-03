@@ -49,10 +49,56 @@ func composerUnfilledSlots(st *composerState) []uint8 {
 	return out
 }
 
-// composerSeatFlow asks for every slot in emitted order.
+// composerReleaseSeat drops slot i's assignment and RELEASES the source it
+// held, reporting whether there was anything to release.
 //
-// Returns false when the operator backs out of slot @0, which is the
-// directive's rule wherever Back is the way out of an opening screen.
+// The release is the half that was missing. composerSeatFlow marks a consumed
+// key:/mk1 source `used` and the pick list filters `used` sources out, so an
+// assignment dropped without releasing its source takes that key out of every
+// later pick list while nothing holds it -- which is how a Back at the mapping
+// review left an operator with two key: records being offered only "Type a
+// seed" and "Leave unseated" (review r0 C-1).
+//
+// A SEED source is never marked used, because one seed fills any number of
+// slots (C12, §4f), so there is nothing to release for it.
+func composerReleaseSeat(st *composerState, i int) bool {
+	if i < 0 || i >= len(st.assigned) {
+		return false
+	}
+	src := st.assigned[i].src
+	if src < 0 {
+		return false
+	}
+	if src < len(st.sources) && st.sources[src].kind != composerSourceSeed {
+		st.sources[src].used = false
+	}
+	st.assigned[i] = composerAssignment{src: -1}
+	return true
+}
+
+// composerReleaseLastSeat releases the HIGHEST-indexed seated slot, so a Back
+// one level up lands where the operator last was.
+func composerReleaseLastSeat(st *composerState) bool {
+	for i := len(st.assigned) - 1; i >= 0; i-- {
+		if composerReleaseSeat(st, i) {
+			return true
+		}
+	}
+	return false
+}
+
+// composerSeatFlow asks for every UNSEATED slot in emitted order.
+//
+// IT RESUMES, IT DOES NOT RE-ASK (review r0 C-1). Re-entering seating after any
+// Back past this step used to restart at slot @0 and overwrite every
+// assignment, while the pick list filtered out every source those assignments
+// still held -- so §7d's "Back keeps assignments", which the spec states twice,
+// was unmet and the policy the operator had just reviewed became unreachable.
+// A slot that already holds a source is skipped; releasing a slot is what makes
+// it askable again, and that is the one place a source goes back on the list.
+//
+// Returns false when the operator backs out of the FIRST slot it asks, which is
+// the directive's rule wherever Back is the way out of an opening screen.
 func composerSeatFlow(ctx *Context, th *Colors, st *composerState) bool {
 	n := composerSlotCount(st.list)
 	if len(st.assigned) != n {
@@ -62,6 +108,11 @@ func composerSeatFlow(ctx *Context, th *Colors, st *composerState) bool {
 		}
 	}
 	for i := 0; i < n && !ctx.Done; {
+		if st.assigned[i].src >= 0 {
+			// Already seated -- resume past it rather than re-asking.
+			i++
+			continue
+		}
 		slot := uint8(i)
 		var rows []string
 		var srcIdx []int
@@ -78,12 +129,10 @@ func composerSeatFlow(ctx *Context, th *Colors, st *composerState) bool {
 			if i == 0 {
 				return false
 			}
-			// Step BACK one slot, releasing what it held.
+			// Step BACK one slot, releasing what it held so the source it
+			// holds returns to the next pick list.
 			i--
-			if prev := st.assigned[i].src; prev >= 0 && st.sources[prev].kind != composerSourceSeed {
-				st.sources[prev].used = false
-			}
-			st.assigned[i] = composerAssignment{src: -1}
+			composerReleaseSeat(st, i)
 			continue
 		}
 		switch {

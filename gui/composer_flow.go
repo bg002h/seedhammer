@@ -228,13 +228,30 @@ func composerSeatingStep(ctx *Context, th *Colors, st *composerState) bool {
 		}
 		st.sources = append(st.sources, src)
 	}
-	if !composerSeatFlow(ctx, th, st) {
-		return false
+	// BACK AT THE MAPPING REVIEW LANDS ON THE LAST SEATED SLOT, not on the
+	// shape (review r0 C-1). Returning false here used to reach composerFlow's
+	// `continue`, which restarts at the path list -- conflating "back one
+	// screen" with "start the composition again". Releasing the last seat and
+	// looping puts the operator on exactly the slot they were last asked
+	// about, which is the same back-step composerSeatFlow already does one
+	// level down, and the released source is offered again.
+	for !ctx.Done {
+		if !composerSeatFlow(ctx, th, st) {
+			return false
+		}
+		if !composerSeatingComplete(st) && !composerShortfall(ctx, th, st) {
+			return false
+		}
+		if composerMappingReview(ctx, th, st) {
+			return true
+		}
+		if !composerReleaseLastSeat(st) {
+			// Nothing was seated, so there is no slot to land on and Back
+			// leaves the step -- the opening-screen rule, one level up.
+			return false
+		}
 	}
-	if !composerSeatingComplete(st) && !composerShortfall(ctx, th, st) {
-		return false
-	}
-	return composerMappingReview(ctx, th, st)
+	return false
 }
 
 // composerEngraveStep is §7f: the form choice, then what it implies.
