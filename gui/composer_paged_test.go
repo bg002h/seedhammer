@@ -31,7 +31,7 @@ func TestComposerPageLinesNeverOverflowsTheContentBox(t *testing.T) {
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	lines := composerNumberedLines(64)
-	_, shown := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
+	_, shown, _ := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
 	if shown <= 0 {
 		t.Fatalf("composerPageLines laid out %d rows of 64; a 232 px content box holds several", shown)
 	}
@@ -41,7 +41,7 @@ func TestComposerPageLinesNeverOverflowsTheContentBox(t *testing.T) {
 	}
 	t.Logf("per-frame capacity at %v with body text: %d rows", sh2DisplaySize, shown)
 	// And paging from the tail must not report rows past the end.
-	_, tail := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, len(lines)-2, -1)
+	_, tail, _ := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, len(lines)-2, -1)
 	if tail != 2 {
 		t.Errorf("laying out from the second-to-last row drew %d rows, want 2", tail)
 	}

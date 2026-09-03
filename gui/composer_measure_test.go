@@ -22,7 +22,7 @@ func TestComposerMeasureSection13Numbers(t *testing.T) {
 
 	measure := func(name string, lines []string) {
 		t.Helper()
-		_, shown := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
+		_, shown, _ := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
 		pages := 0
 		if shown > 0 {
 			pages = (len(lines) + shown - 1) / shown

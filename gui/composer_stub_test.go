@@ -118,7 +118,7 @@ func TestComposerStubScreenIsPagedAtItsMeasuredCapacity(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
-	_, shown := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
+	_, shown, _ := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, 0, -1)
 	if shown >= len(lines) {
 		t.Fatalf("a 32-slot stub screen claims all %d lines fit one frame; it must page", len(lines))
 	}
@@ -128,7 +128,7 @@ func TestComposerStubScreenIsPagedAtItsMeasuredCapacity(t *testing.T) {
 	// terminates rather than looping short of the end.
 	start, pages := 0, 0
 	for start < len(lines) && pages < 64 {
-		_, n := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, start, -1)
+		_, n, _ := composerPageLines(ctx, &descriptorTheme, sh2DisplaySize, lines, start, -1)
 		if n == 0 {
 			t.Fatalf("paging stalled at line %d: composerPageLines drew nothing", start)
 		}
