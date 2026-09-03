@@ -34,7 +34,8 @@ import (
 //	shTap(x, y)     tap at DEVICE coordinates (0..479, 0..319)
 //	shPress(x, y)   press and HOLD; pair with shRelease for hold-to-confirm
 //	shRelease(x, y) let go
-//	shSysw(which)   choose the systemwide payload: "records" | "cards" | "none"
+//	shSysw(which)   choose the systemwide payload:
+//	                "records" | "cards" | "composer" | "none"
 //	shPace(n)       Writes between yields. The emulator already STARTS at the
 //	                walk pace (pace.go, defaultPace) -- call this only to change
 //	                it, e.g. shPace(1) for the real-time countdown. Clamped to
@@ -76,11 +77,13 @@ func installWalkAPI(p *platform) {
 	}))
 
 	// Which payload the platform serves. A walk must be able to CHOOSE, because
-	// the two blobs exist for different stages: the records payload has the
+	// the three blobs exist for different stages: the records payload has the
 	// classes Load Payload's journey needs, the cards payload has the cosigner
-	// mk1s Build policy's gather needs, and no single blob is both without
-	// invalidating a published document. "none" emulates a machine with an
-	// empty region, which is the case §10.1's detection is written for.
+	// mk1s Build policy's gather needs, the composer payload has the `key:`,
+	// `hash:` and `now:` records the Wallet Policy composer's sources draw
+	// from, and no single blob is all three without invalidating a published
+	// document. "none" emulates a machine with an empty region, which is the
+	// case §10.1's detection is written for.
 	//
 	// Takes effect on the NEXT read. The session caches what it loaded, so a
 	// walk switching mid-session sees the payload it already loaded — which is
@@ -111,14 +114,14 @@ func installWalkAPI(p *platform) {
 
 	js.Global().Set("shSysw", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) < 1 {
-			return "shSysw(\"records\"|\"cards\"|\"none\")"
+			return "shSysw(\"records\"|\"cards\"|\"composer\"|\"none\")"
 		}
 		switch which := args[0].String(); which {
-		case "records", "cards", "none":
+		case "records", "cards", "composer", "none":
 			p.syswChoice = which
 			return which
 		default:
-			return "unknown payload: " + which + " (want records, cards or none)"
+			return "unknown payload: " + which + " (want records, cards, composer or none)"
 		}
 	}))
 }

@@ -96,7 +96,11 @@ jobs:
     # testing.ArtifactDir), so a vet step here would fail on day one for reasons
     # unrelated to this build. `go test` runs its own narrower vet subset, which
     # this tree already passes.
-    - run: CGO_ENABLED=0 go test -tags oraclelive -run '^$' ./oracle/ ./gui/ ./sysw/
+    #
+    # ./cmd/emu/ joined the list when cmd/emu/sysw_composer_payload_live_test.go
+    # was added: a tagged file no step compiles is a file that rots, which is
+    # the whole reason this step exists.
+    - run: CGO_ENABLED=0 go test -tags oraclelive -run '^$' ./oracle/ ./gui/ ./sysw/ ./cmd/emu/
     # F-142: `int` is 64 bits here and 32 bits on the device, so a uint32 read
     # off the wire and widened to `int` behaves differently on the machine than
     # in CI. It already did: ParseHeader compared the section cap as
