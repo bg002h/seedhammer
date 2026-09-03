@@ -83,9 +83,32 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 				return fmt.Errorf("self-check: path %d is key-less in the shape and has %d keys decoded", i+1, b.Keys)
 			}
 		case p.Keys.N >= 2:
-			if b.K != int(p.Keys.K) || b.N != int(p.Keys.N) {
-				return fmt.Errorf("self-check: path %d is %d-of-%d in the shape and %d-of-%d decoded",
-					i+1, p.Keys.K, p.Keys.N, b.K, b.N)
+			// K AND N ARE ONLY MEANINGFUL FOR A PLAIN k-of-N HEAD, and reading
+			// them outside that domain made four of the twelve offered presets
+			// unbuildable (review r0 fold: tiered-recovery and
+			// decaying-multisig, under both wrappers). md.Branch documents it
+			// at md/policy_shape.go:45-48 -- "set ONLY when the branch is
+			// exactly a threshold over KEYS … Zero means 'not a plain k-of-N'
+			// — NOT '1-of-1'" -- and §5 lowers a multi behind a timelock to
+			// and_v(v:multi(k,…),older(n)), which is not one. The self-check
+			// was therefore comparing 2-of-2 against 0-of-0 on an HONEST build
+			// and drawing §8q at an operator whose composition was correct.
+			//
+			// So the threshold is compared where the codec reports one, and
+			// the key COUNT -- which Branch.Keys always carries -- where it
+			// does not. Falling back to Keys is not a weakening: it is the
+			// strongest fact the decoded tree offers for that branch, and the
+			// lock and digest that make the branch not-a-plain-threshold are
+			// themselves compared by value just below.
+			switch {
+			case b.K != 0 || b.N != 0:
+				if b.K != int(p.Keys.K) || b.N != int(p.Keys.N) {
+					return fmt.Errorf("self-check: path %d is %d-of-%d in the shape and %d-of-%d decoded",
+						i+1, p.Keys.K, p.Keys.N, b.K, b.N)
+				}
+			case b.Keys != int(p.Keys.N):
+				return fmt.Errorf("self-check: path %d has %d keys in the shape and %d decoded",
+					i+1, p.Keys.N, b.Keys)
 			}
 		default:
 			if b.Keys != 1 {
