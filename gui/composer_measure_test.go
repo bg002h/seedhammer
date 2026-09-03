@@ -15,6 +15,21 @@ import (
 // re-run when the font moves. The one assertion it does make is that each
 // paged screen actually pages -- because a capacity equal to the whole body
 // would mean the screen never pages and the number is meaningless.
+//
+// SPEC §13 item 1 QUOTES THIS TEST'S OUTPUT VERBATIM, so when a number here
+// moves the spec is stale until it is re-pasted. W-3 moved one:
+//
+//	                    3cc71d9b      after the W-3 band fix
+//	stub_screen         7 per frame   6 per frame  (6 pages -> 7)
+//	pick_list           7             7
+//	consent             7             7
+//	descriptor_plate    596 chars     596 chars
+//
+// The stub screen lost a row because `Template-ID: <32 hex>` no longer fits one
+// line inside the band left of the navigation column, so it WRAPS to two -- the
+// honest cost of not drawing the last hex digit under the Back button. The spec
+// sentence "all three paged screens hold 7 rows per frame" is false from this
+// commit; the stub screen holds 6.
 func TestComposerMeasureSection13Numbers(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
