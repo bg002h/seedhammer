@@ -165,11 +165,17 @@ function mustNot(text, needle, why) {
  * thing that makes a coordinate safe (walk_build_policy.js's own words).
  */
 async function chooseRow(i, expect, label, settle = 350) {
-  const targets = window.shTargets();
+  // HOISTED ABOVE THE CALL (review N-1). It used to sit one line below
+  // `window.shTargets()`, where a stale emu.wasm threw
+  // `TypeError: window.shTargets is not a function` first and this message could
+  // never print. Kept rather than deleted -- run()'s copy fires once at entry,
+  // and this function is also reached from the engrave loop's variant handler,
+  // long after that check has passed.
   if (typeof window.shTargets !== "function") {
     throw new Error("shTargets is missing -- this is a STALE emu.wasm. The browser " +
       "caches it and a cache-buster on index.html does not help; serve on a fresh port.");
   }
+  const targets = window.shTargets();
   if (i >= targets.length) {
     throw new Error(`choosing ${label}: the frame offers ${targets.length} tappable row(s), ` +
       `so row ${i} cannot be reached BY TOUCH. On a device whose only input is the panel ` +
@@ -271,8 +277,8 @@ const ENGRAVE_HANDLERS = [
 
 const DOOR_ROW = "Buildanewpolicy";
 
-async function runEngraveTail({ shotURL, prefix, variantRows, pollMs = 75, settleMs = 150 }) {
-  const acts = [], digests = [], variants = [], shots = [];
+async function runEngraveTail({ shotURL, prefix, variant, pollMs = 75, settleMs = 150 }) {
+  const acts = [], digests = [], variants = [], shots = [], rowsTaken = [];
   let stall = 0, lastSteps = -1, reachedDoor = false, shot = false;
   for (let guard = 0; guard < 20000; guard++) {
     const steps = JSON.parse(window.shToolpath.summary()).steps;
@@ -291,12 +297,43 @@ async function runEngraveTail({ shotURL, prefix, variantRows, pollMs = 75, settl
       digests.push(JSON.parse(window.shToolpath.summary()).digest);
     }
     if (h.name === "choose-variant") {
-      // WHICH VARIANTS ARE OFFERED IS AN ASSERTION. A packed md1/mk1 plate
-      // offers TEXT ONLY; a single short chunk offers TEXT + QR first, and
-      // QR ONLY would hand the operator a plate the SH2 can never read back
-      // (it has no camera). Row 0 is taken either way, but which row 0 IS
-      // gets recorded and checked.
-      variants.push(window.shScreen());
+      // WHICH VARIANTS ARE OFFERED IS AN ASSERTION, AND SO IS WHICH ONE IS
+      // TAKEN (review M-2). A packed md1/mk1 plate offers TEXT ONLY and nothing
+      // else; a single short chunk offers TEXT + QR, TEXT ONLY, QR ONLY -- and
+      // QR ONLY would hand the operator a plate the SH2 can never read back,
+      // because it has no camera.
+      //
+      // The first draft asserted by INCLUSION (`must(v, "TEXT ONLY")`), which
+      // would still have passed if a packed plate began offering all three, and
+      // took the row with a bare CONFIRM on whatever was selected by default --
+      // so it established neither "alone" nor "TEXT + QR is the row taken".
+      const v = window.shScreen();
+      variants.push(v);
+      if (variant) {
+        const n = window.shTargets().length;
+        if (n !== variant.rows.length) {
+          throw new Error(`Choose engraving offers ${n} row(s), the walk expects ` +
+            `${variant.rows.length} (${variant.rows.join(", ")}).\nScreen: ${JSON.stringify(v)}`);
+        }
+        // Joined, so this asserts ORDER as well as presence: the rows are drawn
+        // top to bottom and shTargets reports them in the same order, which is
+        // what makes `take` an index into a known list.
+        must(v, variant.rows.join(""), "Choose engraving's rows, in order");
+        for (const f of (variant.forbid || [])) {
+          mustNot(v, f, "Choose engraving offers a variant the plan says it must not");
+        }
+        // Taken BY ROW rather than by the default selection.
+        await chooseRow(variant.take, null, `Choose engraving: ${variant.rows[variant.take]}`);
+        for (let i = 0; i < 200; i++) {
+          window.shTap(...NOWHERE);
+          await sleep(pollMs);
+          if (!squash(window.shScreen()).includes(h.match)) break;
+        }
+        acts.push({ act: "chooseRow", screen: h.name, row: variant.rows[variant.take] });
+        rowsTaken.push(variant.rows[variant.take]);
+        stall = 0; lastSteps = -1;
+        continue;
+      }
     }
     if (h.name === "bundle-engraved" && !shot) {
       shots.push(await screenShot(shotURL, `${prefix}bundle-engraved.png`));
@@ -326,10 +363,7 @@ async function runEngraveTail({ shotURL, prefix, variantRows, pollMs = 75, settl
     throw new Error(`the engrave tail never returned to the composer door; acts ` +
       `${JSON.stringify(acts)}`);
   }
-  if (variantRows) {
-    for (const v of variants) must(v, variantRows, "Choose engraving");
-  }
-  return { census: JSON.parse(window.shToolpath.strings()), digests, acts, variants, shots };
+  return { census: JSON.parse(window.shToolpath.strings()), digests, acts, variants, shots, taken: rowsTaken };
 }
 
 /**
@@ -521,7 +555,11 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
     const claim = censusClaimOf(censusScreen);
 
     await tap(CONFIRM, 500);
-    const tail = await runEngraveTail({ shotURL, prefix: "k05-", variantRows: "TEXT + QR" });
+    // TEXT + QR is row 0 and is TAKEN by row. QR ONLY is offered here and must
+    // never be the one taken: the SH2 has no camera, so a QR-only plate is one
+    // the machine that cut it can never read back.
+    const tail = await runEngraveTail({ shotURL, prefix: "k05-",
+      variant: { rows: ["TEXT + QR", "TEXT ONLY", "QR ONLY"], take: 0 } });
     taken.push(...tail.shots);
     const flat = compareEngraved(tail.census, claim, expect, "the key-less template plate");
     const doorAgain = window.shScreen();
@@ -532,6 +570,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
       arm, shots: taken, elapsedSec: Math.round((performance.now() - t0) / 1000),
       stubPages: stub.pages.length, consentPages: consent.pages.length,
       censusClaim: claim, engraved: flat, variants: tail.variants,
+      variantRowsTaken: tail.taken,
       digests: tail.digests, needlesProven: proven,
       matched: { templateId: expect.templateId, templateStub: expect.templateStub,
                  strings: flat },
@@ -692,7 +731,11 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   await chooseRow(0, "Source: the systemwide payload", "FROM PAYLOAD");
   await tap(CONFIRM, 500);
   await waitFor("Add a BIP-39 passphrase?");
-  await chooseRow(0, "seed 1", "Skip the passphrase");
+  // THE POST-CONDITION IS THE ONE THE TAP CHANGES (review M-1). "seed 1" is
+  // already on the passphrase screen -- it is the slot prefix in that screen's
+  // own title -- so waiting for it certified nothing about the tap. "(any
+  // slots)" is drawn only by composerSourceRow on the re-drawn pick list.
+  await chooseRow(0, "(any slots)", "Skip the passphrase");
   const seat2b = window.shScreen();
   must(seat2b, "seed 1", "the seed source row");
   must(seat2b, "(any slots)", "the seed row's any-slots note");
@@ -776,7 +819,10 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
 
   // (20) The engrave loop, and the byte comparison.
   await tap(CONFIRM, 500);
-  const tail = await runEngraveTail({ shotURL, prefix: `c13-${form}-`, variantRows: "TEXT ONLY" });
+  // "TEXT ONLY alone" (plan row 20a), asserted as ALONE: one row, and neither of
+  // the other two literals anywhere on the screen.
+  const tail = await runEngraveTail({ shotURL, prefix: `c13-${form}-`,
+    variant: { rows: ["TEXT ONLY"], take: 0, forbid: ["QR ONLY", "TEXT + QR"] } });
   taken.push(...tail.shots);
   const flat = compareEngraved(tail.census, claim, expect, `form ${form}`);
   const doorAgain = window.shScreen();
@@ -787,6 +833,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
     stubPages: [stub1.pages.length, stub2.pages.length],
     mappingPages: mapping.pages.length, consentPages: consent.pages.length,
     censusClaim: claim, censusScreen, engraved: flat, variants: tail.variants,
+    variantRowsTaken: tail.taken,
     digests: tail.digests, needlesProven: proven,
     matched: {
       digest: expect.digest, templateId: expect.templateId,
