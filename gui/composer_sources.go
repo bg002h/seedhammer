@@ -1,10 +1,15 @@
 package gui
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip32"
+	"seedhammer.com/bip39"
 	"seedhammer.com/md"
 	"seedhammer.com/mk"
 	"seedhammer.com/sysw"
@@ -211,4 +216,119 @@ func composerSlotOrder(list md.PathList) []composerSlotPos {
 		}
 	}
 	return out
+}
+
+// composerSeedHook is a TEST-OBSERVATION seam, and nothing else. It fires
+// once, right after the seed entry returns, so a test can capture the words
+// before they are scrubbed. It is nil in production and IT SCRUBS NOTHING --
+// exactly as buildMultisigSeedHook does not (gui/multisig_build.go:36-38).
+//
+// THE SCRUB IS THE REGISTRY'S, AND IT IS ONE SITE. composerFlow installs
+// `defer st.reg.scrub()` at the top, before any seed exists, so every exit --
+// a Back, a refusal screen, a ctx.Done unwind, a panic -- is covered by
+// construction rather than by an implementer remembering to add a scrub to a
+// new return. Copying this hook and not that defer would copy the wrong half.
+var composerSeedHook func(bip39.Mnemonic)
+
+// composerSeedSource takes a seed and registers it.
+//
+// The payload is offered before the keyboard, because §3.3.2 now admits
+// ClassMnemonic here (Task A3) and seedEntryFlowTitled is the shared seam
+// that does the offering. The passphrase is asked PER SEED, at that seed's
+// entry (SPEC 4.1's rule, which buildSeedForSlot states at
+// gui/multisig_build.go:725-737): one flow-global passphrase applied to N
+// seeds would mint keys the operator can only re-derive with a pairing they
+// never chose.
+func composerSeedSource(ctx *Context, th *Colors, st *composerState) (composerSource, bool) {
+	label := fmt.Sprintf("seed %d", st.reg.count()+1)
+	mnemonic, ok := seedEntryFlowTitled(ctx, th, "Seed for the policy", label)
+	if !ok {
+		return composerSource{}, false
+	}
+	if composerSeedHook != nil {
+		composerSeedHook(mnemonic)
+	}
+	// Registered IMMEDIATELY, before the passphrase screens can return early:
+	// from this line the deferred scrub owns these words.
+	seedID, err := st.reg.add(label, mnemonic, "", &chaincfg.MainNetParams)
+	if err != nil {
+		showError(ctx, th, "Seed", "Couldn't read that seed.")
+		return composerSource{}, false
+	}
+	pp := &ChoiceScreen{
+		Title:   "Passphrase " + label,
+		Lead:    "Add a BIP-39 passphrase?",
+		Choices: []string{"Skip", "Add passphrase"},
+	}
+	if sel, ok := pp.Choose(ctx, th); ok && sel == 1 {
+		if pass, ok := syswPassphraseFlowTitled(ctx, th, "Passphrase "+label); ok {
+			if err := st.reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
+				showError(ctx, th, "Seed", "Couldn't apply that passphrase.")
+				return composerSource{}, false
+			}
+		}
+	}
+	seed, _ := st.reg.at(seedID)
+	var fp [4]byte
+	binary.BigEndian.PutUint32(fp[:], seed.MasterFP)
+	return composerSource{
+		kind: composerSourceSeed, label: label,
+		fingerprint: fp, fpPresent: true, seedID: seedID,
+	}, true
+}
+
+// composerSeedAccountFor is §4f's account rule: the slot's ordinal among the
+// slots THIS MASTER fills, in ascending emitted slot index.
+//
+// KEYED ON THE MASTER, NOT THE SEED ID, and buildSlotSources states the
+// reason at gui/multisig_build.go:593-601: keying on the id would mint the
+// SAME key twice whenever one master was registered twice -- which is what an
+// operator does when they type one seed for two slots -- and md's duplicate
+// key refusal would then reject a legitimate multi-account wallet.
+// srcIdx indexes st.sources, NOT composerSource.seedID -- two different
+// numbers on the same struct, and the parameter used to carry the other one's
+// name while every caller passed this one.
+func composerSeedAccountFor(st *composerState, slot uint8, srcIdx int) uint32 {
+	want := st.sources[srcIdx].fingerprint
+	n := uint32(0)
+	for i := 0; i < int(slot) && i < len(st.assigned); i++ {
+		a := st.assigned[i]
+		if a.src < 0 || a.src >= len(st.sources) {
+			continue
+		}
+		s := st.sources[a.src]
+		if s.kind == composerSourceSeed && s.fingerprint == want {
+			n++
+		}
+	}
+	return n
+}
+
+// composerSeedDerive fills one assignment from a seed at its own account.
+func composerSeedDerive(st *composerState, slot uint8, srcIdx int) (composerAssignment, error) {
+	src := st.sources[srcIdx]
+	account := composerSeedAccountFor(st, slot, srcIdx)
+	origin := md.DefaultOrigin(st.list.Wrapper, account)
+	seed, ok := st.reg.at(src.seedID)
+	if !ok {
+		return composerAssignment{}, errors.New("composer: no seed for that slot")
+	}
+	path := make(bip32.Path, 0, len(origin))
+	for _, c := range origin {
+		v := c.Value
+		if c.Hardened {
+			v += hdkeychain.HardenedKeyStart
+		}
+		path = append(path, v)
+	}
+	xpub, masterFP, err := deriveAccountXpub(seed.Mnemonic, seed.Passphrase, &chaincfg.MainNetParams, path)
+	if err != nil {
+		return composerAssignment{}, err
+	}
+	var fp [4]byte
+	binary.BigEndian.PutUint32(fp[:], masterFP)
+	return composerAssignment{
+		src: srcIdx, account: account, origin: origin,
+		fingerprint: fp, fpPresent: true, xpub: xpub,
+	}, nil
 }
