@@ -50,6 +50,11 @@ var composeVectorNames = []string{
 	"keyed_compose_wsh_single_head_or_i", "keyed_compose_wsh_sole_sortedmulti",
 	"keyed_compose_wsh_three_paths", "keyed_compose_wsh_two_path_distinct_fingerprints",
 	"keyed_compose_wsh_two_path_or_d", "keyed_compose_wsh_unsorted_sole",
+	// The six archetype presets, exported by S0b (F-453) and vendored by
+	// scripts/vendor-compose-vectors.sh. 26 -> 32.
+	"keyed_compose_preset_plain_multisig", "keyed_compose_preset_simple_timelocked_inheritance",
+	"keyed_compose_preset_kofn_recovery", "keyed_compose_preset_tiered_recovery",
+	"keyed_compose_preset_hashlock_gated", "keyed_compose_preset_decaying_multisig",
 }
 
 // isComposeVectorFile: the corpus's file names, and nothing else in the
@@ -79,9 +84,9 @@ func TestComposeVectorsMatchTheirProvenancePin(t *testing.T) {
 	if p.Vectors != len(composeVectorNames) {
 		t.Fatalf("pin says %d vectors, this test knows %d", p.Vectors, len(composeVectorNames))
 	}
-	// 22 keyed vectors carry five files, 4 unkeyed carry four: 126.
-	if len(p.Files) != 126 {
-		t.Fatalf("pin lists %d files, want 126", len(p.Files))
+	// 28 keyed vectors carry five files, 4 unkeyed carry four: 156.
+	if len(p.Files) != 156 {
+		t.Fatalf("pin lists %d files, want 156", len(p.Files))
 	}
 	pinned := map[string]bool{}
 	seen := map[string]bool{}
