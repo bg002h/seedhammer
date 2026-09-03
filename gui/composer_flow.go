@@ -40,20 +40,28 @@ func composerFlow(ctx *Context, th *Colors) {
 	// policy read zero for the whole of the decision it exists to inform.
 	st.sources = append(composerKeySources(ctx), composerCardSources(ctx)...)
 
-	w, ok := composerWrapperPick(ctx, th)
-	if !ok {
-		return
-	}
-	st.list.Wrapper = w
-
-	// §7b's step is "Wrapper -> preset or blank -> paths", and this is
-	// that middle step (§4d, task A10). Declining the picker is the BLANK
-	// route, not an error: composerShapeFlow below is unchanged and opens
-	// on an empty path list, which is exactly what it did before presets
-	// existed. Accepting seeds the list with the chosen archetype, whose
+	// §7b's step is "Wrapper -> preset or blank -> paths". The preset picker
+	// (§4d, task A10) is the middle step; its first row is the blank route
+	// and Back there returns to the wrapper choice (S4 walk W-1: Back used
+	// to fall through into the blank path list, so "back" meant "forward").
+	// Accepting a preset seeds the list with the chosen archetype, whose
 	// shape is pinned to the Rust primary's own exported vector.
-	if list, ok := composerPresetPick(ctx, th, w); ok {
-		st.list = list
+	var w md.ComposeWrapper
+	for {
+		var ok bool
+		w, ok = composerWrapperPick(ctx, th)
+		if !ok {
+			return
+		}
+		st.list.Wrapper = w
+		list, ok := composerPresetPick(ctx, th, w)
+		if ok {
+			st.list = list
+			break
+		}
+		if ctx.Done {
+			return
+		}
 	}
 
 	var shown []string // the chunk set the stub screen last displayed (§8s)

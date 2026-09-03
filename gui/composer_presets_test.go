@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"seedhammer.com/md"
 )
@@ -279,4 +280,56 @@ func TestComposerPresetLabelsFitTheirRows(t *testing.T) {
 	if len(seen) != 6 {
 		t.Errorf("the four wrappers offer %d distinct preset names, §4d names six", len(seen))
 	}
+	assertChoiceLabelFits(t, composerPresetBlankRow)
+}
+
+// S4 walk W-1: the blank route is a visible row, first, and Back on the
+// preset picker returns to the wrapper choice instead of falling forward
+// into the empty path list. Driven through the real screens on a machine
+// with no payload, as the operator met it.
+func TestComposerPresetPickerOffersBlankFirstAndBackReturnsToTheWrapper(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newEngravedAwarePlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		frame, quit := runUI(ctx, func() { composerFlow(ctx, &descriptorTheme) })
+		defer quit()
+
+		got, ok := pumpUntil(frame, "Which script?", 24)
+		if !ok {
+			t.Fatalf("the wrapper picker never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Down) // -> Segwit (wsh)
+		click(&ctx.Router, Button3)
+		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
+			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
+		}
+		if !uiContains(got, composerPresetBlankRow) {
+			t.Fatalf("the preset picker offers no blank row (W-1).\nFrame: %q", got)
+		}
+		if i, j := strings.Index(got, composerPresetBlankRow), strings.Index(got, "plain-multisig"); j >= 0 && i > j {
+			t.Errorf("the blank row is not first: it is the choice that commits to nothing.\nFrame: %q", got)
+		}
+
+		// Back means back: the wrapper choice draws again, not the path list.
+		click(&ctx.Router, Button1)
+		if got, ok = pumpUntil(frame, "Which script?", 24); !ok {
+			t.Fatalf("Back on the preset picker did not return to the wrapper choice (W-1).\nLast frame: %q", got)
+		}
+		if uiContains(got, "Add a spend path") {
+			t.Fatalf("Back on the preset picker fell forward into the path list (W-1).\nFrame: %q", got)
+		}
+
+		// The blank row opens the empty path list.
+		click(&ctx.Router, Down)
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "Start from?", 24)
+		click(&ctx.Router, Button3) // row 0 = Build my own paths
+		if got, ok = pumpUntil(frame, "Add a spend path", 24); !ok {
+			t.Fatalf("the blank row did not open the path list.\nLast frame: %q", got)
+		}
+		if uiContains(got, "Path 1:") {
+			t.Errorf("the blank row seeded a path.\nFrame: %q", got)
+		}
+	})
 }

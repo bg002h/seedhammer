@@ -154,7 +154,7 @@ func TestComposerWalkFromAKeyedPayloadReachesTheEngraveScreen(t *testing.T) {
 		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
 			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
 		}
-		click(&ctx.Router, Button1)
+		click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 
 		// (3) THE PATH LIST, whose live line must read the sources the FLOW
 		// loaded -- the half that read `keys available: 0` for every payload.
@@ -311,7 +311,7 @@ func TestComposerBackAtTheMappingReviewKeepsTheSeatedKeys(t *testing.T) {
 		if got, ok := pumpUntil(frame, "Start from?", 24); !ok {
 			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
 		}
-		click(&ctx.Router, Button1)
+		click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 		if got, ok := pumpUntil(frame, "Add a spend path", 24); !ok {
 			t.Fatalf("the path list never drew.\nLast frame: %q", got)
 		}
