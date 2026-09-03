@@ -57,16 +57,37 @@ import (
 //
 // sel is the highlighted row's absolute index, or -1 for a read-only screen.
 func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []string, start, sel int) ([]op.Op, int, []image.Rectangle) {
-	lineWidth := dims.X - 2*8
 	contentTop := leadingSize + 8
 	contentBottom := dims.Y - leadingSize
-	// The band stops short of the navigation column, which layoutNavigation
-	// places at dims.X-btnsz.X. A wrapped row is lineWidth wide and would
-	// otherwise reach under Back/page/take, and op.Drawer.Hit returns the FIRST
-	// registered input containing the point -- so an overlap would be decided
-	// by traversal order rather than by intent.
-	bandLeft := (dims.X - lineWidth) / 2
-	bandRight := min(bandLeft+lineWidth, dims.X-assets.NavBtnPrimary.Bounds().Size().X)
+	// ─── ONE BAND, AND EVERYTHING USES IT (W-3) ─────────────────────────────
+	//
+	// The text is WRAPPED and CENTRED inside the band to the LEFT of the
+	// navigation column, and the touch targets use the same two bounds. It used
+	// to wrap at `dims.X - 2*8` and centre across the WHOLE panel while only the
+	// hit rect stopped at the column, so a line that measured near the wrap
+	// bound was DRAWN under a button: on the S4 shots the Template screen's
+	// `Template-ID: 531ab9e1777f018ae53694387dd0d128` lost its 32nd hex digit
+	// under Back, and the key-less arm's `mk encode` lines lost their tails
+	// under the pager.
+	//
+	// The emulator walk could not see it. op.Drawer.ExtractText collects a
+	// glyph's rune wherever it lands, under a button included, so every
+	// text-presence assertion passed on a screen the operator cannot read.
+	// gui/composer_paged_geometry_test.go rasterises the body instead and looks
+	// for ink inside the button rectangles.
+	//
+	// LONG LINES WRAP, they do not shrink: a 32-hex id with its label becomes
+	// two lines, which costs a row of the per-frame budget and is the honest
+	// trade. The budget below counts the wrapped height, so it stays correct by
+	// construction.
+	//
+	// bandMargin is the SAME margin the left edge always had (the old
+	// `(dims.X - (dims.X-2*8))/2`), applied on the right of the text as well so
+	// a glyph never sits flush against a button it is not part of.
+	const bandMargin = 8
+	bandLeft := bandMargin
+	bandRight := dims.X - assets.NavBtnPrimary.Bounds().Size().X - bandMargin
+	lineWidth := bandRight - bandLeft
 	body := make([]op.Op, 0, len(lines))
 	bands := make([]image.Rectangle, 0, len(lines))
 	shown := 0
@@ -83,7 +104,9 @@ func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []strin
 		if i > start && y+sz.Y > contentBottom {
 			break
 		}
-		pos := image.Pt((dims.X-sz.X)/2, y)
+		// Centred in the BAND, not on the panel: centring on the panel is what
+		// pushed a wide line's right half under the column.
+		pos := image.Pt(bandLeft+(lineWidth-sz.X)/2, y)
 		if i == sel {
 			bg := image.Rectangle{Max: sz}
 			bg.Min.X -= buttonPadX
