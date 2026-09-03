@@ -40,13 +40,20 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 	// operator with an empty machine met a wait instead of a choice. Each
 	// choice names the route it takes, which is F-437's ruling applied to the
 	// door rather than to one offer inside it.
-	route, ok := composerDoorFlow(ctx, th)
-	if !ok {
-		return
-	}
-	if route == composerRouteBuild {
+	// THE DOOR IS A LOOP, so Back out of Build lands on the door rather than
+	// on the carousel: Build is one level down from the door, and every other
+	// Back on this device steps back one level.
+	var route composerRoute
+	for {
+		var ok bool
+		route, ok = composerDoorFlow(ctx, th)
+		if !ok {
+			return
+		}
+		if route != composerRouteBuild {
+			break
+		}
 		composerFlow(ctx, th)
-		return
 	}
 	if route == composerRouteFromPayload {
 		// The payload's cards are offered ONCE, before gathering, through the SAME

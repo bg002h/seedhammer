@@ -215,6 +215,14 @@ func TestComposerNoPayloadWalkEngravesAKeylessTemplate(t *testing.T) {
 		click(&ctx.Router, Down) // -> Segwit (wsh)
 		click(&ctx.Router, Button3)
 
+		// The preset picker (§4d, task A10) sits between the wrapper and the
+		// path list. Back is §7b's BLANK route, which is the one C26 walks:
+		// §12 item 3 composes a shape by hand on a machine with no payload.
+		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
+			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button1)
+
 		// §7b's live line carries NO key count with no payload loaded.
 		if got, ok = pumpUntil(frame, "Add a spend path", 24); !ok {
 			t.Fatalf("the path list never drew.\nLast frame: %q", got)
@@ -395,6 +403,12 @@ func TestComposerBackAtThePathListKeepsTheComposition(t *testing.T) {
 		pumpUntil(frame, "Which script?", 24)
 		click(&ctx.Router, Down)
 		click(&ctx.Router, Button3)
+		// The preset picker (§4d, task A10) sits between the wrapper and
+		// the path list on the FIRST pass; Back is the blank route. The
+		// re-pick after the Back below does NOT pass through it, which is
+		// why this step appears once.
+		pumpUntil(frame, "Start from?", 24)
+		click(&ctx.Router, Button1)
 		pumpUntil(frame, "Add a spend path", 24)
 		click(&ctx.Router, Button3)
 		pumpUntil(frame, "What can spend on this path?", 24)
