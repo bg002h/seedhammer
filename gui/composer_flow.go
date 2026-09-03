@@ -288,7 +288,11 @@ func composerEngraveStep(ctx *Context, th *Colors, st *composerState, template, 
 		}
 	}
 
-	if !confirmReviewScreen(ctx, th, "Plate Count",
+	// The census carries the SUPPLY paths' title (gui/multisig.go,
+	// gui/singlesig.go), not Multisig Build's: the build title is a registered
+	// walk anchor (cmd/emu/needle_test.go) whose proof is that exactly one flow
+	// draws it, and the composer is a supply-shaped flow, not a build.
+	if !confirmReviewScreen(ctx, th, "Plates To Cut",
 		composerCensusLines(ctx.Platform.EngraverParams(), cards)) {
 		return false
 	}
