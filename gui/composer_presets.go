@@ -118,11 +118,20 @@ func composerPresets(w md.ComposeWrapper) []composerPreset {
 
 // composerPresetPick offers the archetypes legal under w and returns the
 // chosen path list. §7b's step is "Wrapper -> preset or blank -> paths", so
-// this sits between composerWrapperPick and composerShapeFlow; declining here
-// is the BLANK route, not an error.
+// this sits between composerWrapperPick and composerShapeFlow.
+//
+// S4 walk W-1 (2026-09-02, on the device): the blank route used to be the
+// Back key alone. An operator who wanted their own shape saw six presets and
+// no way forward, and the one key that worked was the one they expected to go
+// backwards. So the blank route is now a ROW, and the first one: the default
+// selection commits to nothing. Back here now means back, to the wrapper
+// choice, and the caller does that.
+const composerPresetBlankRow = "Build my own paths"
+
 func composerPresetPick(ctx *Context, th *Colors, w md.ComposeWrapper) (md.PathList, bool) {
 	presets := composerPresets(w)
-	choices := make([]string, 0, len(presets))
+	choices := make([]string, 0, len(presets)+1)
+	choices = append(choices, composerPresetBlankRow)
 	for _, p := range presets {
 		choices = append(choices, p.name)
 	}
@@ -131,5 +140,8 @@ func composerPresetPick(ctx *Context, th *Colors, w md.ComposeWrapper) (md.PathL
 	if !ok {
 		return md.PathList{Wrapper: w}, false
 	}
-	return presets[sel].list, true
+	if sel == 0 {
+		return md.PathList{Wrapper: w}, true
+	}
+	return presets[sel-1].list, true
 }

@@ -1363,7 +1363,7 @@ func TestComposerFlowReShowsTheStubScreenOnlyAfterARealEdit(t *testing.T) {
 				if got, ok := pumpUntil(frame, "Start from?", 24); !ok {
 					t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
 				}
-				click(&ctx.Router, Button1)
+				click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 
 				// One 1-of-2 path.
 				if got, ok := pumpUntil(frame, "Add a spend path", 24); !ok {

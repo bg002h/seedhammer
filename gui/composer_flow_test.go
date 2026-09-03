@@ -221,7 +221,7 @@ func TestComposerNoPayloadWalkEngravesAKeylessTemplate(t *testing.T) {
 		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
 			t.Fatalf("the preset picker never drew.\nLast frame: %q", got)
 		}
-		click(&ctx.Router, Button1)
+		click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 
 		// §7b's live line carries NO key count with no payload loaded.
 		if got, ok = pumpUntil(frame, "Add a spend path", 24); !ok {
@@ -408,7 +408,7 @@ func TestComposerBackAtThePathListKeepsTheComposition(t *testing.T) {
 		// re-pick after the Back below does NOT pass through it, which is
 		// why this step appears once.
 		pumpUntil(frame, "Start from?", 24)
-		click(&ctx.Router, Button1)
+		click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 		pumpUntil(frame, "Add a spend path", 24)
 		click(&ctx.Router, Button3)
 		pumpUntil(frame, "What can spend on this path?", 24)
