@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 
 	"seedhammer.com/sysw"
@@ -71,6 +72,21 @@ func TestF437CardDoorsDoNotPromiseTyping(t *testing.T) {
 			frame, quit := runUI(ctx, func() { tc.flow(ctx) })
 			defer quit()
 
+			// (0) THE COMPOSER'S DOOR, which is now the first screen of the
+			// wallet-policy program in every state (SPEC_wallet_policy_composer
+			// §7a). "Scan cards" is index 0, so one Down selects "From payload",
+			// which is the route both wallet-policy rows take.
+			//
+			// GUARDED, not applied to all four: the other two rows walk Engrave
+			// Bundle and Engrave Multisig, whose doors are unchanged, and adding
+			// the step to them would make this table lie about what it walks.
+			if strings.HasPrefix(tc.name, "wallet policy") {
+				if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
+					t.Fatal("the composer door never drew")
+				}
+				click(&ctx.Router, Down)
+				click(&ctx.Router, Button3)
+			}
 			got, ok := pumpUntil(frame, tc.lead, 16)
 			if !ok {
 				t.Fatalf("the offer never drew.\nLast frame: %q", got)

@@ -142,6 +142,14 @@ func TestF76WalletPolicyCountsACompleteMd1CardFromThePayload(t *testing.T) {
 	frame, quit := runUI(ctx, func() { walletPolicyFlow(ctx, &descriptorTheme) })
 	defer quit()
 
+	// (0) THE COMPOSER'S DOOR, which is now the first screen in every
+	// state (SPEC_wallet_policy_composer §7a). "Scan cards" is index 0, so
+	// one Down selects "From payload", which is the route this walk takes.
+	if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
+		t.Fatal("the composer door never drew")
+	}
+	click(&ctx.Router, Down)
+	click(&ctx.Router, Button3)
 	got, ok := pumpUntil(frame, "Cards from where?", 16)
 	if !ok {
 		t.Fatalf("the md1 card offer never drew.\nLast frame: %q", got)
