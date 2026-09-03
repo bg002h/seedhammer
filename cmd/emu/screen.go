@@ -50,9 +50,72 @@ type screenRecorder struct {
 	// off the panel is absent here exactly as it is absent from the panel.
 	bounds image.Rectangle
 
-	mu     sync.Mutex
-	text   string
-	frames int
+	mu      sync.Mutex
+	text    string
+	frames  int
+	targets []image.Rectangle
+}
+
+// frameTargets reports the frame's TAPPABLE regions down one vertical line, in
+// top-to-bottom order.
+//
+// WHY A WALK NEEDS THIS. A row is chosen by tapping it, and until now a walk
+// computed where to tap from a formula -- walk_build_policy.js's
+// `rowY = 160 - (n-1)*12 + i*24`, whose constants were measured once by hand
+// against a two-row and a four-row ChoiceScreen. That formula is right for
+// ChoiceScreen and WRONG for the composer's paged screens, which advance by
+// each line's own measured height and carry a lead header that wraps -- so its
+// row pitch is not a constant at all. Re-deriving it in JavaScript would mean
+// reimplementing the text layout without the font metrics.
+//
+// This reads the answer off the layout instead: op.Drawer.Hit is the same
+// lookup the event router performs for a real fingertip
+// (EventRouter.Events -> d.Hit), so a region reported here is exactly a region
+// a finger can hit, and one that is missing is one no finger can.
+//
+// IT IS A READING PRIMITIVE, and the distinction is the one cmd/emu/walk_js.go
+// draws in its header. It injects no event, reaches no flow, and lets a walk do
+// NOTHING a hand could not -- it says where the targets are, which is what the
+// operator's eyes do. A DRIVING primitive that moved a cursor without a touch
+// is precisely what would have hidden W-2: on the pre-fix build this returns
+// ZERO rows for a composer pick screen, so a driver written against it fails
+// with "no tappable rows" rather than quietly injecting Up/Down and reporting a
+// walk the machine cannot perform.
+//
+// ONE VERTICAL LINE, at the horizontal centre. Every list this serves is
+// centred -- ChoiceScreen centres its stack, composerPageLines centres each
+// label -- so the centre line crosses every row. It also MISSES the navigation
+// column at the right edge on purpose: those three buttons have fixed, long
+// known coordinates, and reporting them would put them in the same list as the
+// rows, where an index would silently mean a different thing on a screen with a
+// pager than on one without.
+func frameTargets(d *op.Drawer, bounds image.Rectangle) []image.Rectangle {
+	x := (bounds.Min.X + bounds.Max.X) / 2
+	var out []image.Rectangle
+	// Deduped by RECTANGLE rather than by tag: a tag is a live pointer into GUI
+	// state and this struct outlives the frame, so keeping one would hold a
+	// screen's widgets alive for as long as the emulator runs. Two distinct
+	// rows cannot share a rectangle.
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		_, r, ok := d.Hit(image.Pt(x, y))
+		if !ok {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == r {
+			continue
+		}
+		seen := false
+		for _, prev := range out {
+			if prev == r {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func newScreenRecorder(bounds image.Rectangle) *screenRecorder {
@@ -79,10 +142,15 @@ func newScreenRecorder(bounds image.Rectangle) *screenRecorder {
 func (s *screenRecorder) Frame(content op.Op) {
 	d := new(op.Drawer)
 	txt := d.ExtractText(s.bounds, content)
+	// Probed HERE, inside the call, for the same reason the text is extracted
+	// here: the Drawer's input regions describe the op that is valid only for
+	// the length of this callback. What is kept is plain rectangles.
+	tgts := frameTargets(d, s.bounds)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.text = txt
+	s.targets = tgts
 	s.frames++
 }
 
@@ -95,4 +163,14 @@ func (s *screenRecorder) Snapshot() (text string, frames int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.text, s.frames
+}
+
+// Targets returns the last frame's tappable regions, top to bottom. The slice
+// is copied: the caller is on the JS side and the recorder keeps writing.
+func (s *screenRecorder) Targets() []image.Rectangle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]image.Rectangle, len(s.targets))
+	copy(out, s.targets)
+	return out
 }

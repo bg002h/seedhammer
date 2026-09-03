@@ -316,6 +316,12 @@ func (p *platform) SyswReader() sysw.Reader {
 		// The cosigner-card blob: what Build policy's gather needs, and what
 		// the records blob does not have. See sysw_cards_payload.go.
 		return syswCardsReader{data: []byte(syswCardsPayload)}
+	case "composer":
+		// The composer blob: the `key:`, `hash:` and `now:` records the Wallet
+		// Policy composer's key sources, hash-lock picker and pack-time bound
+		// draw from, plus the seed a slot is seated with. Neither blob above
+		// carries a composer class at all. See sysw_composer_payload.go.
+		return syswComposerReader{data: []byte(syswComposerPayload)}
 	case "none":
 		// A machine with an empty region. nil is a SUPPORTED value, not a stub
 		// — §10.1's detection finding nothing is a real machine state, and a

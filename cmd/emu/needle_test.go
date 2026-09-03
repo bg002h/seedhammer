@@ -26,9 +26,13 @@ package main
 // appears, this asserts the needle could only have come from one place.
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -106,6 +110,132 @@ var buildFlowNeedles = []struct {
 	// engraves" also occurs in gui/bip85.go (measured, 2 sites), which is
 	// exactly the ambiguity this list exists to catch.
 	{"Plate Count", "gui/multisig_build.go"},
+}
+
+// composerFlowNeedles are the composer walk's anchors, on buildFlowNeedles'
+// pattern and checked the same way but by a LITERAL counter (review N-4).
+//
+// WHY A SECOND LIST RATHER THAN TWO MORE ENTRIES ABOVE. productionSites is a
+// raw text scan -- deliberately, since it is what lets decoyNeedles pin counts
+// for strings built by concatenation -- and "Build a new policy" occurs in FIVE
+// gui files: one rendered site and four COMMENTS (gui/composer_flow.go:11,
+// gui/multisig_build.go:24 and :29, gui/sysw_admit.go:54, gui/gui.go:193, all
+// of which name the screen while describing something else). Putting it in
+// buildFlowNeedles fails on the tip for a reason that is not a defect, and
+// widening productionSites would move every existing pin and decoy count with
+// it. So the needle is pinned by the site that matters -- a string literal in
+// code -- using the AST walk embed_confinement_test.go already uses for the
+// same "a mention is not a reference" reason.
+//
+// WHY THESE TWO. The composer walk's engrave tail terminates on the DOOR's own
+// row (cmd/emu/shots_composer.js's DOOR_ROW), so a second screen that reused
+// that copy would end the tail EARLY and compareEngraved would then run against
+// a PARTIAL census -- a wrong answer rather than a timeout, which is the one
+// failure shape a census must not have. "Which script?" is what proves a walk
+// entered the composer's own shape step rather than some other program's.
+var composerFlowNeedles = []struct {
+	text string
+	file string // the single production file whose CODE spells the needle
+}{
+	{"Build a new policy", "gui/composer_door.go"},
+	{"Which script?", "gui/composer_shape.go"},
+}
+
+// literalSites returns the gui files whose CODE contains `text` in a string
+// literal. Comments are excluded by construction: the parser keeps them out of
+// the AST unless asked for them, and this asks for the code.
+func literalSites(t *testing.T, text string) []string {
+	t.Helper()
+	dir := filepath.Join("..", "..", "gui")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+	var out []string
+	checked := 0
+	for _, e := range ents {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		checked++
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0) // 0 == no comments
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		found := false
+		ast.Inspect(f, func(n ast.Node) bool {
+			bl, ok := n.(*ast.BasicLit)
+			if !ok || bl.Kind != token.STRING {
+				return true
+			}
+			v, err := strconv.Unquote(bl.Value)
+			if err == nil && strings.Contains(v, text) {
+				found = true
+			}
+			return true
+		})
+		if found {
+			out = append(out, "gui/"+name)
+		}
+	}
+	// The same floor productionSites carries, for the same reason: a misrooted
+	// path must not make every needle look unique by finding nothing at all.
+	if checked < 30 {
+		t.Fatalf("only %d production .go file(s) under %s — the path is wrong, "+
+			"and every count from it is meaningless", checked, dir)
+	}
+	return out
+}
+
+// TestComposerFlowNeedlesHaveExactlyOneLiteralSite is N-4's gate.
+//
+// It FAILS when a second gui file spells one of these literals in code, which
+// is the mutation that would silently shorten the composer walk's engrave tail.
+func TestComposerFlowNeedlesHaveExactlyOneLiteralSite(t *testing.T) {
+	for _, n := range composerFlowNeedles {
+		sites := literalSites(t, n.text)
+		if len(sites) != 1 {
+			t.Errorf("composer needle %q is spelt in %d production file(s) in CODE, want exactly 1:\n  %s\n"+
+				"the composer walk anchors on this; a second site makes it name the wrong screen, "+
+				"and for the door's row that ends the engrave tail early against a PARTIAL census",
+				n.text, len(sites), strings.Join(sites, "\n  "))
+			continue
+		}
+		if got := sites[0]; got != n.file {
+			t.Errorf("composer needle %q is unique but lives in %s, want %s — "+
+				"it identifies a different screen than the walk thinks", n.text, got, n.file)
+		}
+		t.Logf("%-24q -> %s", n.text, sites[0])
+	}
+}
+
+// TestLiteralSiteCounterIgnoresComments is the mutation proof for the counter
+// itself, on TestNeedleSiteCounterCanCount's pattern.
+//
+// Without it a literalSites that returned one file for everything would make
+// every composer needle look unique -- the false-PASS shape this file exists to
+// remove. "Build a new policy" is the case that proves the point: the raw
+// counter finds five files, this one finds the single rendered site.
+func TestLiteralSiteCounterIgnoresComments(t *testing.T) {
+	raw := productionSites(t, "Build a new policy")
+	lit := literalSites(t, "Build a new policy")
+	if len(raw) <= len(lit) {
+		t.Fatalf("the two counters agree on %q (raw %v, literal %v) — this test is pinning "+
+			"nothing, and the comment sites it exists to discount are gone",
+			"Build a new policy", raw, lit)
+	}
+	if len(lit) != 1 {
+		t.Errorf("the literal counter finds %d site(s) for %q, want 1: %v",
+			len(lit), "Build a new policy", lit)
+	}
+	// A string that is spelt in NO gui file must come back empty from both, or
+	// the counter is matching something other than what it was asked for.
+	if got := literalSites(t, "a string no gui file spells"); len(got) != 0 {
+		t.Errorf("the literal counter found %v for a string no file spells", got)
+	}
+	t.Logf("raw counter %d file(s) %v; literal counter %d %v", len(raw), raw, len(lit), lit)
 }
 
 // contentNeedles identify WHAT WAS BUILT, never WHICH FLOW built it.

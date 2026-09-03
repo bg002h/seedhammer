@@ -8,6 +8,11 @@ import "syscall/js"
 //
 //	shScreen()      the text of the screen as it is NOW
 //	shScreenSeq()   how many frames have been drawn since boot
+//	shTargets()     the tappable regions of the last frame, top to bottom,
+//	                as [{x, y, w, h, cx, cy}, ...] -- see frameTargets in
+//	                screen.go for what it is and, more importantly, what it is
+//	                NOT: a way to move a cursor without touching the screen.
+//	                `cx`/`cy` are the centre, which is the point to tap.
 //
 // TWO CALLS RATHER THAN ONE OBJECT, because the two are read at different
 // rates and for different reasons: a walk polls the sequence in a loop and
@@ -52,5 +57,22 @@ func installScreenAPI(s *screenRecorder) {
 	js.Global().Set("shScreenSeq", js.FuncOf(func(js.Value, []js.Value) any {
 		_, n := s.Snapshot()
 		return n
+	}))
+	// Returned as a plain []any of maps, which syscall/js converts to a real
+	// JS array of objects -- no JSON.parse, because a walk indexes this on
+	// every row it taps and the shScreen/shScreenSeq split above already
+	// records why the common call should not pay for a parse.
+	js.Global().Set("shTargets", js.FuncOf(func(js.Value, []js.Value) any {
+		tgts := s.Targets()
+		out := make([]any, 0, len(tgts))
+		for _, r := range tgts {
+			out = append(out, map[string]any{
+				"x": r.Min.X, "y": r.Min.Y,
+				"w": r.Dx(), "h": r.Dy(),
+				"cx": (r.Min.X + r.Max.X) / 2,
+				"cy": (r.Min.Y + r.Max.Y) / 2,
+			})
+		}
+		return out
 	}))
 }
