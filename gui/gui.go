@@ -188,19 +188,31 @@ const (
 	engraveBundle
 	engraveSingleSig
 	engraveMultisig
-	// walletPolicy is the 10th navigable program (plan D5): a front door for a
-	// wallet policy that came from OUTSIDE this device. It is not a rename of
-	// Multisig and not an extension of Bundle.
+	// walletPolicy is the 10th navigable program (plan D5), and since the
+	// composer it has TWO doors: prove a wallet policy that came from OUTSIDE
+	// this device, or "Build a new policy" and AUTHOR one here. It is still not
+	// a rename of Multisig and still not an extension of Bundle.
 	//
 	// WHY IT IS ITS OWN PROGRAM. Engrave Bundle can already gather and engrave a
-	// supplied md1 — what it cannot do is PROVE it. Its review screen reads
+	// supplied md1; what it cannot do is PROVE it. Its review screen reads
 	// "N cards verified" plus a per-card label, which says the chunks reassembled
 	// and nothing about which wallet the operator is about to commit to steel.
-	// Engrave Multisig proves more, but demands a seed and cuts COSIGNER plates:
-	// its question is "am I in this policy", not "is this the right policy".
-	// Neither answers plan D2 — proof is derived addresses plus a NAMED wallet id
-	// — and bolting that onto either would drag a seed requirement or a plate
-	// census into a flow that needs neither.
+	// Engrave Multisig proves more, but its question is "am I in this policy",
+	// not "is this the right policy", and it can author exactly one shape: a
+	// sortedmulti k-of-n under wsh, sh(wsh) or sh, from a seed.
+	//
+	// THE OLD SENTENCE HERE IS RETIRED, NOT MOVED. It said that bolting proof
+	// onto either program "would drag a seed requirement or a plate census into
+	// a flow that needs neither". This program now takes a seed and cuts a plate
+	// census itself, by C12 and C10, so the sentence became false the day the
+	// composer landed. A stale premise left standing under a heading that reads
+	// as reasoning is the defect this rewrite exists to avoid, not a wording
+	// preference.
+	//
+	// What it authors is what Multisig Build cannot: arbitrary tr and wsh
+	// policies as an ordered list of spend paths, with locks, hashlocks and
+	// key-less paths (SPEC_wallet_policy_composer.md). C7 deprecates Multisig
+	// Build in its favour BY COMMENT ONLY, with no enforcement.
 	//
 	// INSERTED mid-enum, not appended, per the house rule on loadPayload just
 	// below: this program is UNCONDITIONAL, so bip85Derive stays the bound

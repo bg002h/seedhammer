@@ -85,6 +85,13 @@ var classNames = map[string]sysw.Class{
 	"ClassMDMK":          sysw.ClassMDMK,
 	"ClassAddress":       sysw.ClassAddress,
 	"ClassUnknown":       sysw.ClassUnknown,
+	// The composer's three (SPEC_wallet_policy_composer §6a), admitted at
+	// progWalletPolicy alone. A site naming one of these without an entry here
+	// is reported as "names no sysw.Class constant", which is a true failure
+	// with a false cause -- the worst kind to debug.
+	"ClassKey":  sysw.ClassKey,
+	"ClassHash": sysw.ClassHash,
+	"ClassNow":  sysw.ClassNow,
 }
 
 func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
