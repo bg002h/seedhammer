@@ -40,42 +40,23 @@ func composerFlow(ctx *Context, th *Colors) {
 	// policy read zero for the whole of the decision it exists to inform.
 	st.sources = append(composerKeySources(ctx), composerCardSources(ctx)...)
 
-	// §7b's step is "Wrapper -> preset or blank -> paths". The preset picker
-	// (§4d, task A10) is the middle step; its first row is the blank route
-	// and Back there returns to the wrapper choice (S4 walk W-1: Back used
-	// to fall through into the blank path list, so "back" meant "forward").
-	// Accepting a preset seeds the list with the chosen archetype, whose
-	// shape is pinned to the Rust primary's own exported vector.
-	var w md.ComposeWrapper
-	for {
-		var ok bool
-		w, ok = composerWrapperPick(ctx, th)
-		if !ok {
-			return
-		}
-		st.list.Wrapper = w
-		list, ok := composerPresetPick(ctx, th, w)
-		if ok {
-			st.list = list
-			break
-		}
-		if ctx.Done {
-			return
-		}
+	// §7b's step is "Wrapper -> preset or blank -> paths", walked by
+	// composerStartStep, which is also the whole of the Back leg below.
+	if !composerStartStep(ctx, th, st, false) {
+		return
 	}
 
 	var shown []string // the chunk set the stub screen last displayed (§8s)
 	for !ctx.Done {
 		if !composerShapeFlow(ctx, th, st) {
-			// BACK AT THE PATH LIST GOES BACK ONE STEP, to the wrapper, with
-			// the list intact -- §7b's "going back should lose nothing". It
-			// used to return, dropping the wrapper, every path, every lock and
-			// every digest.
-			w, ok := composerWrapperPick(ctx, th)
-			if !ok {
+			// BACK AT THE PATH LIST GOES BACK ONE SCREEN, to "Start from?",
+			// with the list intact -- §7b's "going back should lose nothing".
+			// It used to return, dropping the wrapper, every path, every lock
+			// and every digest; then it ran the wrapper picker ALONE, which
+			// skipped "Start from?" in both directions (S4 walk W-6).
+			if !composerStartStep(ctx, th, st, true) {
 				return
 			}
-			st.list.Wrapper = w
 			continue
 		}
 		composerSizeAssignments(st)
@@ -121,6 +102,70 @@ func composerFlow(ctx *Context, th *Colors) {
 			return
 		}
 	}
+}
+
+// composerStartStep walks §7b's opening pair -- the wrapper, then "Start
+// from?" -- and IS the Back leg out of the path list, entered at the preset
+// screen with `fromPaths`.
+//
+// BACK IS THE INVERSE OF THE WAY IN (S4 walk W-6, the operator on the device):
+// forward is script -> "Start from?" -> paths, so back is paths -> "Start
+// from?" -> script, and a script picked on the way out walks forward through
+// "Start from?" again. The leg used to call composerWrapperPick alone, which
+// meant the preset screen was passed exactly once per composition: Back landed
+// two screens away on the script choice, re-picking a script skipped the
+// preset screen, and the six archetypes S0b shipped were unreachable for the
+// life of a composition unless the operator discarded it.
+//
+// AND IT ROUTES THE EDIT THROUGH §8j (S4 walk W-7, found measuring W-6). The
+// old leg assigned st.list.Wrapper DIRECTLY, so the one edit the path list
+// guards with composerShapeGuard + composerApplyShapeEdit -- "Change the
+// script" -- was unguarded one function away. §5 numbers slots by first
+// appearance and tr extracts an internal key that wsh does not, so the same
+// shape's slots PERMUTE across a wrapper change at an unchanged slot count
+// (gui/composer_backleg_test.go measures it): composerSizeAssignments then
+// kept st.assigned as it was and a key seated as "Path 1 key 1 of 2" became
+// Path 2's sole spending key, on a screen that names no slot's path. A
+// misassignment does not fail -- it derives another wallet's address and shows
+// it to the operator as proof.
+//
+// THE CONFIRM IS ASKED AFTER THE CHOICE AND BEFORE IT IS ACCEPTED, which is
+// §7d's wording, rather than on entry as the path list's row asks it: an
+// operator on this leg is usually NAVIGATING, and re-picking the same script
+// with the blank row moves no slot at all. A warning that fires when nothing
+// is at stake is one the operator learns to tap through.
+func composerStartStep(ctx *Context, th *Colors, st *composerState, fromPaths bool) bool {
+	w := st.list.Wrapper
+	for !ctx.Done {
+		if !fromPaths {
+			var ok bool
+			if w, ok = composerWrapperPick(ctx, th); !ok {
+				return false
+			}
+		}
+		fromPaths = false
+		list, replace, ok := composerPresetPick(ctx, th, w)
+		if !ok {
+			// Back on the preset screen returns to the wrapper choice (W-1),
+			// and Back THERE leaves the composer -- the opening-screen rule.
+			continue
+		}
+		next := st.list
+		next.Wrapper = w
+		if replace {
+			next = list
+		}
+		if composerShapeSignature(next) != composerShapeSignature(st.list) &&
+			!composerShapeGuard(ctx, th, st) {
+			// Declined: nothing is edited and the operator goes back to the
+			// composition they kept, not around the loop to a screen whose
+			// Back would drop it.
+			return true
+		}
+		composerApplyShapeEdit(st, func() { st.list = next })
+		return true
+	}
+	return false
 }
 
 // composerSizeAssignments sizes st.assigned to the shape's slot count AT FLOW

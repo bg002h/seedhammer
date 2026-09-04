@@ -303,12 +303,16 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 		}
 		switch sel {
 		case 0:
-			// THE GUARD IS ON THIS ARM AND ON REMOVE, NOT ON THE EDITOR.
-			// §7d: "A lock or hash edit moves no slot, keeps assignments", and
-			// §7g classifies it DEFAULT. Asking §8j before the editor told an
-			// operator who wanted to change a lock that every key would be
-			// cleared -- false for the edit they intended -- and declining it
-			// left the lock uneditable at all.
+			// THE GUARD IS ON THIS ARM AND ON REMOVE UNCONDITIONALLY, and on
+			// the lock and hash arms only where the codec says the edit can
+			// renumber. §7d: "A lock or hash edit moves no slot, keeps
+			// assignments", and §7g classifies it DEFAULT -- true under wsh,
+			// FALSE under tr, where the lock picks the internal key. Asking
+			// §8j before every lock editor told an operator who wanted to
+			// change a lock that every key would be cleared -- false for the
+			// edit they intended -- and declining it left the lock uneditable
+			// at all; asking it before none let a tr lock edit move slot @0 in
+			// silence (verification C-1/I-1).
 			if !composerShapeGuard(ctx, th, st) {
 				continue
 			}
@@ -323,9 +327,24 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 				}
 			})
 		case 1:
-			composerLockEdit(ctx, th, st, idx)
+			// §8j IS ASKED HERE ONLY WHERE IT IS TRUE. Under wsh a lock moves
+			// no slot and the confirm must not fire (§7g calls this edit
+			// DEFAULT); under tr the lock decides which path supplies the
+			// internal key, so clearing one can hand slot @0 to another path.
+			// composerEditCanRenumber asks the codec which case this is.
+			if composerEditCanRenumber(st.list, idx, composerFieldLock) && !composerShapeGuard(ctx, th, st) {
+				continue
+			}
+			composerApplyShapeEdit(st, func() {
+				composerLockEdit(ctx, th, st, idx)
+			})
 		case 2:
-			composerHashEdit(ctx, th, st, idx)
+			if composerEditCanRenumber(st.list, idx, composerFieldHash) && !composerShapeGuard(ctx, th, st) {
+				continue
+			}
+			composerApplyShapeEdit(st, func() {
+				composerHashEdit(ctx, th, st, idx)
+			})
 		case 3:
 			if !composerShapeGuard(ctx, th, st) {
 				continue
@@ -353,9 +372,17 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 // 2026-08-19 directive. Nothing here clears st.list, so the state the caller
 // re-enters with is the state the operator left.
 //
-// THE DISCARD RULE HAS ONE PLACE TO LIVE, and it is composerPathEdit's Keys,
-// Remove and Move arms plus composerAddPath -- the four that can move slot
-// NUMBERING. A lock or a hash edit moves none (§7d) and is not guarded.
+// THE DISCARD RULE HAS ONE PLACE TO LIVE, and it is composerApplyShapeEdit:
+// composerPathEdit's Keys and Remove arms, composerAddPath, the wrapper row,
+// the Back leg's composerStartStep, and -- since the S4 walk W-7 verification
+// -- the Lock and Hash arms too. The MOVE arm is the one exception and stays
+// one: composerMoveUp discards unconditionally, because a swap of two paths
+// with equal key counts leaves the signature identical (see its own comment,
+// measured). §7d used to say a lock or a hash
+// edit moves no slot, and that is true under wsh and FALSE under tr, where the
+// internal key is the first bare single: those two arms therefore ask §8j
+// exactly when composerEditCanRenumber says the edit can move the codec's
+// mapping, and apply through composerApplyShapeEdit either way.
 func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 	for !ctx.Done {
 		rows := make([]string, 0, len(st.list.Paths)+3)
@@ -425,16 +452,17 @@ func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 // seats, reporting that it did.
 //
 // It does not go through composerApplyShapeEdit, and that is the fix rather
-// than an inconsistency (review r0 I-1). composerShapeSignature carries the
-// wrapper, the path count and each path's key count -- §7d's own list, right
-// for §7d's own enumerated edits -- so reordering two paths with EQUAL key
-// counts left the signature identical and discarded nothing, after
+// than an inconsistency (review r0 I-1). Reordering two paths with EQUAL key
+// counts leaves the signature identical -- still true now that it carries the
+// codec's own mapping, and measured rather than assumed: `w1/1,1,|0.0/1.0/`
+// before and after a swap, because §5 numbers slots by first appearance in
+// LISTED order and a swap moves both paths at once, so every slot index keeps
+// its ordinal position. The signature therefore discarded nothing, after
 // composerShapeGuard had already drawn §8j: "Slot numbers change with the
-// shape. Every key you seated will be cleared." §5 numbers slots by first
-// appearance in the emitted text and that text follows LISTED order, so the
-// retained assignments then denoted different spend paths -- the family's keys
-// behind the timelock, the recovery keys spending immediately -- with no screen
-// saying so, and composerSelfCheck agreed because st.list had moved with them.
+// shape. Every key you seated will be cleared." The retained assignments then
+// denoted different spend paths -- the family's keys behind the timelock, the
+// recovery keys spending immediately -- with no screen saying so, and
+// composerSelfCheck agreed because st.list had moved with them.
 //
 // Discarding unconditionally is what §8j already promised. Move up is the one
 // edit whose numbering effect the signature cannot see, because it changes the

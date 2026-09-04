@@ -116,9 +116,9 @@ func composerPresets(w md.ComposeWrapper) []composerPreset {
 	}
 }
 
-// composerPresetPick offers the archetypes legal under w and returns the
-// chosen path list. §7b's step is "Wrapper -> preset or blank -> paths", so
-// this sits between composerWrapperPick and composerShapeFlow.
+// composerPresetPick offers the archetypes legal under w. §7b's step is
+// "Wrapper -> preset or blank -> paths", so this sits between
+// composerWrapperPick and composerShapeFlow.
 //
 // S4 walk W-1 (2026-09-02, on the device): the blank route used to be the
 // Back key alone. An operator who wanted their own shape saw six presets and
@@ -126,9 +126,17 @@ func composerPresets(w md.ComposeWrapper) []composerPreset {
 // backwards. So the blank route is now a ROW, and the first one: the default
 // selection commits to nothing. Back here now means back, to the wrapper
 // choice, and the caller does that.
+//
+// `replace` IS WHAT THE ROW MEANS, NOT WHAT THE LIST HOLDS, and the
+// distinction is W-6's: this screen is reached a second time, by Back out of
+// the path list, and there the blank row means "I am building my own paths,
+// leave them alone". Returning a blank list for it would make the DEFAULT row
+// of a screen the operator reached by pressing BACK the one that silently
+// discards their composition. On the first pass the current list is empty, so
+// "keep" and "blank" are the same thing and the row reads the same way.
 const composerPresetBlankRow = "Build my own paths"
 
-func composerPresetPick(ctx *Context, th *Colors, w md.ComposeWrapper) (md.PathList, bool) {
+func composerPresetPick(ctx *Context, th *Colors, w md.ComposeWrapper) (list md.PathList, replace, ok bool) {
 	presets := composerPresets(w)
 	choices := make([]string, 0, len(presets)+1)
 	choices = append(choices, composerPresetBlankRow)
@@ -138,10 +146,10 @@ func composerPresetPick(ctx *Context, th *Colors, w md.ComposeWrapper) (md.PathL
 	cs := &ChoiceScreen{Title: "New policy", Lead: "Start from?", Choices: choices}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
-		return md.PathList{Wrapper: w}, false
+		return md.PathList{Wrapper: w}, false, false
 	}
 	if sel == 0 {
-		return md.PathList{Wrapper: w}, true
+		return md.PathList{Wrapper: w}, false, true
 	}
-	return presets[sel-1].list, true
+	return presets[sel-1].list, true, true
 }

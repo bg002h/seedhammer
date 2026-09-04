@@ -403,10 +403,10 @@ func TestComposerBackAtThePathListKeepsTheComposition(t *testing.T) {
 		pumpUntil(frame, "Which script?", 24)
 		click(&ctx.Router, Down)
 		click(&ctx.Router, Button3)
-		// The preset picker (§4d, task A10) sits between the wrapper and
-		// the path list on the FIRST pass; Back is the blank route. The
-		// re-pick after the Back below does NOT pass through it, which is
-		// why this step appears once.
+		// The preset picker (§4d, task A10) sits between the wrapper and the
+		// path list, and Back out of the path list returns THROUGH it, so it
+		// appears again below (S4 walk W-6: the leg used to run the wrapper
+		// picker alone, in both directions).
 		pumpUntil(frame, "Start from?", 24)
 		click(&ctx.Router, Button3) // row 0 = Build my own paths (W-1)
 		pumpUntil(frame, "Add a spend path", 24)
@@ -423,16 +423,27 @@ func TestComposerBackAtThePathListKeepsTheComposition(t *testing.T) {
 			t.Fatalf("the path was never added.\nLast frame: %q", got)
 		}
 
-		// BACK at the path list goes back ONE STEP, to the wrapper.
+		// BACK at the path list goes back ONE SCREEN, to "Start from?", and
+		// one more reaches the wrapper -- the inverse of the way in (W-6).
+		click(&ctx.Router, Button1)
+		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
+			t.Fatalf("Back at the path list did not land on the preset screen; it used "+
+				"to drop the whole composition, and then to skip two screens.\n"+
+				"Last frame: %q", got)
+		}
 		click(&ctx.Router, Button1)
 		if got, ok = pumpUntil(frame, "Which script?", 24); !ok {
-			t.Fatalf("Back at the path list did not land on the wrapper picker; it used "+
-				"to drop the whole composition.\nLast frame: %q", got)
+			t.Fatalf("Back on the preset screen did not land on the wrapper picker.\n"+
+				"Last frame: %q", got)
 		}
 		click(&ctx.Router, Down)
 		click(&ctx.Router, Button3)
+		if got, ok = pumpUntil(frame, "Start from?", 24); !ok {
+			t.Fatalf("re-picking a script skipped the preset screen (W-6).\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button3) // row 0: keep the paths I built
 
-		// ...and the list is still there.
+		// ...and the list is still there, across all four screens of it.
 		if got, ok = pumpUntil(frame, "Path 1: 1-of-2", 24); !ok {
 			t.Fatalf("the path list lost its path across a Back; §7b's rule is that going "+
 				"back loses nothing.\nLast frame: %q", got)
