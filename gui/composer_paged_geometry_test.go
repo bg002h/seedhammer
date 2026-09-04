@@ -95,6 +95,26 @@ func inkUnderNavOps(t *testing.T, dims image.Point, body []op.Op) (image.Rectang
 	return image.Rectangle{}, image.Point{}, false
 }
 
+// rasterInk draws `o` into an rgb565 buffer, as op.Drawer.ExtractText does, and
+// returns which pixels carry ink. Shared with composer_digitpad_layout_test.go:
+// both gates ask what the PANEL is handed rather than what a layout intended.
+func rasterInk(dims image.Point, o op.Op) [][]bool {
+	r := image.Rectangle{Max: dims}
+	fb := rgb565.New(r)
+	maskfb := image.NewAlpha(r)
+	d := new(op.Drawer)
+	d.Draw(fb, maskfb, o)
+	blank := fb.At(0, 0)
+	ink := make([][]bool, dims.Y)
+	for y := 0; y < dims.Y; y++ {
+		ink[y] = make([]bool, dims.X)
+		for x := 0; x < dims.X; x++ {
+			ink[y][x] = !sameColor(fb.At(x, y), blank)
+		}
+	}
+	return ink
+}
+
 func sameColor(a, b color.Color) bool {
 	ar, ag, ab, aa := a.RGBA()
 	br, bg, bb, ba := b.RGBA()
