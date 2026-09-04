@@ -373,9 +373,12 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 // re-enters with is the state the operator left.
 //
 // THE DISCARD RULE HAS ONE PLACE TO LIVE, and it is composerApplyShapeEdit:
-// composerPathEdit's Keys, Remove and Move arms, composerAddPath, the wrapper
-// row, the Back leg's composerStartStep, and -- since the S4 walk W-7
-// verification -- the Lock and Hash arms too. §7d used to say a lock or a hash
+// composerPathEdit's Keys and Remove arms, composerAddPath, the wrapper row,
+// the Back leg's composerStartStep, and -- since the S4 walk W-7 verification
+// -- the Lock and Hash arms too. The MOVE arm is the one exception and stays
+// one: composerMoveUp discards unconditionally, because a swap of two paths
+// with equal key counts leaves the signature identical (see its own comment,
+// measured). §7d used to say a lock or a hash
 // edit moves no slot, and that is true under wsh and FALSE under tr, where the
 // internal key is the first bare single: those two arms therefore ask §8j
 // exactly when composerEditCanRenumber says the edit can move the codec's
