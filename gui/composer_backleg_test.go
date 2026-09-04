@@ -572,3 +572,187 @@ func TestComposerBackAtTheWrapperPickerLeavesTheComposer(t *testing.T) {
 		}
 	})
 }
+
+// TestComposerEditCanRenumberIsExactOverEveryReachableShape is the fold
+// verification's own census, committed as a gate.
+//
+// The probe is the whole condition on §8j for a lock or hash edit, so it is
+// wrong in two directions and both are defects: a FALSE NEGATIVE lets
+// composerApplyShapeEdit discard the operator's seating with no confirm and no
+// chance to decline (r2 I-2, measured at 1,200 pairs), and a FALSE POSITIVE
+// threatens every seat for an edit that clears none and leaves the field
+// uneditable if the operator declines (r2 I-3, 288 pairs). One hand-picked
+// case cannot see either; an enumeration can.
+//
+// THE ORACLE IS INDEPENDENT OF THE PROBE: it varies the field over the values
+// the EDITOR can actually produce -- the lock screen's None plus two lock
+// kinds, the hash screen's "No hash lock" plus a digest -- and asks whether
+// ANY of them moves the signature away from where it is now. The probe
+// compares two points; the oracle sweeps the arm's range.
+func TestComposerEditCanRenumberIsExactOverEveryReachableShape(t *testing.T) {
+	digestA, digestB := new([32]byte), new([32]byte)
+	for i := range digestA {
+		digestA[i] = 0xab
+		digestB[i] = 0x7f
+	}
+	variants := []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 26280}},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Hash: digestA},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Lock: &md.Lock{Kind: md.LockAfterHeight, Value: 1000000}, Hash: digestA},
+		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 13140}},
+		{Hash: digestA}, // key-less: the shape I-2 was hiding in
+	}
+	// The values each arm can actually reach from its own screens.
+	lockValues := []*md.Lock{
+		nil,
+		{Kind: md.LockOlderBlocks, Value: 26280},
+		{Kind: md.LockAfterHeight, Value: 1000000},
+	}
+	hashValues := []*[32]byte{nil, digestA, digestB}
+
+	var lists []md.PathList
+	for _, w := range []md.ComposeWrapper{md.ComposeWsh, md.ComposeTr} {
+		for i := range variants {
+			lists = append(lists, md.PathList{Wrapper: w, Paths: []md.SpendPath{variants[i]}})
+			for j := range variants {
+				lists = append(lists, md.PathList{Wrapper: w, Paths: []md.SpendPath{variants[i], variants[j]}})
+				for k := range variants {
+					lists = append(lists, md.PathList{Wrapper: w, Paths: []md.SpendPath{
+						variants[i], variants[j], variants[k],
+					}})
+				}
+			}
+		}
+	}
+
+	var checked, falseNeg, falsePos int
+	for _, list := range lists {
+		// Seats can only be held on a list the codec accepts, so that is the
+		// reachable set.
+		if _, err := md.Compose(list); err != nil {
+			continue
+		}
+		now := composerShapeSignature(list)
+		for idx := range list.Paths {
+			for _, field := range []composerShapeField{composerFieldLock, composerFieldHash} {
+				truth := false
+				switch field {
+				case composerFieldLock:
+					for _, v := range lockValues {
+						probe := composerListWithPaths(list)
+						probe.Paths[idx].Lock = v
+						if composerShapeSignature(probe) != now {
+							truth = true
+						}
+					}
+				case composerFieldHash:
+					for _, v := range hashValues {
+						probe := composerListWithPaths(list)
+						probe.Paths[idx].Hash = v
+						if composerShapeSignature(probe) != now {
+							truth = true
+						}
+					}
+				}
+				got := composerEditCanRenumber(list, idx, field)
+				checked++
+				switch {
+				case truth && !got:
+					falseNeg++
+					if falseNeg == 1 {
+						t.Errorf("FALSE NEGATIVE: composerEditCanRenumber says a %v edit on "+
+							"path %d cannot renumber, but an edit the screen offers moves the "+
+							"signature. §8j is not asked and composerApplyShapeEdit then "+
+							"discards every seat in silence (r2 I-2).\nwrapper=%v paths=%+v",
+							field, idx, list.Wrapper, list.Paths)
+					}
+				case !truth && got:
+					falsePos++
+					if falsePos == 1 {
+						t.Errorf("FALSE POSITIVE: composerEditCanRenumber says a %v edit on "+
+							"path %d can renumber, but no value the screen offers moves the "+
+							"signature. §8j threatens seats it will not clear, and declining "+
+							"leaves the field uneditable (r2 I-3).\nwrapper=%v paths=%+v",
+							field, idx, list.Wrapper, list.Paths)
+					}
+				}
+			}
+		}
+	}
+	if checked < 1000 {
+		t.Fatalf("the enumeration collapsed to %d cases; it is meant to sweep thousands, "+
+			"so a shrinking corpus is the finding", checked)
+	}
+	t.Logf("checked %d (list, path, field) cases: %d false negatives, %d false positives",
+		checked, falseNeg, falsePos)
+	if falseNeg != 0 || falsePos != 0 {
+		t.Errorf("the probe is not exact: %d false negatives, %d false positives over %d cases",
+			falseNeg, falsePos, checked)
+	}
+}
+
+// TestComposerHashEditOnAKeylessPathAsksBeforeItDiscards is r2 I-2, walked --
+// and it is what pins the CALL SITE, which the census above cannot see: the
+// census proves the probe is exact for each field, and this proves the hash
+// arm passes its own field to it.
+//
+// Clearing the hash on a key-less path empties that path, the list stops
+// composing, and composerApplyShapeEdit clears every seat. That discard is the
+// safe direction, but §7d promises the operator is TOLD before it is accepted
+// and can decline. The first version of the probe cleared the hash in both its
+// variants, so it answered "no move" for exactly this shape and the operator's
+// seating vanished without a screen.
+func TestComposerHashEditOnAKeylessPathAsksBeforeItDiscards(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		digest := new([32]byte)
+		for i := range digest {
+			digest[i] = 0xab
+		}
+		st := &composerState{reg: &seedRegistry{}, list: md.PathList{
+			Wrapper: md.ComposeWsh,
+			Paths: []md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+				{Hash: digest}, // key-less, wsh-only (§4b)
+			},
+		}}
+		composerSizeAssignments(st)
+		st.assigned[0].src = 0
+		st.assigned[1].src = 1
+		st.sources = []composerSource{
+			{kind: composerSourceKey, seedID: -1}, {kind: composerSourceKey, seedID: -1},
+		}
+
+		frame, quit := runUI(ctx, func() { composerPathEdit(ctx, &descriptorTheme, st, 1) })
+		defer quit()
+
+		pumpUntil(frame, "Path 2:", 16)
+		click(&ctx.Router, Down, Down) // Keys -> Time lock -> Hash lock
+		click(&ctx.Router, Button3)
+
+		got, ok := pumpUntil(frame, "CLEARS THE KEYS", 24)
+		if !ok {
+			t.Fatalf("§8j was not asked before a hash edit that can empty this path and "+
+				"discard every seat.\nLast frame: %q", got)
+		}
+		// DECLINE: the seating must survive, which is the whole point of being
+		// asked.
+		click(&ctx.Router, Button1)
+		for range 8 {
+			frame()
+		}
+		for i, a := range st.assigned {
+			if a.src < 0 {
+				t.Errorf("slot @%d lost its seat although the operator DECLINED the confirm; "+
+					"a guard that discards whatever the answer is, is not a guard", i)
+			}
+		}
+		if st.list.Paths[1].Hash == nil {
+			t.Errorf("the hash was cleared although the operator declined the confirm")
+		}
+	})
+}

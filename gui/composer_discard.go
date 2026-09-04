@@ -64,9 +64,18 @@ func composerShapeSignature(list md.PathList) string {
 	return b.String()
 }
 
-// composerEditCanRenumber reports whether editing path idx's LOCK or HASH can
-// move slot numbering under this list's wrapper -- again by asking the codec,
-// with the lock and the hash cleared and then set, rather than by naming
+// composerShapeField names the one field an editor arm can change, so the
+// probe below varies THAT field and nothing else.
+type composerShapeField uint8
+
+const (
+	composerFieldLock composerShapeField = iota
+	composerFieldHash
+)
+
+// composerEditCanRenumber reports whether editing path idx's lock -- or its
+// hash -- can move slot numbering under this list's wrapper, by asking the
+// codec with that ONE field cleared and then set, rather than by naming
 // lowerTr's predicate a second time in this package.
 //
 // It exists so §8j is asked exactly where it is true. Asking it before every
@@ -75,17 +84,37 @@ func composerShapeSignature(list md.PathList) string {
 // the lock uneditable at all (§7g classifies a lock edit DEFAULT). Asking it
 // before none of them let a tr lock edit hand slot @0 to another path in
 // silence.
-func composerEditCanRenumber(list md.PathList, idx int) bool {
+//
+// IT VARIES ONLY THE FIELD THE ARM EDITS, and that is not a detail: the first
+// version cleared the HASH in both variants while toggling the lock, so it
+// answered a question about a path it had already changed (fold verification
+// r2, I-2 and I-3, measured over 14,092 (list, idx) pairs -- 1,200 false
+// negatives and 288 false positives, against 0 and 0 for this one). The false
+// negatives were key-less paths, where clearing the hash empties the path and
+// the list stops composing: the probe called that "no move", the arm asked
+// nothing, and composerApplyShapeEdit then discarded every seat in silence.
+// The false positives were tr paths carrying a hash, where no lock can affect
+// isBareSingle: §8j fired, cleared nothing, and declining it left the lock
+// uneditable -- verbatim the failure this function exists to remove.
+func composerEditCanRenumber(list md.PathList, idx int, field composerShapeField) bool {
 	if idx < 0 || idx >= len(list.Paths) {
 		return false
 	}
-	bare := composerListWithPaths(list)
-	bare.Paths[idx].Lock = nil
-	bare.Paths[idx].Hash = nil
-	held := composerListWithPaths(list)
-	held.Paths[idx].Lock = &md.Lock{Kind: md.LockOlderBlocks, Value: 1}
-	held.Paths[idx].Hash = nil
-	return composerShapeSignature(bare) != composerShapeSignature(held)
+	cleared := composerListWithPaths(list)
+	set := composerListWithPaths(list)
+	switch field {
+	case composerFieldLock:
+		cleared.Paths[idx].Lock = nil
+		set.Paths[idx].Lock = &md.Lock{Kind: md.LockOlderBlocks, Value: 1}
+	case composerFieldHash:
+		var probe [32]byte
+		for i := range probe {
+			probe[i] = 0x01
+		}
+		cleared.Paths[idx].Hash = nil
+		set.Paths[idx].Hash = &probe
+	}
+	return composerShapeSignature(cleared) != composerShapeSignature(set)
 }
 
 // composerListWithPaths copies the path SLICE so a probe can replace a path's
