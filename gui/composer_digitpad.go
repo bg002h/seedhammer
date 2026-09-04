@@ -87,7 +87,69 @@ func composerDigitEntry(ctx *Context, th *Colors, title, lead string, maxDigits 
 		r.Min.X -= buttonPadX
 		r.Max.X += buttonPadX
 		top, _ := content.CutBottom(kbdsz.Y)
-		wordOff := top.Center(frgSize)
+
+		// ─── W-4: THE BOX, THE PROMPT AND THE ECHO ARE ONE GROUP ────────────
+		//
+		// Each info line used to be clamped to `top.Max.Y - sz.Y` ON ITS OWN,
+		// so a second line that did not fit was pushed UP onto the first and
+		// the two were drawn over each other. The operator met it on the device
+		// (decaying-multisig -> Path 1 -> Time lock -> After a wait -> Blocks):
+		// "How many blocks?" and "1 to 65535 blocks" in one illegible band.
+		// Measured on the emulator before this: every pad drew its prompt and
+		// its echo inside a single 17-20 px band, and the three CEILING
+		// messages -- which wrap to two lines -- merged with the entry box as
+		// well, one blob from y74 to y129.
+		//
+		// So nothing is placed until everything is MEASURED. The box, the
+		// prompt and the echo are laid out as one vertical group and the GROUP
+		// is centred in the band above the keyboard. A clamp cannot apply to
+		// one member of a group.
+		//
+		// GAPS COLLAPSE BEFORE A LINE MOVES. At the SH2 size the band is 86 px
+		// and the worst case -- a wrapped ceiling message -- needs 89 with the
+		// gaps and 77 without, so the gaps are what give. A line is never
+		// dropped and never overlapped: if a group still did not fit it would
+		// be top-aligned and visibly too tall, which is a bug to see rather
+		// than one to hide.
+		const boxGap, lineGap = 8, 4
+		type padLine struct {
+			op op.Op
+			sz image.Point
+		}
+		var infos []padLine
+		for _, s := range []string{lead, line} {
+			if s == "" {
+				continue
+			}
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, s)
+			infos = append(infos, padLine{lbl, sz})
+		}
+		// The box's DRAWN extent, not the label's: `r` above runs 3 px over the
+		// glyphs and buttonPadY under them, and that is what the eye centres on.
+		const boxOver = 3
+		boxH := frgSize.Y + boxOver + buttonPadY
+		groupHeight := func(gapBox, gapLine int) int {
+			h := boxH
+			for i, in := range infos {
+				if i == 0 {
+					h += gapBox
+				} else {
+					h += gapLine
+				}
+				h += in.sz.Y
+			}
+			return h
+		}
+		gapBox, gapLine := boxGap, lineGap
+		if groupHeight(gapBox, gapLine) > top.Dy() {
+			gapBox, gapLine = 0, 0
+		}
+		y := top.Min.Y + (top.Dy()-groupHeight(gapBox, gapLine))/2
+		if y < top.Min.Y {
+			y = top.Min.Y
+		}
+
+		wordOff := image.Pt(top.Center(frgSize).X, y+boxOver)
 		word = op.Layer(
 			word,
 			op.Compose(
@@ -95,20 +157,17 @@ func composerDigitEntry(ctx *Context, th *Colors, title, lead string, maxDigits 
 				op.RoundedRect2(&ctx.B, r, cornerRadius),
 			),
 		).Offset(wordOff)
+		y += boxH
 
 		var infoOps []op.Op
-		lineY := wordOff.Y + frgSize.Y + 8
-		for _, s := range []string{lead, line} {
-			if s == "" {
-				continue
+		for i, in := range infos {
+			if i == 0 {
+				y += gapBox
+			} else {
+				y += gapLine
 			}
-			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, dims.X-2*8, th.Text, s)
-			y := lineY
-			if lim := top.Max.Y - sz.Y; y > lim {
-				y = lim
-			}
-			infoOps = append(infoOps, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
-			lineY = y + sz.Y + 4
+			infoOps = append(infoOps, in.op.Offset(image.Pt((dims.X-in.sz.X)/2, y)))
+			y += in.sz.Y
 		}
 
 		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}

@@ -234,37 +234,7 @@ func composerLockEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 		}
 		if absSel == 0 {
 			frag, ok := composerDigitEntry(ctx, th, title, "Date as YYYYMMDD", 8, func(s string) (string, bool) {
-				y, m, d, parsed := composerParseDateDigits(s)
-				if !parsed {
-					return "eight digits, YYYYMMDD", false
-				}
-				_, inBand := composerDateToUnix(y, m, d)
-				if !inBand {
-					// THE THREE FAILURES ARE TOLD APART BY WHAT THEY ARE, not
-					// by reading the returned operand. `u` is 0 on every
-					// failure path, so `y > 2038 || u == 0` was a tautology and
-					// "that date does not exist" was dead code -- 2027-02-31
-					// got the CEILING message, advising a block height for a
-					// date that no height makes real (F-458).
-					if !composerDateExists(y, m, d) {
-						return "that date does not exist", false
-					}
-					if y < 2009 {
-						return composerCopyDateFloor(), false
-					}
-					// A DATE PAST THE CEILING EXISTS; the build will not write
-					// it as a TIME lock. §4d's first archetype,
-					// simple-timelocked-inheritance, is exactly where a
-					// twenty-year date is the ordinary case, so the operator is
-					// told the limit and the alternative rather than being left
-					// to retype.
-					return composerCopyDateCeiling(), false
-				}
-				// THE RAW OPERAND IS NOT SHOWN. §6b's premise is that the
-				// operator never types one, and the echo screen after this
-				// prints §8c's clean form, so the number added nothing anyone
-				// could check.
-				return composerCopyLockEchoDate(y, m, d), true
+				return composerDateBandEcho(s)
 			})
 			if !ok {
 				return false
@@ -332,6 +302,41 @@ func composerDaysBandEcho(s string) (string, bool) {
 		return composerCopyRelativeCeiling(), false
 	}
 	return composerCopyLockEchoDays(uint32(n), composerDaysToUnits(uint32(n))), true
+}
+
+// composerDateBandEcho is the DATE pad's band, named alongside the three above
+// for the reason their shared header gives: as a closure it had no caller a test
+// could reach, so widening it left the suite green. W-4's geometry gate renders
+// all four pads and needs the real validators, not copies of them -- a copy in a
+// test is a second answer to a question that must have one.
+func composerDateBandEcho(s string) (string, bool) {
+	y, m, d, parsed := composerParseDateDigits(s)
+	if !parsed {
+		return "eight digits, YYYYMMDD", false
+	}
+	_, inBand := composerDateToUnix(y, m, d)
+	if !inBand {
+		// THE THREE FAILURES ARE TOLD APART BY WHAT THEY ARE, not by reading
+		// the returned operand. `u` is 0 on every failure path, so
+		// `y > 2038 || u == 0` was a tautology and "that date does not exist"
+		// was dead code -- 2027-02-31 got the CEILING message, advising a block
+		// height for a date that no height makes real (F-458).
+		if !composerDateExists(y, m, d) {
+			return "that date does not exist", false
+		}
+		if y < 2009 {
+			return composerCopyDateFloor(), false
+		}
+		// A DATE PAST THE CEILING EXISTS; the build will not write it as a TIME
+		// lock. §4d's first archetype, simple-timelocked-inheritance, is exactly
+		// where a twenty-year date is the ordinary case, so the operator is told
+		// the limit and the alternative rather than being left to retype.
+		return composerCopyDateCeiling(), false
+	}
+	// THE RAW OPERAND IS NOT SHOWN. §6b's premise is that the operator never
+	// types one, and the echo screen after this prints §8c's clean form, so the
+	// number added nothing anyone could check.
+	return composerCopyLockEchoDate(y, m, d), true
 }
 
 func composerHeightBandEcho(s string) (string, bool) {
