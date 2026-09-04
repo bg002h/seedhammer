@@ -303,12 +303,16 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 		}
 		switch sel {
 		case 0:
-			// THE GUARD IS ON THIS ARM AND ON REMOVE, NOT ON THE EDITOR.
-			// §7d: "A lock or hash edit moves no slot, keeps assignments", and
-			// §7g classifies it DEFAULT. Asking §8j before the editor told an
-			// operator who wanted to change a lock that every key would be
-			// cleared -- false for the edit they intended -- and declining it
-			// left the lock uneditable at all.
+			// THE GUARD IS ON THIS ARM AND ON REMOVE UNCONDITIONALLY, and on
+			// the lock and hash arms only where the codec says the edit can
+			// renumber. §7d: "A lock or hash edit moves no slot, keeps
+			// assignments", and §7g classifies it DEFAULT -- true under wsh,
+			// FALSE under tr, where the lock picks the internal key. Asking
+			// §8j before every lock editor told an operator who wanted to
+			// change a lock that every key would be cleared -- false for the
+			// edit they intended -- and declining it left the lock uneditable
+			// at all; asking it before none let a tr lock edit move slot @0 in
+			// silence (verification C-1/I-1).
 			if !composerShapeGuard(ctx, th, st) {
 				continue
 			}
@@ -323,9 +327,24 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 				}
 			})
 		case 1:
-			composerLockEdit(ctx, th, st, idx)
+			// §8j IS ASKED HERE ONLY WHERE IT IS TRUE. Under wsh a lock moves
+			// no slot and the confirm must not fire (§7g calls this edit
+			// DEFAULT); under tr the lock decides which path supplies the
+			// internal key, so clearing one can hand slot @0 to another path.
+			// composerEditCanRenumber asks the codec which case this is.
+			if composerEditCanRenumber(st.list, idx) && !composerShapeGuard(ctx, th, st) {
+				continue
+			}
+			composerApplyShapeEdit(st, func() {
+				composerLockEdit(ctx, th, st, idx)
+			})
 		case 2:
-			composerHashEdit(ctx, th, st, idx)
+			if composerEditCanRenumber(st.list, idx) && !composerShapeGuard(ctx, th, st) {
+				continue
+			}
+			composerApplyShapeEdit(st, func() {
+				composerHashEdit(ctx, th, st, idx)
+			})
 		case 3:
 			if !composerShapeGuard(ctx, th, st) {
 				continue
