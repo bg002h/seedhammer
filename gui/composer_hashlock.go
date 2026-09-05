@@ -79,7 +79,8 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 				// of what the line is for ("converts a divergence discovered at
 				// spend time into a five-minute check") is met here instead, at
 				// the one moment every phrase-set hash passes through.
-				showError(ctx, th, "Hash lock", composerCopyHashlockReconcile())
+				showError(ctx, th, "Hash lock",
+					composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase)))
 				return hashlockAssigned
 			}
 			// Back on the confirm -> method pick, nothing assigned

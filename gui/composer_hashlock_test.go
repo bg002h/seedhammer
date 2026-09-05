@@ -374,6 +374,14 @@ func TestHashlockPhraseRouteSetsTheCorpusDigest(t *testing.T) {
 			if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantChars)) {
 				t.Errorf("the confirm modal drew %q, want it to contain %q", normalizeDrawn(body), wantChars)
 			}
+			// H5 §1 item 2: the write-down instruction names the DIGEST too --
+			// the operator is asked on the very next screen to compare it
+			// against the host, and until now nothing told them to record it.
+			// MUTATION: restore "Write down this phrase and the method now." ->
+			// this fails.
+			if !strings.Contains(normalizeDrawn(body), normalizeDrawn("phrase, the method and this digest")) {
+				t.Errorf("the confirm modal's write-down line does not name the digest: %q", normalizeDrawn(body))
+			}
 			h.holdConfirm()
 			if got := st.list.Paths[len(st.list.Paths)-1].Hash; got == nil || hashlockHashHex(got) != tc.want {
 				t.Fatalf("path hash = %v, want %s", got, tc.want)
@@ -919,6 +927,76 @@ func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	// fails.
 	if !composerAnyPathByPhrase(st) {
 		t.Fatal("the phrase route did not record that this hash was set by phrase")
+	}
+}
+
+// H5 §1 (F-487): the reconcile screen carries what it asks the operator to
+// compare.
+//
+// The screen says "check the digest matches" -- and the digest had just left
+// the panel with the confirm modal, so the check was asked for at the one moment
+// the operand was not on screen. It now repeats the token, the method and the
+// character count, spelled exactly as the confirm modal spells them, and adds
+// what to do when they differ.
+//
+// HARDENED, deliberately: `3cf5d421..b70a4c12` is a token no other row of this
+// file produces, so a screen that echoed the SHA-256 trial's frame could not
+// pass, and `method: hardened` is the longer of the two method words.
+//
+// MUTATIONS:
+//   - return the old one-sentence body -> fails at the token.
+//   - drop the mismatch sentence -> fails at "If they differ".
+//   - pass m.String() where len(phrase) is wanted, or vice versa -> the
+//     method/chars line assertion fails.
+func TestHashlockReconcileScreenCarriesTheDigestMethodAndChars(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(0, 3)
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.mustReach("Hashlock phrase")
+	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
+	h.tapNav(Button3)
+	h.mustReach("Which method?")
+	h.tapRow(0, 2) // Hardened: 28 characters, so no §4.3a warning
+	h.mustReach("Write down this phrase")
+	h.holdConfirm()
+	frame := h.mustReach("run ms hashlock with this phrase")
+	for _, want := range []string{
+		"hash  3cf5d421..b70a4c12",
+		"method: hardened   chars: 28",
+		"If they differ, do not fund this wallet: build it again.",
+	} {
+		if !strings.Contains(normalizeDrawn(frame), normalizeDrawn(want)) {
+			t.Errorf("the reconcile screen does not carry %q.\nFrame: %q", want, normalizeDrawn(frame))
+		}
+	}
+}
+
+// The reconcile screen's first two lines are spelled the way the confirm modal
+// spells them (H5 §1 item 1), so the operator compares two screens that read
+// alike rather than two that merely mean alike.
+//
+// A GATE RATHER THAN A COMMENT: the two bodies are separate string literals in
+// composer_copy.go -- deliberately, because every operator-facing body is a
+// composerCopy* function the AST scan counts and the fit table measures, and a
+// shared un-scanned helper would smuggle one past both -- so nothing but this
+// keeps them from drifting apart.
+//
+// MUTATION: change the reconcile body's separator to a single space
+// ("method: %s chars: %d") -> this fails.
+func TestHashlockReconcileHeaderIsSpelledLikeTheConfirmModal(t *testing.T) {
+	const tok, method, chars = "b867db87..edbc96cb", "sha256", 28
+	rec := composerCopyHashlockReconcile(tok, method, chars)
+	con := composerCopyHashlockConfirm(tok, method, chars, "", "")
+	head := "hash  " + tok + "\nmethod: " + method + "   chars: 28\n"
+	if !strings.HasPrefix(rec, head) {
+		t.Errorf("the reconcile body does not open with the shared header:\n got: %q\nwant prefix: %q", rec, head)
+	}
+	if !strings.HasPrefix(con, head) {
+		t.Errorf("the confirm body does not open with the shared header:\n got: %q\nwant prefix: %q", con, head)
 	}
 }
 

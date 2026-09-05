@@ -415,6 +415,14 @@ func composerCopyHashlockDerivingLead() string {
 // composerCopyHashlockConfirm is the §4.5 body. relation is "" when the payload
 // holds no hash: record; otherwise the matches/no-match line. otherPath is ""
 // unless another path of this policy already carries a different hash.
+//
+// THE HEADROOM NUMBER, CORRECTED (H5 §6 records; tests M-1 = journey N-1). The
+// comment on composerCopyHashlockReconcile used to claim this body's measured
+// headroom was 186; it is 107, and it was 107 before H5 touched it. The number
+// that is true is logged by TestConfirmScreensThisBlockTouchesAreDrawnInFull on
+// every run, which is why no literal is asserted here -- headroom is a LINE
+// budget, not a character budget (modal_fits_test.go), so H5 §1's longer
+// write-down sentence adds no line and does not move it.
 func composerCopyHashlockConfirm(first8last8, method string, chars int, relation, otherPath string) string {
 	b := "hash  " + first8last8 + "\n" +
 		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n"
@@ -425,8 +433,8 @@ func composerCopyHashlockConfirm(first8last8, method string, chars int, relation
 		b += otherPath + "\n"
 	}
 	return b +
-		"Write down this phrase and the method now. They are not on this device and " +
-		"not on your plates. Without both, this path can never be spent.\n" +
+		"Write down this phrase, the method and this digest now. The phrase and " +
+		"method are not on this device. Without both, this path can never be spent.\n" +
 		"One phrase per policy. Never use this phrase as a passphrase or a password " +
 		"anywhere else."
 }
@@ -438,20 +446,47 @@ func composerCopyHashlockRelation(i int) string {
 	return fmt.Sprintf("matches hash %d in the payload", i+1)
 }
 
-// §4.5's reconciliation line, on its own screen after HOLD.
+// §4.5's reconciliation screen, drawn right after HOLD for every phrase-set
+// hash.
 //
 // §4.5's drop-order step 2 says to move this line into the phrase-route §8h at
 // Done, and the build gate did -- but §8h is guarded by composerEveryPathHashed
-// (composer_state.go:239 at the fork baseline c4a64fc), so on the ordinary
+// (composer_state.go at the fork baseline c4a64fc), so on the ordinary
 // wallet with one keyed path and one
 // hashlocked path it was drawn NOWHERE (r0 adversarial I-1 = fidelity I-2 =
 // journey I-3, all three tracing the same loss). Its own screen after HOLD is
-// reachable for every policy that has a phrase-set hash, and keeps the confirm
-// modal's measured headroom (186) intact. §4.7's copy is unchanged below, as the
-// spec states it.
-func composerCopyHashlockReconcile() string {
-	return "Before you fund this wallet, run ms hashlock with this phrase and " +
-		"method on the host and check the digest matches."
+// reachable for every policy that has a phrase-set hash.
+//
+// IT CARRIES THE OPERAND IT ASKS ABOUT (H5 §1, F-487). "Check the digest
+// matches" was asked one frame AFTER the confirm modal took the digest off the
+// panel, so the operator was told to compare against something no longer on
+// screen. The token, the method and the character count come back here, spelled
+// exactly as the confirm modal spells them
+// (TestHashlockReconcileHeaderIsSpelledLikeTheConfirmModal), and `chars: <n>` is
+// H2 §4.5's reconciliation field arriving at the moment of reconciliation --
+// it is the one signal that shows a stray space against the host card's
+// phrase_chars.
+//
+// AND IT SAYS WHAT A MISMATCH MEANS. A divergence found here is a path that
+// could never have been spent; the remedy is to build the policy again, before
+// it is funded, and not to fund it and hope.
+//
+// "BEFORE YOU CUT PLATES", NOT "BEFORE YOU FUND" (r0 journey M-2). This screen
+// is drawn inside composerShapeFlow, and the stub screen, seating and engraving
+// all follow it in the same composerFlow -- roughly 21 minutes per plate. The
+// digest is IN the engraved md1, so a divergence found after the plates are cut
+// costs every plate. Funding is the funds-safety deadline and the mismatch
+// sentence keeps it; the operator standing here is at the cheapest moment to
+// act, and the first sentence now names that one instead of a later one.
+//
+// Measured on errorScreenBody at sh2DisplaySize, longest variant (`hardened`,
+// `chars: 100`): see the row in TestModalsThisBlockTouchesAreDrawnInFull.
+func composerCopyHashlockReconcile(first8last8, method string, chars int) string {
+	return "hash  " + first8last8 + "\n" +
+		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n" +
+		"Before you cut plates, run ms hashlock with this phrase and method on " +
+		"the host and check the digest matches. If they differ, do not fund this " +
+		"wallet: build it again."
 }
 
 // composerCopyHashlockOtherPath is the confirm modal's second relation line
