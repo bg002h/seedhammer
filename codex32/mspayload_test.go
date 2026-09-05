@@ -3,6 +3,8 @@ package codex32
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -121,5 +123,138 @@ func TestIsPreimageReadsThePrefixByteOnly(t *testing.T) {
 	}
 	if _, _, _, err := DecodeMS1(s); err != errMSBadPrefix {
 		t.Errorf("DecodeMS1(plate) err = %v, want errMSBadPrefix: the seed decoder must not decode a preimage", err)
+	}
+}
+
+// hashlockCorpus is the vendored ms-codec 0.8.0 corpus, read from the hashlock
+// package's own testdata by a path RELATIVE TO THIS PACKAGE (`go test` runs with
+// codex32/ as its working directory and hashlock/ is a sibling). One vendored
+// copy, one provenance pin (hashlock/testdata/hashlock-v0.8.provenance.json) --
+// never a second copy or a literal transcribed into this file.
+type hashlockCorpus struct {
+	Kind []struct {
+		PreimageHex   string `json:"preimage_hex"`
+		Digest        string `json:"digest"`
+		MS1           string `json:"ms1"`
+		Entr32PairMS1 string `json:"entr32_pair_ms1"`
+	} `json:"kind"`
+	Derivation []struct {
+		Phrase    string `json:"phrase"`
+		HardenedX string `json:"hardened_x"`
+	} `json:"derivation"`
+}
+
+func loadHashlockCorpus(t *testing.T) hashlockCorpus {
+	t.Helper()
+	raw, err := os.ReadFile("../hashlock/testdata/hashlock-v0.8.json")
+	if err != nil {
+		t.Fatalf("reading the vendored hashlock corpus: %v", err)
+	}
+	var c hashlockCorpus
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("parsing the vendored hashlock corpus: %v", err)
+	}
+	if len(c.Kind) < 1 || c.Kind[0].PreimageHex == "" || c.Kind[0].Entr32PairMS1 == "" {
+		t.Fatalf("corpus shape: %d kind rows", len(c.Kind))
+	}
+	return c
+}
+
+// H2 (SPEC_hashlock_H2_device §6, §7.4): the 0x03 kind has ONE decoder of its own;
+// DecodeMS1 keeps refusing it (H0), and the two never share a code path.
+//
+// Every value here comes from the corpus, never from a literal this file
+// transcribed. MUTATION: `copy(preimage[:], d[:32])` in place of `d[1:]` -> the
+// full-width comparison below fails with
+// `preimage = 03abab...abab, want the corpus's preimage_hex abab...abab`. The `x[0] == 0 && x[31] == 0`
+// smoke check this replaced could NOT fail on that mutation (r0 adversarial C-2:
+// under it x[0] = 0x03 and x[31] = 0xab, so the && is false and the mutant
+// reported PASS -- executed and confirmed for this fold).
+func TestDecodeMS1PreimageIsShapeExact(t *testing.T) {
+	c := loadHashlockCorpus(t)
+	plate := c.Kind[0].MS1
+	s, err := New(plate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := DecodeMS1Preimage(s)
+	if err != nil {
+		t.Fatalf("DecodeMS1Preimage(plate): %v", err)
+	}
+	if want := mustHexT(t, c.Kind[0].PreimageHex); !bytes.Equal(x[:], want) {
+		t.Fatalf("preimage = %x, want the corpus's preimage_hex %x", x, want)
+	}
+	if _, _, _, err := DecodeMS1(s); err != errMSBadPrefix {
+		t.Errorf("DecodeMS1(plate) = %v, want errMSBadPrefix (H0 contract)", err)
+	}
+
+	// §7.4's acceptance-record case: the plate ms hashlock actually wrote on
+	// the host (design/agent-reports/ms-hashlock-H1-acceptance.md, H1 item 3)
+	// decodes to the corpus ANCHOR row's hardened_x. This is the one row that
+	// ties this decoder to a host-produced artifact rather than to a corpus
+	// string; a decoder that agreed with the corpus but not with ms would pass
+	// every other row here.
+	const acceptancePlate = "ms10hashsq0p7jaf9gsjjpkjvll2l274w8a388xgqzlewp73scptwxgtjugspvs8tklufg89hqj"
+	ap, err := New(acceptancePlate)
+	if err != nil {
+		t.Fatalf("New(the H1 acceptance plate): %v", err)
+	}
+	ax, err := DecodeMS1Preimage(ap)
+	if err != nil {
+		t.Fatalf("DecodeMS1Preimage(the H1 acceptance plate): %v", err)
+	}
+	if len(c.Derivation) == 0 || c.Derivation[0].Phrase != "correct horse battery staple" {
+		t.Fatal("derivation row 0 is not the anchor phrase -- the corpus and this test have drifted")
+	}
+	if want := mustHexT(t, c.Derivation[0].HardenedX); !bytes.Equal(ax[:], want) {
+		t.Errorf("the H1 acceptance plate decodes to %x, want the anchor row's hardened_x %x", ax, want)
+	}
+
+	// §7.1's "kind: the entr32 pair" lockstep clause. The SAME 32 bytes under
+	// Tag::ENTR are a SEED, not a preimage: the preimage decoder must refuse
+	// the sibling on its prefix byte, and DecodeMS1 -- which refuses the hash
+	// plate -- must decode it. That is the pair, driven in both directions.
+	pair, err := New(c.Kind[0].Entr32PairMS1)
+	if err != nil {
+		t.Fatalf("New(entr32_pair_ms1): %v", err)
+	}
+	if _, err := DecodeMS1Preimage(pair); err != errMSBadPrefix {
+		t.Errorf("DecodeMS1Preimage(entr32_pair_ms1) err = %v, want errMSBadPrefix", err)
+	}
+	prefix, lang, entropy, err := DecodeMS1(pair)
+	if err != nil {
+		t.Fatalf("DecodeMS1(entr32_pair_ms1): %v", err)
+	}
+	if prefix != msPrefixEntr || lang != 0 {
+		t.Errorf("DecodeMS1(entr32_pair_ms1) prefix/language = %d/%d, want %d/0", prefix, lang, msPrefixEntr)
+	}
+	if want := mustHexT(t, c.Kind[0].PreimageHex); !bytes.Equal(entropy, want) {
+		t.Errorf("entr32_pair_ms1 seed = %x, want the same 32 bytes as the hash plate %x", entropy, want)
+	}
+	for _, tc := range []struct {
+		name, s string
+		want    error
+	}{
+		{"entr single", "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f", errMSBadPrefix},
+		{"a 2-of-N share beginning 0x03", "ms12testaqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqdq7pl8qdc5tsp", errMSBadPrefix},
+		{"the entr-id 0x03 shape (kind is the prefix byte)", "ms10entrsqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5gz69g08wwtz9", nil},
+	} {
+		e, err := New(tc.s)
+		if err != nil {
+			t.Fatalf("New(%s): %v", tc.name, err)
+		}
+		if _, err := DecodeMS1Preimage(e); err != tc.want {
+			t.Errorf("DecodeMS1Preimage(%s) err = %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	// An unshared 0x03 string whose payload is not 33 bytes: the length rule.
+	d17 := make([]byte, 17)
+	d17[0] = 0x03
+	short, err := NewSeed("ms", 0, "hash", 's', d17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeMS1Preimage(short); err != errMSBadLength {
+		t.Errorf("17-byte 0x03 payload: err = %v, want errMSBadLength", err)
 	}
 }
