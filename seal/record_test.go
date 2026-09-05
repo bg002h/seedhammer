@@ -459,8 +459,11 @@ const sealPreimagePlate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46
 
 // An encrypted section carrying a preimage plate is refused whole, exactly as
 // one carrying any unknown record is — the payload never reaches the unlock
-// screen with an "ms1" it would cut as a seed. (The unlock screen renders this
-// as "Payload unreadable."; a named arm is an H2 follow-up.)
+// screen with an "ms1" it would cut as a seed. (The unlock screen used to
+// render this as "Payload unreadable."; F-474 gave it a named arm in H2, and
+// the refusal now carries the record index and the kind structurally — see
+// RecordNotPermittedError and record_not_permitted_test.go. The class stays
+// UNKNOWN, which is what the assertion below holds.)
 func TestAdmitSectionRefusesAPreimagePlateAsUnknown(t *testing.T) {
 	_, err := AdmitSection([][]byte{[]byte(sealPreimagePlate)}, SectionEncrypted)
 	if !errors.Is(err, ErrRecordNotPermitted) {

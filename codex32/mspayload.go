@@ -99,3 +99,29 @@ func IsPreimage(s String) bool {
 	d := s.Seed()
 	return len(d) == 33 && d[0] == msPrefixPreimage
 }
+
+// DecodeMS1Preimage decodes the m-format HASHLOCK PREIMAGE kind (SPEC_ms_hashlock
+// §1: payload = [0x03][32 bytes]) from a New-valid string: ONLY an unshared
+// single whose data is exactly 33 bytes beginning 0x03 -- the shape IsPreimage
+// tests. Every other input is refused with the same errors DecodeMS1 uses:
+// errMSBadPrefix for a wrong first byte or a SHARE, errMSBadLength for an
+// unshared 0x03 payload that is not 33 bytes.
+//
+// DecodeMS1 is deliberately NOT taught this kind (r2 review C-2): its five callers
+// all treat the result as a SEED. The returned preimage is SECRET; the caller
+// scrubs. No screen calls this in stage H2.
+func DecodeMS1Preimage(s String) (preimage [32]byte, err error) {
+	f, perr := ParsePrefix(s.String())
+	if perr != nil || !f.Unshared {
+		return preimage, errMSBadPrefix
+	}
+	d := s.Seed()
+	if len(d) == 0 || d[0] != msPrefixPreimage {
+		return preimage, errMSBadPrefix
+	}
+	if len(d) != 1+32 {
+		return preimage, errMSBadLength
+	}
+	copy(preimage[:], d[1:])
+	return preimage, nil
+}

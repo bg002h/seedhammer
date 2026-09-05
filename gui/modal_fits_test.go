@@ -6,6 +6,7 @@ import (
 
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
+	"seedhammer.com/hashlock"
 )
 
 // ─── F-185: the CLASS check, not another per-screen trim ─────────────────────
@@ -332,9 +333,64 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"the incomplete-card refusal, neither",
 			bundlePendingMessage(false, false),
 		},
+		{
+			"the hashlock ms1-plate refusal (H2 §2 rule 3)",
+			composerCopyHashlockRefusal(hashlock.ErrMS1Shaped),
+		},
+		{
+			"the hashlock reconciliation screen (H2 §4.5)",
+			composerCopyHashlockReconcile(),
+		},
+		{
+			"HASH ON EVERY PATH, phrase-route form (H2 §4.7)",
+			composerCopyHashEveryPathPhrase(),
+		},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)
+		})
+	}
+}
+
+// The H2 bodies drawn by composerConfirmScreen -> ConfirmWarningScreen, measured
+// on THAT renderer and WRAPPED in composerConfirmBody exactly as production
+// draws them.
+//
+// A separate table rather than a renderer column on the one above, because
+// TestModalsThisBlockTouchesAreDrawnInFull's rows are all showError bodies and
+// a third positional field would have had to be added to every pre-existing row
+// to say so.
+//
+// r0 fidelity I-3 = journey I-2 (PARTIAL): these three rows were measured
+// through errorScreenBody and unwrapped, while being named as modals -- the
+// table's claim about its own subject was false. The NUMBERS do not move: the
+// refute pass measured the capacity delta between the two renderers at ZERO for
+// seven different bodies, because warningBodyClip (gui/gui.go:595-600) depends
+// only on dims. Journey's further suggestion -- re-run §4.5's drop order and
+// restore the reconciliation line if the unshortened body "now fits" -- is
+// declined on that measurement; the line's real loss was §8h's guard, fixed by
+// composerCopyHashlockReconcile instead.
+func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
+	for _, tc := range []struct {
+		what string
+		body string
+	}{
+		{
+			"the hashlock hardened warning (H2 §4.3)",
+			composerConfirmBody(composerCopyHashlockHardenedWarning()),
+		},
+		{
+			"the hashlock sha256 warning (H2 §4.3)",
+			composerConfirmBody(composerCopyHashlockSHA256Warning()),
+		},
+		{
+			"the hashlock confirm modal, longest variant (H2 §4.5)",
+			composerConfirmBody(composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
+				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+		},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			assertModalBodyFits(t, tc.what, confirmWarningBody, tc.body)
 		})
 	}
 }

@@ -24,8 +24,8 @@ import (
 // never be spent, and the reference wallet's own README records months of
 // exactly that.
 //
-// THE COMPOSER NEVER DERIVES, STORES OR ENGRAVES A PREIMAGE this cycle
-// (§14). It takes a digest and puts it in a script.
+// THE COMPOSER DERIVES A PREIMAGE IN RAM FOR ONE SCREEN (H2) AND NEVER STORES,
+// SHOWS OR ENGRAVES IT. It puts a digest in a script.
 
 // composerHexKeys is the fallback pad's alphabet: hex digits only, so an
 // entry that is 64 characters long is 64 VALID characters by construction.
@@ -136,41 +136,108 @@ func composerHexEntry(ctx *Context, th *Colors) ([32]byte, bool) {
 	return out, false
 }
 
+const composerHashRowPhrase = "Type a hashlock phrase"
+
+// composerHashRowSet builds `Which hash?` ONCE and records where each named row
+// sits, so the dispatch below is by label, never by index arithmetic (spec §5;
+// r2 review C-4: the shipped default arm cleared the lock when a row moved).
+//
+// (Named composerHashRowSet rather than composerHashRows: the constructor below
+// is composerHashRows, and Go does not allow a type and a func to share a name
+// in the same package -- the plan's own tests call the constructor composerHashRows.)
+type composerHashRowSet struct {
+	labels    []string
+	lead      string
+	digests   [][32]byte
+	phraseRow int
+	hexRow    int
+	noneRow   int
+}
+
+func composerHashRows(s *syswSession) composerHashRowSet {
+	digests := composerPayloadDigests(s)
+	labels := make([]string, 0, len(digests)+3)
+	for i, d := range digests {
+		labels = append(labels, composerHashRow(i+1, d))
+	}
+	r := composerHashRowSet{digests: digests, lead: "Which hash?"}
+	r.phraseRow = len(labels)
+	labels = append(labels, composerHashRowPhrase)
+	r.hexRow = len(labels)
+	labels = append(labels, "Type 64 hex")
+	r.noneRow = len(labels)
+	labels = append(labels, "No hash lock")
+	r.labels = labels
+	if len(digests) == 0 {
+		r.lead = composerCopyHashlockNoPayloadLead()
+	}
+	return r
+}
+
+// composerHashByPhraseSync drops st.hashByPhrase once NO path carries a hash at
+// all -- the one event after which no phrase-set hash can still be in the
+// composition (r0 adversarial I-2 = fidelity M-2 = journey M-1: the flag was set
+// and never cleared anywhere).
+//
+// It is deliberately NOT cleared when THIS path's hash is replaced by a payload
+// row or a hex digest: another path may still be phrase-set, and clearing on
+// that narrower event would drop §8h's phrase form while a phrase-set hash is
+// still live -- the C16 shape (a composition-wide fact edited as though it were
+// per-path). The residual staleness runs the SAFE way: an over-sticky flag makes
+// composerCopyHashEveryPathPhrase name "the phrase and its method, OR the
+// preimage plate", so the operator is told to back up one artifact too many,
+// never one too few. Per-path provenance is filed as a follow-up (owning phase
+// H3) rather than bolted on here, because it needs the same splicing discipline
+// composerAddPath and "Remove path" already apply to Paths.
+func composerHashByPhraseSync(st *composerState) {
+	for _, p := range st.list.Paths {
+		if p.Hash != nil {
+			return
+		}
+	}
+	st.hashByPhrase = false
+}
+
 // composerHashEdit sets or clears one path's hashlock.
 func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool {
 	title := fmt.Sprintf("Path %d hash", idx+1)
-	digests := composerPayloadDigests(ctx.sysw)
-	rows := make([]string, 0, len(digests)+2)
-	for i, d := range digests {
-		rows = append(rows, composerHashRow(i+1, d))
-	}
-	rows = append(rows, "Type 64 hex")
-	rows = append(rows, "No hash lock")
-	sel, ok := composerPickScreen(ctx, th, title, "Which hash?", rows)
-	if !ok {
-		return false
-	}
-	// §8i, ONCE THE OPERATOR IS ACTUALLY TAKING A HASH. It used to be shown
-	// unconditionally on entry, so an operator whose next choice was "No hash
-	// lock" met a modal in front of a clear. It governs how the preimage must
-	// have been produced, which is only a question for someone choosing one.
-	if sel <= len(digests) {
-		showError(ctx, th, title, composerCopyHashRule())
-	}
-	switch {
-	case sel < len(digests):
-		d := digests[sel]
-		st.list.Paths[idx].Hash = &d
-		return true
-	case sel == len(digests):
-		d, ok := composerHexEntry(ctx, th)
+	for {
+		rows := composerHashRows(ctx.sysw)
+		sel, ok := composerPickScreen(ctx, th, title, rows.lead, rows.labels)
 		if !ok {
-			return false
+			return false // Back at `Which hash?` -- the ONLY false this function returns (spec §4.6)
 		}
-		st.list.Paths[idx].Hash = &d
-		return true
-	default:
-		st.list.Paths[idx].Hash = nil
-		return true
+		// The §8i rule fires when the operator is TAKING a hash: a payload row,
+		// the phrase row or the hex row -- stated as that predicate.
+		taking := sel < len(rows.digests) || sel == rows.phraseRow || sel == rows.hexRow
+		if taking {
+			showError(ctx, th, title, composerCopyHashRule())
+		}
+		switch {
+		case sel < len(rows.digests):
+			d := rows.digests[sel]
+			st.list.Paths[idx].Hash = &d
+			return true
+		case sel == rows.phraseRow:
+			switch hashlockPhraseRoute(ctx, th, st, idx, rows.digests) {
+			case hashlockAssigned:
+				return true
+			case hashlockBackToWhichHash:
+				continue
+			}
+		case sel == rows.hexRow:
+			d, ok := composerHexEntry(ctx, th)
+			if !ok {
+				continue // Back from hex entry returns to `Which hash?`, path intact
+			}
+			st.list.Paths[idx].Hash = &d
+			return true
+		case sel == rows.noneRow:
+			st.list.Paths[idx].Hash = nil
+			composerHashByPhraseSync(st)
+			return true
+		default:
+			panic(fmt.Sprintf("composerHashEdit: pick returned row %d of %d", sel, len(rows.labels)))
+		}
 	}
 }

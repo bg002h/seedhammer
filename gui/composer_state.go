@@ -32,6 +32,11 @@ type composerState struct {
 	// present, affecting echoes and refusals only, never an encoded operand.
 	bound composerBound
 
+	// hashByPhrase records that AT LEAST ONE path's hash was set through the
+	// phrase route (H2), so Done's §8h form names the phrase/method as the
+	// backup rather than a bare preimage (composerCopyHashEveryPathFor).
+	hashByPhrase bool
+
 	// NO CONFIRM MEMO LIVES HERE, and its absence is the fix rather than an
 	// omission. §8a and §8b were memoised by the operator's path INDEX, and an
 	// index is not an identity: "Remove path" splices the slice and left the

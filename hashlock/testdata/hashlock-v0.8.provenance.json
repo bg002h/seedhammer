@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "PROVENANCE PIN for the vendored copy of ms-codec 0.8.0's hashlock corpus (SPEC_hashlock_H2_device §7.1).",
+    "The rows are MEASURED constants (python3 hashlib + openssl kdf) recorded by the H1 plan; never edited by hand.",
+    "hashlock/hashlock_test.go fails if sha256 and the file disagree or if any derivation row disagrees with the Go port.",
+    "TO RE-SYNC: cp ../mnemonic-secret/crates/ms-codec/tests/vectors/hashlock-v0.8.json hashlock/testdata/ ;",
+    "  git -C ../mnemonic-secret rev-parse HEAD ; sha256sum hashlock/testdata/hashlock-v0.8.json"
+  ],
+  "repo": "mnemonic-secret",
+  "remote": "git@github.com:bg002h/mnemonic-secret.git",
+  "path": "crates/ms-codec/tests/vectors/hashlock-v0.8.json",
+  "commit": "cd0a60f",
+  "release": "ms-codec-v0.8.0 (crates.io 0.8.0, 2026-09-05)",
+  "sha256": "a46c197a3640fe8af4ca4370b46a9637466649227163ce6761bb032354811d30",
+  "derivation_rows": 11,
+  "refusals_rows": 15,
+  "recorded_at": "2026-09-05"
+}

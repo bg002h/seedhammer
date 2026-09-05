@@ -1,6 +1,10 @@
 package gui
 
-import "fmt"
+import (
+	"fmt"
+
+	"seedhammer.com/hashlock"
+)
 
 // Every operator-facing string the wallet-policy COMPOSER draws, in one file
 // (SPEC_wallet_policy_composer.md §8).
@@ -346,4 +350,124 @@ func composerCopySameOriginFewFingerprints() string {
 func composerCopySameXpub(a, b uint8) string {
 	return fmt.Sprintf("Slots @%d and @%d hold the same key. Every slot needs a "+
 		"different key.", a, b)
+}
+
+// ─── H2: hashlock phrase route (SPEC_hashlock_H2_device §4) ──────────────────
+
+func composerCopyHashlockNoPayloadLead() string {
+	return "No hash record in the payload. Type a phrase below, or make one with " +
+		"ms hashlock on the host."
+}
+
+// The first sentence answers the §8i rule modal the operator has just dismissed
+// ("A passphrase must be hashed to 32 bytes first, then hashed again") -- that
+// modal fires on the phrase row too, immediately in front of the one route that
+// does the hashing itself, and read cold it says this route cannot work
+// (r0 journey I-5). Stating it here costs no new gate row and no new screen.
+func composerCopyHashlockPhraseLead() string {
+	return "This screen does that hashing for you. Use a phrase you have never " +
+		"used anywhere else."
+}
+
+func composerCopyHashlockRefusal(err error) string {
+	switch err {
+	case hashlock.ErrEmpty:
+		return "Type a hashlock phrase, or press Back."
+	case hashlock.ErrNotPrintableASCII:
+		return "A hashlock phrase is printable ASCII only."
+	case hashlock.ErrMS1Shaped:
+		return "That is a preimage plate, not a phrase. On the host, run ms hashlock " +
+			"with it and load the hash: record it prints."
+	case hashlock.ErrTooLong:
+		return "A hashlock phrase is at most 100 characters."
+	case hashlock.ErrHex64:
+		return "That is a preimage in hex, not a phrase. Use the Type 64 hex row."
+	}
+	return err.Error()
+}
+
+func composerCopyHashlockHardenedWarning() string {
+	return "Even a 20-character phrase falls in about 72 days on one GPU, and " +
+		"shorter ones fall sooner. Choose it from a generator. If you have used " +
+		"this phrase anywhere else, press Back and choose another. Continue?"
+}
+
+func composerCopyHashlockSHA256Warning() string {
+	return "This is the brainwallet construction: anyone holding the digest tests " +
+		"10^10 phrases per second. A phrase a person chose is not safe here; use " +
+		"six diceware words. If you have used this phrase anywhere else, press " +
+		"Back and choose another. Continue?"
+}
+
+func composerCopyHashlockDerivingLead() string {
+	return "Deriving. This takes about 10 seconds."
+}
+
+// composerCopyHashlockConfirm is the §4.5 body. relation is "" when the payload
+// holds no hash: record; otherwise the matches/no-match line. otherPath is ""
+// unless another path of this policy already carries a different hash.
+func composerCopyHashlockConfirm(first8last8, method string, chars int, relation, otherPath string) string {
+	b := "hash  " + first8last8 + "\n" +
+		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n"
+	if relation != "" {
+		b += relation + "\n"
+	}
+	if otherPath != "" {
+		b += otherPath + "\n"
+	}
+	return b +
+		"Write down this phrase and the method now. They are not on this device and " +
+		"not on your plates. Without both, this path can never be spent.\n" +
+		"One phrase per policy. Never use this phrase as a passphrase or a password " +
+		"anywhere else."
+}
+
+func composerCopyHashlockRelation(i int) string {
+	if i < 0 {
+		return "no hash: record in the payload has this digest"
+	}
+	return fmt.Sprintf("matches hash %d in the payload", i+1)
+}
+
+// §4.5's reconciliation line, on its own screen after HOLD.
+//
+// §4.5's drop-order step 2 says to move this line into the phrase-route §8h at
+// Done, and the build gate did -- but §8h is guarded by composerEveryPathHashed
+// (composer_state.go:239 at the fork baseline c4a64fc), so on the ordinary
+// wallet with one keyed path and one
+// hashlocked path it was drawn NOWHERE (r0 adversarial I-1 = fidelity I-2 =
+// journey I-3, all three tracing the same loss). Its own screen after HOLD is
+// reachable for every policy that has a phrase-set hash, and keeps the confirm
+// modal's measured headroom (186) intact. §4.7's copy is unchanged below, as the
+// spec states it.
+func composerCopyHashlockReconcile() string {
+	return "Before you fund this wallet, run ms hashlock with this phrase and " +
+		"method on the host and check the digest matches."
+}
+
+// composerCopyHashlockOtherPath is the confirm modal's second relation line
+// (r0 journey I-1): another path of this policy already carries a DIFFERENT
+// hash, so spending will need more than this one phrase. COUNT-FREE on purpose
+// (post-impl e2e I-1): "two phrases" was a hard-coded number, wrong on any
+// wallet with three or more hashlocks -- an undercount at the moment the
+// operator is counting what to back up.
+func composerCopyHashlockOtherPath() string {
+	return "another path has a different hash: back up every phrase"
+}
+
+// §8h, the phrase-route form (SPEC_hashlock_H2_device §4.7), verbatim as the
+// spec states it. The reconciliation line lives in composerCopyHashlockReconcile
+// instead; see there.
+func composerCopyHashEveryPathPhrase() string {
+	return "HASH ON EVERY PATH\n" +
+		"Every way to spend this wallet needs a hashlock preimage. It is not on " +
+		"this device and not on these plates. Back up the phrase and its method, " +
+		"or the preimage plate, separately."
+}
+
+func composerCopyHashEveryPathFor(st *composerState) string {
+	if st.hashByPhrase {
+		return composerCopyHashEveryPathPhrase()
+	}
+	return composerCopyHashEveryPath()
 }

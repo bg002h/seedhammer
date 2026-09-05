@@ -671,7 +671,13 @@ func TestComposerLockAndHashEditsAreNotGuardedByTheDiscardConfirm(t *testing.T) 
 		want  string
 	}{
 		{"time lock", 1, "What kind of time lock?"},
-		{"hash lock", 2, "Which hash?"},
+		// H2 (SPEC_hashlock_H2_device §4.1): with no ctx.sysw session loaded
+		// (this test's own state), composerHashRows reports 0 payload digests,
+		// so the screen's LEAD becomes composerCopyHashlockNoPayloadLead
+		// rather than the literal "Which hash?" -- the TITLE ("Path 1 hash")
+		// is what stays invariant across both cases, so the pump target moves
+		// to it rather than to wording this test does not otherwise assert on.
+		{"hash lock", 2, "Path 1 hash"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

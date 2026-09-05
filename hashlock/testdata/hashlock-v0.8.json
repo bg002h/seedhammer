@@ -1,0 +1,63 @@
+{
+  "format": "ms hashlock corpus v0.8 (SPEC_ms_hashlock §8)",
+  "kind": [
+    {
+      "description": "preimage single, X = 0xab*32; id hash; 75 chars; the entr-32 pair row is X=0xab*32 under Tag::ENTR. Measured with the gated build: both begin ms10<id>sq and differ at the id (and, downstream of the prefix byte's low bits, at the tenth character).",
+      "preimage_hex": "abababababababababababababababababababababababababababababababab",
+      "digest": "9a2db2e23f1504cd056606553ac049c5e718e8f9ce9233876df1a7a1821af885",
+      "ms1": "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c",
+      "entr32_pair_ms1": "ms10entrsqz46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kdv3c0wn2hx0lq"
+    }
+  ],
+  "derivation": [
+    { "phrase": "correct horse battery staple", "phrase_chars": 28, "hardened_x": "c3e97525442520da4cffd5f57aae3f6273990017f2e0fa30c056e32172e22016", "hardened_h": "3cf5d421caf2a9c8eb9de1d400866ea7d475e6ba978861bb0167a37cb70a4c12", "sha256_x": "c4bbcb1fbec99d65bf59d85c8cb62ee2db963f0fe106f483d9afa73bd4e39a8a", "sha256_h": "b867db875479bcc0287352cdaa4a1755689b8338777d0915e9acd9f6edbc96cb", "provenance": "python3 -c 'import hashlib;p=b\\\"correct horse battery staple\\\";x=hashlib.pbkdf2_hmac(\\\"sha256\\\",p,b\\\"ms-hashlock-v1\\\",100000,32);print(x.hex(),hashlib.sha256(x).hex())' ; openssl kdf -keylen 32 -kdfopt digest:SHA256 -kdfopt pass:'correct horse battery staple' -kdfopt salt:ms-hashlock-v1 -kdfopt iter:100000 PBKDF2" },
+    { "phrase": "z", "phrase_chars": 1, "hardened_x": "eda31187ec20d855d85cb69d94abac1c55b8996819d6ce3dc6cc17f79f6dd3e2", "hardened_h": "af384a82ac8ff16b69a24392f1adc40966ab22923ae2b06d5ebc8ea6a5453b3a", "sha256_x": "594e519ae499312b29433b7dd8a97ff068defcba9755b6d5d00e84c524d67b06", "sha256_h": "c27cd49cb724724842a58b799b1009ecc968b3499767b73ee54693661ff723ca", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "twenty characters!!!", "phrase_chars": 20, "hardened_x": "c9c45a47783e7cfbe4773d76a0f282d02ad077bc32d863a5b78e9fb134d0503c", "hardened_h": "f00137a8ecf4f1b6acb592a7d00085ab30a738d936996417df098fe6d39eb4a2", "sha256_x": "e8bf4723478e5d324b4ce75009b82a9b60ce5d4233a43e656c2ff7e4f8cba7f8", "sha256_h": "5b891cd8cd226400ddcf25419847487f0954fc197640b6e6e5074dfb3b1bdde4", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "hashlock phrase row: sixty-four printable characters, no hex!!xx", "phrase_chars": 64, "hardened_x": "72bd30bb4280d8db4a1db45f18ef5e03313a30d7e2440b2abe4b39ff23b62a96", "hardened_h": "bd10cd48bffc544fa3c42cb8577db646f8603135479d73217b564e5be57b58fd", "sha256_x": "ef2d8e668e2172c6fea55ac565db83db434cdb993bdee43e3dad3e398cd61b60", "sha256_h": "895d7861d3c8f40ca177e30e4ac8e30004a15706cdd549aa04822c00126ec335", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "hashlock phrase row: sixty-four printable characters, no hex!!xx!", "phrase_chars": 65, "hardened_x": "81659f096958cceca503b18498a2abe861ccd93789801c42f031f96d0ea7c9c7", "hardened_h": "4a84ddc8d54b05c8d06cf5ba610c25a2e14ab83f79ada662a7504c1f37bf6984", "sha256_x": "2f437817e6039e03d66badc8808dfaaf74adb0cbafdebc1f95c45e0e8fdc856b", "sha256_h": "671c81426fa67f7b590f78f143173faeb56799da21dd316aa2762dac6ac64ff1", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "hashlock phrase row: one hundred printable characters kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "phrase_chars": 100, "hardened_x": "048a9101a6c2d4d2f41a64d3cfc2fa63717eafb99ddc2c0b94183605ffd97ece", "hardened_h": "70a5395386c769019faa4996aa61510f7760a1b32d6980173ccc57b3e68b4525", "sha256_x": "4847734befcd471f090bfb87ea23c13e2a80dccd973dffb301be6844c53a5251", "sha256_h": "76001f8e456719bd4d1e560ff28be3c4d75db624779079809da422607f31cde4", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "hashlock phrase row: one hundred printable characters kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk!", "phrase_chars": 101, "hardened_x": "abe28ff3905421a9f8caae476f3685555bb94a11c55e767d3bd979e9e46f6a57", "hardened_h": "ee37d62cd1e715c6b49cb76403aa2605c468db9c67386a7065dc6cae0b1c003b", "sha256_x": "7c898a67500677c6d58452d6b01361c53f482c13450c9609130f84d9018a80ad", "sha256_h": "f87e53adb8fd3338ad727cbc677be5b75b028ff481695e05d46fb33e0d8fb8b8", "note": "the codec derives it; the CLI refuses it", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "  a  b ", "phrase_chars": 7, "hardened_x": "cae9f5663350a86462a194015516655846bc6880f134e156227e582323e0146b", "hardened_h": "07ca621d2310d284d214f8894bc35100f467a39f9fb8155620d3a3f0d65941f6", "sha256_x": "2438381a3894dfca639406f8a9677057050c098ad4d36ae8109db731adbb9574", "sha256_h": "5f74bd9f51c2e64d0099927da9e472bd97bfe63537667b8a8e1cf4d4b294fe69", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "correct-horse,battery staple", "phrase_chars": 28, "hardened_x": "4a48398f2814a30100fc29db21f2c2640774b86068bd2aa115ecb0ea3c5f5449", "hardened_h": "528a12a16588e00171dc83975a4a511815ff33ff43788abf88f780051af350df", "sha256_x": "6c76839064b97076384507503d4b987312c58a2fbd68d5854dee0765b03d42dc", "sha256_h": "c0ed353a4b7f36a2802940f473a06c43c3b64c1246c58118da9e09b5ebfdf468", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "a-b,c", "phrase_chars": 5, "hardened_x": "79324e188fd4935ef23dd5e1aa31e00cbe0d597558cea1dcd5e6a815b169900f", "hardened_h": "8680bbf9e00acff491b41ed5ca0e6ea7c3530260690f2ea7a1145e3ac1841c37", "sha256_x": "7a7fc2a0bffae80552a53f00a170f459d777b8b27857993fd463950ffe7fcbb7", "sha256_h": "082f6172bde9ae5667a2493e75437dd839cc472ff54c311873aa3cb889a9fe16", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" },
+    { "phrase": "Correct Horse Battery Staple", "phrase_chars": 28, "hardened_x": "865125fb7ee922748fe3a53fbbf0917affce472877eb537482092572301fe650", "hardened_h": "36d5ad9d6ec2a7bbaaa5e2ca641698f2301392076faa0c3fb0ad50f828cacea2", "sha256_x": "af139fa284364215adfa49c889ab7feddc5e5d1c52512ffb2cfc9baeb67f220e", "sha256_h": "95d4447031cdc4117f797040c1a9e32367af2a8d97554e442c7bfd002297a7ff", "note": "mixed case: NO folding, a different X from the anchor row (R0 r0 tests I-1)", "provenance": "python3 hashlib.pbkdf2_hmac('sha256', phrase_bytes, b'ms-hashlock-v1', 100000, 32) and hashlib.sha256, 2026-09-04; the hardened X of the 'z' and '  a  b ' rows cross-checked byte-identical in openssl kdf (PBKDF2, digest:SHA256, salt:ms-hashlock-v1, iter:100000)" }
+  ],
+  "refusals": [
+    { "input": "", "channel": "phrase", "rule": "empty" },
+    { "input": "café", "channel": "phrase", "rule": "printable-ascii" },
+    { "input_bytes_hex": "ff", "channel": "phrase", "rule": "printable-ascii" },
+    { "input": "a\tb", "channel": "phrase", "rule": "printable-ascii" },
+    { "input_bytes_hex": "617f", "channel": "phrase", "rule": "printable-ascii" },
+    { "input": " ~", "channel": "phrase", "rule": null, "note": "0x20 and 0x7E accepted" },
+    { "input": "c3e97525442520da4cffd5f57aae3f6273990017f2e0fa30c056e32172e22016", "channel": "phrase", "rule": "64-hex", "remedy": "--hex" },
+    { "input": "C3E97525442520DA4CFFD5F57AAE3F6273990017F2E0FA30C056E32172E22016", "channel": "phrase", "rule": "64-hex", "remedy": "--hex" },
+    { "input": "beef", "channel": "phrase", "rule": null, "note": "short all-hex ACCEPTED" },
+    { "input": "<the kind[0].ms1 string, lowercase>", "channel": "phrase", "rule": "ms1-shaped", "remedy": "--in" },
+    { "input": "<the kind[0].ms1 string, UPPERCASE>", "channel": "phrase", "rule": "ms1-shaped", "remedy": "--in" },
+    { "input": "<the kind[0].ms1 string, grouped by 5 with spaces>", "channel": "phrase", "rule": "ms1-shaped", "remedy": "--in" },
+    { "input": "<the kind[0].ms1 string, with two leading and two trailing spaces>", "channel": "phrase", "rule": "ms1-shaped", "remedy": "--in" },
+    { "input": "<the kind[0].ms1 string, grouped by 2 (112 chars)>", "channel": "phrase", "rule": "ms1-shaped", "remedy": "--in", "note": "shape test precedes the cap" },
+    { "input": "hashlock phrase row: one hundred printable characters kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk!", "channel": "phrase", "rule": "too-long" }
+  ],
+  "lengths_by_door": [
+    { "payload_bytes": 34, "door": "decode", "error": "PreimageLengthMismatch", "got": 33 },
+    { "payload_bytes": 17, "door": "decode", "error": "PreimageLengthMismatch", "got": 16 },
+    { "payload_bytes": 16, "door": "decode", "error": "UnexpectedStringLength", "got": 48 },
+    { "payload_bytes": 16, "door": "combine_shares", "error": "PreimageLengthMismatch", "got": 15 },
+    { "payload_bytes": 32, "door": "combine_shares", "error": "PreimageLengthMismatch", "got": 31 },
+    { "payload_bytes": 44, "door": "combine_shares", "error": "PreimageLengthMismatch", "got": 43 },
+    { "payload_bytes": 46, "door": "none", "note": "unconstructible: 96 chars is outside both codex32 brackets" }
+  ],
+  "downgrade": {
+    "reader": "ms-codec 0.7 (ms 0.16.0 / 0.17.x)",
+    "input": "kind[0].ms1",
+    "expected": "refused: `reserved-prefix byte was 0x03, expected 0x00`, exit 2 -- never a panic",
+    "executor": "scripts/plan-build-gate-ms.sh step 6 builds the pre-H1 tree and runs it; no shipped test can hold a 0.7 crate, so this row is proven at plan time and re-provable with that script against any pre-0.8 SHA"
+  },
+  "lockstep": [
+    "derivation rows: 100 and 101 characters, the spaces row, the hyphen+comma row",
+    "refusals: empty, printable-ascii (TAB, DEL, 0xFF), 64-hex both cases, 101",
+    "kind: the entr32 pair; id/prefix mismatch both directions (forged strings in hashlock_kind.rs)",
+    "the fork's pin test drives these rows in BOTH directions (encode and decode)"
+  ]
+}
