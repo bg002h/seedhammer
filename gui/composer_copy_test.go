@@ -113,6 +113,8 @@ func composerCopyTable() []composerCopyRow {
 			"Slots @0 and @1 hold the same key. Every slot needs a different key."},
 		{"composerCopySameOriginFewFingerprints", "8v", composerCopySameOriginFewFingerprints(),
 			"Two keys declare the same origin and not both carry a fingerprint. This template could not be restored. Use cards or records with fingerprints."},
+		{"composerCopyHashlockNoPayloadLead", "H2-3", composerCopyHashlockNoPayloadLead(),
+			"No hash record in the payload. Type a phrase below, or make one with ms hashlock on the host."},
 	}
 }
 
@@ -191,7 +193,9 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 41 SINCE REVIEW r0 M-4 moved §7d's same-xpub refusal in here: it was an
 	// fmt.Sprintf at its own showError, so §12 item 5's four gates did not
 	// reach it and this scan did not count it.
-	if declared != 41 {
+	// 42 SINCE H2 TASK 3 added composerCopyHashlockNoPayloadLead (the
+	// no-payload lead on `Which hash?`, SPEC_hashlock_H2_device §4.1).
+	if declared != 42 {
 		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 41 -- "+
 			"if that is deliberate, update both", declared)
 	}

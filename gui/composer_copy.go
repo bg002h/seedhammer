@@ -347,3 +347,10 @@ func composerCopySameXpub(a, b uint8) string {
 	return fmt.Sprintf("Slots @%d and @%d hold the same key. Every slot needs a "+
 		"different key.", a, b)
 }
+
+// ─── H2: hashlock phrase route (SPEC_hashlock_H2_device §4) ──────────────────
+
+func composerCopyHashlockNoPayloadLead() string {
+	return "No hash record in the payload. Type a phrase below, or make one with " +
+		"ms hashlock on the host."
+}
