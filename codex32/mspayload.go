@@ -73,10 +73,22 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 // The question is "is this a preimage SINGLE", not "does some byte equal 3":
 // the check is singles-only (§1 rule 2 -- a share's data part is an SSS
 // point, and its first byte is whatever the polynomial gave it), and the
-// preimage payload is exactly [0x03][32 bytes]. A plain BIP-93 secret whose
-// seed begins 0x03 has a 16..32-byte payload and is untouched. The id is NOT
-// consulted: the kind is the prefix byte (§1), a 0x03 single under any other
-// id is a mismatch the host refuses, and it is not a seed either way.
+// preimage payload is exactly [0x03][32 bytes]. The id is NOT consulted: the
+// kind is the prefix byte (§1), a 0x03 single under any other id is a
+// mismatch the host refuses, and it is not a seed either way.
+//
+// THE COLLISION, stated plainly (post-implementation review I-1). A plain
+// BIP-93 33-byte seed that begins 0x03 is indistinguishable from a preimage
+// plate -- same width, same prefix byte, and the id is not consulted -- and
+// IS REFUSED. Roughly 1 in 256 of 33-byte seeds. The 16-, 20-, 24-, 28- and
+// 32-byte seeds are untouched, and so is every share. That is accepted, not
+// overlooked: the constellation profile pins a 33-byte payload to a kind
+// byte, `me` refuses the identical string (ms-codec 0.7 at the prefix gate,
+// 0.8 as a TagKindMismatch), so this is CONVERGENCE with the Rust primary
+// rather than a device narrowing; and the alternative -- keying on the id
+// `hash` -- would engrave a MISTAGGED REAL PREIMAGE as a seed. A refusal
+// costs a re-encode; a wrong cut exposes a spend secret. Pinned by the seam
+// corpus row bip93-plain-33-byte-payload-0x03 in both repos.
 //
 // Reads the prefix fields and one payload byte; nothing new is retained.
 func IsPreimage(s String) bool {

@@ -90,7 +90,11 @@ func TestIsPreimageReadsThePrefixByteOnly(t *testing.T) {
 	// Every population the predicate must NOT touch, and the one it must.
 	// MUTATIONS, each measured against exactly one row: dropping `!f.Unshared`
 	// calls the share row a preimage; dropping `len(d) == 33` calls the plain
-	// 16-byte BIP-93 row one; `d[0] != msPrefixEntr` in place of
+	// 16-byte BIP-93 row one (the 16-byte row is a control against an
+	// OVER-WIDE predicate -- it is not evidence that a 33-byte plain seed
+	// cannot collide, and one can: see the seam row
+	// bip93-plain-33-byte-payload-0x03, refused on both sides by design,
+	// post-impl review I-1); `d[0] != msPrefixEntr` in place of
 	// `== msPrefixPreimage` calls the 33-byte 0x31 row one; keying on the id
 	// `hash` instead of the prefix misses the entr-id row. The mnem row is
 	// 17 bytes and is refused by the length test alone. Seam-corpus rows
