@@ -440,7 +440,7 @@ func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 				continue
 			}
 			if composerEveryPathHashed(st.list) {
-				showError(ctx, th, "Spend paths", composerCopyHashEveryPath())
+				showError(ctx, th, "Spend paths", composerCopyHashEveryPathFor(st))
 			}
 			return true
 		}

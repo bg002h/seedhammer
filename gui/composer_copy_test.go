@@ -6,6 +6,8 @@ import (
 	"go/token"
 	"strings"
 	"testing"
+
+	"seedhammer.com/hashlock"
 )
 
 // composerCopyRow is one operator-facing body, its §8 section, and the exact
@@ -115,6 +117,32 @@ func composerCopyTable() []composerCopyRow {
 			"Two keys declare the same origin and not both carry a fingerprint. This template could not be restored. Use cards or records with fingerprints."},
 		{"composerCopyHashlockNoPayloadLead", "H2-3", composerCopyHashlockNoPayloadLead(),
 			"No hash record in the payload. Type a phrase below, or make one with ms hashlock on the host."},
+		{"composerCopyHashlockPhraseLead", "H2-4.2", composerCopyHashlockPhraseLead(),
+			"This screen does that hashing for you. Use a phrase you have never used anywhere else."},
+		{"composerCopyHashlockRefusal", "H2-4.2", composerCopyHashlockRefusal(hashlock.ErrMS1Shaped),
+			"That is a preimage plate, not a phrase. On the host, run ms hashlock with it and load the hash: record it prints."},
+		{"composerCopyHashlockHardenedWarning", "H2-4.3a", composerCopyHashlockHardenedWarning(),
+			"Even a 20-character phrase falls in about 72 days on one GPU, and shorter ones fall sooner. Choose it from a generator. If you have used this phrase anywhere else, press Back and choose another. Continue?"},
+		{"composerCopyHashlockSHA256Warning", "H2-4.3b", composerCopyHashlockSHA256Warning(),
+			"This is the brainwallet construction: anyone holding the digest tests 10^10 phrases per second. A phrase a person chose is not safe here; use six diceware words. If you have used this phrase anywhere else, press Back and choose another. Continue?"},
+		{"composerCopyHashlockDerivingLead", "H2-4.4", composerCopyHashlockDerivingLead(),
+			"Deriving. This takes about 10 seconds."},
+		{"composerCopyHashlockConfirm", "H2-4.5", composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
+			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
+			"hash  b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
+				"another path has a different hash: two phrases to back up " +
+				"Write down this phrase and the method now. They are not on this device and not on your plates. Without both, this path can never be spent. " +
+				"One phrase per policy. Never use this phrase as a passphrase or a password anywhere else."},
+		{"composerCopyHashlockRelation", "H2-4.5", composerCopyHashlockRelation(0),
+			"matches hash 1 in the payload"},
+		{"composerCopyHashlockOtherPath", "H2-4.5", composerCopyHashlockOtherPath(),
+			"another path has a different hash: two phrases to back up"},
+		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile(),
+			"Before you fund this wallet, run ms hashlock with this phrase and method on the host and check the digest matches."},
+		{"composerCopyHashEveryPathPhrase", "H2-4.7", composerCopyHashEveryPathPhrase(),
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up the phrase and its method, or the preimage plate, separately."},
+		{"composerCopyHashEveryPathFor", "H2-4.7", composerCopyHashEveryPathFor(&composerState{hashByPhrase: true}),
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up the phrase and its method, or the preimage plate, separately."},
 	}
 }
 
@@ -195,8 +223,16 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// reach it and this scan did not count it.
 	// 42 SINCE H2 TASK 3 added composerCopyHashlockNoPayloadLead (the
 	// no-payload lead on `Which hash?`, SPEC_hashlock_H2_device §4.1).
-	if declared != 42 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 41 -- "+
+	// 53 SINCE H2 TASK 4 added the phrase route's eleven bodies: the phrase
+	// lead, the phrase-rule refusal, both method warnings, the deriving
+	// lead, the confirm body, its relation line and its other-path line, the
+	// reconciliation screen, and the two §8h forms
+	// (SPEC_hashlock_H2_device §4.2-§4.7). The last two arrived in the R0
+	// round 0 fold: composerCopyHashlockOtherPath (journey I-1) and
+	// composerCopyHashlockReconcile (adversarial I-1 = fidelity I-2 =
+	// journey I-3, the line §8h's guard had made unreachable).
+	if declared != 53 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 53 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }
