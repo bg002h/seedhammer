@@ -27,7 +27,7 @@ import (
 //
 // The file is authored in the Rust primary (Rust-primary rule) and vendored
 // here; its own header carries the per-row provenance and the re-pin recipe.
-const seamVectorsSHA256 = "3d53ef88a474f02c15aa60a839f4a31071598a26c853463122a847515926eb6a"
+const seamVectorsSHA256 = "f1f2fa6bbbf27e3697ee496636de49be2f25787deff7b3bc4a2c5e16854e391c"
 
 func TestCodex32SeamDeviceAdmitsEverythingTheHostDoes(t *testing.T) {
 	const path = "testdata/codex32_seam_vectors.json"

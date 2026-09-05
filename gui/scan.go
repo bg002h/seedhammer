@@ -86,7 +86,9 @@ func (s *scanner) Scan(r io.Reader) (any, error) {
 		// 	res.Content = m
 	} else if d, err := nonstandard.OutputDescriptor(buf); err == nil {
 		return d, nil
-	} else if s, err := codex32.New(string(buf)); err == nil {
+	} else if s, err := codex32.New(string(buf)); err == nil && !codex32.IsPreimage(s) {
+		// H0 (SPEC_ms_hashlock §9): a hashlock preimage plate is not a seed;
+		// seal.Classify mirrors this arm and narrows with it.
 		return s, nil
 	} else if codex32.ValidMD(string(buf)) || codex32.ValidMK(string(buf)) {
 		return mdmkText(buf), nil

@@ -6,9 +6,10 @@ import "errors"
 // the FIRST byte of the codex32 data payload (Seed()[0]) — NOT the 4-char
 // id/Tag, which is "entr" for both entr and mnem secrets.
 const (
-	msPrefixEntr  = 0x00 // RESERVED_PREFIX: payload = [0x00][entropy]
-	msPrefixMnem  = 0x02 // MNEM_PREFIX:     payload = [0x02][language][entropy]
-	msMaxLanguage = 9    // MNEM_LANGUAGE_NAMES indices 0..9
+	msPrefixEntr     = 0x00 // RESERVED_PREFIX: payload = [0x00][entropy]
+	msPrefixMnem     = 0x02 // MNEM_PREFIX:     payload = [0x02][language][entropy]
+	msPrefixPreimage = 0x03 // PREIMAGE_PREFIX: payload = [0x03][32-byte hashlock preimage] (SPEC_ms_hashlock §1)
+	msMaxLanguage    = 9    // MNEM_LANGUAGE_NAMES indices 0..9
 )
 
 var (
@@ -57,4 +58,32 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 		return 0, 0, nil, errMSBadLength
 	}
 	return prefix, language, entropy, nil
+}
+
+// IsPreimage reports whether a New-valid string carries the m-format HASHLOCK
+// PREIMAGE kind (SPEC_ms_hashlock §1: payload = [0x03][32 bytes], id `hash`).
+//
+// H0 (SPEC_ms_hashlock §9): such a string is INERT on this device — never a
+// codex32 SECRET and no class of its own — because every path that admits
+// ClassCodex32Secret ends at backup.EngraveSeedString, and a hashlock
+// preimage is not a seed: engraved as one it exposes a spend secret as a
+// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix;
+// the device learns to USE a preimage in stage H2, not here.
+//
+// The question is "is this a preimage SINGLE", not "does some byte equal 3":
+// the check is singles-only (§1 rule 2 -- a share's data part is an SSS
+// point, and its first byte is whatever the polynomial gave it), and the
+// preimage payload is exactly [0x03][32 bytes]. A plain BIP-93 secret whose
+// seed begins 0x03 has a 16..32-byte payload and is untouched. The id is NOT
+// consulted: the kind is the prefix byte (§1), a 0x03 single under any other
+// id is a mismatch the host refuses, and it is not a seed either way.
+//
+// Reads the prefix fields and one payload byte; nothing new is retained.
+func IsPreimage(s String) bool {
+	f, err := ParsePrefix(s.String())
+	if err != nil || !f.Unshared {
+		return false
+	}
+	d := s.Seed()
+	return len(d) == 33 && d[0] == msPrefixPreimage
 }

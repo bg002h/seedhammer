@@ -191,6 +191,13 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 		showError(ctx, th, unlockTitle, "This record is not a readable codex32 secret.")
 		return
 	}
+	if codex32.IsPreimage(s) {
+		// Unreachable behind seal.Classify's H0 guard, which never admits a
+		// preimage plate as ClassCodex32Secret. Named rather than assumed:
+		// this is the one call on the sealed path that cuts metal.
+		showError(ctx, th, unlockTitle, "This record is a hashlock preimage, not a seed. It is not engraved as one.")
+		return
+	}
 	id, _, _ := s.Split()
 	params := ctx.Platform.EngraverParams()
 	plan, err := backup.EngraveSeedString(params, backup.SeedString{

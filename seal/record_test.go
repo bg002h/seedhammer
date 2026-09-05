@@ -409,8 +409,9 @@ func TestClassifyMirrorsScanBranchOrder(t *testing.T) {
 		{"command: lock-boot", ClassDebugCommand},
 		{vectorNamed(t, "A").Secret[0], ClassMnemonic},
 		{d.Secret[0], ClassCodex32Secret},
-		{d.Public[0], ClassMDMK}, // mk1
-		{d.Public[2], ClassMDMK}, // md1
+		{d.Public[0], ClassMDMK},          // mk1
+		{d.Public[2], ClassMDMK},          // md1
+		{sealPreimagePlate, ClassUnknown}, // H0: a hashlock preimage plate is not a secret and has no class
 		{"", ClassUnknown},
 		{"not a record at all", ClassUnknown},
 	} {
@@ -449,4 +450,25 @@ func TestWipeZeroesAPartialResult(t *testing.T) {
 			}
 		}
 	}
+}
+
+// H0 (SPEC_ms_hashlock §9): the 75-character kind-0x03 preimage plate from the
+// shared seam corpus (sysw/testdata/codex32_seam_vectors.json, row
+// preimage-plate-0x03). BCH-valid, inside the cap, and NOT a seed.
+const sealPreimagePlate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
+
+// An encrypted section carrying a preimage plate is refused whole, exactly as
+// one carrying any unknown record is — the payload never reaches the unlock
+// screen with an "ms1" it would cut as a seed. (The unlock screen renders this
+// as "Payload unreadable."; a named arm is an H2 follow-up.)
+func TestAdmitSectionRefusesAPreimagePlateAsUnknown(t *testing.T) {
+	_, err := AdmitSection([][]byte{[]byte(sealPreimagePlate)}, SectionEncrypted)
+	if !errors.Is(err, ErrRecordNotPermitted) {
+		t.Fatalf("AdmitSection(preimage plate, encrypted) err = %v, want ErrRecordNotPermitted", err)
+	}
+	if !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("error %q does not name the class unknown", err)
+	}
+	// MUTATION: drop `!codex32.IsPreimage(c)` from Classify -> admitted as
+	// codex32-secret, err == nil, this test fails on the first check.
 }

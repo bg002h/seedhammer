@@ -120,6 +120,8 @@ func isStrictMs1(record string) bool {
 	if !strings.HasPrefix(strings.ToLower(record), "ms1") {
 		return false
 	}
-	_, err := codex32.New(record)
-	return err == nil
+	c, err := codex32.New(record)
+	// H0 (SPEC_ms_hashlock §9): a hashlock preimage plate is BCH-valid and
+	// inside the cap, and it is not a seed. Inert here — no class of its own.
+	return err == nil && !codex32.IsPreimage(c)
 }
