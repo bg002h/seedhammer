@@ -6,9 +6,10 @@ import "errors"
 // the FIRST byte of the codex32 data payload (Seed()[0]) — NOT the 4-char
 // id/Tag, which is "entr" for both entr and mnem secrets.
 const (
-	msPrefixEntr  = 0x00 // RESERVED_PREFIX: payload = [0x00][entropy]
-	msPrefixMnem  = 0x02 // MNEM_PREFIX:     payload = [0x02][language][entropy]
-	msMaxLanguage = 9    // MNEM_LANGUAGE_NAMES indices 0..9
+	msPrefixEntr     = 0x00 // RESERVED_PREFIX: payload = [0x00][entropy]
+	msPrefixMnem     = 0x02 // MNEM_PREFIX:     payload = [0x02][language][entropy]
+	msPrefixPreimage = 0x03 // PREIMAGE_PREFIX: payload = [0x03][32-byte hashlock preimage] (SPEC_ms_hashlock §1)
+	msMaxLanguage    = 9    // MNEM_LANGUAGE_NAMES indices 0..9
 )
 
 var (
@@ -57,4 +58,44 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 		return 0, 0, nil, errMSBadLength
 	}
 	return prefix, language, entropy, nil
+}
+
+// IsPreimage reports whether a New-valid string carries the m-format HASHLOCK
+// PREIMAGE kind (SPEC_ms_hashlock §1: payload = [0x03][32 bytes], id `hash`).
+//
+// H0 (SPEC_ms_hashlock §9): such a string is INERT on this device — never a
+// codex32 SECRET and no class of its own — because every path that admits
+// ClassCodex32Secret ends at backup.EngraveSeedString, and a hashlock
+// preimage is not a seed: engraved as one it exposes a spend secret as a
+// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix;
+// the device learns to USE a preimage in stage H2, not here.
+//
+// The question is "is this a preimage SINGLE", not "does some byte equal 3":
+// the check is singles-only (§1 rule 2 -- a share's data part is an SSS
+// point, and its first byte is whatever the polynomial gave it), and the
+// preimage payload is exactly [0x03][32 bytes]. The id is NOT consulted: the
+// kind is the prefix byte (§1), a 0x03 single under any other id is a
+// mismatch the host refuses, and it is not a seed either way.
+//
+// THE COLLISION, stated plainly (post-implementation review I-1). A plain
+// BIP-93 33-byte seed that begins 0x03 is indistinguishable from a preimage
+// plate -- same width, same prefix byte, and the id is not consulted -- and
+// IS REFUSED. Roughly 1 in 256 of 33-byte seeds. The 16-, 20-, 24-, 28- and
+// 32-byte seeds are untouched, and so is every share. That is accepted, not
+// overlooked: the constellation profile pins a 33-byte payload to a kind
+// byte, `me` refuses the identical string (ms-codec 0.7 at the prefix gate,
+// 0.8 as a TagKindMismatch), so this is CONVERGENCE with the Rust primary
+// rather than a device narrowing; and the alternative -- keying on the id
+// `hash` -- would engrave a MISTAGGED REAL PREIMAGE as a seed. A refusal
+// costs a re-encode; a wrong cut exposes a spend secret. Pinned by the seam
+// corpus row bip93-plain-33-byte-payload-0x03 in both repos.
+//
+// Reads the prefix fields and one payload byte; nothing new is retained.
+func IsPreimage(s String) bool {
+	f, err := ParsePrefix(s.String())
+	if err != nil || !f.Unshared {
+		return false
+	}
+	d := s.Seed()
+	return len(d) == 33 && d[0] == msPrefixPreimage
 }

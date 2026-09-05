@@ -71,3 +71,55 @@ func TestDecodeMS1Refusal(t *testing.T) {
 		t.Error("invalid language accepted")
 	}
 }
+
+// H0: the preimage kind is recognised by its shape and prefix byte and by
+// nothing else, and DecodeMS1 keeps refusing it (the seed decoder must not
+// learn a kind that is not a seed).
+func TestIsPreimageReadsThePrefixByteOnly(t *testing.T) {
+	const plate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
+	s, err := New(plate)
+	if err != nil {
+		t.Fatalf("New(plate): %v", err)
+	}
+	if !IsPreimage(s) {
+		t.Fatalf("IsPreimage(plate) = false, want true (Seed()[0] = %#x)", s.Seed()[0])
+	}
+	if id, _, _ := s.Split(); id != "hash" {
+		t.Errorf("id = %q, want hash", id)
+	}
+	// Every population the predicate must NOT touch, and the one it must.
+	// MUTATIONS, each measured against exactly one row: dropping `!f.Unshared`
+	// calls the share row a preimage; dropping `len(d) == 33` calls the plain
+	// 16-byte BIP-93 row one (the 16-byte row is a control against an
+	// OVER-WIDE predicate -- it is not evidence that a 33-byte plain seed
+	// cannot collide, and one can: see the seam row
+	// bip93-plain-33-byte-payload-0x03, refused on both sides by design,
+	// post-impl review I-1); `d[0] != msPrefixEntr` in place of
+	// `== msPrefixPreimage` calls the 33-byte 0x31 row one; keying on the id
+	// `hash` instead of the prefix misses the entr-id row. The mnem row is
+	// 17 bytes and is refused by the length test alone. Seam-corpus rows
+	// where one exists (sysw/testdata/codex32_seam_vectors.json); the 0x31
+	// row is codex32.NewSeed("ms", 0, "test", 's', 33 bytes beginning 0x31).
+	for _, c := range []struct {
+		name, s string
+		want    bool
+	}{
+		{"constellation-entr-128 (prefix 0x00)", "ms10entrsqqqqqqqqqqqqqqqqqqqqqqqqqqqqcj9sxraq34v7f", false},
+		{"mnem-english16 (prefix 0x02)", "ms10entrsqgqqc83yukgh23xkvmp59xf2eldpk4cdrq2y4h82yz", false},
+		{"bip93-plain-payload-0x03 (16-byte seed beginning 0x03)", "ms10testsqv0qqqqqqqqqqqqqqqqqqqqqqq8mzk8tjfdnjn5", false},
+		{"bip93-share-payload-0x03 (a 2-of-N share beginning 0x03)", "ms12testaqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqdq7pl8qdc5tsp", false},
+		{"bip93-plain-33-byte-payload-0x31 (unshared, 33 bytes, first byte 0x31)", "ms10testsxy0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5dayejmh0wrfk", false},
+		{"preimage-shape-entr-id (unshared, 33 bytes, 0x03, id entr)", "ms10entrsqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5gz69g08wwtz9", true},
+	} {
+		e, err := New(c.s)
+		if err != nil {
+			t.Fatalf("New(%s): %v", c.name, err)
+		}
+		if got := IsPreimage(e); got != c.want {
+			t.Errorf("IsPreimage(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if _, _, _, err := DecodeMS1(s); err != errMSBadPrefix {
+		t.Errorf("DecodeMS1(plate) err = %v, want errMSBadPrefix: the seed decoder must not decode a preimage", err)
+	}
+}

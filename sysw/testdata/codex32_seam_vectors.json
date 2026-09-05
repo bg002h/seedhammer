@@ -112,6 +112,46 @@
       "host_admits": false,
       "device_admits": false,
       "source": "BIP-93's own BAD-CHECKSUM vector, verbatim from the fork's codex32/codex32_test.go TestBIPBadChecksums (and codex32/polish_test.go, which pins Describe(err) == \"bad checksum\"). THE NEGATIVE CONTROL: neither side admits it, so a mutation that admits everything cannot pass."
+    },
+    {
+      "name": "preimage-plate-0x03",
+      "string": "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c",
+      "chars": 75,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "SPEC_ms_hashlock section 1, kind 0x03 with id `hash`: a hashlock PREIMAGE plate, produced by the H1 plan's gate-wired `ms hashlock` (mnemonic-secret 3592532, gate run 13); ms-codec 0.7 refuses it with `reserved-prefix byte was 0x03, expected 0x00` at exit 2 (that plan's downgrade row). NOT A SEED: cut as one it exposes a spend secret as a backup, loaded as one it derives keys from a hashlock preimage. H0 (SPEC_ms_hashlock section 9) makes it INERT on both sides -- never Codex32Secret, no class of its own -- and this row is the tripwire: it goes red on the host the day `me` bumps to ms-codec 0.8 without a refusing arm, and on the device if the prefix test is ever removed."
+    },
+    {
+      "name": "bip93-plain-payload-0x03",
+      "string": "ms10testsqv0qqqqqqqqqqqqqqqqqqqqqqq8mzk8tjfdnjn5",
+      "chars": 48,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "codex32.NewSeed(\"ms\", 0, \"test\", 's', 16 bytes with byte 0 = 0x03): a plain BIP-93 unshared secret whose seed happens to begin 0x03. H0's device guard MUST leave it alone -- the preimage kind is an UNSHARED string with a 33-byte payload whose first byte is 0x03, and this payload is 16 bytes. Measured on the fork at 839fa5aa. Fidelity C-2 (hashlock-H0-plan-R0-r0-fidelity.md)."
+    },
+    {
+      "name": "bip93-share-payload-0x03",
+      "string": "ms12testaqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqdq7pl8qdc5tsp",
+      "chars": 75,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "codex32.NewSeed(\"ms\", 2, \"test\", 'a', 33 bytes with byte 0 = 0x03): a 2-of-N SHARE whose SSS point begins 0x03. A share carries no kind byte (SPEC_ms_hashlock section 1 rule 2: the check is singles-only); H0 must not make it inert, or one such share would refuse a whole sealed payload as unreadable. Measured on the fork at 839fa5aa. Fidelity C-2."
+    },
+    {
+      "name": "preimage-shape-entr-id",
+      "string": "ms10entrsqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5gz69g08wwtz9",
+      "chars": 75,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "codex32.NewSeed(\"ms\", 0, \"entr\", 's', 33 bytes with byte 0 = 0x03): the preimage SHAPE (unshared, 33-byte payload, prefix 0x03) under the id `entr`. The kind is the prefix byte, not the id (SPEC_ms_hashlock section 1): ms-codec 0.7 refuses the prefix, 0.8 refuses the id/prefix mismatch (TagKindMismatch), and the device treats it as inert -- never a seed either way. Measured on the fork at 839fa5aa."
+    },
+    {
+      "name": "bip93-plain-33-byte-payload-0x03",
+      "string": "ms10testsqvrsu9guyv4rzwplgex4gkmzd9c8wl593jfe4gdg47mtm3xt6tv7qh3pm4xrfdlvvp",
+      "chars": 75,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "codex32.NewSeed(\"ms\", 0, \"test\", 's', 33 bytes with byte 0 = 0x03): THE COLLISION, and it is deliberate. A plain BIP-93 unshared secret whose 33-byte seed happens to begin 0x03 is byte-for-byte indistinguishable from a hashlock PREIMAGE plate -- the kind is the prefix byte (SPEC_ms_hashlock section 1), the payload width is the same, and the id is not consulted -- so H0 refuses it on both sides. This is CONVERGENCE, not a device narrowing: `me` refuses this exact string too (ms-codec 0.7 at the prefix gate, 0.8 as a TagKindMismatch), measured. The cost is bounded and known: a real 264-bit BIP-93 master seed beginning 0x03 (about 1 in 256 of 33-byte seeds) is refused rather than engraved. The 16-, 20-, 24-, 28- and 32-byte seeds are untouched, and so is every share -- see bip93-plain-payload-0x03 and bip93-share-payload-0x03, both device_admits: true. Consulting the id instead would engrave a mistagged REAL preimage as a seed (tests I-1), which is the worse failure: a refusal costs a re-encode, a wrong cut exposes a spend secret. Post-implementation review I-1/M-2 (agent-reports/hashlock-H0-post-impl.md)."
     }
   ]
 }

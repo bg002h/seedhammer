@@ -209,7 +209,7 @@ func Classify(b []byte) Classification {
 	// From here down the engines need a string. Nothing above this line touches
 	// s, so the two classes that carry seed material never allocate one.
 	s := string(b)
-	if _, err := codex32.New(s); err == nil {
+	if c, err := codex32.New(s); err == nil && !codex32.IsPreimage(c) {
 		return ClassCodex32Secret
 	}
 	if codex32.ValidMD(s) || codex32.ValidMK(s) {

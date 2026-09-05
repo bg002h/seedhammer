@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -397,5 +398,147 @@ func TestConfirmCodex32Flow_ShowSecretGate(t *testing.T) {
 	}
 	if !seen {
 		t.Fatal("Show secret did not open the decode view on the unshared secret (showSecret gate perturbed?)")
+	}
+}
+
+// H0 (SPEC_ms_hashlock §9): a kind-0x03 preimage plate handed to the engrave
+// dispatch -- the object both the NFC door and the typed M*1 STRING door
+// produce -- is refused by name and never reaches the codex32 confirm screen.
+func TestEngraveCodex32RefusesAPreimagePlate(t *testing.T) {
+	s, err := codex32.New("ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := NewContext(newPlatform())
+	returned := false
+	frame, drawer, quit := runUITouch(ctx, func() {
+		engraveObjectFlow(ctx, &descriptorTheme, s)
+		returned = true
+	})
+	h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+	h.frame, h.drawer = frame, drawer
+	t.Cleanup(quit)
+	// MUTATION: drop the IsPreimage check in engraveCodex32 -> the flow shows
+	// "Confirm Codex32 Secret" for the plate and never this text.
+	h.mustReach("hashlock preimage")
+}
+
+// The NFC door: Scan classifies the plate as no known object, exactly as
+// seal.Classify does (the two are documented mirrors), so it never becomes a
+// codex32.String for engraveObjectFlow. The typed door has no such gate and
+// relies on engraveCodex32's refusal above.
+func TestScanDoesNotHandAPreimagePlateToEngrave(t *testing.T) {
+	const plate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
+	// Scan reads until io.EOF; a strings.Reader delivers that on its second Read.
+	scanAll := func(s string) (any, error) {
+		sc := &scanner{}
+		r := strings.NewReader(s)
+		for {
+			obj, err := sc.Scan(r)
+			if !errors.Is(err, errScanInProgress) {
+				return obj, err
+			}
+		}
+	}
+	obj, err := scanAll(plate)
+	if !errors.Is(err, errScanUnknownFormat) {
+		t.Fatalf("Scan(preimage plate) = %T, %v; want errScanUnknownFormat", obj, err)
+	}
+	// And the legitimate populations the guard must not touch still scan.
+	for _, s := range []string{
+		"ms10testsqv0qqqqqqqqqqqqqqqqqqqqqqq8mzk8tjfdnjn5",                            // plain BIP-93, seed begins 0x03
+		"ms12testaqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqdq7pl8qdc5tsp", // a share beginning 0x03
+	} {
+		obj, err := scanAll(s)
+		if _, ok := obj.(codex32.String); err != nil || !ok {
+			t.Errorf("Scan(%.20s...) = %T, %v; want a codex32.String", s, obj, err)
+		}
+	}
+}
+
+// H0 (SPEC_ms_hashlock §9), the RECOVER arm — post-implementation review C-1.
+//
+// engraveCodex32's loop REASSIGNS the object it was handed (`scan = secret`)
+// when the operator recovers a secret from shares, so a guard that runs once
+// before the loop protects only the object that came through a door. A K-of-N
+// set whose interpolation is a kind-0x03 preimage single is the counterexample:
+// neither share is a preimage (a share carries no kind byte — §1 rule 2, and
+// the door correctly admits it), and the secret the loop manufactures is one.
+//
+// The screens are: Confirm Codex32 SHARE -> Recover (Button2) -> type share 2
+// -> OK (Button3) -> [the guard must fire here]. With the test outside the
+// loop the next screens are "Confirm Codex32 Secret" and then "Engrave Plate",
+// which is `backup.EngraveSeedString` — the call that cuts metal.
+func TestEngraveCodex32RefusesAPreimageRecoveredFromShares(t *testing.T) {
+	// A 2-of-N set over a 33-byte payload beginning 0x03, id `hash`, built with
+	// the fork's own codex32.NewSeed + Interpolate (the review's construction).
+	const (
+		shareC = "ms12hashc5yq6ypay5zr2wr9f4796czdw42gtz94nkx2mvyachjdtkx9ahw0cqdhwpr98gd53cq"
+		shareD = "ms12hashdf3qqyjsyfsrswsgfgv9qc3qwgcg3zkcnt52pvhsc2qd3k4ga2u0zqcr0mcp2tv27n7"
+		secret = "ms12hashsqvqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jq9get7tzc6sn5y"
+	)
+	// UPPERCASE throughout: the codex32 keypad uppercases what it types, and
+	// codex32 requires one consistent case across a set (a lowercase share and
+	// an uppercase one are "mismatched type" = mismatched HRP). This is the
+	// form the device actually holds after share 2 is entered.
+	first, err := codex32.New(strings.ToUpper(shareC))
+	if err != nil {
+		t.Fatalf("New(shareC): %v", err)
+	}
+	second, err := codex32.New(strings.ToUpper(shareD))
+	if err != nil {
+		t.Fatalf("New(shareD): %v", err)
+	}
+	// The premise, asserted rather than assumed: the SHARES are not preimages
+	// (so no upstream door refuses them), and their interpolation IS one.
+	if codex32.IsPreimage(first) || codex32.IsPreimage(second) {
+		t.Fatal("a share must not be a preimage; the guard would fire at the door and the loop never run")
+	}
+	rec, err := codex32.Interpolate([]codex32.String{first, second}, 'S')
+	if err != nil {
+		t.Fatalf("Interpolate: %v", err)
+	}
+	if !strings.EqualFold(rec.String(), secret) || !codex32.IsPreimage(rec) {
+		t.Fatalf("the set does not recover a preimage single: got %q IsPreimage=%v", rec.String(), codex32.IsPreimage(rec))
+	}
+
+	ctx := NewContext(newPlatform())
+	// Queued in the order the operator taps them: Recover at the share's
+	// confirm screen, share 2 on the keypad, OK.
+	click(&ctx.Router, Button2)
+	runes(&ctx.Router, strings.ToUpper(shareD))
+	click(&ctx.Router, Button3)
+
+	returned := false
+	frame, drawer, quit := runUITouch(ctx, func() {
+		engraveObjectFlow(ctx, &descriptorTheme, first)
+		returned = true
+	})
+	h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+	h.frame, h.drawer = frame, drawer
+	t.Cleanup(quit)
+
+	// MUTATION: move the IsPreimage test back OUTSIDE the `for` body (where it
+	// shipped) -> the recovered preimage reaches "Confirm Codex32 Secret" and,
+	// one tap later, "Engrave Plate". Both are fatal here, so this test cannot
+	// pass by merely finding the refusal somewhere after a cut was offered.
+	reached := ""
+	for i := 0; i < 256 && reached == ""; i++ {
+		c, ok := h.frame()
+		if !ok {
+			break
+		}
+		h.content = c
+		switch {
+		case uiContains(c, "Confirm Codex32 Secret"):
+			t.Fatalf("a preimage recovered from shares reached the SECRET confirm screen: %q", c)
+		case uiContains(c, "Engrave Plate"):
+			t.Fatalf("a preimage recovered from shares reached the ENGRAVE screen: %q", c)
+		case uiContains(c, "hashlock preimage"):
+			reached = c
+		}
+	}
+	if reached == "" {
+		t.Fatalf("never reached the hashlock-preimage refusal; last frame %q", h.content)
 	}
 }

@@ -1291,3 +1291,31 @@ func TestSecretPlateBackIsDrawnAsDestructive(t *testing.T) {
 		t.Error("the secret plate's Back slot does not render assets.IconDiscard")
 	}
 }
+
+// runUnlockEngraveCodex32 is runUnlockEngraveMnemonic's twin for the ms1 arm.
+func runUnlockEngraveCodex32(t *testing.T, pf Platform, rec []byte) *sessionHarness {
+	t.Helper()
+	ctx := NewContext(pf)
+	returned := false
+	frame, drawer, quit := runUITouch(ctx, func() {
+		unlockEngraveCodex32(ctx, &descriptorTheme, rec)
+		returned = true
+	})
+	h := &sessionHarness{t: t, ctx: ctx, done: &returned}
+	h.frame, h.drawer = frame, drawer
+	t.Cleanup(quit)
+	return h
+}
+
+// H0 (SPEC_ms_hashlock §9), defence in depth: even if a kind-0x03 preimage
+// plate reached the sealed path's cut, it is refused by name and no engrave
+// screen is shown. seal.Classify never admits one, so this is the second
+// guard, not the first.
+func TestUnlockEngraveCodex32RefusesAPreimagePlate(t *testing.T) {
+	const plate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
+	h := runUnlockEngraveCodex32(t, newPlatform(), []byte(plate))
+	// MUTATION: drop the IsPreimage check in unlockEngraveCodex32 -> the flow
+	// reaches the EngraveSeed screen for the plate, and this never sees the
+	// refusal text.
+	h.mustReach("hashlock preimage")
+}
