@@ -171,9 +171,12 @@ func unlockSecretPlate(ctx *Context, th *Colors, p *seal.Payload, i int, label s
 
 // unlockEngraveCodex32 cuts one ms1 record.
 //
-// It does NOT reuse engraveCodex32, whose codex32Recover branch waits on
-// physical NFC shares that a payload-sourced record does not have -- the same
-// dead end that made B1 refuse mdmkFlow (F-76). Nor backupSeedStringFlow, whose
+// It does NOT reuse engraveCodex32, whose codex32Recover branch prompts for
+// the REST of a share set -- shares a payload-sourced record does not carry,
+// the same dead end that made B1 refuse mdmkFlow (F-76). (Those shares are
+// typed on the codex32 keypad, via inputCodex32Flow; there is no NFC on that
+// path. This comment said "physical NFC shares" until the post-implementation
+// review measured it -- M-3.) Nor backupSeedStringFlow, whose
 // `for { if Engrave { return } }` loop re-presents a CANCELLED plate: under
 // §10.2.2 that record is already being wiped, so the retry would offer to cut
 // nothing.
