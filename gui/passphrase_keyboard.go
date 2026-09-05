@@ -47,6 +47,10 @@ type ppKey struct {
 	clk    Clickable
 }
 
+// ppReadoutGap separates the masked readout from the key grid. See its use in
+// Layout: the budget the readout is clamped to is MaxHeight - grid - this.
+const ppReadoutGap = 8
+
 type PassphraseKeyboard struct {
 	Fragment string
 
@@ -445,14 +449,16 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 	// taking q/a/z and the page-cycle key off the glass. Touch is the only
 	// input the machine has, so those keys were simply gone. See
 	// TestPassphraseKeyboardStaysOnPanel.
-	const readoutGap = 8
+	// ppReadoutGap, package level since H5 §3: the phrase screen's geometry gate
+	// measures the readout budget with the SAME number Layout divides by, rather
+	// than a copy of it.
 	// Clamp the readout to the height that actually exists, keeping the TAIL:
 	// the tail is what was just typed, and it is the end of a passphrase that
 	// an operator is checking as they enter it. Dropping the head is safe only
 	// because the n/100 counter -- which this clamp is what keeps visible --
 	// reports the true length, and the confirm screen shows the value whole.
 	if k.MaxHeight > 0 {
-		avail := k.MaxHeight - k.size[k.page].Y - readoutGap
+		avail := k.MaxHeight - k.size[k.page].Y - ppReadoutGap
 		w := k.size[k.page].X
 		if ctx.Styles.word.Measure(w, "%s", shown).Y > avail {
 			// Binary search the number of leading runes to drop. Height is
@@ -473,7 +479,7 @@ func (k *PassphraseKeyboard) Layout(ctx *Context, th *Colors) (op.Op, image.Poin
 	}
 	readoutOp, readoutSz := widget.Labelw(&ctx.B, ctx.Styles.word, k.size[k.page].X, th.Text, shown)
 
-	gridY := readoutSz.Y + readoutGap
+	gridY := readoutSz.Y + ppReadoutGap
 	var content op.Op
 	rows := k.keys()
 	for i, row := range rows {

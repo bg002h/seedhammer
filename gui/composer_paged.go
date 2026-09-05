@@ -32,6 +32,27 @@ import (
 // becomes the first row of the page that is then laid out, which is exact
 // rather than a guess at how many rows the previous page held.
 
+// composerTextBand is the ONE horizontal band composer text wraps inside: the
+// panel, less the navigation column at the right edge and the same 8 px margin
+// on the left (W-3, and see composerPageLines below for what centring on the
+// whole panel cost).
+//
+// FACTORED OUT BECAUSE A SECOND SCREEN NEEDED IT (H5 §3, F-484). The hashlock
+// phrase screen wrapped its lead at `dims.X - 2*8` and centred it on the panel,
+// so 152 px of its ink landed inside the Back button's rectangle -- W-3's defect
+// on a screen W-3's fix did not reach. A copy of the arithmetic there would be a
+// second answer to "where does text stop", and the two would drift; a shared
+// function cannot.
+//
+// It returns (left, width) rather than (left, right) because every caller wraps
+// to the width and then centres inside it.
+func composerTextBand(dims image.Point) (left, width int) {
+	const bandMargin = 8
+	left = bandMargin
+	right := dims.X - assets.NavBtnPrimary.Bounds().Size().X - bandMargin
+	return left, right - left
+}
+
 // composerPageLines lays out lines[start:] into the content box and returns
 // the ops, HOW MANY were drawn, and each drawn row's TOUCH BAND.
 //
@@ -84,10 +105,8 @@ func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []strin
 	// bandMargin is the SAME margin the left edge always had (the old
 	// `(dims.X - (dims.X-2*8))/2`), applied on the right of the text as well so
 	// a glyph never sits flush against a button it is not part of.
-	const bandMargin = 8
-	bandLeft := bandMargin
-	bandRight := dims.X - assets.NavBtnPrimary.Bounds().Size().X - bandMargin
-	lineWidth := bandRight - bandLeft
+	bandLeft, lineWidth := composerTextBand(dims)
+	bandRight := bandLeft + lineWidth
 	body := make([]op.Op, 0, len(lines))
 	bands := make([]image.Rectangle, 0, len(lines))
 	shown := 0

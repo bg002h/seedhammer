@@ -167,10 +167,8 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		// No CutBottom here: the keyboard's readout needs every pixel below the
 		// lead and counter bands (post-impl I-2 / F-481 -- an 8 px cut left the
 		// readout budget one line short and the show key dead).
-		leadOp, leadSz := widget.Labelw(&ctx.B, ctx.Styles.lead, dims.X-2*8, th.Text,
-			composerCopyHashlockPhraseLead())
-		leadBand, content := content.CutTop(leadSz.Y)
-		leadOp = leadOp.Offset(leadBand.N(leadSz))
+		leadOp, leadSz := hashlockPhraseLead(ctx, th, dims, content.Min.Y)
+		_, content = content.CutTop(leadSz.Y)
 		cntOp, cntsz := widget.Labelf(&ctx.B, ctx.Styles.subtitle, th.Text,
 			"%d/%d", len(kbd.Fragment), hashlock.PhraseMaxChars)
 		counterBand, content := content.CutTop(cntsz.Y)
@@ -186,6 +184,27 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		ctx.Frame(op.Layer(kbdOp, leadOp, cntOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return nil, false
+}
+
+// hashlockPhraseLead lays out the phrase screen's lead INSIDE the composer's
+// text band, positioned at y = top (H5 §3, F-484).
+//
+// IT USED TO WRAP AT `dims.X - 2*8` AND CENTRE ON THE WHOLE PANEL, which is
+// exactly the layout W-3 removed from composerPageLines: the lead's band
+// overlaps the Back button's row, so 152 px of its ink was drawn inside that
+// button's rectangle. No glyph or chip was lost -- the ink was in the button's
+// empty margin -- but the margin is what keeps a glyph from sitting flush
+// against a control it is not part of, and that margin was spent.
+//
+// A SEPARATE FUNCTION SO THE GATE MEASURES WHAT PRODUCTION DRAWS. The geometry
+// test rasterises the op this returns; a test that re-derived the layout would
+// pass on its own arithmetic rather than on the screen's
+// (composer_paged_geometry_test.go's own split makes the same point).
+func hashlockPhraseLead(ctx *Context, th *Colors, dims image.Point, top int) (op.Op, image.Point) {
+	left, width := composerTextBand(dims)
+	lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.lead, width, th.Text,
+		composerCopyHashlockPhraseLead())
+	return lbl.Offset(image.Pt(left+(width-sz.X)/2, top)), sz
 }
 
 func hashlockMethodPick(ctx *Context, th *Colors) (hashlockMethod, bool) {
