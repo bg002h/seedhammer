@@ -216,16 +216,23 @@ func recoverCodex32Flow(ctx *Context, th *Colors, first codex32.String) (codex32
 // engraved. Returns true (recognized/handled) in all terminal cases — Back is a
 // deliberate decline, NOT "Unknown format".
 func engraveCodex32(ctx *Context, th *Colors, scan codex32.String) bool {
-	if codex32.IsPreimage(scan) {
-		// H0 (SPEC_ms_hashlock §9). Both doors that hand a codex32.String to
-		// engraveObjectFlow -- the NFC scan and the typed M*1 STRING -- end
-		// here, and this is the call that titles the plate and cuts it. The
-		// scan door already refuses upstream; the typed door does not, so the
-		// named refusal lives at the choke point.
-		showError(ctx, th, "Hashlock preimage", "This record is a hashlock preimage, not a seed. It is not engraved as one.")
-		return true
-	}
 	for {
+		// H0 (SPEC_ms_hashlock §9). INSIDE the loop, and first: `scan` is
+		// reassigned by the codex32Recover arm below, so a test placed before
+		// the loop would guard only the object a door handed in. It must also
+		// guard the secret this loop MANUFACTURES -- Interpolate on a K-of-N
+		// set of a 0x03/33-byte payload returns a preimage single, and the
+		// next pass would confirm and cut it (post-impl review C-1).
+		//
+		// Every route to backup.EngraveSeedString from a codex32.String passes
+		// through this loop: the NFC scan and the typed M*1 STRING doors reach
+		// it via engraveObjectFlow, and recovery re-enters it. The scan door
+		// also refuses upstream; the typed door does not, so the named refusal
+		// lives here, at the choke point.
+		if codex32.IsPreimage(scan) {
+			showError(ctx, th, "Hashlock preimage", "This record is a hashlock preimage, not a seed. It is not engraved as one.")
+			return true
+		}
 		switch confirmCodex32Flow(ctx, th, scan) {
 		case codex32Back:
 			return true
