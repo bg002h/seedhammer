@@ -67,12 +67,12 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			if composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 				d := h
 				st.list.Paths[idx].Hash = &d
-				st.hashByPhrase = true
+				composerNotePhraseDigest(st, d)
 				// The reconciliation line, on its own screen and reachable for
 				// EVERY policy that has a phrase-set hash (r0 adversarial I-1 =
 				// fidelity I-2 = journey I-3). Spec §4.5's drop-order step 2
 				// moved it into the phrase-route §8h at Done, but §8h is guarded
-				// by composerEveryPathHashed (composer_state.go:239 at the fork
+				// by composerEveryPathHashed (composer_state.go at the fork
 				// baseline c4a64fc), which is false the moment ONE path is keyed
 				// -- so on the ordinary mixed wallet the line was drawn nowhere
 				// at all. §4.5's own statement
@@ -113,8 +113,8 @@ func hashlockRelationLine(payload [][32]byte, h [32]byte) string {
 // Hash values, and nothing else on the route compares them. Two phrases is a
 // legal composition; it is a backup burden the operator must choose knowingly.
 //
-// It reads *p.Hash directly rather than st.hashByPhrase, so it is unaffected by
-// that flag's own staleness, and it skips idx because the path being edited may
+// It reads *p.Hash directly rather than the phrase set, so it is unaffected by
+// that set's own history, and it skips idx because the path being edited may
 // already hold the hash it is about to replace.
 func hashlockOtherPathLine(st *composerState, idx int, h [32]byte) string {
 	for i, p := range st.list.Paths {

@@ -170,10 +170,19 @@ func composerCopySameSeedBelow(slots []uint8, k int) string {
 
 // ─── §8h, §8i, §8j, §8k, §8l ─────────────────────────────────────────────────
 
+// §8h, the plain form: every path is hashed and NO current path's digest came
+// from a phrase typed here (composerCopyHashEveryPathFor).
+//
+// "EVERY PREIMAGE", NOT "THE PREIMAGE" (r0 journey I-2). Two paths can carry two
+// DIFFERENT digests, which is two different preimages the operator must hold,
+// and the shipped sentence named one. That is the same undercount H5 §2 item 5
+// removed from the phrase form above, on the sibling body that chooses against
+// it -- leaving one counted and one not would make the two forms disagree about
+// what spending needs.
 func composerCopyHashEveryPath() string {
 	return "HASH ON EVERY PATH\n" +
 		"Every way to spend this wallet needs the preimage of a hash. It is not " +
-		"on this device and not on these plates. Back the preimage up separately."
+		"on this device and not on these plates. Back up every preimage separately."
 }
 
 func composerCopyHashRule() string {
@@ -455,18 +464,33 @@ func composerCopyHashlockOtherPath() string {
 	return "another path has a different hash: back up every phrase"
 }
 
-// §8h, the phrase-route form (SPEC_hashlock_H2_device §4.7), verbatim as the
-// spec states it. The reconciliation line lives in composerCopyHashlockReconcile
-// instead; see there.
+// §8h, the phrase-route form (SPEC_hashlock_H2_device §4.7 as H5 §2 folds it).
+// The reconciliation line lives in composerCopyHashlockReconcile instead; see
+// there.
+//
+// "EVERY ... AND EVERY", NOT "THE ... OR THE" (H5 §2 item 5, journey I-3). This
+// banner is drawn when EVERY path is hashed and at least one of those hashes
+// came from a phrase -- which on a mixed wallet means one path needs the phrase
+// and another needs a preimage plate, so BOTH backups are required, one per
+// path. The shipped sentence offered a choice between them, and a choice is an
+// undercount at the one screen whose job is to say what spending needs.
+//
+// IT OVERCOUNTS ON THE TWO PURE WALLETS, DELIBERATELY (r0 journey M-4). An
+// all-phrase wallet has no preimage PLATE and a phrase re-typed as 64 hex has
+// none either, and both are named one anyway. Counting exactly would need three
+// variants of this body; overcounting asks the operator to look for a backup
+// they do not have, and undercounting lets them stop looking for one they do.
+// The safe direction is the one that keeps looking, so this stays as written --
+// recorded here so the next reader does not re-open it.
 func composerCopyHashEveryPathPhrase() string {
 	return "HASH ON EVERY PATH\n" +
 		"Every way to spend this wallet needs a hashlock preimage. It is not on " +
-		"this device and not on these plates. Back up the phrase and its method, " +
-		"or the preimage plate, separately."
+		"this device and not on these plates. Back up every phrase and its " +
+		"method, and every preimage plate, separately."
 }
 
 func composerCopyHashEveryPathFor(st *composerState) string {
-	if st.hashByPhrase {
+	if composerAnyPathByPhrase(st) {
 		return composerCopyHashEveryPathPhrase()
 	}
 	return composerCopyHashEveryPath()

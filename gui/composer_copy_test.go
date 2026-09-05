@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"seedhammer.com/hashlock"
+	"seedhammer.com/md"
 )
 
 // composerCopyRow is one operator-facing body, its §8 section, and the exact
@@ -57,7 +58,7 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopySameSeedBelow", "8g", composerCopySameSeedBelow([]uint8{1, 2}, 3),
 			"SAME SEED, SAME PATH Slots @1 and @2 are the same seed. One person holds 2 of the 3 signatures this path needs. Liana will refuse it."},
 		{"composerCopyHashEveryPath", "8h", composerCopyHashEveryPath(),
-			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. It is not on this device and not on these plates. Back the preimage up separately."},
+			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. It is not on this device and not on these plates. Back up every preimage separately."},
 		{"composerCopyHashRule", "8i", composerCopyHashRule(),
 			"The hash must be SHA-256 of a 32-byte value. A passphrase must be hashed to 32 bytes first, then hashed again. A hash of the passphrase itself can never be spent."},
 		{"composerCopyEditClearsKeys", "8j", composerCopyEditClearsKeys(),
@@ -140,10 +141,29 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile(),
 			"Before you fund this wallet, run ms hashlock with this phrase and method on the host and check the digest matches."},
 		{"composerCopyHashEveryPathPhrase", "H2-4.7", composerCopyHashEveryPathPhrase(),
-			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up the phrase and its method, or the preimage plate, separately."},
-		{"composerCopyHashEveryPathFor", "H2-4.7", composerCopyHashEveryPathFor(&composerState{hashByPhrase: true}),
-			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up the phrase and its method, or the preimage plate, separately."},
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
+		// H5 §2: the FOR row is driven through composerAnyPathByPhrase, so it
+		// needs a state whose PATH carries a digest that is in the phrase set --
+		// a bool literal no longer exists to set.
+		{"composerCopyHashEveryPathFor", "H2-4.7", composerCopyHashEveryPathFor(composerStateByPhraseForCopyTable()),
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
 	}
+}
+
+// composerStateByPhraseForCopyTable is the smallest composition §8h's phrase
+// form applies to: one path, whose hash is a digest the phrase set holds.
+//
+// It exists because H5 §2 replaced composerState.hashByPhrase with a value set
+// plus a predicate over the CURRENT paths, so the table's row can no longer be
+// driven by a struct literal. Building it here keeps composerCopyTable a table.
+func composerStateByPhraseForCopyTable() *composerState {
+	var d [32]byte
+	for i := range d {
+		d[i] = byte(i)
+	}
+	st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: &d}}}}
+	composerNotePhraseDigest(st, d)
+	return st
 }
 
 // TestComposerCopyIsVerbatimFromTheSpec compares every shipped string with
