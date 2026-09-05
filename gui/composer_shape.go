@@ -351,9 +351,6 @@ func composerPathEdit(ctx *Context, th *Colors, st *composerState, idx int) {
 			}
 			composerApplyShapeEdit(st, func() {
 				st.list.Paths = append(st.list.Paths[:idx], st.list.Paths[idx+1:]...)
-				// Post-impl interruption M-1: removing the last hashed path is
-				// the other event after which no phrase-set hash can remain.
-				composerHashByPhraseSync(st)
 			})
 			return
 		case 4:
