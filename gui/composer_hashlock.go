@@ -163,7 +163,9 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		dims := ctx.Platform.DisplaySize()
 		screen := layout.Rectangle{Max: dims}
 		_, content := screen.CutTop(leadingSize)
-		content, _ = content.CutBottom(8)
+		// No CutBottom here: the keyboard's readout needs every pixel below the
+		// lead and counter bands (post-impl I-2 / F-481 -- an 8 px cut left the
+		// readout budget one line short and the show key dead).
 		leadOp, leadSz := widget.Labelw(&ctx.B, ctx.Styles.lead, dims.X-2*8, th.Text,
 			composerCopyHashlockPhraseLead())
 		leadBand, content := content.CutTop(leadSz.Y)

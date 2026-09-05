@@ -47,7 +47,12 @@ func PreimageHardened(phrase []byte) [32]byte {
 	defer d.Wipe()
 	d.Step(Iterations)
 	var out [32]byte
-	copy(out[:], d.Key())
+	// Key() is nil on a dead or incomplete Deriver (seal/pbkdf2.go's contract:
+	// the caller fails closed); an all-zero preimage must never be returned as
+	// if derived. Unreachable here (the Deriver is local), kept for the contract.
+	if k := d.Key(); k != nil {
+		copy(out[:], k)
+	}
 	return out
 }
 
@@ -62,7 +67,11 @@ func DeriveHardened(phrase []byte, progress func(done, total int) bool) (x [32]b
 			return x, false
 		}
 	}
-	copy(x[:], d.Key())
+	k := d.Key()
+	if k == nil {
+		return x, false // fail closed on a dead Deriver (post-impl M-2)
+	}
+	copy(x[:], k)
 	return x, true
 }
 
@@ -111,7 +120,14 @@ const minMS1Len = 48
 // 48 characters, an `ms1` prefix and only bech32 characters. NO checksum -- a
 // grouped or mistyped plate the host refuses is refused here too.
 func IsMS1Shaped(s string) bool {
-	t := strings.ToLower(strings.TrimSpace(s))
+	// ASCII-only case fold, as the host's to_ascii_lowercase (post-impl N-2):
+	// strings.ToLower would fold non-ASCII runes the host leaves alone.
+	t := strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, strings.TrimSpace(s))
 	var b strings.Builder
 	for _, r := range t {
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '-' || r == ',' {

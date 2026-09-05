@@ -3,6 +3,7 @@ package gui
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	"os"
 	"strings"
@@ -359,7 +360,20 @@ func TestHashlockPhraseRouteSetsTheCorpusDigest(t *testing.T) {
 				// 28 characters: no hardened warning.
 				h.mustReach("Deriving")
 			}
-			h.mustReach("Write down this phrase")
+			body := h.mustReach("Write down this phrase")
+			// Post-impl I-1: the two spec 4.5-normative tokens are produced by
+			// production code (hashlockFirst8Last8 and len(phrase)) and were
+			// asserted by nothing -- both survived mutation of the whole suite.
+			// MUTATION: hashlockFirst8Last8 returning s[:8]+".."+s[:8] -> the
+			// first assertion fails; len(phrase)+1 at the call site -> the second.
+			wantTok := "hash " + tc.want[:8] + ".." + tc.want[56:]
+			if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantTok)) {
+				t.Errorf("the confirm modal drew %q, want it to contain %q", normalizeDrawn(body), wantTok)
+			}
+			wantChars := fmt.Sprintf("chars: %d", len(tc.phrase))
+			if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantChars)) {
+				t.Errorf("the confirm modal drew %q, want it to contain %q", normalizeDrawn(body), wantChars)
+			}
 			h.holdConfirm()
 			if got := st.list.Paths[len(st.list.Paths)-1].Hash; got == nil || hashlockHashHex(got) != tc.want {
 				t.Fatalf("path hash = %v, want %s", got, tc.want)
@@ -938,4 +952,41 @@ func hashlockMustHex(t *testing.T, s string) [32]byte {
 	var out [32]byte
 	copy(out[:], b)
 	return out
+}
+
+// Post-impl I-2 (F-481): the phrase screen must DRAW its readout. Before the
+// fix an 8 px CutBottom left the passphrase keyboard's readout budget at 11 px
+// (one line needs 19), so PassphraseKeyboard.Layout dropped every rune: no
+// asterisks masked, nothing on reveal, while the `show` key stayed live -- the
+// dead-control shape the fork removed the gear key for.
+// MUTATION: restore `content, _ = content.CutBottom(8)` in hashlockPhraseFlow
+// -> zero asterisks in the frame and this test fails.
+func TestHashlockPhraseScreenDrawsTheMaskedReadout(t *testing.T) {
+	st := composerStateForTest(t)
+	h := runComposerAddPath(t, st, composerSessionWith(nil, nil))
+	h.mustReach("What can spend on this path?")
+	h.choose(1) // A hash, no keys
+	h.mustReach("EXPERIMENTAL")
+	h.holdConfirm()
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(0, 3)
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.mustReach("Hashlock phrase")
+	typeOnPassphraseKeyboard(t, h, "abcdefghij")
+	frame := h.mustReach("10/100")
+	if n := strings.Count(frame, "*"); n < 10 {
+		t.Fatalf("the phrase screen drew %d asterisks for 10 typed characters; the readout is not drawn (F-481). frame: %q", n, normalizeDrawn(frame))
+	}
+}
+
+// Post-impl N-1: every sentinel hashlock.ValidatePhrase can return has a copy
+// arm; the err.Error() fallthrough (a Go error with a package prefix) must be
+// unreachable. MUTATION: delete the ErrHex64 case -> this test names it.
+func TestHashlockRefusalCopyCoversEverySentinel(t *testing.T) {
+	for _, err := range []error{hashlock.ErrEmpty, hashlock.ErrNotPrintableASCII, hashlock.ErrMS1Shaped, hashlock.ErrTooLong, hashlock.ErrHex64} {
+		if got := composerCopyHashlockRefusal(err); got == "" || got == err.Error() {
+			t.Errorf("composerCopyHashlockRefusal(%v) = %q: fell through to the Go error", err, got)
+		}
+	}
 }
