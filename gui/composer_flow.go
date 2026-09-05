@@ -8,6 +8,20 @@ import (
 	"seedhammer.com/md"
 )
 
+// composerFlowExit is everything one composition must undo, in one deferred
+// call: the seed scrub that has always run here, and H5 §4's composition-state
+// hook.
+//
+// ONE DEFER, DELIBERATELY, and measured: a second `defer clearComposerStateHook()`
+// costs 96 B of firmware flash against this shape's nothing, because TinyGo
+// removes the empty stub's CALL but not the defer bookkeeping around it. Both
+// numbers are in IMPLEMENTATION_PLAN_hashlock_H5_device_polish.md Task 5, and
+// composer_state_hook_tinygo.go says why "nothing" is the claim and not "0 B".
+func composerFlowExit(st *composerState) {
+	st.reg.scrub()
+	clearComposerStateHook()
+}
+
 // composerFlow is "Build a new policy" (SPEC_wallet_policy_composer.md §7),
 // from the door to the plate, in §7's order.
 //
@@ -32,7 +46,17 @@ import (
 // implementer remembering to add one to a new return (C14).
 func composerFlow(ctx *Context, th *Colors) {
 	st := &composerState{reg: &seedRegistry{}, bound: composerBoundFrom(ctx.sysw)}
-	defer st.reg.scrub()
+	// THE COMPOSITION-STATE SEAM IS INSTALLED HERE TOO (H5 §4, F-485), and it
+	// leaves through the SAME defer the scrub does -- composerFlowExit -- rather
+	// than through a second one. Two reasons, and the second is why it is
+	// written this way: every exit below is covered without an implementer
+	// remembering to add a clear to a new return, and on the machine the shape
+	// costs nothing. A `defer clearComposerStateHook()` beside the scrub's own
+	// defer measured +96 B of flash even though the tinygo stub is empty --
+	// TinyGo elides the empty CALL and not the defer record around it. One
+	// defer, as there has always been, costs no measurable flash.
+	setComposerStateHook(st)
+	defer composerFlowExit(st)
 
 	// SOURCES ARE LOADED BEFORE THE SHAPE, so §7b's live line
 	// ("slots: N / keys available: M") is right from the first frame. Loading

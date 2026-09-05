@@ -500,11 +500,120 @@ export const CARDS_DIGEST = "25271e58";
 // green. The rule is not "no plate count anywhere"; it is that `ok` may contain
 // only terms the emulator was OBSERVED to produce.
 //
-// Blind spot, stated: this reads the `ok:` expression textually. A driver that
+// Blind spot, stated: this reads the `ok` expression textually. A driver that
 // computed `ok` into a variable first, or that shipped a helper named something
 // else, would slip past. It costs one grep and catches the shape that has now
 // occurred twice.
-var okExprRe = regexp.MustCompile(`(?ms)^\s*ok:.*?\n  \};`)
+//
+// TWO SHAPES, BECAUSE THIS TEST WAS RED AT FORK MAIN b9a9a30 AND HAD BEEN SINCE
+// H0 (found by the H5 plan's build gate, 2026-09-05). Only the object-literal
+// property `ok: <expr>,` was readable, so every walk that instead ASSIGNS --
+// `out.ok = <expr>;`, which walk_h0_preimage.js has done since 45f3d4c and
+// walk_hashlock_phrase.js since e1bf137 -- reported INCONCLUSIVE, and
+// INCONCLUSIVE here is a t.Errorf. CI runs `go test ./...`, so the package has
+// been failing for two stages while the guard's own doc claimed it covered
+// "BOTH walk scripts".
+//
+// EVERY ASSIGNMENT IS READ, NOT THE FIRST (r0 fidelity I-2). A walk's verdict is
+// its LAST `ok` assignment, and the first draft of this branch took
+// FindStringSubmatch -- the first match -- so a walk that opened
+// `out.ok = false;` and closed `out.ok = out.plates === 3;` cleared the guard,
+// was counted as checked, and was LOGGED as restating nothing. That is worse
+// than the INCONCLUSIVE it replaced, because INCONCLUSIVE said so. The `plates`
+// check now runs on every right-hand side, so the position of the offending one
+// does not matter; walkOkAssignments below is separated out for exactly one
+// reason, that TestWalkOkGuardReadsEveryAssignment can feed it that shape.
+//
+// The assignment regex captures the right-hand side EXACTLY, anchored on the
+// `.ok =` it is looking for, so unlike the property span it cannot grab a
+// neighbouring literal -- which is why the census/verdict floor below is
+// required of the property shape and not of this one.
+var (
+	okPropRe   = regexp.MustCompile(`(?ms)^\s*ok:.*?\n  \};`)
+	okAssignRe = regexp.MustCompile(`(?ms)^\s*\w+\.ok\s*=\s*(.*?);\s*$`)
+	// A bare boolean right-hand side: `out.ok = true;`. This is the STRONGEST
+	// form of the property under test, not an exemption from it -- an `ok` that
+	// is SET after the last assertion contains no term at all, so it cannot
+	// contain one the driver supplied, and there is nothing left for the
+	// `plates` check to find. H5 §4.4 requires exactly this of the hashlock
+	// walk, and a guard that called the strongest shape INCONCLUSIVE would push
+	// the next author back to a recomputation.
+	okSetRe = regexp.MustCompile(`^(true|false)$`)
+)
+
+// walkOkAssignments returns the right-hand side of EVERY `x.ok = <rhs>;` in src,
+// in source order, trimmed.
+//
+// Separated from the test so the guard's own blind spot has a test: see
+// TestWalkOkGuardReadsEveryAssignment.
+func walkOkAssignments(src string) []string {
+	ms := okAssignRe.FindAllStringSubmatch(src, -1)
+	out := make([]string, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, strings.TrimSpace(m[1]))
+	}
+	return out
+}
+
+// walkOkDriverSupplied returns the right-hand sides of assignments that name a
+// term the CALLER supplies (I-1/F-170), and whether every assignment was a bare
+// boolean constant.
+func walkOkDriverSupplied(rhs []string) (bad []string, allConst bool) {
+	allConst = true
+	for _, r := range rhs {
+		if okSetRe.MatchString(r) {
+			continue
+		}
+		allConst = false
+		if strings.Contains(r, "plates") {
+			bad = append(bad, r)
+		}
+	}
+	return bad, allConst
+}
+
+// TestWalkOkGuardReadsEveryAssignment is the guard's own gate (r0 fidelity I-2).
+//
+// The shape that matters is row 3: a walk whose LAST assignment is the defect
+// and whose FIRST is innocent. Reading one match passes it.
+//
+// MUTATION: make walkOkAssignments use FindStringSubmatch (the first match only)
+// -> the row "the verdict is the last assignment" fails on both counts, measured:
+// `walkOkDriverSupplied found 0 caller-supplied term(s) [] in ["false"], want 1`
+// and `allConst = true over ["false"], want false`. The row after it survives that
+// mutation BY CONSTRUCTION -- its offender IS the first assignment -- which is why
+// both rows are here: one pins the position, the other pins that position is not
+// what the check depends on.
+func TestWalkOkGuardReadsEveryAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		src      string
+		wantBad  int
+		wantAllC bool
+	}{
+		{"set after the last assertion", "  out.ok = false;\n  must(x);\n  out.ok = true;\n", 0, true},
+		{"the verdict is the last assignment",
+			"  const out = { plates: null, ok: false };\n  out.ok = false;\n" +
+				"  out.plates = window.shPlates();\n  out.ok = out.plates === 3;\n", 1, false},
+		{"an early offender with a bare verdict after it",
+			"  out.ok = out.plates === 3;\n  out.ok = true;\n", 1, false},
+		{"a derived verdict that names nothing the caller supplies",
+			"  out.ok = census.length > 0;\n", 0, false},
+		{"no assignment at all", "  const out = { ok: false };\n", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rhs := walkOkAssignments(tc.src)
+			bad, allConst := walkOkDriverSupplied(rhs)
+			if len(bad) != tc.wantBad {
+				t.Errorf("walkOkDriverSupplied found %d caller-supplied term(s) %q in %q, want %d",
+					len(bad), bad, rhs, tc.wantBad)
+			}
+			if allConst != tc.wantAllC {
+				t.Errorf("allConst = %v over %q, want %v", allConst, rhs, tc.wantAllC)
+			}
+		})
+	}
+}
 
 func TestWalkOkContainsNoDriverSuppliedPlateCount(t *testing.T) {
 	files, err := filepath.Glob("walk_*.js")
@@ -520,10 +629,31 @@ func TestWalkOkContainsNoDriverSuppliedPlateCount(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading %s: %v", f, err)
 		}
-		expr := okExprRe.FindString(string(b))
+		src := string(b)
+		// The ASSIGNMENT shape first: its span is exact, so it needs no floor.
+		if rhs := walkOkAssignments(src); len(rhs) > 0 {
+			checked++
+			bad, allConst := walkOkDriverSupplied(rhs)
+			for _, r := range bad {
+				t.Errorf("%s's `ok` contains `plates`, which the CALLER supplies (I-1/F-170):\n%s\n"+
+					"A walk cannot derive, so a caller-supplied count in `ok` is content the walk "+
+					"never observed — a run that cut N WRONG strings is green.", f, r)
+			}
+			if allConst {
+				// SAYS ONLY WHAT IS CHECKED (r0 journey N-1). Nothing here
+				// measures where the assignment sits relative to the last
+				// assertion; what is measured is that every right-hand side is a
+				// constant, which is what makes it restate nothing.
+				t.Logf("%s assigns `ok` nothing but the constant(s) %s, so it restates no assertion "+
+					"(H5 §4.4)", f, strings.Join(rhs, ", "))
+			}
+			continue
+		}
+		expr := okPropRe.FindString(src)
 		if expr == "" {
-			t.Errorf("INCONCLUSIVE: %s has no `ok:` property this test can read, so nothing "+
-				"was checked for it — the walk's return shape changed and this guard did not", f)
+			t.Errorf("INCONCLUSIVE: %s has neither an `ok:` property nor an `x.ok =` assignment "+
+				"this test can read, so nothing was checked for it — the walk's return shape "+
+				"changed and this guard did not", f)
 			continue
 		}
 		// A floor, so a regex that grabbed the wrong span cannot pass by reading

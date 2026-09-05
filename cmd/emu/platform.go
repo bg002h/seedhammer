@@ -94,6 +94,7 @@ func newPlatform() *platform {
 	installNFCAPI(p.nfc)
 	installWalkAPI(p)
 	installScreenAPI(p.screen)
+	installComposerAPI()
 
 	doc := js.Global().Get("document")
 	canvas := doc.Call("getElementById", "screen")

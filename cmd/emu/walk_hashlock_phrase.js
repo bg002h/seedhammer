@@ -36,10 +36,49 @@
 //                   is actually assigned and the reconciliation screen (§4.5)
 //                   is reached.
 //
+// WHAT THE SCREEN SAYS IS NOT WHAT THE POLICY HOLDS (H5 §4, F-485). Trials 1-4
+// above assert DISPLAYED tokens, and until this revision that was the whole
+// walk -- so two defects passed it: a hash assigned BEFORE the hold-to-confirm
+// (Back after reading the digest would have left it set), and a stored digest
+// that differs from the displayed one. Both are red in CI's gui tests; neither
+// was visible to the gate the stage closes on.
+//
+// So trial 4 also reads window.shComposerPathHashes(), the composition-state
+// seam (gui/composer_state_hook.go, cmd/emu/composer_js.go):
+//
+//   * with the confirm modal UP and before the hold, the edited path's hash is
+//     `null` -- the assignment has not happened yet. The read is pinned to that
+//     frame rather than taken "some time before the hold", because a read taken
+//     earlier passes trivially and proves nothing about the ORDER.
+//   * after the hold, it is the corpus's FULL 64-hex hardened digest, and its
+//     first8..last8 is the token the confirm modal displayed. Full hex on both
+//     sides: comparing one abbreviation against another would accept 2^192
+//     wrong digests.
+//   * the reconciliation screen carries that same token AND the same
+//     `chars: <n>` the confirm modal carried (§1.5).
+//
+// IT ONLY EVER READS. Driving stays with shTap/shPress/shRelease, which inject
+// the events a finger would; a walk that reached past a screen would prove less
+// than the operator's own hands do.
+//
+// ROW PICKING STAYS BY INDEX, and F-485's note about it is answered rather than
+// deferred. chooseRow(i, expect, label) taps the i-th rectangle shTargets
+// reports and then ASSERTS WHERE IT LANDED, so a moved row fails at the landing
+// assertion with the screen it reached. A label pick is not available: shTargets
+// returns bare rectangles because frameTargets drops the tag on purpose
+// (cmd/emu/screen.go), so picking by label would need a second gui seam for no
+// safety the landing assertion does not already give.
+//
 // Helpers are inlined from walk_h0_preimage.js / shots_composer.js (they are
 // not exported there).
 //
-// THE KEYBOARD GRID WAS PROBED, NOT DERIVED (2026-09-05, this emulator build).
+// THE KEYBOARD GRID WAS PROBED, NOT DERIVED -- during H2, on the emulator build
+// of e1bf137, and NOT re-probed for H5. Nothing in this stage moves it: H5 §3
+// narrows the lead's band and the lead stays two lines (44 px) at both widths,
+// so kbd.MaxHeight is 209 before and after (gui/composer_hashlock_geometry_test
+// .go logs it on every run) and the grid the centres below belong to is the
+// same one. Run (a) of the three-run acceptance re-proves it end to end anyway:
+// a moved key mistypes the phrase and trial 1 misses its digest.
 // window.shTargets() is no help here: it hit-tests only the CENTRE COLUMN, and
 // on the 10-key `qwertyuiop` row x=240 lands in the 8 px gap BETWEEN two keys,
 // so that row is missing from its output entirely. The phrase screen has no
@@ -74,6 +113,10 @@ const CAROUSEL_NEXT = [455, 160];
 const ANCHOR = "correct horse battery staple";        // derivation[0].phrase
 const ANCHOR_SHA_H = "b867db87..edbc96cb";            // derivation[0].sha256_h, first8..last8
 const ANCHOR_HARD_H = "3cf5d421..b70a4c12";           // derivation[0].hardened_h, first8..last8
+// The same row's hardened_h WHOLE, for the stored-versus-displayed comparison.
+// Copied from the corpus, never recomputed here.
+const ANCHOR_HARD_FULL =
+  "3cf5d421caf2a9c8eb9de1d400866ea7d475e6ba978861bb0167a37cb70a4c12";
 const MIXED = "Correct Horse Battery Staple";         // the mixed-case derivation row's phrase
 const MIXED_SHA_H = "95d44470..2297a7ff";             // that row's sha256_h, first8..last8
 const CONTROL = "correct horse battery stapl";        // NOT a corpus row: one character short
@@ -248,6 +291,55 @@ async function trial(phrase, method) {
   return { modal, firstFrame };
 }
 
+/**
+ * The composition's STORED path hashes, as 64-hex or null, in path order.
+ *
+ * Throws rather than returning undefined when the seam is missing: an emulator
+ * built before H5 has no shComposerPathHashes, and a walk that silently skipped
+ * the stored-versus-displayed assertions would report the same PASS as one that
+ * ran them.
+ */
+function pathHashes(where) {
+  if (typeof window.shComposerPathHashes !== "function") {
+    throw new Error("shComposerPathHashes is missing -- STALE emu.wasm. The browser caches it " +
+      "and a cache-buster on index.html does not help; serve on a FRESH port.");
+  }
+  const h = window.shComposerPathHashes();
+  if (h === null) {
+    throw new Error(`${where}: no composition is running, so there is nothing stored to compare ` +
+      `against. The walk is not where it thinks it is.\nScreen: ${JSON.stringify(window.shScreen())}`);
+  }
+  return h;
+}
+
+/** first8..last8 of a 64-hex digest -- the abbreviation gui.hashlockFirst8Last8 draws. */
+const short8 = (hex64) => `${hex64.slice(0, 8)}..${hex64.slice(-8)}`;
+
+/**
+ * The first8..last8 token a frame DREW, read out of the frame itself.
+ *
+ * THIS IS WHAT MAKES THE STORED-VERSUS-DISPLAYED ASSERTION FALSIFIABLE. Comparing
+ * short8(stored) against a constant this file also compares the stored value
+ * against is a tautology: once the corpus check has passed, the abbreviation
+ * check cannot fail under any device behaviour, so the assertion spec §4.5(c)
+ * exists to exercise would have no failing input. Reading the token the screen
+ * actually painted makes "the screen showed one digest and the policy holds
+ * another" a claim about two independent sources.
+ *
+ * The confirm modal and the reconcile screen both open `hash  <first8>..<last8>`
+ * (gui/composer_copy.go), and squash() removes the two spaces, so the first
+ * match is the header token. Throws rather than returning null: a walk that
+ * silently skipped this comparison would report the same PASS as one that ran it.
+ */
+function drawnToken(frame, where) {
+  const m = squash(frame).match(/hash([0-9a-f]{8}\.\.[0-9a-f]{8})/);
+  if (m === null) {
+    throw new Error(`${where}: no \`hash <first8>..<last8>\` token in the frame, so there is ` +
+      `nothing to compare the STORED digest against.\nScreen: ${JSON.stringify(frame)}`);
+  }
+  return m[1];
+}
+
 /** Back out of the confirm modal to `Which hash?`, dropping the phrase (§4.6). */
 async function backToWhichHash() {
   await tap(BACK, 400);                       // confirm  -> method pick
@@ -259,9 +351,10 @@ async function backToWhichHash() {
 }
 
 export async function run() {
-  for (const fn of ["shScreen", "shTargets", "shTap", "shPress", "shRelease", "shSysw"]) {
+  for (const fn of ["shScreen", "shTargets", "shTap", "shPress", "shRelease", "shSysw",
+                    "shComposerPathHashes"]) {
     if (typeof window[fn] !== "function") {
-      throw new Error(`${fn} missing -- stale or wrong emu.wasm; rebuild from the hashlock-h2 branch and serve on a FRESH port`);
+      throw new Error(`${fn} missing -- stale or wrong emu.wasm; rebuild from the hashlock-h5 branch and serve on a FRESH port`);
     }
   }
   const out = { typed: null, control: null, mixed: null, hardened: null, ok: false };
@@ -314,18 +407,75 @@ export async function run() {
   mustNot(hardened, "b867db87", "hardened produced the SHA-256 digest -- the method pick did nothing");
   out.hardened = squash(hardened).slice(0, 220);
   out.hardenedFirstFrame = firstFrame;
+  // The token the modal DREW, parsed from its own frame -- not a constant. The
+  // must() above has already pinned it to the corpus; this is the value the
+  // stored digest is compared against after the hold.
+  const displayed = drawnToken(hardened, "the hardened confirm modal");
+  out.displayed = displayed;
+
+  // ── the ORDER assertion, pinned to the confirm-modal frame ───────────────
+  // The modal is up and the hold has not happened. Nothing may be stored yet:
+  // a route that assigned at derivation time would leave the digest set even
+  // when the operator reads it and presses Back.
+  const before = pathHashes("with the confirm modal up, before the hold");
+  if (before.length !== 1) {
+    throw new Error(`the composition has ${before.length} path(s), want exactly 1 -- the walk built ` +
+      `a different policy than it thinks.\nStored: ${JSON.stringify(before)}`);
+  }
+  if (before[0] !== null) {
+    throw new Error("the path ALREADY holds a hash while the confirm modal is up: the digest is " +
+      `assigned before the hold, so Back after reading it would leave it set (F-485).\n` +
+      `Stored: ${JSON.stringify(before[0])}`);
+  }
+  out.storedBeforeHold = before[0];
+
   await hold(CONFIRM);
+
+  // ── stored versus displayed, then stored versus the corpus ───────────────
+  //
+  // ORDER IS LOAD-BEARING. The screen comparison runs FIRST, against the token
+  // parsed out of the modal's own frame, so spec §4.5(c) -- the stored hash
+  // perturbed by one byte after assignment -- fails HERE and not at the corpus
+  // check. The corpus check then stays as the oracle for what the value should
+  // have been. Reversed, or compared against ANCHOR_HARD_H, this assertion has
+  // no failing input at all: it would restate the corpus check.
+  const after = pathHashes("after the hold");
+  if (typeof after[0] !== "string") {
+    throw new Error("the path holds NO hash after the hold: the digest the confirm modal " +
+      `displayed was never assigned.\n  stored: ${JSON.stringify(after[0])}`);
+  }
+  if (short8(after[0]) !== displayed) {
+    throw new Error("the stored digest does not abbreviate to the token the confirm modal drew: " +
+      "the screen showed one digest and the policy holds another.\n" +
+      `  displayed: ${displayed}\n  stored:    ${after[0]} -> ${short8(after[0])}`);
+  }
+  if (after[0] !== ANCHOR_HARD_FULL) {
+    throw new Error("the STORED digest is not the corpus's hardened digest for this phrase.\n" +
+      `  stored:   ${JSON.stringify(after[0])}\n  corpus:   ${ANCHOR_HARD_FULL}`);
+  }
+  out.stored = after[0];
+
   const reconcile = await waitFor("run ms hashlock with this phrase", 20000);
   must(reconcile, "check the digest matches", "the reconciliation screen (§4.5)");
+  // §1.5: the screen that asks for the comparison carries the operands.
+  if (drawnToken(reconcile, "the reconciliation screen") !== displayed) {
+    throw new Error("the reconciliation screen draws a DIFFERENT token than the confirm modal, " +
+      "so the operator is asked to compare against a value they were never shown.\n" +
+      `  confirm modal: ${displayed}\n  reconcile:     ${drawnToken(reconcile, "the reconciliation screen")}`);
+  }
+  must(reconcile, ANCHOR_HARD_H, "the reconciliation screen repeats the confirm modal's token");
+  must(reconcile, "chars: " + ANCHOR.length, "the reconciliation screen repeats the confirm modal's char count");
+  must(reconcile, "If they differ", "the reconciliation screen says what a mismatch means");
   out.reconcile = squash(reconcile).slice(0, 200);
   await tap(CONFIRM, 500);
   const list = await waitFor("Spend paths", 20000);
   must(list, "hash", "the path row after the hash was assigned");
   out.pathRow = squash(list).slice(0, 200);
 
-  out.ok = squash(out.typed).includes(squash(ANCHOR_SHA_H)) &&
-    !squash(out.control).includes("b867db87") &&
-    squash(out.mixed).includes(squash(MIXED_SHA_H)) &&
-    squash(out.hardened).includes(squash(ANCHOR_HARD_H));
+  // ok is SET, never recomputed (§4.4). Every assertion above throws, so
+  // reaching this line is the whole of the result; restating four of them here
+  // -- as this walk used to -- reports a subset of what already passed and
+  // silently omits the rest, including both stored-versus-displayed checks.
+  out.ok = true;
   return out;
 }

@@ -12,6 +12,24 @@ import (
 	"testing"
 )
 
+// nonInterfaceHookPairs names every //go:build pair in gui whose host file
+// carries no exported INTERFACE, with the reason. It is the "say so out loud"
+// the per-pair check below demands, and it is deliberately a map keyed by the
+// host filename so a pair that stops being an exception fails loudly when the
+// entry is left behind.
+//
+// A pair named here is NOT exempt from the scan: its exported functions and
+// variables go into the same owner map, and its stub is required to export
+// nothing at all. Only the "declares an exported interface" shape is waived.
+var nonInterfaceHookPairs = map[string]string{
+	"composer_state_hook.go": "H5 §4 (F-485): the composition-state seam is a package " +
+		"variable plus an exported reader, not an interface a Platform implements -- what it " +
+		"reports is a LOCAL of composerFlow, so there is no object for cmd/emu to implement " +
+		"anything on. The property this test protects is unchanged and is checked below: " +
+		"ComposerPathHashes may be named in no other gui file, and composer_state_hook_tinygo.go " +
+		"exports nothing.",
+}
+
 // The guard over every optional hook this package keeps OUT of the firmware
 // image.
 //
@@ -199,9 +217,74 @@ func TestBuildTaggedHooksAreAbsentFromTheFirmwareImage(t *testing.T) {
 		// is a deliberate edit and not a stale list: the check has to be told,
 		// out loud, that the pair carries no interface to protect.
 		if found == 0 {
-			t.Errorf("%s declares no exported interface, so nothing about it is checked below -- "+
-				"if this pair is not an interface hook, say so here rather than leaving the "+
-				"scan silently vacuous", p.host)
+			why, told := nonInterfaceHookPairs[p.host]
+			if !told {
+				t.Errorf("%s declares no exported interface, so nothing about it is checked below -- "+
+					"if this pair is not an interface hook, say so here rather than leaving the "+
+					"scan silently vacuous", p.host)
+				continue
+			}
+			t.Logf("%s: %s", p.host, why)
+			// TOLD IS NOT EXCUSED. A pair that carries no interface still has a
+			// host-only surface the firmware must not contain, so its exported
+			// declarations go into the same owner map and through the same
+			// "used outside its owning file" scan below. Without this the
+			// exemption would be a hole: naming a pair here would remove it from
+			// every check rather than from one.
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					if d.Recv == nil && d.Name.IsExported() {
+						owner[d.Name.Name] = p.host
+						found++
+					}
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						vs, ok := spec.(*ast.ValueSpec)
+						if !ok {
+							continue
+						}
+						for _, n := range vs.Names {
+							if n.IsExported() {
+								owner[n.Name] = p.host
+								found++
+							}
+						}
+					}
+				}
+			}
+			if found == 0 {
+				t.Errorf("%s is named in nonInterfaceHookPairs but exports nothing at all, so the "+
+					"scan below still checks nothing for it", p.host)
+			}
+			// And the stub may export nothing whatever its shape: the rule the
+			// interface check states ("a tinygo-tagged file is firmware") is
+			// about the image, not about the Go kind of the declaration.
+			sf, err := parser.ParseFile(fset, p.stub, nil, 0)
+			if err != nil {
+				t.Fatalf("parsing %s: %v", p.stub, err)
+			}
+			for _, decl := range sf.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					if d.Recv == nil && d.Name.IsExported() {
+						t.Errorf("%s exports %s -- that file IS the firmware, so the host-only "+
+							"surface of this pair is in the image", p.stub, d.Name.Name)
+					}
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						vs, ok := spec.(*ast.ValueSpec)
+						if !ok {
+							continue
+						}
+						for _, n := range vs.Names {
+							if n.IsExported() {
+								t.Errorf("%s exports %s -- that file IS the firmware", p.stub, n.Name)
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 	if len(owner) < 2 {
