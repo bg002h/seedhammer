@@ -62,6 +62,27 @@ func TestUnlockNamesARefusedPreimageInsteadOfCallingItUnreadable(t *testing.T) {
 	if !uiContains(got, "Nothing was opened") {
 		t.Errorf("the screen must say nothing was opened; got %q", got)
 	}
+	// H5 §5 (F-488): the refusal says what to do next. Naming the record and
+	// the kind leaves the operator holding an intact payload and no route.
+	// MUTATION: drop the new sentence -> this fails.
+	if !uiContains(got, "Remove that record") {
+		t.Errorf("the screen must say what to do next; got %q", got)
+	}
+	// MUTATION: drop "(records count from 0)" -> this fails. The index is
+	// 0-based (seal/record.go:69) and the device said so nowhere; once the
+	// number is an instruction to DELETE, a 1-based reading deletes the record
+	// above the plate -- in this fixture's own blob, the seed at record 0.
+	if !uiContains(got, "records count from 0") {
+		t.Errorf("the screen must say the index is 0-based; got %q", got)
+	}
+	// MUTATION: drop "-- and any others like it --" -> this fails. AdmitSection
+	// returns on the FIRST refused record, so a payload with two plates is
+	// refused twice and the index MOVES between rounds; an operator applying the
+	// second refusal's number to their original listing deletes a record the
+	// device never named (r0 journey M-3).
+	if !uiContains(got, "and any others like it") {
+		t.Errorf("the screen must say there may be more than one; got %q", got)
+	}
 
 	// It leaves rather than looping for another passphrase: the payload is
 	// refused WHOLE and retrying cannot help.
@@ -96,7 +117,8 @@ func TestUnlockNotPermittedBodyNamesTheRecordAndTheKind(t *testing.T) {
 		{
 			"a preimage plate at record 1",
 			&seal.RecordNotPermittedError{Index: 1, Class: seal.ClassUnknown, Section: seal.SectionEncrypted, Preimage: true},
-			[]string{"Record 1", "hashlock preimage", "not a seed", "Nothing was opened"},
+			[]string{"Record 1", "hashlock preimage", "not a seed", "Nothing was opened",
+				"Remove that record -- and any others like it -- (records count from 0) on the host and seal the payload again."},
 			[]string{"unknown format", "unreadable"},
 		},
 		{
@@ -108,13 +130,26 @@ func TestUnlockNotPermittedBodyNamesTheRecordAndTheKind(t *testing.T) {
 		{
 			"a codex32 secret in the public section",
 			&seal.RecordNotPermittedError{Index: 7, Class: seal.ClassCodex32Secret, Section: seal.SectionPublic},
-			[]string{"Record 7", "codex32 secret", "Nothing was opened"},
+			[]string{"Record 7", "codex32 secret", "Nothing was opened",
+				"Remove that record -- and any others like it -- (records count from 0) on the host and seal the payload again."},
 			[]string{"hashlock preimage", "unreadable"},
+		},
+		{
+			// H5 §5's fit row: the LONGEST noun this body can carry
+			// ("not a format this machine reads") at a two-digit index, so
+			// assertModalBodyFits measures the widest arm rather than the
+			// first one.
+			"the longest noun at a two-digit index",
+			&seal.RecordNotPermittedError{Index: 13, Class: seal.ClassUnknown, Section: seal.SectionEncrypted},
+			[]string{"Record 13", "not a format this machine reads",
+				"Remove that record -- and any others like it -- (records count from 0) on the host and seal the payload again."},
+			[]string{"hashlock preimage"},
 		},
 		{
 			"a record this machine does not read at all",
 			&seal.RecordNotPermittedError{Index: 2, Class: seal.ClassUnknown, Section: seal.SectionEncrypted},
-			[]string{"Record 2", "not a format this machine reads"},
+			[]string{"Record 2", "not a format this machine reads",
+				"Remove that record -- and any others like it -- (records count from 0) on the host and seal the payload again."},
 			[]string{"hashlock preimage"},
 		},
 	} {

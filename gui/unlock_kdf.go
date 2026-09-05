@@ -387,8 +387,35 @@ func unlockAttemptOnce(ctx *Context, th *Colors, blob []byte, p *seal.Payload, m
 //
 // The record's own BYTES never appear here. seal.RecordNotPermittedError does
 // not carry them, and this function could not print them if it wanted to.
+//
+// AND IT SAYS WHAT TO DO NEXT (H5 §5, F-488). Naming the record and the kind
+// left the operator holding an intact payload, a ~31 s derivation already spent,
+// and no route: the machine cannot edit a sealed payload, so the only way
+// forward is the host.
+//
+// "(RECORDS COUNT FROM 0)" IS LOAD-BEARING, not a parenthetical. The index is
+// 0-based (seal/record.go:69) and the device said so nowhere, while `ms` says it
+// throughout; the moment the number becomes an instruction to DELETE, a 1-based
+// reading removes the record ABOVE the plate -- which in this package's own
+// fixture (gui/unlock_preimage_test.go's blob, the plate at record 1) is a seed.
+//
+// "AND ANY OTHERS LIKE IT" IS THE PLURAL CASE (r0 journey M-3). AdmitSection
+// returns on the FIRST refused record (seal/record.go, pass 2), so a payload
+// carrying two preimage plates is refused once per plate -- each round costing
+// another ~31 s derivation and another host re-seal -- and THE INDEX MOVES
+// between rounds, because removing record 1 renumbers everything after it.
+// Naming only "that record" invites an operator to apply round 2's number to
+// their ORIGINAL listing, which deletes a different record than the one the
+// device refused; on [seed, plate, seed, plate] that is a seed. The clause
+// costs 22 characters and leaves headroom 378 at the longest noun, measured.
+//
+// The body is shared by every unlockRecordNoun arm below, so this reaches all of
+// them; the fit is measured at the longest noun and a two-digit index in
+// TestUnlockNotPermittedBodyNamesTheRecordAndTheKind.
 func unlockNotPermittedBody(e *seal.RecordNotPermittedError) string {
-	return fmt.Sprintf("Record %d is %s. This payload cannot be unlocked here. Nothing was opened.",
+	return fmt.Sprintf("Record %d is %s. This payload cannot be unlocked here. "+
+		"Nothing was opened. Remove that record -- and any others like it -- "+
+		"(records count from 0) on the host and seal the payload again.",
 		e.Index, unlockRecordNoun(e))
 }
 
