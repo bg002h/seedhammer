@@ -43,6 +43,54 @@ var (
 	ErrCodex32TooLong = errors.New("seal: codex32 secret is too long to engrave")
 )
 
+// RecordNotPermittedError is ErrRecordNotPermitted with the two facts a SCREEN
+// needs: WHICH record the allow-list refused, and WHAT that record is (F-474).
+//
+// The sentinel already named both in its MESSAGE, and that was not enough.
+// gui/unlock_kdf.go reaches the error through errors.Is and cannot take a
+// message apart, so its `default:` arm rendered every allow-list refusal as
+// "Payload unreadable." -- after a successful authentication and a ~31 s
+// derivation, on a payload that is intact. That is the same false diagnosis
+// ErrCodex32TooLong and ErrTooManyRecords already exist to remove, and §6.4
+// requires the machine to distinguish it.
+//
+// It carries NO record bytes, and that line is not incidental. The index, the
+// classification and the section are authenticated plaintext, so naming them
+// leaks nothing -- exactly the argument §6.4 won for the record count -- while
+// the record itself may be seed material.
+//
+// Preimage is a FIELD rather than a Classification, because H0 considered a
+// class of its own for the kind and rejected one: a preimage plate stays
+// ClassUnknown and inert on every classifier, and the reason it was refused
+// here is that it is not on the allow-list, not that it is special. This flag
+// only lets the screen say WHICH unknown it was, which is the difference
+// between "unknown format" and "a hashlock preimage, not a seed".
+type RecordNotPermittedError struct {
+	Index    int            // 0-based, as `me` counts records
+	Class    Classification // Classify's verdict on the refused record
+	Section  Section
+	Preimage bool // the record is an unshared kind-0x03 hashlock preimage plate (H0)
+}
+
+// Error names the CLASSIFICATION and, when there is one, the kind -- never the
+// kind INSTEAD of the classification. The allow-list refused this record on its
+// class, and H0's own TestAdmitSectionRefusesAPreimagePlateAsUnknown pins that
+// a preimage plate stays "unknown format" here; a message that said only
+// "hashlock preimage plate" would erase the fact that test exists to hold.
+func (e *RecordNotPermittedError) Error() string {
+	what := e.Class.String()
+	if e.Preimage {
+		what += " (a hashlock preimage plate)"
+	}
+	return fmt.Sprintf("%s: record %d classifies as %s, which the %s section does not permit",
+		ErrRecordNotPermitted.Error(), e.Index, what, e.Section)
+}
+
+// Unwrap keeps every existing errors.Is(err, ErrRecordNotPermitted) call site
+// working: the type is ADDITIVE, and TestRecordNotPermittedErrorStillMatchesTheSentinel
+// is what says so.
+func (e *RecordNotPermittedError) Unwrap() error { return ErrRecordNotPermitted }
+
 // MaxEngraveableCodex32Len is §10.2.1a's limit: the longest codex32 secret the
 // seed plate's QR can hold.
 //
@@ -238,6 +286,18 @@ func permitted(section Section, c Classification) bool {
 		(c == ClassCodex32Secret || c == ClassMnemonic)
 }
 
+// isPreimageRecord is H0's own predicate, asked of a record the allow-list has
+// already refused, so a screen can say "a hashlock preimage, not a seed"
+// instead of "unknown format" (F-474).
+//
+// It is deliberately not part of Classify: H0 rejected a Classification of its
+// own for the kind, and adding one here would put a preimage on a code path
+// that classifies rather than one that refuses.
+func isPreimageRecord(r []byte) bool {
+	c, err := codex32.New(string(r))
+	return err == nil && codex32.IsPreimage(c)
+}
+
 // AdmitSection runs all three passes over one section's records. On any failure
 // it returns NO records: rejection is whole-payload, and an empty result is
 // Phase A's expression of "nothing was engraved".
@@ -259,8 +319,11 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 		c := Classify(r)
 		if !permitted(section, c) {
 			wipe(out)
-			return nil, fmt.Errorf("%w: record %d classifies as %s, which the %s section does not permit",
-				ErrRecordNotPermitted, i, c, section)
+			// isPreimageRecord runs ONLY here, on the refusal path that returns
+			// immediately, so the happy path pays nothing for it (F-474).
+			return nil, &RecordNotPermittedError{
+				Index: i, Class: c, Section: section, Preimage: isPreimageRecord(r),
+			}
 		}
 		// Pass 2a — §10.2.1a. An ms1 the seed plate cannot hold is refused HERE,
 		// in the per-record pass, and never in the post-loop section block: there

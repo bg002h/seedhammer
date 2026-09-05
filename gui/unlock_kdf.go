@@ -374,6 +374,55 @@ func unlockAttemptOnce(ctx *Context, th *Colors, blob []byte, p *seal.Payload, m
 	return o.UnlockWithKey(blob, p, key)
 }
 
+// unlockNotPermittedBody is §10.2.1's allow-list refusal, NAMED (F-474).
+//
+// The same §6.4 argument the two arms above already won: the record index, the
+// classification and the kind are authenticated plaintext, so naming them leaks
+// nothing, and the operator's payload is INTACT. Falling through to "Payload
+// unreadable." tells someone whose payload merely holds a record this machine
+// will not engrave that it has been tampered with -- after a successful
+// authentication and a ~31 s derivation. Nothing was opened: AdmitSection wiped
+// every record it had copied and returned none, which is what the last sentence
+// states.
+//
+// The record's own BYTES never appear here. seal.RecordNotPermittedError does
+// not carry them, and this function could not print them if it wanted to.
+func unlockNotPermittedBody(e *seal.RecordNotPermittedError) string {
+	return fmt.Sprintf("Record %d is %s. This payload cannot be unlocked here. Nothing was opened.",
+		e.Index, unlockRecordNoun(e))
+}
+
+// unlockRecordNoun names the refused record for an OPERATOR.
+//
+// Separate from seal.Classification.String(), which names a class for a log:
+// "unknown format" is true of a preimage plate and useless to someone holding
+// one, and H0 deliberately gave the kind no Classification of its own (a class
+// would put a preimage on a path that classifies rather than one that refuses).
+// The Preimage flag is what lets this say which unknown it was, in H0's own
+// reader words -- "not a seed" is the half that stops the operator re-cutting
+// it as one.
+func unlockRecordNoun(e *seal.RecordNotPermittedError) string {
+	if e.Preimage {
+		return "a hashlock preimage, not a seed"
+	}
+	switch e.Class {
+	case seal.ClassCodex32Secret:
+		return "a codex32 secret"
+	case seal.ClassMnemonic:
+		return "a BIP-39 mnemonic"
+	case seal.ClassDescriptor:
+		return "an output descriptor"
+	case seal.ClassAddress:
+		return "a bitcoin address"
+	case seal.ClassDebugCommand:
+		return "a debug command"
+	case seal.ClassMDMK:
+		return "an md1/mk1 card"
+	default:
+		return "not a format this machine reads"
+	}
+}
+
 // unlockRetryBody is §10.2 step 8's message. It MUST offer both readings and
 // keep the §6.6 hash on screen: the tag also authenticates the public section
 // (§6.1a), so a tampered public card fails here too -- ~31 s after the hash was
@@ -414,6 +463,10 @@ func unlockSealedFlow(ctx *Context, th *Colors, blob []byte, p *seal.Payload) bo
 		// The mnemonic is []Word, so clear() reaches it; wipeBytes takes []byte
 		// and does not compile against it.
 		clear(m)
+		// errors.As needs an addressable target, so it is declared here rather
+		// than inside the case; it is re-zeroed on every iteration by the
+		// assignment errors.As performs, and read only on the arm that matched.
+		var notPermitted *seal.RecordNotPermittedError
 		switch {
 		case err == nil:
 			return true
@@ -449,6 +502,16 @@ func unlockSealedFlow(ctx *Context, th *Colors, blob []byte, p *seal.Payload) bo
 				"This payload holds a codex32 secret longer than %d characters, "+
 					"which this machine cannot engrave. Nothing was opened.",
 				seal.MaxEngraveableCodex32Len))
+			return false
+		case errors.As(err, &notPermitted):
+			// §10.2.1, and the same §6.4 argument as the two arms above
+			// (F-474). The allow-list refused ONE record; the payload
+			// authenticated and is intact, so "unreadable" -- which §2.2 item 4
+			// has taught the operator to read as "someone replaced my payload"
+			// -- is the wrong word and the wrong instruction. Naming the record
+			// and the kind is what turns a suspected compromise back into a
+			// payload to rebuild on the host.
+			showError(ctx, th, unlockTitle, unlockNotPermittedBody(notPermitted))
 			return false
 		default:
 			showError(ctx, th, unlockTitle, "Payload unreadable.")
