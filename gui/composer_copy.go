@@ -447,9 +447,12 @@ func composerCopyHashlockReconcile() string {
 
 // composerCopyHashlockOtherPath is the confirm modal's second relation line
 // (r0 journey I-1): another path of this policy already carries a DIFFERENT
-// hash, so spending will need two phrases and two backups.
+// hash, so spending will need more than this one phrase. COUNT-FREE on purpose
+// (post-impl e2e I-1): "two phrases" was a hard-coded number, wrong on any
+// wallet with three or more hashlocks -- an undercount at the moment the
+// operator is counting what to back up.
 func composerCopyHashlockOtherPath() string {
-	return "another path has a different hash: two phrases to back up"
+	return "another path has a different hash: back up every phrase"
 }
 
 // §8h, the phrase-route form (SPEC_hashlock_H2_device §4.7), verbatim as the

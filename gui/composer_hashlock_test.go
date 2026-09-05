@@ -903,8 +903,8 @@ func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	h.holdConfirm()
 	// The other path's hash differs, so §4.5's second relation line fires too
 	// (r0 journey I-1). MUTATION: return "" from hashlockOtherPathLine ->
-	// `never reached "two phrases to back up"`.
-	h.mustReach("two phrases to back up")
+	// `never reached "back up every phrase"`.
+	h.mustReach("back up every phrase")
 	h.holdConfirm()
 	h.mustReach("run ms hashlock with this phrase")
 	if got := st.list.Paths[1].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
@@ -940,6 +940,22 @@ func TestHashlockOtherPathLineIsSilentOnAnEqualHash(t *testing.T) {
 	}
 	if got := hashlockOtherPathLine(composerStateWithPaths(t, 2), 1, different); got != "" {
 		t.Errorf("no other path carries a hash at all; drew %q", got)
+	}
+	// Post-impl e2e I-1: with THREE other paths carrying three different hashes
+	// (the reasonably complex wallet's shape) the line must still be the same
+	// warning and must carry no count -- "two phrases" was wrong here.
+	// MUTATION: put a number back into composerCopyHashlockOtherPath -> fails.
+	many := composerStateWithPaths(t, 4)
+	for i := 0; i < 3; i++ {
+		var d [32]byte
+		d[0] = byte(0x20 + i)
+		many.list.Paths[i].Hash = &d
+	}
+	if got := hashlockOtherPathLine(many, 3, different); got != composerCopyHashlockOtherPath() {
+		t.Errorf("three other differing hashes drew %q, want the warning", got)
+	}
+	if strings.ContainsAny(composerCopyHashlockOtherPath(), "0123456789") || strings.Contains(composerCopyHashlockOtherPath(), "two") {
+		t.Errorf("the other-path line carries a count: %q", composerCopyHashlockOtherPath())
 	}
 }
 
@@ -989,4 +1005,37 @@ func TestHashlockRefusalCopyCoversEverySentinel(t *testing.T) {
 			t.Errorf("composerCopyHashlockRefusal(%v) = %q: fell through to the Go error", err, got)
 		}
 	}
+}
+
+// Post-impl interruption M-1: "Remove path" is the other event after which no
+// phrase-set hash can remain in the composition, and it spliced the slice
+// without re-syncing st.hashByPhrase -- so §8h at Done would name a phrase the
+// composition no longer has.
+// MUTATION: delete the composerHashByPhraseSync call in composerPathEdit's
+// Remove arm -> the flag stays true and this fails.
+func TestRemovePathReSyncsHashByPhrase(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		st := &composerState{list: composerTwoPathList(), reg: &seedRegistry{}}
+		composerSizeAssignments(st) // nothing seated: the shape guard stays silent
+		d := hashlockMustHex(t, hashlockAnchorSHA_H)
+		st.list.Paths[0].Hash = &d
+		st.hashByPhrase = true // path 1's hash came from a phrase; path 2 has none
+		frame, quit := runUI(ctx, func() { composerPathEdit(ctx, &descriptorTheme, st, 0) })
+		defer quit()
+		pumpUntil(frame, "Path 1:", 16)
+		click(&ctx.Router, Down, Down, Down) // Keys, Time lock, Hash lock -> Remove path
+		click(&ctx.Router, Button3)
+		for i := 0; i < 8 && len(st.list.Paths) == 2; i++ {
+			frame()
+		}
+		if len(st.list.Paths) != 1 {
+			t.Fatalf("Remove path did not remove the path (len %d)", len(st.list.Paths))
+		}
+		if st.hashByPhrase {
+			t.Fatal("the only phrase-set hash was removed and st.hashByPhrase is still true")
+		}
+	})
 }

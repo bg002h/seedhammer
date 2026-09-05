@@ -130,13 +130,13 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyHashlockConfirm", "H2-4.5", composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
 			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
 			"hash  b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
-				"another path has a different hash: two phrases to back up " +
+				"another path has a different hash: back up every phrase " +
 				"Write down this phrase and the method now. They are not on this device and not on your plates. Without both, this path can never be spent. " +
 				"One phrase per policy. Never use this phrase as a passphrase or a password anywhere else."},
 		{"composerCopyHashlockRelation", "H2-4.5", composerCopyHashlockRelation(0),
 			"matches hash 1 in the payload"},
 		{"composerCopyHashlockOtherPath", "H2-4.5", composerCopyHashlockOtherPath(),
-			"another path has a different hash: two phrases to back up"},
+			"another path has a different hash: back up every phrase"},
 		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile(),
 			"Before you fund this wallet, run ms hashlock with this phrase and method on the host and check the digest matches."},
 		{"composerCopyHashEveryPathPhrase", "H2-4.7", composerCopyHashEveryPathPhrase(),
