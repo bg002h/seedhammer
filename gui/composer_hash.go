@@ -174,31 +174,13 @@ func composerHashRows(s *syswSession) composerHashRowSet {
 	return r
 }
 
-// composerHashByPhraseSync drops st.hashByPhrase once NO path carries a hash at
-// all -- the one event after which no phrase-set hash can still be in the
-// composition (r0 adversarial I-2 = fidelity M-2 = journey M-1: the flag was set
-// and never cleared anywhere).
-//
-// It is deliberately NOT cleared when THIS path's hash is replaced by a payload
-// row or a hex digest: another path may still be phrase-set, and clearing on
-// that narrower event would drop §8h's phrase form while a phrase-set hash is
-// still live -- the C16 shape (a composition-wide fact edited as though it were
-// per-path). The residual staleness runs the SAFE way: an over-sticky flag makes
-// composerCopyHashEveryPathPhrase name "the phrase and its method, OR the
-// preimage plate", so the operator is told to back up one artifact too many,
-// never one too few. Per-path provenance is filed as a follow-up (owning phase
-// H3) rather than bolted on here, because it needs the same splicing discipline
-// composerAddPath and "Remove path" already apply to Paths.
-func composerHashByPhraseSync(st *composerState) {
-	for _, p := range st.list.Paths {
-		if p.Hash != nil {
-			return
-		}
-	}
-	st.hashByPhrase = false
-}
-
 // composerHashEdit sets or clears one path's hashlock.
+//
+// NO PROVENANCE BOOKKEEPING LIVES HERE, and its absence is H5 §2's fix rather
+// than an omission. composerHashByPhraseSync used to run in the noneRow arm and
+// in composerPathEdit's Remove arm to keep a composition-wide bool honest; with
+// provenance held per digest (composerAnyPathByPhrase) every arm below simply
+// writes p.Hash, and the predicate reads it.
 func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool {
 	title := fmt.Sprintf("Path %d hash", idx+1)
 	for {
@@ -234,7 +216,6 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			return true
 		case sel == rows.noneRow:
 			st.list.Paths[idx].Hash = nil
-			composerHashByPhraseSync(st)
 			return true
 		default:
 			panic(fmt.Sprintf("composerHashEdit: pick returned row %d of %d", sel, len(rows.labels)))

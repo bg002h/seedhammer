@@ -67,19 +67,20 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			if composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 				d := h
 				st.list.Paths[idx].Hash = &d
-				st.hashByPhrase = true
+				composerNotePhraseDigest(st, d)
 				// The reconciliation line, on its own screen and reachable for
 				// EVERY policy that has a phrase-set hash (r0 adversarial I-1 =
 				// fidelity I-2 = journey I-3). Spec §4.5's drop-order step 2
 				// moved it into the phrase-route §8h at Done, but §8h is guarded
-				// by composerEveryPathHashed (composer_state.go:239 at the fork
+				// by composerEveryPathHashed (composer_state.go at the fork
 				// baseline c4a64fc), which is false the moment ONE path is keyed
 				// -- so on the ordinary mixed wallet the line was drawn nowhere
 				// at all. §4.5's own statement
 				// of what the line is for ("converts a divergence discovered at
 				// spend time into a five-minute check") is met here instead, at
 				// the one moment every phrase-set hash passes through.
-				showError(ctx, th, "Hash lock", composerCopyHashlockReconcile())
+				showError(ctx, th, "Hash lock",
+					composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase)))
 				return hashlockAssigned
 			}
 			// Back on the confirm -> method pick, nothing assigned
@@ -113,8 +114,8 @@ func hashlockRelationLine(payload [][32]byte, h [32]byte) string {
 // Hash values, and nothing else on the route compares them. Two phrases is a
 // legal composition; it is a backup burden the operator must choose knowingly.
 //
-// It reads *p.Hash directly rather than st.hashByPhrase, so it is unaffected by
-// that flag's own staleness, and it skips idx because the path being edited may
+// It reads *p.Hash directly rather than the phrase set, so it is unaffected by
+// that set's own history, and it skips idx because the path being edited may
 // already hold the hash it is about to replace.
 func hashlockOtherPathLine(st *composerState, idx int, h [32]byte) string {
 	for i, p := range st.list.Paths {
@@ -166,10 +167,8 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		// No CutBottom here: the keyboard's readout needs every pixel below the
 		// lead and counter bands (post-impl I-2 / F-481 -- an 8 px cut left the
 		// readout budget one line short and the show key dead).
-		leadOp, leadSz := widget.Labelw(&ctx.B, ctx.Styles.lead, dims.X-2*8, th.Text,
-			composerCopyHashlockPhraseLead())
-		leadBand, content := content.CutTop(leadSz.Y)
-		leadOp = leadOp.Offset(leadBand.N(leadSz))
+		leadOp, leadSz := hashlockPhraseLead(ctx, th, dims, content.Min.Y)
+		_, content = content.CutTop(leadSz.Y)
 		cntOp, cntsz := widget.Labelf(&ctx.B, ctx.Styles.subtitle, th.Text,
 			"%d/%d", len(kbd.Fragment), hashlock.PhraseMaxChars)
 		counterBand, content := content.CutTop(cntsz.Y)
@@ -185,6 +184,27 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		ctx.Frame(op.Layer(kbdOp, leadOp, cntOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return nil, false
+}
+
+// hashlockPhraseLead lays out the phrase screen's lead INSIDE the composer's
+// text band, positioned at y = top (H5 §3, F-484).
+//
+// IT USED TO WRAP AT `dims.X - 2*8` AND CENTRE ON THE WHOLE PANEL, which is
+// exactly the layout W-3 removed from composerPageLines: the lead's band
+// overlaps the Back button's row, so 152 px of its ink was drawn inside that
+// button's rectangle. No glyph or chip was lost -- the ink was in the button's
+// empty margin -- but the margin is what keeps a glyph from sitting flush
+// against a control it is not part of, and that margin was spent.
+//
+// A SEPARATE FUNCTION SO THE GATE MEASURES WHAT PRODUCTION DRAWS. The geometry
+// test rasterises the op this returns; a test that re-derived the layout would
+// pass on its own arithmetic rather than on the screen's
+// (composer_paged_geometry_test.go's own split makes the same point).
+func hashlockPhraseLead(ctx *Context, th *Colors, dims image.Point, top int) (op.Op, image.Point) {
+	left, width := composerTextBand(dims)
+	lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.lead, width, th.Text,
+		composerCopyHashlockPhraseLead())
+	return lbl.Offset(image.Pt(left+(width-sz.X)/2, top)), sz
 }
 
 func hashlockMethodPick(ctx *Context, th *Colors) (hashlockMethod, bool) {

@@ -32,10 +32,25 @@ type composerState struct {
 	// present, affecting echoes and refusals only, never an encoded operand.
 	bound composerBound
 
-	// hashByPhrase records that AT LEAST ONE path's hash was set through the
-	// phrase route (H2), so Done's §8h form names the phrase/method as the
-	// backup rather than a bare preimage (composerCopyHashEveryPathFor).
-	hashByPhrase bool
+	// phraseDigests is the set of digests THIS COMPOSITION derived from a
+	// phrase typed on the device (H5 §2, F-480). Done's §8h form names the
+	// phrase and its method as the backup exactly when a path CURRENTLY carries
+	// one of them (composerAnyPathByPhrase, composerCopyHashEveryPathFor).
+	//
+	// A SET OF VALUES, NOT A FLAG AND NOT AN INDEX. The predecessor was one
+	// bool for the whole policy, so replacing a phrase-set hash with a payload
+	// row while another path kept a hex hash left §8h naming a phrase the
+	// composition no longer had. An index would be the C16 shape a second time
+	// -- "Remove path" splices the slice, so an index is not an identity.
+	//
+	// NOTHING EVER DELETES FROM IT, and it cannot go stale for that reason: a
+	// digest no path carries is simply never matched. Two paths sharing one
+	// phrase digest are both by-phrase, and a path whose phrase digest is later
+	// re-entered as 64 hex is STILL by-phrase -- the digest was derived here
+	// once and the backup burden is unchanged.
+	//
+	// It is nil until the first HOLD; composerNotePhraseDigest allocates.
+	phraseDigests map[[32]byte]struct{}
 
 	// NO CONFIRM MEMO LIVES HERE, and its absence is the fix rather than an
 	// omission. §8a and §8b were memoised by the operator's path INDEX, and an
@@ -251,6 +266,46 @@ func composerEveryPathHashed(list md.PathList) bool {
 		}
 	}
 	return true
+}
+
+// composerNotePhraseDigest records that h was derived from a phrase typed on
+// this device, in this composition (H5 §2).
+//
+// IT ALLOCATES, and that is why the insertion is a function rather than one
+// line at the HOLD. composerState is built as a zero-value struct literal at
+// its one production site (gui/composer_flow.go:34) and in every test in this
+// package, so phraseDigests arrives nil -- and an assignment into a nil map
+// panics. The panic would be on the machine, in the GUI goroutine, at the
+// moment the operator holds to confirm a hash that gates funds.
+func composerNotePhraseDigest(st *composerState, h [32]byte) {
+	if st.phraseDigests == nil {
+		st.phraseDigests = make(map[[32]byte]struct{})
+	}
+	st.phraseDigests[h] = struct{}{}
+}
+
+// composerAnyPathByPhrase is §8h's provenance condition (H5 §2, H2 §4.7): some
+// path CURRENTLY in this composition carries a digest derived from a phrase.
+//
+// IT WALKS THE PATHS, which is the whole design. Every edit that changes a hash
+// -- "Remove path", `No hash lock`, `Type 64 hex`, a payload row -- changes
+// p.Hash, and this reads p.Hash, so none of them needs bookkeeping and the
+// composerHashByPhraseSync that used to keep the old flag honest is gone with
+// both of its call sites. A predicate that only asked whether the SET is
+// non-empty would reproduce F-480 exactly.
+//
+// Reading a nil map is legal in Go, so the pre-first-HOLD state answers false
+// without a special case.
+func composerAnyPathByPhrase(st *composerState) bool {
+	for _, p := range st.list.Paths {
+		if p.Hash == nil {
+			continue
+		}
+		if _, ok := st.phraseDigests[*p.Hash]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // composerPathLine is one row of the path-list screen (§7b's "Path 2: 2-of-3

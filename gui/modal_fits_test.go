@@ -338,8 +338,10 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			composerCopyHashlockRefusal(hashlock.ErrMS1Shaped),
 		},
 		{
-			"the hashlock reconciliation screen (H2 §4.5)",
-			composerCopyHashlockReconcile(),
+			// The LONGEST variant: `hardened` is the longer method name and
+			// `chars: 100` the widest count hashlock.PhraseMaxChars permits.
+			"the hashlock reconciliation screen (H2 §4.5, H5 §1)",
+			composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100),
 		},
 		{
 			"HASH ON EVERY PATH, phrase-route form (H2 §4.7)",
