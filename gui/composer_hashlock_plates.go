@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 
 	"seedhammer.com/codex32"
 	"seedhammer.com/hashlock"
@@ -55,7 +56,10 @@ func hashlockPlatesRecords(s *syswSession) []hashlockPlatesRecord {
 	for _, r := range s.records {
 		switch r.class {
 		case sysw.ClassPreimage:
-			c, err := codex32.New(r.body)
+			// TrimSpace, as sysw.Classify and composerPayloadPreimages do: the
+			// door's count and this list must answer the same question the same
+			// way (post-impl review I-1).
+			c, err := codex32.New(strings.TrimSpace(r.body))
 			if err != nil {
 				continue
 			}

@@ -478,3 +478,33 @@ func readSourceFile(t *testing.T, name string) string {
 	}
 	return string(b)
 }
+
+// TestHashlockPlatesListsAPaddedPreimageRecordLikeTheDoorDoes is the H6
+// post-impl review's I-1. `sysw.Classify` and `Which hash?`'s band 2 both
+// TrimSpace a record before decoding it, so a preimage plate that arrived with
+// a stray space or CR (a host file with trailing whitespace survives `me sysw
+// pack`) is ClassPreimage at the door and selectable in a composition. The §5.2
+// flow's own list must offer it too, or the door names a route the flow then
+// refuses -- with the empty-payload screen whose comment says it is unreachable
+// from the door (spec §5.2, the F-437 shape).
+//
+// MUTATION: drop the strings.TrimSpace in hashlockPlatesRecords -> the three
+// padded cases list 0 records against a door count of 1, and this fails.
+func TestHashlockPlatesListsAPaddedPreimageRecordLikeTheDoorDoes(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"bare", guiPreimagePlate},
+		{"trailing space", guiPreimagePlate + " "},
+		{"leading space", " " + guiPreimagePlate},
+		{"trailing CR", guiPreimagePlate + "\r"},
+	} {
+		s := composerSessionWith(nil, []string{tc.body})
+		_, _, preimages, _ := composerDoorCounts(s)
+		if preimages != 1 {
+			t.Fatalf("%s: the door counts %d preimage records, want 1 -- the fixture no longer classifies", tc.name, preimages)
+		}
+		recs := hashlockPlatesRecords(s)
+		if len(recs) != preimages {
+			t.Errorf("%s: the Hashlock plates list holds %d records but the door counts %d -- the door offers a route the flow refuses", tc.name, len(recs), preimages)
+		}
+	}
+}
