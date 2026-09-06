@@ -163,14 +163,31 @@ func isStrictMs1(record string) bool {
 }
 
 // isHashIdPreimageKind is F-503's conjunct: the preimage KIND (first payload
-// byte 0x03, any length, unshared) under the preimage id `hash`. The id is
-// read the way codex32.IsPreimagePlate reads it -- case-sensitively, from
-// String.Split -- so the UPPERCASE spelling is not this shape either; it is
-// refused elsewhere (H6 §4.3) and never reaches a seed class.
+// byte 0x03, any length, unshared) under the preimage id `hash`, in EITHER
+// case.
+//
+// THE ID IS COMPARED CASE-INSENSITIVELY, and the contrast with
+// codex32.IsPreimagePlate is the reason rather than an inconsistency (F-506,
+// operator ruling 2026-09-06). bech32 is a case-insensitive encoding, so the
+// uppercase spelling is the SAME string; what differs is which way strictness
+// falls. IsPreimagePlate decides ADMISSION -- what --pack-preimage lets into a
+// payload the device engraves -- and there a strict, case-SENSITIVE read
+// yields a REFUSAL, which is the safe direction, and §5.3 hashes a record in
+// its canonical lowercase form anyway. This predicate decides INERTNESS, and
+// there strictness falls the other way: reading `HASH` as "not the id `hash`"
+// left the uppercase spelling classified ClassCodex32Secret -- a SEED class --
+// which is precisely the outcome F-503 exists to remove. Measured at fork
+// f503 b32ff08 before the fix: `MS10HASHSQVQ...MV3LQLGKN6S5C` Classify = 2;
+// after: ClassUnknown. The seam row hash-kind03-16-byte-x-uppercase pins it.
+//
+// EqualFold is safe here because it can only ever make MORE strings inert,
+// never fewer: nothing this predicate matches can become a seed class, and no
+// legitimate constellation record carries the id `hash` in any case (the
+// profile's seed id is `entr`).
 func isHashIdPreimageKind(c codex32.String) bool {
 	if !codex32.IsPreimageKind(c) {
 		return false
 	}
 	id, _, _ := c.Split()
-	return id == "hash"
+	return strings.EqualFold(id, "hash")
 }

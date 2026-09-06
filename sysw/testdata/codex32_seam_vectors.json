@@ -184,6 +184,14 @@
       "host_admits": false,
       "device_admits": true,
       "source": "codex32.NewSeed(\"ms\", 0, \"hash\", 's', 17 bytes: 0x00 then 16 zero bytes): the entr KIND under the preimage id `hash`. The host refuses it as an id/kind mismatch (TagKindMismatch, ruling L24); the device still admits it as a BIP-93 seed. THE CONTROL ROW for F-503: the operator chose to make only the 0x03 kind inert under `hash`, not to reserve the whole id, and this row is what keeps that choice from silently widening."
+    },
+    {
+      "name": "hash-kind03-16-byte-x-uppercase",
+      "string": "MS10HASHSQVQQQQQQQQQQQQQQQQQQQQQQQQQQMV3LQLGKN6S5C",
+      "chars": 50,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "The UPPERCASE (QR-alphanumeric) spelling of hash-kind03-16-byte-x. bech32 is case-insensitive, so this is the SAME string, and F-506 (operator ruling 2026-09-06) makes the device read the id case-insensitively for the inertness test: `sysw.isHashIdPreimageKind` uses strings.EqualFold. Case-sensitivity is right for ADMISSION (codex32.IsPreimagePlate keeps it: section 5.3 hashes a record in canonical lowercase, and being strict there yields a REFUSAL) and wrong for INERTNESS, where being strict yields the opposite -- the string stays a seed class. Measured before the fix: Classify = 2, a seed class; after: ClassUnknown. The host refuses it in either case."
     }
   ]
 }
