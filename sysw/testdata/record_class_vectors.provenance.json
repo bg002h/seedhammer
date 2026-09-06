@@ -7,15 +7,16 @@
     "TO RE-SYNC: cp ../mnemonic-engrave/crates/me-cli/testdata/record_class_vectors.json sysw/testdata/ ;",
     "  git -C ../mnemonic-engrave rev-parse HEAD ; git -C ../mnemonic-engrave log -1 --format=%H -- crates/me-cli/testdata/record_class_vectors.json ;",
     "  sha256sum sysw/testdata/record_class_vectors.json",
-    "PROVISIONAL COMMIT PIN (H6 Task 7): `commit`/`file_commit` name engrave master at the time this corpus was re-vendored, NOT the commit that carries the 68-row file -- H6 Task 2 had not landed on master yet. Re-record both once Task 2 is merged; sha256 and vectors are already the final values."
+    "COMMIT PIN (H6 Task 13, re-recorded): `commit` is the mnemonic-engrave revision this copy was taken from and `file_commit` is the commit that actually carries the 68-row file. Both are on branch `h6-b` (H6 Task 2's implementer), NOT yet on engrave master -- the fork's port landed first because the two repos merge on their own schedules. sha256 and vectors are unchanged from the provisional record: the FILE never moved, only the commit that names it was unknown."
   ],
   "repo": "mnemonic-engrave",
   "remote": "git@github.com:bg002h/mnemonic-engrave.git",
   "path": "crates/me-cli/testdata/record_class_vectors.json",
-  "commit": "17ba56c1e843ca2a16a9dec4dfdf7ddc05aca6b0",
-  "file_commit": "17ba56c1e843ca2a16a9dec4dfdf7ddc05aca6b0",
+  "commit": "8cf2a7f98e5f5bfa535200b260a514cdae33f087",
+  "file_commit": "4d00fbbf2b4012a533d060161bef72e3c7b547c1",
   "repo_clean_when_recorded": true,
   "sha256": "3575ccb0e12d12646c45dde583380199170cff815ea5e8d86d4d37d4a1c4abaf",
   "vectors": 68,
-  "recorded_at": "2026-09-05"
+  "recorded_at": "2026-09-06",
+  "commit_branch": "h6-b"
 }

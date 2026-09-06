@@ -17,8 +17,17 @@ import (
 // The phrase route of `Which hash?` (SPEC_hashlock_H2_device §4): phrase screen ->
 // method pick (+ its modal) -> derivation -> hold-to-confirm. One loop, so every
 // inner Back moves WITHIN the route with the phrase intact, and only Back at the
-// phrase screen returns to `Which hash?` (§4.6). The preimage lives on the stack
-// here and is dropped when this function returns (L7, L15).
+// phrase screen returns to `Which hash?` (§4.6).
+//
+// THE PREIMAGE NO LONGER DIES WITH THIS FUNCTION. This record used to read "the
+// preimage lives on the stack here and is dropped when this function returns
+// (L7, L15)"; H6 §2.2 HOLDS it, with the phrase and the method, in
+// composerState.hashlockHeld for the life of the composition, so §5.3 can offer
+// a plate for it at Done. composerHoldHashlockMaterial
+// (gui/composer_state.go:346) is the next production statement after the
+// confirm modal is accepted, and composerScrubHashlockHeld
+// (gui/composer_state.go:363) runs from composerFlowExit's ONE defer. L7 and
+// L15 are superseded on store/show/engrave and unchanged on `source`.
 
 type hashlockOutcome int
 

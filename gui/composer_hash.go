@@ -27,8 +27,15 @@ import (
 // never be spent, and the reference wallet's own README records months of
 // exactly that.
 //
-// THE COMPOSER DERIVES A PREIMAGE IN RAM FOR ONE SCREEN (H2) AND NEVER STORES,
-// SHOWS OR ENGRAVES IT. It puts a digest in a script.
+// THE COMPOSER HOLDS A PREIMAGE FOR THE LIFE OF ONE COMPOSITION (H6 §2.2) AND
+// CAN CUT IT ONTO A PLATE OF ITS OWN (§5.3, §6). This record used to read "THE
+// COMPOSER DERIVES A PREIMAGE IN RAM FOR ONE SCREEN (H2) AND NEVER STORES,
+// SHOWS OR ENGRAVES IT", which was H2's literal reading of ruling L7. H6 lifts
+// three of L7's four verbs -- store, show, engrave -- and leaves the fourth
+// refused: a preimage plate presented to a seed flow is still not a seed
+// (H0; codex32.IsPreimage). The material lives in composerState.hashlockHeld
+// (gui/composer_state.go:81) and is scrubbed by composerFlowExit; what goes in
+// the SCRIPT is still only the digest.
 
 // composerHexKeys is the fallback pad's alphabet: hex digits only, so an
 // entry that is 64 characters long is 64 VALID characters by construction.

@@ -67,8 +67,12 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 // codex32 SECRET and no class of its own — because every path that admits
 // ClassCodex32Secret ends at backup.EngraveSeedString, and a hashlock
 // preimage is not a seed: engraved as one it exposes a spend secret as a
-// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix;
-// the device learns to USE a preimage in stage H2, not here.
+// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix.
+// (This header used to end "the device learns to USE a preimage in stage H2,
+// not here", which H6 makes false in its second half: H2 taught the device to
+// USE one and H6 to CUT one -- EncodeMS1Preimage at codex32/msencode.go:48,
+// IsPreimagePlate at :145 of this file, backup.EngraveHashlock. None of that
+// runs through IsPreimage, whose answer is still "not a seed".)
 //
 // The question is "is this a preimage SINGLE", not "does some byte equal 3":
 // the check is singles-only (§1 rule 2 -- a share's data part is an SSS
