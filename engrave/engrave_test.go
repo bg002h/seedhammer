@@ -541,29 +541,30 @@ func FuzzConstantQR(f *testing.F) {
 	})
 }
 
-// TestConstantQRLargeVersionsFailClosed checks that a v6 (dim 41) constant QR
-// either engraves or fails closed with an explicit error -- it never panics
-// and never silently truncates. An error here is the EXPECTED outcome: spec O6
-// resolved to v5 only, so v6 is out of range by design. (An earlier draft of
-// this comment described a Phase B "78-char cap fallback" for the unsupported
-// case; O6 resolved that as unnecessary and it was never built.)
+// H6 MOVED THE CEILING, and this test moved with it. Until H6 the bound was v5
+// (dim 37) and this test asserted that v6 (dim 41) was refused, because spec O6
+// resolved the passphrase plate to v5 only. H6 §7 raises the bound to v9
+// (dim 53) for the hashlock phrase plate's 194-byte worst case and gives
+// bitmapForQRStatic and constantTimeQRModules an entry for each of
+// 41/45/49/53, so 41 is now ADMITTED and TestConstantQRAcceptsThroughV9AndRefusesV10
+// asserts it. The fail-closed property is unchanged; only the version it is
+// asserted at moved, to v10 (dim 57), which is the first version with no
+// alignment-centre row and no fuzzed budget.
+//
+// An earlier version of this test called t.Skipf when ConstantQR errored,
+// which was ALWAYS, so it asserted nothing beyond "did not panic" while its
+// comment claimed to check for silent truncation. Assert the rejection.
 func TestConstantQRLargeVersionsFailClosed(t *testing.T) {
-	// v6 (dim 41) is deliberately unsupported -- spec O6 resolved to v5 only,
-	// because ECC-L caps at 106 bytes and the passphrase caps at 100.
-	//
-	// An earlier version of this test called t.Skipf when ConstantQR errored,
-	// which is ALWAYS, so it asserted nothing beyond "did not panic" while its
-	// comment claimed to check for silent truncation. Assert the rejection.
-	long := strings.Repeat("Xy7#", 30) // 120 bytes -> v6, dim 41
+	long := strings.Repeat("Xy7#", 60) // 240 bytes -> v10, dim 57
 	c, err := qr.Encode(long, qr.L)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Size != 41 {
-		t.Fatalf("expected dim 41, got %d", c.Size)
+	if c.Size != 57 {
+		t.Fatalf("expected dim 57, got %d", c.Size)
 	}
 	if _, err := ConstantQR(c); err == nil {
-		t.Fatal("ConstantQR accepted a dim-41 code; the guard is meant to reject it")
+		t.Fatal("ConstantQR accepted a dim-57 code; the guard is meant to reject it")
 	}
 }
 
@@ -721,8 +722,10 @@ func TestPassphraseQRFitsSupportedVersion(t *testing.T) {
 		t.Fatalf("ConstantQR rejected a dim-%d code: %v", c.Size, err)
 	}
 	// Boundary: v5-L holds 106 bytes, so the 100-char cap has 6 chars of
-	// headroom and 107 is where dim 41 -- which is deliberately unsupported --
-	// would begin.
+	// headroom and 107 is where dim 41 begins. Dim 41 is ADMITTED since H6 §7
+	// (it is the hashlock phrase plate's smallest version); what this row pins
+	// is that a 100-character PASSPHRASE still never reaches it, so the
+	// passphrase plate's own QR stays at v5 and its scale-3 goldens do not move.
 	for _, tc := range []struct {
 		n, want int
 	}{{78, 33}, {79, 37}, {106, 37}, {107, 41}} {

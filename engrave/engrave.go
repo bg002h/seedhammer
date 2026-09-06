@@ -369,6 +369,67 @@ func constantTimeQRModules(dims int) int {
 		// content-dependent engrave-time failures on a permanent plate, an
 		// overestimate costs ~2% more engraving time.
 		return 664 + 20
+	case 41:
+		// v6 (H6 SPEC_hashlock_H6 §7.2 item 4). Derived by fuzzing on the
+		// protocol the v5 entry records, over §8.6-SHAPED PAYLOADS ONLY -- a
+		// random printable-ASCII phrase at a length that reaches this version
+		// under one of the two method lines, which is the only content this
+		// plate ever carries: 14,494,291 executions in 32 min on 24
+		// cores, observed max 823, converged with 16.4 min of quiet
+		// (the last improvement was at sample 7,013,580). Ratio
+		// max/dims^2 = 0.4896; findPath failed on 0 of them.
+		//
+		// The asymmetry justifies the margin, in the v5 entry's own words: an
+		// underestimate produces content-dependent engrave-time failures on a
+		// permanent plate, an overestimate costs ~2% more engraving time.
+		return 823 + 20
+	case 45:
+		// v7 (H6 SPEC_hashlock_H6 §7.2 item 4). Derived by fuzzing on the
+		// protocol the v5 entry records, over §8.6-SHAPED PAYLOADS ONLY -- a
+		// random printable-ASCII phrase at a length that reaches this version
+		// under one of the two method lines, which is the only content this
+		// plate ever carries: 11,065,492 executions in 32 min on 24
+		// cores, observed max 960, converged with 2.8 min of quiet
+		// (the last improvement was at sample 10,124,362). Ratio
+		// max/dims^2 = 0.4741; findPath failed on 0 of them.
+		// ITS RATIO FALLS BELOW ITS NEIGHBOURS (0.4741 against a
+		// 0.4905 mean of the other three), which is exactly the signal the
+		// v5 entry used to justify a buffer of 20 rather than the historical 5.
+		// Trend-implied max at that ratio is ~993, so the buffer is widened to
+		// 53 rather than left at 20.
+		//
+		// The asymmetry justifies the margin, in the v5 entry's own words: an
+		// underestimate produces content-dependent engrave-time failures on a
+		// permanent plate, an overestimate costs ~2% more engraving time.
+		return 960 + 53
+	case 49:
+		// v8 (H6 SPEC_hashlock_H6 §7.2 item 4). Derived by fuzzing on the
+		// protocol the v5 entry records, over §8.6-SHAPED PAYLOADS ONLY -- a
+		// random printable-ASCII phrase at a length that reaches this version
+		// under one of the two method lines, which is the only content this
+		// plate ever carries: 10,138,994 executions in 32 min on 24
+		// cores, observed max 1179, converged with 4.1 min of quiet
+		// (the last improvement was at sample 8,820,790). Ratio
+		// max/dims^2 = 0.4910; findPath failed on 0 of them.
+		//
+		// The asymmetry justifies the margin, in the v5 entry's own words: an
+		// underestimate produces content-dependent engrave-time failures on a
+		// permanent plate, an overestimate costs ~2% more engraving time.
+		return 1179 + 20
+	case 53:
+		// v9 (H6 SPEC_hashlock_H6 §7.2 item 4). Derived by fuzzing on the
+		// protocol the v5 entry records, over §8.6-SHAPED PAYLOADS ONLY -- a
+		// random printable-ASCII phrase at a length that reaches this version
+		// under one of the two method lines, which is the only content this
+		// plate ever carries: 7,759,282 executions in 32 min on 24
+		// cores, observed max 1379, converged with 22.6 min of quiet
+		// (the last improvement was at sample 2,213,470). Ratio
+		// max/dims^2 = 0.4909; findPath failed on 0 of them.
+		//
+		// The asymmetry justifies the margin, in the v5 entry's own words: an
+		// underestimate produces content-dependent engrave-time failures on a
+		// permanent plate, an overestimate costs ~2% more engraving time.
+		return 1379 + 20
 	}
 	// Not supported, return a low number to force error.
 	return 0
@@ -402,27 +463,56 @@ func bitmapForQRStatic(dim int) ([]bezier.Point, []bezier.Point) {
 	switch dim {
 	case 21:
 		// No marker.
-	case 25, 29, 33, 37:
+	case 25, 29, 33, 37, 41:
 		// Single marker. v5 (37) and v6 (41) each still take exactly one
 		// alignment pattern, at the same (dim-9, dim-9) offset as v2-v4.
 		//.
 		alignMarkers = append(alignMarkers, bezier.Pt(dim-9, dim-9))
+	case 45, 49, 53:
+		// v7-v9 take SIX alignment patterns: the version's three alignment
+		// coordinates crossed with themselves, less the three combinations the
+		// position markers already occupy. The centres are tabulated rather
+		// than computed because none of them follow the (dim-9) rule above,
+		// and TestAlignmentTableMatchesTheEncoder derives this table from the
+		// encoder's own bitmap on every run so it cannot be transcribed wrong.
+		//
+		// fillMarker takes a TOP-LEFT, so each entry is (centre - 2).
+		for _, c := range qrAlignCentres[dim] {
+			alignMarkers = append(alignMarkers, bezier.Pt(c.X-2, c.Y-2))
+		}
 	default:
 		panic("unsupported qr code version")
 	}
 	return posMarkers, alignMarkers
 }
 
+// qrAlignCentres are the alignment-pattern CENTRES of the versions whose
+// patterns do not sit alone at (dim-9, dim-9). Keyed by dimension:
+// v7 (45), v8 (49), v9 (53).
+var qrAlignCentres = map[int][]bezier.Point{
+	45: {{X: 22, Y: 6}, {X: 6, Y: 22}, {X: 22, Y: 22}, {X: 38, Y: 22}, {X: 22, Y: 38}, {X: 38, Y: 38}},
+	49: {{X: 24, Y: 6}, {X: 6, Y: 24}, {X: 24, Y: 24}, {X: 42, Y: 24}, {X: 24, Y: 42}, {X: 42, Y: 42}},
+	53: {{X: 26, Y: 6}, {X: 6, Y: 26}, {X: 26, Y: 26}, {X: 46, Y: 26}, {X: 26, Y: 46}, {X: 46, Y: 46}},
+}
+
 // ConstantQR is like QR that engraves the QR code in a pattern independent of content,
 // except for the QR code version (size).
 func ConstantQR(qrc *qr.Code) (*ConstantQRCmd, error) {
 	dim := qrc.Size
-	if dim > 37 {
-		// The bound is v5 (dim 37), which is what the passphrase plate needs:
-		// ECC-L caps at 106 bytes and the passphrase caps at 100 (spec O6).
-		// bitmapForQRStatic tabulates 21/25/29/33/37 only, so rejecting here
-		// is what keeps a larger version from reaching its default case and
-		// panicking. Raise both together or not at all.
+	if dim > 53 {
+		// The bound is v9 (dim 53), which is what the H6 hashlock phrase plate
+		// needs: ECC-L caps at 230 bytes at v9 and the §8.6 worst case is 194
+		// (hashlock v1 + the 73-character hardened method line + a
+		// 100-character phrase, SPEC_hashlock_H6 8.6/7.1), so there are 36
+		// bytes of headroom. MEASURED from this package's own encoder: the
+		// first byte count reaching dim 53 is 193 and the first reaching dim 57
+		// is 231; 192 is v8's cap, and an earlier version of this comment
+		// paired the admitted version with the PREVIOUS version's capacity,
+		// which read as "the bound holds 192 and the content needs 194".
+		// bitmapForQRStatic tabulates 21/25/29/33/37/41/45/49/53 only, and
+		// constantTimeQRModules has an arm for each, so rejecting here is what
+		// keeps a larger version from reaching either default and panicking or
+		// silently refusing. Raise all three together or not at all.
 		return nil, fmt.Errorf("engrave: constant QR size too large: %d", dim)
 	}
 	qr := bitmapForQR(qrc)
@@ -688,6 +778,27 @@ func (q ConstantQRCmd) Engrave(conf StepperConfig, strokeWidth, scale int) Engra
 
 func engraveModule(yield func(Command) bool, sw, scale int, center bezier.Point) bool {
 	switch scale {
+	case 2:
+		// ASYMMETRIC, and not "case 3 with smaller numbers". centerOf puts the
+		// centre of module p at p*scale*sw + 1.5*sw, which is the middle of a
+		// 3-stroke cell but 1.5 strokes into a 2-stroke one -- half a stroke
+		// off-centre, exactly as it is for case 4, whose arm compensates the
+		// same way. The cell is [p*2sw, p*2sw+2sw], so relative to `center` the
+		// painted extent must be [-1.5sw, +0.5sw] and the PATH must run
+		// [-sw, 0] on both axes: a closed square on the corners (-sw,-sw),
+		// (0,-sw), (0,0) and (-sw,0), with `center` ON the (0,0) corner.
+		//
+		// FIVE commands, the same constant as case 3, and that is the property
+		// this arm has to carry: ConstantQRCmd.Engrave pads every move to
+		// maxDur and runs `for range nmod`, so a per-module command count that
+		// is constant in the CONTENT is what keeps the toolpath
+		// content-independent. An arm whose command count varied by module
+		// would re-open the timing leak ConstantQR exists to close.
+		return yield(Line(center.Add(bezier.Pt(-sw, -sw)))) &&
+			yield(Line(center.Add(bezier.Pt(0, -sw)))) &&
+			yield(Line(center)) &&
+			yield(Line(center.Add(bezier.Pt(-sw, 0)))) &&
+			yield(Line(center.Add(bezier.Pt(-sw, -sw))))
 	case 3:
 		return yield(Line(center.Add(bezier.Pt(sw, 0)))) &&
 			yield(Line(center.Add(bezier.Pt(sw, sw)))) &&
