@@ -125,3 +125,23 @@ func DecodeMS1Preimage(s String) (preimage [32]byte, err error) {
 	copy(preimage[:], d[1:])
 	return preimage, nil
 }
+
+// IsPreimagePlate is IsPreimage PLUS the id `hash` (SPEC_ms_hashlock §1 rule 2,
+// ruling L14). H0's kind-byte rule is unchanged and still governs INERTNESS
+// everywhere else; this narrower predicate governs ADMISSION to a flow that
+// ENGRAVES.
+//
+// The two predicates differ because H6 inverts the consequence of a false
+// positive. Under H0 a false positive was a REFUSAL — "a refusal costs a
+// re-encode; a wrong cut exposes a spend secret", which is why IsPreimage does
+// not consult the id. On the H6 admission path a false positive routes a string
+// INTO a flow that engraves it under a band reading NOT A SEED, so a plain
+// BIP-93 33-byte secret beginning 0x03 — roughly 1 in 256 of them — must not
+// arrive. Hence the id.
+func IsPreimagePlate(s String) bool {
+	if !IsPreimage(s) {
+		return false
+	}
+	id, _, _ := s.Split()
+	return id == "hash"
+}
