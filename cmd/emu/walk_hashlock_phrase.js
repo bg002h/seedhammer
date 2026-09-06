@@ -36,6 +36,24 @@
 //                   is actually assigned and the reconciliation screen (§4.5)
 //                   is reached.
 //
+// THEN THE H6 ARM (IMPLEMENTATION_PLAN_hashlock_H6_preimage_plates.md Task 12,
+// spec §11.7): a SECOND, KEYED path is added and left unseated, the composition
+// is driven to Done, one preimage plate is ACCEPTED at §5.3's pick screen, and
+// §8.3's census row is asserted to carry THE SAME first8..last8 the confirm
+// modal carried. The token is parsed out of each frame, so the comparison is
+// one screen against another rather than a constant against itself.
+//
+// THE SECOND PATH IS NORMATIVE, NOT CONVENIENCE. md.Compose refuses a wholly
+// key-less composition ("every path is key-less; at least one path must hold a
+// key"), so the one-path composition trials 1-4 build cannot reach Done at all:
+// it stops at a refusal, not at a census. Leaving that path UNSEATED is §12
+// item 3's own shape and is what collapses the form choice to a single notice.
+//
+// AND THE CENSUS PAGES. §11.7 measured it at 11 lines over 3 pages -- §8.3's
+// heading and rows begin on page 2, the apart-storage line is on page 3 -- and
+// composerReadScreen withholds the continue affordance until the last page has
+// been laid out once. readPages() below reads all of them.
+//
 // WHAT THE SCREEN SAYS IS NOT WHAT THE POLICY HOLDS (H5 §4, F-485). Trials 1-4
 // above assert DISPLAYED tokens, and until this revision that was the whole
 // walk -- so two defects passed it: a hash assigned BEFORE the hold-to-confirm
@@ -340,6 +358,68 @@ function drawnToken(frame, where) {
   return m[1];
 }
 
+// ─── the H6 arm's helpers (§11.7) ────────────────────────────────────────────
+const PAGE_BTN = [453, 160];            // Button2: the pager on every paged screen
+
+/**
+ * Every page of a paged screen (composerReadScreen), joined.
+ *
+ * IT PAGES TO THE END, and that is not tidiness. composerReadScreen withholds
+ * the continue affordance until the last page has been laid out once
+ * (gui/composer_paged.go), and §11.7 MEASURED the census at 11 lines over 3
+ * pages -- §8.3's heading and its rows begin on page 2, the apart-storage line
+ * is on page 3. A walk that asserted the first frame would assert against the
+ * wrong screen and then find the checkmark inert.
+ *
+ * The stop condition is the screen's OWN wrap (page 0 recurring), never a
+ * count: an expected page count is an assertion for the call site, not a bound
+ * on the loop. Inlined from shots_composer.js's readAllPages minus the
+ * screenshots; the helpers there are not exported.
+ */
+async function readPages(where, maxPages = 20) {
+  const pages = [];
+  for (let i = 0; i < maxPages; i++) {
+    const text = squash(window.shScreen());
+    if (pages.length && text === pages[0]) break;   // wrapped to the first page
+    if (pages.includes(text)) break;                // no forward progress
+    pages.push(text);
+    await tap(PAGE_BTN, 350);
+  }
+  if (pages.length >= maxPages) {
+    throw new Error(`${where}: paged ${maxPages} times without the first page recurring, so the ` +
+      `walk cannot know it reached the end.\nPages: ${JSON.stringify(pages)}`);
+  }
+  return { pages, joined: pages.join("") };
+}
+
+/**
+ * The first8..last8 §8.3's census row for path `pathNo` carries.
+ *
+ * TWO FAILURES, NAMED APART, because this walk's two mutations produce exactly
+ * one each: a row whose digest was dropped (the row matches, the group does
+ * not) and a row whose digest was perturbed (the group matches and differs from
+ * what the confirm modal drew, which the caller compares). Collapsing them into
+ * one "row not found" would report a dropped digest as though §8.3's block had
+ * never been drawn at all -- a different defect, in a different function.
+ *
+ * The row is `path %d  <first8..last8>  <form>` (composerCopyPreimagePlateRow),
+ * and squash() removes its two double spaces.
+ */
+function censusPlateToken(joined, pathNo, form, where) {
+  const f = squash(form);
+  const m = joined.match(new RegExp(`path${pathNo}([0-9a-f]{8}\\.\\.[0-9a-f]{8})?${f}`));
+  if (m === null) {
+    throw new Error(`${where}: the census carries no row for path ${pathNo} in the ${form} form, ` +
+      `so §8.3's block did not report the plate that was accepted.\nCensus: ${JSON.stringify(joined)}`);
+  }
+  if (m[1] === undefined) {
+    throw new Error(`${where}: the census row for path ${pathNo} carries NO digest, so the operator ` +
+      `is handed a plate list they cannot read against the plates on the bench, and there is ` +
+      `nothing to compare the confirm modal's token against.\nCensus: ${JSON.stringify(joined)}`);
+  }
+  return m[1];
+}
+
 /** Back out of the confirm modal to `Which hash?`, dropping the phrase (§4.6). */
 async function backToWhichHash() {
   await tap(BACK, 400);                       // confirm  -> method pick
@@ -471,6 +551,120 @@ export async function run() {
   const list = await waitFor("Spend paths", 20000);
   must(list, "hash", "the path row after the hash was assigned");
   out.pathRow = squash(list).slice(0, 200);
+
+  // ══ H6 §11.7: THE PREIMAGE PLATE ARM ═══════════════════════════════════════
+  //
+  // From the path list the four trials above left behind, to the Done census,
+  // asserting that §8.3's row carries THE SAME first8..last8 the confirm modal
+  // carried. `displayed` is the token parsed out of the modal's own frame, so
+  // this is one screen against another and not a constant against itself.
+  //
+  // H5 §4.1'S DOCTRINE BINDS: a walk may read state only to assert that what the
+  // screen shows equals what is stored, and it never drives through a hook. So
+  // the census is asserted from the SCREEN and Task 6's goldens assert the
+  // plate; no third hook carrying a preimage is added here.
+
+  // ── (a) a SECOND, KEYED path -- NORMATIVE, not convenience ────────────────
+  //
+  // md.Compose refuses a wholly key-less composition ("every path is key-less;
+  // at least one path must hold a key", md/compose.go), so the ONE hashed
+  // key-less path the trials above built cannot reach Done at all: it stops at
+  // a refusal, not at a census, and this arm would assert against a screen that
+  // never draws. The path is left UNSEATED, which is §12 item 3's own shape and
+  // what collapses the form choice to a single notice below.
+  await chooseRow(1, "What can spend on this path?", "Add a spend path");
+  await chooseRow(0, "Path 2: how many keys?", "Keys");
+  await chooseRow(2, "Path 2: how many must sign?", "n = 3");
+  await chooseRow(1, "Path 2: 2-of-3", "k = 2");
+  const twoPaths = window.shScreen();
+  must(twoPaths, "Path 1: hash only", "the hashed key-less path survived adding a second one");
+  must(twoPaths, "Path 2: 2-of-3", "the second, keyed path");
+  out.paths = squash(twoPaths).slice(0, 200);
+
+  // ── (b) Done -> the Template screen ───────────────────────────────────────
+  //
+  // Done is the LAST row, read off the frame rather than counted: the list gains
+  // a row per path and drops "Add a spend path" at the cap, so an index computed
+  // here would address a different action on a different list.
+  const listRows = window.shTargets().length;
+  await chooseRow(listRows - 1, "Template-ID", "Done");
+  mustNot(window.shScreen(), "Sorted keys, or your order?",
+    "the key-order question was asked on a TWO-path list (composerSortedIsLegal)");
+  const stub = await readPages("the Template screen");
+  out.stubPages = stub.pages.length;
+  await tap(CONFIRM, 500);
+
+  // ── (c) unseated, then the consent ────────────────────────────────────────
+  await waitFor("Seat keys into this template?");
+  await chooseRow(0, "Review", "Engrave a key-less template");
+  const consent = await readPages("the Review screen");
+  must(consent.joined, "Path 1: KEY-LESS (EXPERIMENTAL)", "the consent's key-less path");
+  must(consent.joined, "Path 2: 2-of-3", "the consent's keyed path");
+  // The THIRD screen to carry the token, and the first one that is not part of
+  // the hashlock flow at all: §7e's consent renders it from the composition, so
+  // a digest that survived the hold but not the composition fails here.
+  const consentToken = drawnToken(consent.joined, "the Review screen");
+  if (consentToken !== displayed) {
+    throw new Error("the consent screen draws a DIFFERENT token than the confirm modal, so the " +
+      "policy being consented to is not the one whose digest the operator read.\n" +
+      `  confirm modal: ${displayed}\n  consent:       ${consentToken}`);
+  }
+  out.consentToken = consentToken;
+  await tap(CONFIRM, 500);
+  await waitFor("Nothing outside this device");
+  await hold(CONFIRM);
+
+  // ── (d) the form choice COLLAPSES on an unseated composition ──────────────
+  const formNotice = await waitFor("No slot is seated", 20000);
+  must(formNotice, "there is a template and nothing else", "the collapsed form notice");
+  await tap(CONFIRM, 500);
+
+  // ── (e) step (A): ACCEPT a preimage plate (§5.3) ──────────────────────────
+  //
+  // The pick screen is per HELD digest a CURRENT path carries. Trials 1-3 were
+  // backed out at the confirm modal and hold nothing, so there is exactly one.
+  const pick = await waitFor("Preimage plate", 30000);
+  must(pick, "path 1", "the pick lead names the path the digest is on");
+  must(pick, "phrase: " + ANCHOR.length + " characters", "the pick lead's masked phrase length");
+  must(pick, "method: hardened", "the pick lead's method");
+  // §5.3 item 7: MASKED, and never revealed on this screen.
+  mustNot(pick, "battery staple", "the pick screen REVEALED the phrase it is supposed to mask");
+  mustNot(pick, ANCHOR, "the pick screen REVEALED the phrase it is supposed to mask");
+  const pickToken = drawnToken(pick, "the preimage pick screen");
+  if (pickToken !== displayed) {
+    throw new Error("the pick screen offers a plate for a DIFFERENT digest than the confirm modal " +
+      "drew, so the operator would accept a plate for a preimage they never saw.\n" +
+      `  confirm modal: ${displayed}\n  pick screen:   ${pickToken}`);
+  }
+  for (const r of ["preimage string", "phrase + method", "phrase + method + QR",
+                   "do not cut this preimage"]) {
+    must(pick, r, "§5.3's row set on the pick screen");
+  }
+  out.pick = squash(pick).slice(0, 220);
+  // Row 0 is `preimage string`, the default form (decision 1). It is the one
+  // form that needs no §8.5 QR confirm, so ACCEPTING is one decision and the
+  // census below reports exactly it.
+  await chooseRow(0, "Plates To Cut", "preimage string");
+
+  // ── (f) step (B): the census REPORTS what (A) decided (§8.3) ──────────────
+  const census = await readPages("the Plates To Cut census");
+  must(census.joined, "Plus 1 preimage plate(s), cut first and NOT part of this backup:",
+    "§8.3's heading over the accepted plates");
+  must(census.joined, "Keep each preimage plate apart from the policy plates and from the others.",
+    "§8.3's apart-storage line");
+  mustNot(census.joined, "battery staple", "the census printed the PHRASE");
+  const censusToken = censusPlateToken(census.joined, 1, "preimage string",
+    "the Plates To Cut census");
+  if (censusToken !== displayed) {
+    throw new Error("§8.3's census row carries a DIFFERENT first8..last8 than the confirm modal " +
+      "drew: the operator is handed a plate list they cannot read against the digest they wrote " +
+      "down, and the plate about to be cut first is identified by a value nothing else showed " +
+      "them.\n" +
+      `  confirm modal: ${displayed}\n  census row:    ${censusToken}`);
+  }
+  out.censusPages = census.pages.length;
+  out.censusToken = censusToken;
+  out.census = census.joined.slice(0, 420);
 
   // ok is SET, never recomputed (§4.4). Every assertion above throws, so
   // reaching this line is the whole of the result; restating four of them here
