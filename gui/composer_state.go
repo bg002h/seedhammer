@@ -301,7 +301,7 @@ func composerEveryPathHashed(list md.PathList) bool {
 //
 // IT ALLOCATES, and that is why the insertion is a function rather than one
 // line at the HOLD. composerState is built as a zero-value struct literal at
-// its one production site (gui/composer_flow.go:34) and in every test in this
+// its one production site, composerFlow (gui/composer_flow.go), and in every test in this
 // package, so phraseDigests arrives nil -- and an assignment into a nil map
 // panics. The panic would be on the machine, in the GUI goroutine, at the
 // moment the operator holds to confirm a hash that gates funds.

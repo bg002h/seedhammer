@@ -22,7 +22,7 @@ import (
 // never matched.
 
 // composerFlowShapedState builds composerState EXACTLY as composerFlow does
-// (gui/composer_flow.go:34) -- a struct literal that never mentions
+// (gui/composer_flow.go) -- a struct literal that never mentions
 // phraseDigests, so the map arrives nil.
 //
 // THE NIL IS THE POINT. An assignment into a nil map panics, and this is the
