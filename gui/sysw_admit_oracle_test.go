@@ -40,6 +40,13 @@ import (
 // class. So the matcher below also walks `r.class == sysw.ClassX` and
 // `r.class != sysw.ClassX` comparisons, and those sites are registered here
 // with the rest.
+//
+// AND ITS SWITCH FORM, `switch r.class { case sysw.ClassX: }`, which is the
+// same read written the other way -- a site that keeps two classes reaches for
+// a switch rather than two comparisons, and H6 Task 10's Hashlock plates flow
+// and the composer door both do. Matching only the comparison would have let a
+// site slip past by changing its punctuation, which is the "the defect class
+// moves into the remedy" shape.
 
 // syswConsumer is one production consumption site: the function that names a
 // class, and the programs its callers belong to.
@@ -115,6 +122,16 @@ var syswConsumers = []syswConsumer{
 	{"composer_hash.go", "composerPayloadPhrases", []syswProgram{progWalletPolicy},
 		"H6 §5.1 band 3: the payload's phrase: records, UNDERIVED at row-build " +
 			"time. The ClassPhrase half of the same gate"},
+	{"composer_hashlock_plates.go", "hashlockPlatesRecords", []syswProgram{progWalletPolicy},
+		"H6 §5.2's Hashlock plates flow lists BOTH classes through a switch; it " +
+			"runs under the Wallet Policy door and builds no composition (decision 4)"},
+	{"composer_door.go", "composerDoorCounts", []syswProgram{progWalletPolicy},
+		"§8r's lead counts what the payload holds -- four classes through one " +
+			"switch, and H6 §5.2 step 2 added the preimage/phrase pair so the lead " +
+			"and the routes agree"},
+	{"composer_hashlock_plates.go", "hashlockPlatesStub", []syswProgram{progWalletPolicy},
+		"H6 §6.3's `mk1 stub` locator row: an md1 record in the SAME payload is " +
+			"the only source, because no payload record carries an id"},
 }
 
 // classNames maps the sysw.Class identifiers a call site can name to their
@@ -181,9 +198,61 @@ func syswFilteredClass(n ast.Node) (string, bool) {
 	return sel.Sel.Name, true
 }
 
+// syswSwitchedClasses matches the SWITCH form of the same read --
+// `switch r.class { case sysw.ClassX, sysw.ClassY: ... }` -- and returns every
+// sysw.Class constant any of its cases names.
+//
+// A site that keeps TWO classes writes a switch rather than two comparisons
+// (H6 §5.2's flow keeps ClassPreimage and ClassPhrase; the door counts four
+// classes at once), so matching only the comparison form would let a site slip
+// past this oracle by changing its punctuation.
+func syswSwitchedClasses(n ast.Node) ([]string, bool) {
+	sw, ok := n.(*ast.SwitchStmt)
+	if !ok || sw.Tag == nil {
+		return nil, false
+	}
+	field, ok := sw.Tag.(*ast.SelectorExpr)
+	if !ok || field.Sel.Name != "class" {
+		return nil, false
+	}
+	var out []string
+	for _, stmt := range sw.Body.List {
+		cc, ok := stmt.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		for _, e := range cc.List {
+			sel, ok := e.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "sysw" {
+				continue
+			}
+			if _, known := classNames[sel.Sel.Name]; known {
+				out = append(out, sel.Sel.Name)
+			}
+		}
+	}
+	return out, len(out) > 0
+}
+
 // syswCheckSite reconciles one site against §3.3.2, shared by both shapes.
+//
+// ClassUnknown IS EXEMPT, and by construction rather than convenience. It is
+// the inert class -- "offered to nobody and reach no screen"
+// (sysw/descriptor.go:46-48) -- so §3.3.2 refuses it to every program and
+// TestUnknownIsRefusedEverywhere pins that whole row on its own. A site naming
+// it is therefore never a consumption: composerDoorCounts names it to COUNT
+// what will NOT be used, which is the opposite of consuming it, and reporting
+// that as an admission violation would be the oracle refusing a site for
+// saying so.
 func syswCheckSite(t *testing.T, file, fn, class string, index map[string]syswConsumer) {
 	t.Helper()
+	if class == "ClassUnknown" {
+		return
+	}
 	key := file + ":" + fn
 	c, mapped := index[key]
 	if !mapped {
@@ -242,6 +311,13 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 				if cls, ok := syswFilteredClass(n); ok {
 					sites++
 					syswCheckSite(t, name, fn.Name.Name, cls, index)
+					return true
+				}
+				if classes, ok := syswSwitchedClasses(n); ok {
+					sites++
+					for _, cls := range classes {
+						syswCheckSite(t, name, fn.Name.Name, cls, index)
+					}
 					return true
 				}
 				call, ok := n.(*ast.CallExpr)

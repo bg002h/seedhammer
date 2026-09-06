@@ -355,6 +355,8 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 		{"H6 §10.1, HASH ON EVERY PATH held-phrase form", composerCopyHashEveryPathHeldPhrase()},
 		{"H6 §8.3, the stand-alone unused-preimage notice", composerCopyPreimageOnlyNotice()},
 		{"H6 §5.3, the preimage-plate refusal", composerCopyPreimagePlateRefusal()},
+		{"H6 §5.2, the Hashlock plates flow's own abort", composerCopyHashlockPlatesNotCut()},
+		{"H6 §5.2, the empty-payload refusal", composerCopyHashlockPlatesEmpty()},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)

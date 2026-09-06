@@ -198,6 +198,16 @@ func composerCopyTable() []composerCopyRow {
 			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. This composition holds the preimage for each one and can cut a plate for it at Done. Store those plates apart from these, and apart from each other."},
 		{"composerCopyHashEveryPathHeldPhrase", "H6-10.1", composerCopyHashEveryPathHeldPhrase(),
 			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. This composition holds the phrase and method for each one and can cut a plate at Done. Store those plates apart from these, and apart from each other."},
+		// H6 §5.2's Hashlock plates flow. Quoted strings in this table for
+		// §11's reason: H6's §8 carries no blockquote for this route's screens.
+		{"composerCopyHashlockPlatesLead", "H6-5.2", composerCopyHashlockPlatesLead(2),
+			"2 records can be cut as preimage plates. Whoever holds one can spend its path."},
+		{"composerCopyHashlockPlatesEmpty", "H6-5.2", composerCopyHashlockPlatesEmpty(),
+			"This payload holds no preimage or phrase record to cut."},
+		{"composerCopyHashlockPlatesNotCut", "H6-5.2", composerCopyHashlockPlatesNotCut(),
+			"That plate was not cut. The record is still in this payload, so you can cut it again from this list."},
+		{"composerCopyPreimagesLoaded", "H6-5.2", composerCopyPreimagesLoaded(2),
+			"2 preimage or phrase records loaded."},
 	}
 }
 
@@ -308,8 +318,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 67 SINCE H6 TASK 9 added the Done review's thirteen: §5.3's masked pick
 	// lead and the plate refusal, §8.5's QR warning, §8.3's five row forms and
 	// its stand-alone notice, both §8.4 arms and both §10.1 held arms.
-	if declared != 67 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 67 -- "+
+	// 71 SINCE H6 TASK 10 added the Hashlock plates flow's four: the list lead,
+	// the empty-payload refusal, this flow's own abort (which is NEITHER §8.4
+	// arm) and the door's preimage count.
+	if declared != 71 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 71 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

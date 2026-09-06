@@ -61,12 +61,15 @@ func TestComposerDoorCountsIgnoreClassesThatAreNotKeys(t *testing.T) {
 		"key:zz",                     // malformed -> ClassUnknown
 		composerTestDescriptorRecord, // ClassDescriptor
 	}, nil)
-	keys, seeds, inert := composerDoorCounts(s)
+	keys, seeds, preimages, inert := composerDoorCounts(s)
 	if keys != 1 {
 		t.Errorf("keys = %d, want 1: only the well-formed key: record is a key", keys)
 	}
 	if seeds != 0 {
 		t.Errorf("seeds = %d, want 0", seeds)
+	}
+	if preimages != 0 {
+		t.Errorf("preimages = %d, want 0: none of these records is a preimage or a phrase", preimages)
 	}
 	if inert != 1 {
 		t.Errorf("inert = %d, want 1: the malformed key: record goes inert and is counted "+

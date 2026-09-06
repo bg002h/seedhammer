@@ -703,3 +703,42 @@ func composerCopyPreimagePlateRefusal() string {
 	return "Couldn't build that preimage plate. Go back and choose a smaller " +
 		"form: the phrase without a QR, or the preimage string."
 }
+
+// ─── H6 §5.2: the Hashlock plates flow's copy ────────────────────────────────
+
+// composerCopyHashlockPlatesLead is the list's lead. It says what the rows ARE,
+// because a preimage plate is not a backup of this device's state -- it is
+// bearer access to whatever path its digest locks.
+func composerCopyHashlockPlatesLead(n int) string {
+	if n == 1 {
+		return "1 record can be cut as a preimage plate. Whoever holds that plate can spend its path."
+	}
+	return fmt.Sprintf("%d records can be cut as preimage plates. Whoever holds one can spend its path.", n)
+}
+
+// composerCopyHashlockPlatesEmpty is unreachable from the door, whose predicate
+// asks the same question. It exists so the flow refuses rather than drawing an
+// empty picker.
+func composerCopyHashlockPlatesEmpty() string {
+	return "This payload holds no preimage or phrase record to cut."
+}
+
+// composerCopyHashlockPlatesNotCut is this flow's abort, and it is NOT either
+// §8.4 arm. Those say the phrase "dies with this composition" and speak about a
+// run that also cuts policy plates; here the material stays in the payload, in
+// flash, and saying a secret is gone when it is not is false in the dangerous
+// direction.
+func composerCopyHashlockPlatesNotCut() string {
+	return "That plate was not cut. The record is still in this payload, so you can " +
+		"cut it again from this list."
+}
+
+// composerCopyPreimagesLoaded is §5.2 step 2's door count. Without it the door
+// draws composerCopyNoKeys above a route offered for exactly the records that
+// lead says are not there.
+func composerCopyPreimagesLoaded(n int) string {
+	if n == 1 {
+		return "1 preimage or phrase record loaded."
+	}
+	return fmt.Sprintf("%d preimage or phrase records loaded.", n)
+}
