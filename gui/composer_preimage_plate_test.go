@@ -318,6 +318,39 @@ func TestComposerCensusReportsEveryDecisionAndCutsNothingItself(t *testing.T) {
 	if strings.Contains(joined, "a set is only a backup when all of it exists.\nPlus") {
 		t.Error("the preimage block was spliced into the set-completeness claim")
 	}
+	// F-497: the rows say what will be cut, and the scope line says that is ALL
+	// they say -- the device keeps no record of earlier runs, so this block is
+	// not an inventory of what exists on steel.
+	//
+	// MUTATION: drop the append in composerPreimageCensusLines -> this fails.
+	// The copy table alone does NOT catch that: it proves the body exists and
+	// is spelled right, never that anything draws it.
+	if !strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("the census carries rows but not F-497's scope line:\n%s", joined)
+	}
+}
+
+// TestComposerCensusScopeLineOnlyAppearsWithRows is F-497's other half: the
+// stand-alone notice form lists no plates to cut, so a caveat about the
+// completeness of a list would be a caveat about nothing.
+//
+// MUTATION: append the scope line unconditionally (outside the len(accepted)>0
+// arm) -> this fails.
+func TestComposerCensusScopeLineOnlyAppearsWithRows(t *testing.T) {
+	st := &composerState{reg: &seedRegistry{}, list: md.PathList{Wrapper: md.ComposeWsh,
+		Paths: []md.SpendPath{{Keys: &md.KeySet{K: 2, N: 2}}}}}
+	h, m := composerH6Material("anchor a", true)
+	composerHoldHashlockMaterial(st, h, m)
+	plates := composerPreimagePlates(st)
+	joined := strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, plates), "\n")
+	if strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census with no plate rows carries the scope line anyway:\n%s", joined)
+	}
+	// And a census with no preimages at all is untouched.
+	base := strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, nil), "\n")
+	if strings.Contains(base, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census with no preimage block carries the scope line:\n%s", base)
+	}
 }
 
 // TestComposerCensusDrawsTheStandAloneNoticeForAnUnusedPreimage is §8.3's
