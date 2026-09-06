@@ -318,6 +318,75 @@ func TestComposerCensusReportsEveryDecisionAndCutsNothingItself(t *testing.T) {
 	if strings.Contains(joined, "a set is only a backup when all of it exists.\nPlus") {
 		t.Error("the preimage block was spliced into the set-completeness claim")
 	}
+	// F-497: the rows say what will be cut, and the scope line says that is ALL
+	// they say -- the device keeps no record of earlier runs, so this block is
+	// not an inventory of what exists on steel.
+	//
+	// MUTATION: drop the append in composerPreimageCensusLines -> this fails.
+	// The copy table alone does NOT catch that: it proves the body exists and
+	// is spelled right, never that anything draws it.
+	if !strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("the census carries rows but not F-497's scope line:\n%s", joined)
+	}
+}
+
+// TestComposerCensusScopeLineOnlyAppearsWithRows is F-497's other half: the
+// stand-alone notice form lists no plates to cut, so a caveat about the
+// completeness of a list would be a caveat about nothing.
+//
+// MUTATION: append the scope line unconditionally (outside the len(accepted)>0
+// arm) -> this fails.
+func TestComposerCensusScopeLineOnlyAppearsWithRows(t *testing.T) {
+	st := &composerState{reg: &seedRegistry{}, list: md.PathList{Wrapper: md.ComposeWsh,
+		Paths: []md.SpendPath{{Keys: &md.KeySet{K: 2, N: 2}}}}}
+	h, m := composerH6Material("anchor a", true)
+	composerHoldHashlockMaterial(st, h, m)
+	plates := composerPreimagePlates(st)
+	joined := strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, plates), "\n")
+	if strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census with no plate rows carries the scope line anyway:\n%s", joined)
+	}
+	// And a census with no preimages at all is untouched.
+	base := strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, nil), "\n")
+	if strings.Contains(base, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census with no preimage block carries the scope line:\n%s", base)
+	}
+
+	// THE CASE THE ONE-PLATE FIXTURES CANNOT REACH, and the reason this block
+	// exists (independent check C-1). With a SINGLE unassigned preimage the
+	// stand-alone notice returns before the row-building path runs at all, so a
+	// mutation that appends the scope line unconditionally inside that path is
+	// dead on arrival for the assertions above -- measured: it passed, and so
+	// did all 1290 tests. TWO held-but-unassigned preimages skip both early
+	// returns and leave len(accepted) == 0, which is where the mutation
+	// actually shows: a line reading "this is what this composition will cut"
+	// standing over a census that cuts nothing.
+	//
+	// MUTATION: move the append out of the `len(accepted) > 0` arm -> this
+	// fails. (The assertions above do NOT catch that one; they catch the
+	// stand-alone form growing the line.)
+	two := &composerState{reg: &seedRegistry{}, list: md.PathList{Wrapper: md.ComposeWsh,
+		Paths: []md.SpendPath{{Keys: &md.KeySet{K: 2, N: 2}}}}}
+	for _, anchor := range []string{"anchor a", "anchor b"} {
+		hh, mm := composerH6Material(anchor, true)
+		composerHoldHashlockMaterial(two, hh, mm)
+	}
+	twoPlates := composerPreimagePlates(two)
+	if len(twoPlates) != 2 {
+		t.Fatalf("the fixture is not two held preimages: %v", twoPlates)
+	}
+	for i, p := range twoPlates {
+		if p.path != 0 {
+			t.Fatalf("plate %d is on path %d; this fixture needs both unassigned", i, p.path)
+		}
+	}
+	if accepted := composerAcceptedPreimagePlates(twoPlates); len(accepted) != 0 {
+		t.Fatalf("the fixture accepts %d plates; it needs none", len(accepted))
+	}
+	joined = strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, twoPlates), "\n")
+	if strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census that cuts nothing carries the scope line:\n%s", joined)
+	}
 }
 
 // TestComposerCensusDrawsTheStandAloneNoticeForAnUnusedPreimage is §8.3's

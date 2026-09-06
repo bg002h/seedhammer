@@ -400,6 +400,9 @@ func composerPreimageCensusLines(plates []hashlockPlate) []string {
 			out = append(out, composerCopyPreimagePlateRow(p.path,
 				hashlockFirst8Last8(p.digest), hashlockPlateFormWords(p)))
 		}
+		// F-497: the rows say what will be cut, and this says that is ALL they
+		// say. Only where rows exist -- see the copy's own comment.
+		out = append(out, composerCopyPreimageCensusScope())
 	}
 	for _, p := range plates {
 		switch {

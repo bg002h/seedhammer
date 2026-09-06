@@ -180,6 +180,9 @@ func composerCopyTable() []composerCopyRow {
 			"Plus 2 preimage plate(s), cut first and NOT part of this backup:"},
 		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, "b867db87..edbc96cb", "phrase, hardened, QR"),
 			"path 2  b867db87..edbc96cb  phrase, hardened, QR"},
+		{"composerCopyPreimageCensusScope", "H6-8.3", composerCopyPreimageCensusScope(),
+			"This is what this composition will cut. Plates cut in earlier runs are not known to " +
+				"this device and are not listed."},
 		{"composerCopyPreimageNotOnAnyPath", "H6-8.3", composerCopyPreimageNotOnAnyPath("b867db87..edbc96cb"),
 			"preimage b867db87..edbc96cb: not on any path, will not be cut"},
 		{"composerCopyPreimageDeclined", "H6-8.3", composerCopyPreimageDeclined("b867db87..edbc96cb"),
@@ -331,8 +334,12 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 73 SINCE H6 TASK 11 added §9's shared ms1-shaped warning and §8.8's
 	// Password-program notice. Neither is composer copy; both live in this file
 	// so the four gates above reach them.
-	if declared != 73 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 73 -- "+
+	// 74 SINCE F-497 added §8.3's census scope line, which says the block lists
+	// what THIS composition will cut and that plates cut in earlier runs are
+	// unknown to the device (operator ruling 2026-09-06: the limitation is
+	// accepted and the copy owns it).
+	if declared != 74 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 74 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

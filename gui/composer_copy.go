@@ -636,6 +636,24 @@ func composerCopyPreimagePlateHeading(n int) string {
 	return fmt.Sprintf("Plus %d preimage plate(s), cut first and NOT part of this backup:", n)
 }
 
+// composerCopyPreimageCensusScope is F-497's scope line: what this census is a
+// list OF.
+//
+// The census reports what THIS composition will cut. The device keeps no record
+// of past runs — a plate cut for the same digest last week is invisible to it —
+// so a reader who takes this block for an inventory of what exists on steel is
+// reading it for more than it can say. The operator ruled 2026-09-06 that the
+// limitation is accepted and the copy must own it, rather than the device
+// growing durable state and a migration to remove it.
+//
+// IT SITS WITH THE ROWS AND NOWHERE ELSE. The stand-alone notice form lists no
+// plates to cut at all, so a caveat about the completeness of a list would be a
+// caveat about nothing.
+func composerCopyPreimageCensusScope() string {
+	return "This is what this composition will cut. Plates cut in earlier runs are " +
+		"not known to this device and are not listed."
+}
+
 // composerCopyPreimagePlateRow is §8.3's per-plate row.
 func composerCopyPreimagePlateRow(path int, first8last8, form string) string {
 	return fmt.Sprintf("path %d  %s  %s", path, first8last8, form)
