@@ -351,6 +351,42 @@ func TestComposerCensusScopeLineOnlyAppearsWithRows(t *testing.T) {
 	if strings.Contains(base, composerCopyPreimageCensusScope()) {
 		t.Errorf("a census with no preimage block carries the scope line:\n%s", base)
 	}
+
+	// THE CASE THE ONE-PLATE FIXTURES CANNOT REACH, and the reason this block
+	// exists (independent check C-1). With a SINGLE unassigned preimage the
+	// stand-alone notice returns before the row-building path runs at all, so a
+	// mutation that appends the scope line unconditionally inside that path is
+	// dead on arrival for the assertions above -- measured: it passed, and so
+	// did all 1290 tests. TWO held-but-unassigned preimages skip both early
+	// returns and leave len(accepted) == 0, which is where the mutation
+	// actually shows: a line reading "this is what this composition will cut"
+	// standing over a census that cuts nothing.
+	//
+	// MUTATION: move the append out of the `len(accepted) > 0` arm -> this
+	// fails. (The assertions above do NOT catch that one; they catch the
+	// stand-alone form growing the line.)
+	two := &composerState{reg: &seedRegistry{}, list: md.PathList{Wrapper: md.ComposeWsh,
+		Paths: []md.SpendPath{{Keys: &md.KeySet{K: 2, N: 2}}}}}
+	for _, anchor := range []string{"anchor a", "anchor b"} {
+		hh, mm := composerH6Material(anchor, true)
+		composerHoldHashlockMaterial(two, hh, mm)
+	}
+	twoPlates := composerPreimagePlates(two)
+	if len(twoPlates) != 2 {
+		t.Fatalf("the fixture is not two held preimages: %v", twoPlates)
+	}
+	for i, p := range twoPlates {
+		if p.path != 0 {
+			t.Fatalf("plate %d is on path %d; this fixture needs both unassigned", i, p.path)
+		}
+	}
+	if accepted := composerAcceptedPreimagePlates(twoPlates); len(accepted) != 0 {
+		t.Fatalf("the fixture accepts %d plates; it needs none", len(accepted))
+	}
+	joined = strings.Join(composerCensusLines(newPlatform().EngraverParams(), nil, twoPlates), "\n")
+	if strings.Contains(joined, composerCopyPreimageCensusScope()) {
+		t.Errorf("a census that cuts nothing carries the scope line:\n%s", joined)
+	}
 }
 
 // TestComposerCensusDrawsTheStandAloneNoticeForAnUnusedPreimage is §8.3's
