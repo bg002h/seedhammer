@@ -189,6 +189,29 @@ func composerPagedScreens(t *testing.T) map[string][]string {
 	rows = append(rows, "Type a seed", "Leave unseated")
 	out["pick list"] = append([]string{composerCopySeatPrompt(2, 1, 2, 3), ""}, rows...)
 
+	// H6 §8.3: the Done census, with every one of its four preimage states at
+	// once -- an accepted plate, a declined one, one on no path, and the
+	// apart-storage line. It joined this map when composerEngraveStep stopped
+	// drawing the census through confirmReviewScreen's panel-wide wrap; five of
+	// its rows are over the 374 px at which a panel-centred row reaches under
+	// the navigation column.
+	st := composerH6PlateState(t, "anchor a", "anchor b")
+	hd, hm := composerH6Material("anchor d", true)
+	composerHoldHashlockMaterial(st, hd, hm)
+	plates := composerPreimagePlates(st)
+	plates[0].choice = hashlockPlatePhraseQR
+	plates[1].choice = hashlockPlateDecline
+	out["done census"] = composerCensusLines(newPlatform().EngraverParams(),
+		[]bundleCard{{kind: cardMD1, label: "md1 template", strings: []string{"md1abc"},
+			summary: "key-less wallet policy"}}, plates)
+
+	// And the pick screen step (A) draws, lead and rows, as composerPickScreen
+	// composes them.
+	_, pm := composerH6Material("anchor a", true)
+	prows, _ := composerPreimagePlateRows(pm)
+	out["preimage plate pick"] = append([]string{
+		composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened"), ""}, prows...)
+
 	return out
 }
 

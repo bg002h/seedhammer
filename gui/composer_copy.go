@@ -573,9 +573,133 @@ func composerCopyHashEveryPathPhrase() string {
 		"method, and every preimage plate, separately."
 }
 
+// composerCopyHashEveryPathFor chooses among §8h's FOUR arms (H6 §10.1).
+//
+// THE HELD ARMS COME FIRST because they are the true statement when they apply:
+// the shipped two say the preimage "is not on this device", and H6 §2.2 makes
+// that false for a composition that holds it. Saying a backup does not exist
+// when it is about to be cut is the direction that costs the operator a plate.
 func composerCopyHashEveryPathFor(st *composerState) string {
+	if composerEveryHashedPathHeld(st) {
+		if composerEveryHeldPathHasAPhrase(st) {
+			return composerCopyHashEveryPathHeldPhrase()
+		}
+		return composerCopyHashEveryPathHeld()
+	}
 	if composerAnyPathByPhrase(st) {
 		return composerCopyHashEveryPathPhrase()
 	}
 	return composerCopyHashEveryPath()
+}
+
+// ─── H6 §8.3, §8.4, §8.5, §10.1: the preimage plates' copy ───────────────────
+
+// composerCopyPreimagePlateLead is §5.3 item 7's masked pick lead: the digest,
+// the path, and the phrase's LENGTH and method -- no character of the phrase.
+//
+// `phrase: <n> characters` IS THE WHOLE AFFORDANCE. It is what a person
+// comparing this screen against a host card can check without the secret ever
+// reaching the panel, and it is the one signal that shows a stray space.
+// TWO LINES, AND THE NUMBER IS MEASURED. composerPickScreen draws the lead as a
+// per-page header through composerPageLines, so every line the lead spends is a
+// ROW the operator loses: at sh2DisplaySize a four-line lead leaves 3 of this
+// screen's 4 rows on the first page, and `do not cut this preimage` is the row
+// an operator reaches for to UNDO. Two lines leave all four
+// (TestComposerPreimagePlatePickDrawsAllFourRows).
+func composerCopyPreimagePlateLead(first8last8 string, path, chars int, method string) string {
+	head := "hash  " + first8last8
+	if path > 0 {
+		head += fmt.Sprintf("   path %d", path)
+	}
+	if chars == 0 {
+		return head + "\npreimage held, phrase not: only the string form can be cut"
+	}
+	return head + fmt.Sprintf("\nphrase: %d characters   method: %s", chars, method)
+}
+
+// composerCopyPreimageQRWarning is §8.5, confirm-to-proceed on the model of
+// ftWarnQR (gui/freetext_flow.go:1214-1216), which already warns for strictly
+// less dangerous content.
+func composerCopyPreimageQRWarning() string {
+	return "The QR makes the phrase readable by any camera. A photograph of the " +
+		"plate is a copy of the phrase, and the phrase spends this path."
+}
+
+// composerCopyPreimagePlateHeading is §8.3's heading.
+//
+// "plate(s)" IS THE SPEC'S OWN SPELLING and is kept verbatim, against this
+// file's house style (composerSlotWord renders "slot @3" or "slots @3 and @4"
+// so a refusal never reads "slots @3"). Changing spec copy inside a build gate
+// would put the shipped string and the document that is diffed against it out
+// of step; it is filed instead.
+func composerCopyPreimagePlateHeading(n int) string {
+	return fmt.Sprintf("Plus %d preimage plate(s), cut first and NOT part of this backup:", n)
+}
+
+// composerCopyPreimagePlateRow is §8.3's per-plate row.
+func composerCopyPreimagePlateRow(path int, first8last8, form string) string {
+	return fmt.Sprintf("path %d  %s  %s", path, first8last8, form)
+}
+
+// composerCopyPreimageNotOnAnyPath is §8.3's row for a retained preimage no
+// CURRENT path carries: LISTED, never cut, and nothing is deleted from
+// hashlockHeld to achieve it (§2.2 item 2).
+func composerCopyPreimageNotOnAnyPath(first8last8 string) string {
+	return "preimage " + first8last8 + ": not on any path, will not be cut"
+}
+
+// composerCopyPreimageDeclined is §8.3's row for a plate the operator declined.
+func composerCopyPreimageDeclined(first8last8 string) string {
+	return "preimage " + first8last8 + ": declined, will not be cut"
+}
+
+func composerCopyPreimageKeepApart() string {
+	return "Keep each preimage plate apart from the policy plates and from the others."
+}
+
+// composerCopyPreimageOnlyNotice is §8.3's stand-alone notice form, for a review
+// whose ONLY preimage entry is one no path carries. The terse row says what
+// happened; on a review with nothing else to read there is room to say what to
+// do about it.
+func composerCopyPreimageOnlyNotice() string {
+	return "One preimage this composition holds is on no path of this policy. It " +
+		"will not be cut. Go back and set a path's hash to it, or leave it."
+}
+
+// composerCopyAbortNoPreimage is §8.4a.
+func composerCopyAbortNoPreimage() string {
+	return "NO PREIMAGE PLATE WAS CUT. The phrase dies with this composition. " +
+		"Do not fund this wallet."
+}
+
+// composerCopyAbortPreimageCut is §8.4b.
+func composerCopyAbortPreimageCut() string {
+	return "A PREIMAGE PLATE WAS CUT and no policy plate was. Store or destroy it " +
+		"now; do not leave it with the blanks."
+}
+
+// composerCopyHashEveryPathHeld is §10.1's THIRD §8h arm: every hashed path's
+// digest has material this composition holds, and none of it is a phrase.
+func composerCopyHashEveryPathHeld() string {
+	return "HASH ON EVERY PATH\n" +
+		"Every way to spend this wallet needs the preimage of a hash. This " +
+		"composition holds the preimage for each one and can cut a plate for it " +
+		"at Done. Store those plates apart from these, and apart from each other."
+}
+
+// composerCopyHashEveryPathHeldPhrase is §10.1's FOURTH arm: the same, and the
+// phrase and method are held too.
+func composerCopyHashEveryPathHeldPhrase() string {
+	return "HASH ON EVERY PATH\n" +
+		"Every way to spend this wallet needs a hashlock preimage. This " +
+		"composition holds the phrase and method for each one and can cut a plate " +
+		"at Done. Store those plates apart from these, and apart from each other."
+}
+
+// composerCopyPreimagePlateRefusal is the refusal when a decided preimage plate
+// cannot be built or does not fit the plate. It names the form so the operator
+// can choose a smaller one rather than being told only that something failed.
+func composerCopyPreimagePlateRefusal() string {
+	return "Couldn't build that preimage plate. Go back and choose a smaller " +
+		"form: the phrase without a QR, or the preimage string."
 }

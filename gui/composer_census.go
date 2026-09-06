@@ -82,13 +82,26 @@ func composerDescriptorCeilingChars(pl Platform) int {
 // TestComposerMeasureSection13Numbers records.
 
 // composerCensusLines is the census the operator confirms before the first
-// cut, plus §7f's read-back-integrity line.
-func composerCensusLines(params engrave.Params, cards []bundleCard) []string {
+// cut, plus §7f's read-back-integrity line and H6 §8.3's preimage block.
+//
+// IT TAKES THE DECIDED PLATE LIST AS A VALUE (H6 §5.3 item 2 / r0 fidelity
+// N-3). The shipped signature could see neither step (A)'s decisions nor
+// hashlockHeld, and reading the state here would make the census RECOMPUTE a
+// decision the operator has already made -- two answers to "what is being cut",
+// on the screen that exists to be the one.
+//
+// buildPlateCensusLines' COUNT AND ITS "a set is only a backup when all of it
+// exists" CLAIM STAY BYTE-UNCHANGED (gui/multisig_build_census.go:63-73),
+// because a preimage plate is not a bundleCard and does not enter `plan`. That
+// is S6b's passphrase-plate precedent (:88-93): entering `plan` "would tell a
+// reader it travels WITH the set", and §8.3's own heading says the opposite.
+func composerCensusLines(params engrave.Params, cards []bundleCard, plates []hashlockPlate) []string {
 	lines := buildPlateCensusLines(params, cards)
 	// RECOVERY-TIME ERROR DETECTION DIFFERS BY FORM AND THE CENSUS SAYS SO
 	// (§7f). md1 and mk1 carry BCH; a text or QR descriptor carries only its
 	// BIP-380 checksum, which detects a typo and corrects nothing.
-	return append(lines, "",
+	lines = append(lines, "",
 		"md1 and mk1 plates carry error correction. A plain descriptor plate "+
 			"carries only its checksum, which finds a mistake but cannot fix one.")
+	return append(lines, composerPreimageCensusLines(plates)...)
 }

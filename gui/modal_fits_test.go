@@ -347,6 +347,14 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"HASH ON EVERY PATH, phrase-route form (H2 §4.7)",
 			composerCopyHashEveryPathPhrase(),
 		},
+		// H6 Task 9. Every DEVICE body the Done review adds, measured ALONE as
+		// it is drawn.
+		{"H6 §8.4a, no preimage plate was cut", composerCopyAbortNoPreimage()},
+		{"H6 §8.4b, a preimage plate was cut and no policy plate was", composerCopyAbortPreimageCut()},
+		{"H6 §10.1, HASH ON EVERY PATH held form", composerCopyHashEveryPathHeld()},
+		{"H6 §10.1, HASH ON EVERY PATH held-phrase form", composerCopyHashEveryPathHeldPhrase()},
+		{"H6 §8.3, the stand-alone unused-preimage notice", composerCopyPreimageOnlyNotice()},
+		{"H6 §5.3, the preimage-plate refusal", composerCopyPreimagePlateRefusal()},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)
@@ -389,6 +397,12 @@ func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"the hashlock confirm modal, longest variant (H2 §4.5)",
 			composerConfirmBody(composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
 				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+		},
+		{
+			// H6 §8.5: the QR warning, drawn through composerConfirmBody exactly
+			// as composerPreimagePlatePick draws it.
+			"the preimage QR warning (H6 §8.5)",
+			composerConfirmBody(composerCopyPreimageQRWarning()),
 		},
 		{
 			// H6 §5.1: the payload PREIMAGE record's confirm, longest variant

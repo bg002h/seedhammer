@@ -168,6 +168,36 @@ func composerCopyTable() []composerCopyRow {
 				"another path has a different hash: back up every phrase " +
 				"Spending this path needs that preimage. It is in the payload and not on these plates. " +
 				"Cut a preimage plate for it at Done, or keep the payload."},
+		// H6 §5.3, §8.3, §8.4, §8.5, §10.1. The `verbatim` column is the plan's
+		// own text for the §8.3 rows and the two §8.4 arms; the pick lead, the
+		// plate refusal and §8.5's warning are quoted strings in this table for
+		// §11's reason.
+		{"composerCopyPreimagePlateLead", "H6-5.3", composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened"),
+			"hash  b867db87..edbc96cb   path 2 phrase: 100 characters   method: hardened"},
+		{"composerCopyPreimageQRWarning", "H6-8.5", composerCopyPreimageQRWarning(),
+			"The QR makes the phrase readable by any camera. A photograph of the plate is a copy of the phrase, and the phrase spends this path."},
+		{"composerCopyPreimagePlateHeading", "H6-8.3", composerCopyPreimagePlateHeading(2),
+			"Plus 2 preimage plate(s), cut first and NOT part of this backup:"},
+		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, "b867db87..edbc96cb", "phrase, hardened, QR"),
+			"path 2  b867db87..edbc96cb  phrase, hardened, QR"},
+		{"composerCopyPreimageNotOnAnyPath", "H6-8.3", composerCopyPreimageNotOnAnyPath("b867db87..edbc96cb"),
+			"preimage b867db87..edbc96cb: not on any path, will not be cut"},
+		{"composerCopyPreimageDeclined", "H6-8.3", composerCopyPreimageDeclined("b867db87..edbc96cb"),
+			"preimage b867db87..edbc96cb: declined, will not be cut"},
+		{"composerCopyPreimageKeepApart", "H6-8.3", composerCopyPreimageKeepApart(),
+			"Keep each preimage plate apart from the policy plates and from the others."},
+		{"composerCopyPreimageOnlyNotice", "H6-8.3", composerCopyPreimageOnlyNotice(),
+			"One preimage this composition holds is on no path of this policy. It will not be cut. Go back and set a path's hash to it, or leave it."},
+		{"composerCopyPreimagePlateRefusal", "H6-5.3", composerCopyPreimagePlateRefusal(),
+			"Couldn't build that preimage plate. Go back and choose a smaller form: the phrase without a QR, or the preimage string."},
+		{"composerCopyAbortNoPreimage", "H6-8.4a", composerCopyAbortNoPreimage(),
+			"NO PREIMAGE PLATE WAS CUT. The phrase dies with this composition. Do not fund this wallet."},
+		{"composerCopyAbortPreimageCut", "H6-8.4b", composerCopyAbortPreimageCut(),
+			"A PREIMAGE PLATE WAS CUT and no policy plate was. Store or destroy it now; do not leave it with the blanks."},
+		{"composerCopyHashEveryPathHeld", "H6-10.1", composerCopyHashEveryPathHeld(),
+			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. This composition holds the preimage for each one and can cut a plate for it at Done. Store those plates apart from these, and apart from each other."},
+		{"composerCopyHashEveryPathHeldPhrase", "H6-10.1", composerCopyHashEveryPathHeldPhrase(),
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. This composition holds the phrase and method for each one and can cut a plate at Done. Store those plates apart from these, and apart from each other."},
 	}
 }
 
@@ -275,8 +305,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 54 SINCE H6 TASK 8b added composerCopyHashlockPreimageConfirm (§5.1's
 	// confirm for a payload PREIMAGE record, whose fields the phrase-shaped
 	// confirm body does not have).
-	if declared != 54 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 54 -- "+
+	// 67 SINCE H6 TASK 9 added the Done review's thirteen: §5.3's masked pick
+	// lead and the plate refusal, §8.5's QR warning, §8.3's five row forms and
+	// its stand-alone notice, both §8.4 arms and both §10.1 held arms.
+	if declared != 67 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 67 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

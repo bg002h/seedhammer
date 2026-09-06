@@ -385,15 +385,71 @@ func composerEngraveStep(ctx *Context, th *Colors, st *composerState, template, 
 		}
 	}
 
+	// ─── H6 §5.3: THE DONE REVIEW IS TWO STEPS ──────────────────────────────
+	//
+	// (A) one composerPickScreen per held digest a current path carries, which
+	// DECIDES; then (B) the census, which REPORTS. The order is forced: a
+	// read-only screen cannot carry the decision (W-2 measured 205 taps that
+	// moved nothing on exactly that shape), and a census that ran first would
+	// have to describe choices nobody had made.
+	plates := composerPreimagePlateStep(ctx, th, st)
+
 	// The census carries the SUPPLY paths' title (gui/multisig.go,
 	// gui/singlesig.go), not Multisig Build's: the build title is a registered
 	// walk anchor (cmd/emu/needle_test.go) whose proof is that exactly one flow
 	// draws it, and the composer is a supply-shaped flow, not a build.
-	if !confirmReviewScreen(ctx, th, "Plates To Cut",
-		composerCensusLines(ctx.Platform.EngraverParams(), cards)) {
+	//
+	// DRAWN THROUGH composerPageLines' BAND (H6 §5.3 step B), not
+	// confirmReviewScreen's own wrap. confirmReviewScreen wraps at
+	// `dims.X - 2*8 = 464` px and centres on the WHOLE panel while the
+	// navigation column starts at 427, so every row wider than 374 px has its
+	// right edge under a button -- the SHIPPED completeness line at 459 px
+	// included. That is the W-3 class the composer's paged screens were rebuilt
+	// to remove, and H6 adds five more rows to this screen; composerReadScreen
+	// has confirmReviewScreen's exact contract (Button3 continues, Button1
+	// backs, Button2 pages) inside the band that keeps ink off the buttons.
+	if !composerReadScreen(ctx, th, "Plates To Cut",
+		composerCensusLines(ctx.Platform.EngraverParams(), cards, plates)) {
 		return false
 	}
-	return bundleEngrave(ctx, th, "Wallet Policy", cards, "", "") == bundleEngraveDone
+
+	// ─── §5.4: PREIMAGE PLATES FIRST ────────────────────────────────────────
+	//
+	// Ordering removes the window in which the md1 plates exist and the preimage
+	// does not. The ms1 secret cards keep their place at the head of `cards`
+	// above, so the whole run is secrets-then-preimages-then-policy.
+	accepted := composerAcceptedPreimagePlates(plates)
+	cut := 0
+	for _, p := range accepted {
+		plate, err := composerHashlockPlateFor(ctx.Platform, p,
+			composerHashlockLocator(p, template, keyed))
+		if err != nil {
+			showError(ctx, th, "Preimage plate", composerCopyPreimagePlateRefusal())
+			if cut > 0 {
+				return composerAbortPreimageCut(ctx, th)
+			}
+			return composerAbortNoPreimage(ctx, th)
+		}
+		composerNotePlateCut("preimage")
+		if !NewEngraveScreen(ctx, plate).Engrave(ctx, &engraveTheme) {
+			// §8.4's TWO windows, and the ORDER is what creates the second.
+			if cut > 0 {
+				return composerAbortPreimageCut(ctx, th)
+			}
+			return composerAbortNoPreimage(ctx, th)
+		}
+		cut++
+	}
+
+	composerNotePlateCut("policy")
+	// §10.3: PREIMAGE REQUIRED on the md1 AND the mk1 key cards, never a
+	// cardMS1 -- bundlePlateMark's own exclusion, unchanged.
+	done := bundleEngrave(ctx, th, "Wallet Policy", cards,
+		composerPreimageMarkTitle(st), "") == bundleEngraveDone
+	if !done && cut > 0 {
+		return composerAbortPreimageCut(ctx, th)
+	}
+	return done
 }
 
 // composerSecretCards is §7f's "a seed that filled several slots is cut ONCE".

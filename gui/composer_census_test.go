@@ -39,7 +39,7 @@ func TestComposerCensusLinesSayHowRecoveryDetectsAnError(t *testing.T) {
 		kind: cardMD1, label: "md1 template",
 		strings: []string{"md1abc"}, summary: "key-less wallet policy",
 	}}
-	lines := composerCensusLines(newPlatform().EngraverParams(), cards)
+	lines := composerCensusLines(newPlatform().EngraverParams(), cards, nil)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "This engraves") {
 		t.Errorf("the census does not carry buildPlateCensusLines' plate count:\n%s", joined)
