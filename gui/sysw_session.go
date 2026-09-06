@@ -1,6 +1,9 @@
 package gui
 
-import "seedhammer.com/sysw"
+import (
+	"seedhammer.com/hashlock"
+	"seedhammer.com/sysw"
+)
 
 // syswSession is the systemwide payload the machine currently holds.
 //
@@ -275,6 +278,62 @@ func syswOfferAlt(ctx *Context, th *Colors, want sysw.Class, title, lead, alt st
 		return "", false
 	}
 	return ctx.sysw.take(want)
+}
+
+// syswWarnMS1Shaped is H6 §9's warning at the OK of a TEXT-ENTRY screen, shared
+// by the two programs that cut a typed string (Engrave Text and BIP-39
+// Password).
+//
+// IT LIVES HERE BECAUSE NEITHER PROGRAM OWNS IT. Both call it, the body is one
+// string by decision (§9: "two near-identical bodies is how one of them goes
+// stale"), and a copy in either flow file would be the second answer to a
+// question with one answer.
+//
+// EARLIER THAN THE CONFIRM SUMMARY, on the entry screen itself: both confirm
+// summaries are already paged (ftConfirmFlow, ppConfirmFlow), and a warning
+// that arrives after the operator has walked four more fields arrives after
+// they have stopped asking whether they are in the right program.
+//
+// ONCE PER COMPOSITION, RE-ARMED BY AN EDIT, and `accepted` is how: it holds the
+// exact text the operator was warned about, so paging back to this screen and
+// pressing OK again is silent while changing one character warns again.
+//
+// THE PREDICATE IS hashlock.IsMS1Shaped, the host's looks_like_ms1 ported byte
+// for byte -- NO CHECKSUM. That is H2 §2 rule 3's own argument: a GROUPED plate
+// is what `ms hashlock`'s card prints and therefore what an operator retypes,
+// and codex32.IsPreimage would answer false for it.
+//
+// It returns false when the operator declined, which the caller treats as "stay
+// on this screen". It is NEVER a refusal: continuing cuts the string as typed.
+func syswWarnMS1Shaped(ctx *Context, th *Colors, title, text string, accepted *string) bool {
+	if !hashlock.IsMS1Shaped(text) || *accepted == text {
+		return true
+	}
+	if !composerConfirmScreen(ctx, th, title, composerConfirmBody(composerCopyHashlockLooksLikeMS1())) {
+		return false
+	}
+	*accepted = text
+	return true
+}
+
+// syswNoticeHashlockPhrase is H6 §8.8's notice, drawn at progPassword when the
+// loaded payload holds a hashlock phrase and no BIP-39 passphrase.
+//
+// THE ASYMMETRY IT REMOVES: §9 gives the passphrase program a warning for an
+// operator who TYPES an ms1 string at it -- the rarer mistake, with no funds
+// consequence -- while the operator whose payload literally CONTAINS a hashlock
+// phrase got nothing at all. Silence is today's behaviour, so the test is
+// whether the wrong outcome is worse than saying nothing; here saying nothing is
+// what routes the operator around the guard, so it is worse.
+//
+// AND NOT WHEN A `pass:` RECORD IS ALSO PRESENT: then syswOfferAlt DOES draw,
+// the operator is offered the passphrase the program is for, and a notice
+// beside it would be answering a question nobody asked.
+func syswNoticeHashlockPhrase(ctx *Context, th *Colors) {
+	if ctx.sysw == nil || !ctx.sysw.has(sysw.ClassPhrase) || ctx.sysw.has(sysw.ClassPassphrase) {
+		return
+	}
+	showError(ctx, th, "BIP-39 Password", composerCopyHashlockPhraseNotPassphrase())
 }
 
 // syswOfferCards is syswOffer for a CARD SET: it hands back every md1/mk1

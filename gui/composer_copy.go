@@ -742,3 +742,48 @@ func composerCopyPreimagesLoaded(n int) string {
 	}
 	return fmt.Sprintf("%d preimage or phrase records loaded.", n)
 }
+
+// ─── H6 §9 and §8.8: two bodies about a string being mistaken for another ────
+//
+// THEY LIVE IN THIS FILE FOR THE GATE, not because they are composer copy.
+// TestComposerCopyTableCoversEveryBody scans composer_copy.go's composerCopy*
+// declarations and requires a row for each, and that row is what carries §12
+// item 5's four gates -- the glyph check, the raster floor, the modal-fits
+// measurement and a fires-on-condition test. A body declared beside its screen
+// instead would ship with none of them and nothing would say so; that is the
+// defect the same test's own comment records.
+
+// composerCopyHashlockLooksLikeMS1 is §9's warning, shown by BOTH the free-text
+// and the passphrase programs when what has been typed looks like an ms1 string.
+//
+// NEVER A REFUSAL. Both programs cut what the operator typed; this tells them
+// what the string looks like and where the marked plate comes from, and lets
+// them continue.
+//
+// THE PASSPHRASE PROGRAM SHOWS THE SAME BODY. The string is about to become a
+// BIP-39 passphrase rather than a plate, but the sentence that matters -- what
+// it looks like, and where a marked hashlock plate comes from -- is identical,
+// and two near-identical bodies is how one of them goes stale.
+func composerCopyHashlockLooksLikeMS1() string {
+	return "This looks like an ms1 string. A seed plate comes from a payload; a " +
+		"marked hashlock plate comes from the Wallet Policy program, from a phrase " +
+		"typed there or a preimage packed on the host. Continue here to cut it as " +
+		"plain text."
+}
+
+// composerCopyHashlockPhraseNotPassphrase is §8.8's notice at progPassword.
+//
+// WHAT IT REPLACES IS SILENCE, and silence is what routes the operator around
+// the guard. The refusal at progPassword is correct and structural
+// (syswOfferAlt returns before any screen is drawn when the payload holds no
+// ClassPassphrase), so an operator who packs a hashlock phrase, taps, and opens
+// the program whose NAME matches what they are holding gets the ordinary
+// passphrase keyboard -- no offer, no mention, no reason. The obvious next move
+// is the harmful one: re-pack the phrase as a `pass:` record so it "works",
+// which is the substitution ruling L2 exists to prevent and whose stated stake
+// is a different wallet.
+func composerCopyHashlockPhraseNotPassphrase() string {
+	return "This payload holds a HASHLOCK PHRASE, not a BIP-39 passphrase. They are " +
+		"not interchangeable: using one as the other opens a different wallet. A " +
+		"hashlock phrase is used in the Wallet Policy program."
+}

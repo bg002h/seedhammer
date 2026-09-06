@@ -357,6 +357,8 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 		{"H6 §5.3, the preimage-plate refusal", composerCopyPreimagePlateRefusal()},
 		{"H6 §5.2, the Hashlock plates flow's own abort", composerCopyHashlockPlatesNotCut()},
 		{"H6 §5.2, the empty-payload refusal", composerCopyHashlockPlatesEmpty()},
+		{"H6 §8.8, the Password-program notice", composerCopyHashlockPhraseNotPassphrase()},
+		{"H6 §9, the ms1-shaped warning on errorScreenBody", composerCopyHashlockLooksLikeMS1()},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, errorScreenBody, tc.body)
@@ -399,6 +401,12 @@ func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"the hashlock confirm modal, longest variant (H2 §4.5)",
 			composerConfirmBody(composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
 				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+		},
+		{
+			// H6 §9: the ms1-shaped warning as BOTH programs draw it -- through
+			// composerConfirmScreen, wrapped in composerConfirmBody.
+			"the ms1-shaped warning (H6 §9)",
+			composerConfirmBody(composerCopyHashlockLooksLikeMS1()),
 		},
 		{
 			// H6 §8.5: the QR warning, drawn through composerConfirmBody exactly

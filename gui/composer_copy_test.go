@@ -208,6 +208,13 @@ func composerCopyTable() []composerCopyRow {
 			"That plate was not cut. The record is still in this payload, so you can cut it again from this list."},
 		{"composerCopyPreimagesLoaded", "H6-5.2", composerCopyPreimagesLoaded(2),
 			"2 preimage or phrase records loaded."},
+		// H6 §9 and §8.8. These two are NOT composer copy; they live in
+		// composer_copy.go so this table's four gates reach them, which is the
+		// reason the file's own comment gives.
+		{"composerCopyHashlockLooksLikeMS1", "H6-9", composerCopyHashlockLooksLikeMS1(),
+			"This looks like an ms1 string. A seed plate comes from a payload; a marked hashlock plate comes from the Wallet Policy program, from a phrase typed there or a preimage packed on the host. Continue here to cut it as plain text."},
+		{"composerCopyHashlockPhraseNotPassphrase", "H6-8.8", composerCopyHashlockPhraseNotPassphrase(),
+			"This payload holds a HASHLOCK PHRASE, not a BIP-39 passphrase. They are not interchangeable: using one as the other opens a different wallet. A hashlock phrase is used in the Wallet Policy program."},
 	}
 }
 
@@ -321,8 +328,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 71 SINCE H6 TASK 10 added the Hashlock plates flow's four: the list lead,
 	// the empty-payload refusal, this flow's own abort (which is NEITHER §8.4
 	// arm) and the door's preimage count.
-	if declared != 71 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 71 -- "+
+	// 73 SINCE H6 TASK 11 added §9's shared ms1-shaped warning and §8.8's
+	// Password-program notice. Neither is composer copy; both live in this file
+	// so the four gates above reach them.
+	if declared != 73 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 73 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }
