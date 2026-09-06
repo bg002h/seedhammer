@@ -152,6 +152,46 @@
       "host_admits": false,
       "device_admits": false,
       "source": "codex32.NewSeed(\"ms\", 0, \"test\", 's', 33 bytes with byte 0 = 0x03): THE COLLISION, and it is deliberate. A plain BIP-93 unshared secret whose 33-byte seed happens to begin 0x03 is byte-for-byte indistinguishable from a hashlock PREIMAGE plate -- the kind is the prefix byte (SPEC_ms_hashlock section 1), the payload width is the same, and the id is not consulted -- so H0 refuses it on both sides. This is CONVERGENCE, not a device narrowing: `me` refuses this exact string too (ms-codec 0.7 at the prefix gate; 0.8 as an `UnknownTag` -- the shape predicate, not the codec error, is what names it), measured. The cost is bounded and known: a real 264-bit BIP-93 master seed beginning 0x03 (about 1 in 256 of 33-byte seeds) is refused rather than engraved. The 16-, 20-, 24-, 28- and 32-byte seeds are untouched, and so is every share -- see bip93-plain-payload-0x03 and bip93-share-payload-0x03, both device_admits: true. Consulting the id instead would engrave a mistagged REAL preimage as a seed (tests I-1), which is the worse failure: a refusal costs a re-encode, a wrong cut exposes a spend secret. Post-implementation review I-1/M-2 (agent-reports/hashlock-H0-post-impl.md)."
+    },
+    {
+      "name": "hash-kind03-16-byte-x",
+      "string": "ms10hashsqvqqqqqqqqqqqqqqqqqqqqqqqqqqmv3lqlgkn6s5c",
+      "chars": 50,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "codex32.NewSeed(\"ms\", 0, \"hash\", 's', 17 bytes: 0x03 then 16 zero bytes): the preimage KIND under the preimage id `hash` with an X of 16 bytes, not 32 -- the string F-503 was filed on. The host names it (`PreimageLengthMismatch` -> a kind-0x03 payload under `hash` whose X is 16 bytes); before F-503 the device called it ClassCodex32Secret, a seed class, because H0's inertness tested only the 33-byte width. F-503 (operator ruling 2026-09-06): under the id `hash`, the kind 0x03 is inert at EVERY length. Every other id keeps H0's BIP-93-wide rule -- see bip93-plain-payload-0x03."
+    },
+    {
+      "name": "hash-kind03-31-byte-x",
+      "string": "ms10hashsqvqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0n4lhy39fprwh",
+      "chars": 74,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "codex32.NewSeed(\"ms\", 0, \"hash\", 's', 32 bytes: 0x03 then 31 zero bytes): one byte short of a plate, at the 74-character width of a plain BIP-93 256-bit secret. Refused on both sides (F-503)."
+    },
+    {
+      "name": "hash-kind03-33-byte-x",
+      "string": "ms10hashsqvqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsdgdmr756qg7w",
+      "chars": 77,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "codex32.NewSeed(\"ms\", 0, \"hash\", 's', 34 bytes: 0x03 then 33 zero bytes): one byte past a plate. Refused on both sides (F-503)."
+    },
+    {
+      "name": "hash-id-kind00-16-byte",
+      "string": "ms10hashsqqqqqqqqqqqqqqqqqqqqqqqqqqqq0mck2082pkd87",
+      "chars": 50,
+      "host_admits": false,
+      "device_admits": true,
+      "source": "codex32.NewSeed(\"ms\", 0, \"hash\", 's', 17 bytes: 0x00 then 16 zero bytes): the entr KIND under the preimage id `hash`. The host refuses it as an id/kind mismatch (TagKindMismatch, ruling L24); the device still admits it as a BIP-93 seed. THE CONTROL ROW for F-503: the operator chose to make only the 0x03 kind inert under `hash`, not to reserve the whole id, and this row is what keeps that choice from silently widening."
+    },
+    {
+      "name": "hash-kind03-16-byte-x-uppercase",
+      "string": "MS10HASHSQVQQQQQQQQQQQQQQQQQQQQQQQQQQMV3LQLGKN6S5C",
+      "chars": 50,
+      "host_admits": false,
+      "device_admits": false,
+      "source": "The UPPERCASE (QR-alphanumeric) spelling of hash-kind03-16-byte-x. bech32 is case-insensitive, so this is the SAME string, and F-506 (operator ruling 2026-09-06) makes the device read the id case-insensitively for the inertness test: `sysw.isHashIdPreimageKind` uses strings.EqualFold. Case-sensitivity is right for ADMISSION (codex32.IsPreimagePlate keeps it: section 5.3 hashes a record in canonical lowercase, and being strict there yields a REFUSAL) and wrong for INERTNESS, where being strict yields the opposite -- the string stays a seed class. Measured before the fix: Classify = 2, a seed class; after: ClassUnknown. The host refuses it in either case."
     }
   ]
 }
