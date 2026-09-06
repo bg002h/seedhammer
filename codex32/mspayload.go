@@ -85,7 +85,8 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 // BIP-93 33-byte seed that begins 0x03 is indistinguishable from a preimage
 // plate -- same width, same prefix byte, and the id is not consulted -- and
 // IS REFUSED. Roughly 1 in 256 of 33-byte seeds. The 16-, 20-, 24-, 28- and
-// 32-byte seeds are untouched, and so is every share. That is accepted, not
+// 32-byte seeds are untouched under every id but `hash` (F-503: see
+// IsPreimageKind), and so is every share. That is accepted, not
 // overlooked: the constellation profile pins a 33-byte payload to a kind
 // byte, `me` refuses the identical string (ms-codec 0.7 at the prefix gate,
 // 0.8 as a TagKindMismatch), so this is CONVERGENCE with the Rust primary
@@ -102,6 +103,33 @@ func IsPreimage(s String) bool {
 	}
 	d := s.Seed()
 	return len(d) == 33 && d[0] == msPrefixPreimage
+}
+
+// IsPreimageKind is the KIND alone: an unshared string whose first payload
+// byte is the preimage prefix 0x03, at ANY payload length. It is wider than
+// IsPreimage (which also requires the 33-byte plate width) and narrower than
+// nothing else: a share is never of any kind, because a share's bytes are SSS
+// points and its first byte says nothing about the secret's kind.
+//
+// F-503 (operator ruling 2026-09-06). ms-codec's dispatch_payload reads the
+// first payload byte as the kind at every width, so a 0x03 payload of the
+// wrong length is `PreimageLengthMismatch` -- refused, never a seed. This
+// device deliberately stays BIP-93-wide for every id but one: under the
+// preimage id `hash`, sysw.isStrictMs1 treats this kind as inert at every
+// length, so a damaged or hand-built plate (a 17-byte payload under `hash`,
+// 50 characters) is ClassUnknown instead of a seed. Under any OTHER id the
+// 16-, 20-, 24-, 28- and 32-byte seeds beginning 0x03 stay seeds, as the seam
+// corpus row bip93-plain-payload-0x03 pins; the id is what keeps H0's
+// argument above intact.
+//
+// Reads the prefix fields and one payload byte; nothing new is retained.
+func IsPreimageKind(s String) bool {
+	f, err := ParsePrefix(s.String())
+	if err != nil || !f.Unshared {
+		return false
+	}
+	d := s.Seed()
+	return len(d) > 0 && d[0] == msPrefixPreimage
 }
 
 // DecodeMS1Preimage decodes the m-format HASHLOCK PREIMAGE kind (SPEC_ms_hashlock

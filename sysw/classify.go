@@ -154,5 +154,23 @@ func isStrictMs1(record string) bool {
 	c, err := codex32.New(record)
 	// H0 (SPEC_ms_hashlock §9): a hashlock preimage plate is BCH-valid and
 	// inside the cap, and it is not a seed. Inert here — no class of its own.
-	return err == nil && !codex32.IsPreimage(c)
+	// F-503: and under the preimage id `hash`, the 0x03 KIND is inert at
+	// EVERY length, not only the plate's 33 bytes -- a damaged or hand-built
+	// plate is ClassUnknown, as it is on the host (PreimageLengthMismatch),
+	// instead of a seed the host would never have packed. Every other id keeps
+	// the BIP-93-wide rule (seam row bip93-plain-payload-0x03).
+	return err == nil && !codex32.IsPreimage(c) && !isHashIdPreimageKind(c)
+}
+
+// isHashIdPreimageKind is F-503's conjunct: the preimage KIND (first payload
+// byte 0x03, any length, unshared) under the preimage id `hash`. The id is
+// read the way codex32.IsPreimagePlate reads it -- case-sensitively, from
+// String.Split -- so the UPPERCASE spelling is not this shape either; it is
+// refused elsewhere (H6 §4.3) and never reaches a seed class.
+func isHashIdPreimageKind(c codex32.String) bool {
+	if !codex32.IsPreimageKind(c) {
+		return false
+	}
+	id, _, _ := c.Split()
+	return id == "hash"
 }
