@@ -1226,6 +1226,19 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 			t.Errorf("the confirm modal does not name the RECORD's method: %q", normalizeDrawn(body))
 		}
 		h.holdConfirm()
+		// F-496. THIS FIXTURE CARRIES NO `hash:` RECORD, so nothing in the
+		// payload states what the digest should be and nothing has compared the
+		// device's derivation to the host's -- the reconciliation screen is the
+		// only check on offer and IS drawn. The matching-hash case is the
+		// subtest below. (§10.2 used to scope this screen to the phrase route
+		// and call the scoping true by construction; the operator's ruling of
+		// 2026-09-06 replaced that with a condition.)
+		//
+		// MUTATION: drop the !payloadStatesDigest guard -> the subtest below
+		// fails; invert it -> `never reached "run ms hashlock with this
+		// phrase"` here. Neither direction passes both.
+		h.mustReach("run ms hashlock with this phrase")
+		h.tapNav(Button3) // dismiss it, as the phrase route's own test does
 		h.waitDone()
 		if !ret {
 			t.Fatal("composerHashEdit returned false after the phrase-record row was taken")
@@ -1243,11 +1256,48 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		if m.provenance != hashlockFromPayload {
 			t.Errorf("provenance = %v, want hashlockFromPayload", m.provenance)
 		}
-		// §10.2 BY CONSTRUCTION: composerCopyHashlockReconcile has ONE call
-		// site, inside hashlockPhraseRoute, so a payload phrase can never draw
-		// it. Asserted on the LAST frame the route produced.
-		if strings.Contains(normalizeDrawn(body), normalizeDrawn("run ms hashlock with this phrase")) {
-			t.Error("a payload phrase reached the reconciliation screen, whose instruction is a no-op for it")
+	})
+
+	// F-496's other branch, in its own fixture because this one cannot hold it:
+	// a `hash:` record would be a SIXTH row and the first page holds five
+	// (TestWhichHashPageHoldsFiveRows), so the preimage record is dropped to
+	// make room. Rows here: payload hash 1, phrase record 1, Type a hashlock
+	// phrase, Type 64 hex, No hash lock.
+	//
+	// MUTATION: drop the `!payloadStatesDigest(...)` guard -> the screen is
+	// drawn here too and this subtest fails; invert it -> the subtest above
+	// fails. Neither direction passes both.
+	t.Run("a payload phrase the payload already states needs no reconciliation", func(t *testing.T) {
+		st := composerStateWithPaths(t, 1)
+		var ret bool
+		sess := composerSessionWith(
+			[]string{"hash:" + hashlockAnchorSHA_H},
+			[]string{composerTestPhraseRecord(sysw.HashlockSHA256, hashlockAnchorPhrase)},
+		)
+		h := runComposerHashEdit(t, st, sess, 0, &ret)
+		h.mustReach("Which hash?")
+		h.tapRow(1, 5) // band 3's first row: the phrase: record
+		h.mustReach("32-byte value")
+		h.tapNav(Button3)
+		body := h.mustReach("Write down this phrase")
+		// The confirm modal says the payload states this digest...
+		if !strings.Contains(normalizeDrawn(body), normalizeDrawn("matches hash 1 in the payload")) {
+			t.Fatalf("the fixture's hash: record does not match the derived digest: %q",
+				normalizeDrawn(body))
+		}
+		h.holdConfirm()
+		// ...so the check has already been made, and a second screen telling the
+		// operator to go and make it is noise they learn to page past. The
+		// route returns straight to composerAddPath: an error screen would
+		// block waiting for a dismissal, so waitDone succeeding IS the
+		// assertion, and the content check names what would have been drawn.
+		h.waitDone()
+		if !ret {
+			t.Fatal("composerHashEdit returned false after the phrase-record row was taken")
+		}
+		if strings.Contains(normalizeDrawn(h.content), normalizeDrawn("run ms hashlock with this phrase")) {
+			t.Errorf("a payload phrase the payload already states drew the reconciliation screen: %q",
+				normalizeDrawn(h.content))
 		}
 	})
 

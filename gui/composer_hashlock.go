@@ -109,17 +109,25 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 // for a phrase: record the payload delivered.
 //
 // A DIFFERENT FUNCTION, not a flag on the phrase route, because
-// hashlockPhraseRoute does BOTH of the things a payload phrase must not do: it
-// calls hashlockMethodPick (the method is the RECORD's, so offering a pick is
-// J4-1's mistake -- a phrase derived under a method its record does not name
-// produces a digest nothing else in the payload agrees with), and it ends on
-// composerCopyHashlockReconcile, whose instruction ("run ms hashlock with this
-// phrase") is a no-op for a phrase the host already has.
+// hashlockPhraseRoute calls hashlockMethodPick and a payload phrase must not:
+// the method is the RECORD's, so offering a pick is J4-1's mistake -- a phrase
+// derived under a method its record does not name produces a digest nothing
+// else in the payload agrees with.
 //
-// AND THAT SPLIT IS WHAT MAKES §10.2 TRUE BY CONSTRUCTION.
-// composerCopyHashlockReconcile has exactly ONE call site in the whole tree,
-// inside hashlockPhraseRoute, so a payload phrase can never reach it. There is
-// no runtime guard and no test for one, because the guard would be dead code.
+// THE RECONCILIATION SCREEN IS CONDITIONAL HERE, and the condition is whether
+// the payload says what the digest should be (F-496, operator ruling
+// 2026-09-06). §10.2 originally scoped composerCopyHashlockReconcile to the
+// phrase route and called the scoping "true by construction" -- one call site,
+// so no runtime guard and no test for one. That argument rested on the claim
+// that "run ms hashlock with this phrase" is a no-op for a phrase the host
+// already has, and it is a no-op only in the case the argument had in mind:
+// the payload ALSO carries a `hash:` record equal to this digest, so the
+// comparison has already been made and the confirm modal's relation line has
+// already shown it. When the payload carries the phrase and NO matching hash,
+// nothing has compared the device's derivation to the host's, the relation line
+// says so, and this screen is the only check on offer -- the operator has the
+// phrase in the payload and can run the host command against it. So the screen
+// is drawn exactly then, and payloadStatesDigest is the guard that decides.
 //
 // THERE IS NO PHRASE SCREEN AND NO METHOD PICK, so the only Back before the
 // confirm is the derivation countdown's, which returns to `Which hash?` with
@@ -148,7 +156,28 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	composerHoldHashlockMaterial(st, h, hashlockMaterial{
 		phrase: phrase, method: m, preimage: x, provenance: hashlockFromPayload,
 	})
+	// F-496. Drawn only when the payload states no matching digest; see the
+	// header. hashlockPreimageRecordRoute deliberately does NOT get this: a
+	// preimage record carries X directly, so there is no derivation to
+	// reconcile and no phrase for the host command to take.
+	if !payloadStatesDigest(payload, h) {
+		showError(ctx, th, "Hash lock",
+			composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase)))
+	}
 	return hashlockAssigned
+}
+
+// payloadStatesDigest reports whether the payload carries a `hash:` record
+// equal to h -- the same question hashlockRelationLine asks in order to word
+// the confirm modal's relation line, asked here as a plain fact so the two
+// screens cannot disagree about it (F-496).
+func payloadStatesDigest(payload [][32]byte, h [32]byte) bool {
+	for _, d := range payload {
+		if d == h {
+			return true
+		}
+	}
+	return false
 }
 
 // hashlockPreimageRecordRoute is the same shape WITHOUT the KDF: a preimage
