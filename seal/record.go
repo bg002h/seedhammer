@@ -240,8 +240,23 @@ const cmdPrefix = "command: "
 // The branch ORDER is normative and unchanged — moving the conversion moves no
 // test, because nothing above the new site consults s.
 func Classify(b []byte) Classification {
+	c, _ := classify(b)
+	return c
+}
+
+// classify is Classify plus the one fact Classify already learns and throws
+// away: whether the record is a hashlock PREIMAGE. The kind still has no
+// Classification of its own — H0 rejected that deliberately, and this returns a
+// separate bool rather than a class precisely so the decision stands — but the
+// refusal path can now ask without a SECOND parse of the same bytes.
+//
+// That second parse was the cost F-483 names: `string(b)` on a record that may
+// be a preimage plate allocates an immutable copy Go cannot zero, and the old
+// isPreimageRecord made one every time the allow-list refused. One parse, one
+// string, and both are already unavoidable for the classification itself.
+func classify(b []byte) (Classification, bool) {
 	if bytes.HasPrefix(b, []byte(cmdPrefix)) {
-		return ClassDebugCommand
+		return ClassDebugCommand, false
 	}
 	if m, err := bip39.Parse(b); err == nil {
 		// Parse returns a full, WIPEABLE []Word copy of the record. Every other
@@ -249,27 +264,35 @@ func Classify(b []byte) Classification {
 		// one it can, so it does. (Parse now also zeroes its own accumulator on
 		// each ERROR exit, so the reject path leaves nothing behind either.)
 		clear(m)
-		return ClassMnemonic
+		return ClassMnemonic, false
 	}
 	if _, err := nonstandard.OutputDescriptor(b); err == nil {
-		return ClassDescriptor
+		return ClassDescriptor, false
 	}
 	// From here down the engines need a string. Nothing above this line touches
 	// s, so the two classes that carry seed material never allocate one.
 	s := string(b)
-	if c, err := codex32.New(s); err == nil && !codex32.IsPreimage(c) {
-		return ClassCodex32Secret
+	// preimage is remembered, never acted on here: the fall-through below is
+	// byte for byte what H0 shipped, so a preimage still reaches whatever class
+	// the remaining engines give it (ClassUnknown, in practice) and is still
+	// inert to `permitted`.
+	preimage := false
+	if c, err := codex32.New(s); err == nil {
+		if !codex32.IsPreimage(c) {
+			return ClassCodex32Secret, false
+		}
+		preimage = true
 	}
 	if codex32.ValidMD(s) || codex32.ValidMK(s) {
-		return ClassMDMK
+		return ClassMDMK, preimage
 	}
 	if _, err := btcaddr.DecodeAddress(s, &chaincfg.MainNetParams); err == nil {
-		return ClassAddress
+		return ClassAddress, preimage
 	}
 	if _, err := btcaddr.DecodeAddress(s, &chaincfg.TestNet3Params); err == nil {
-		return ClassAddress
+		return ClassAddress, preimage
 	}
-	return ClassUnknown
+	return ClassUnknown, preimage
 }
 
 // permitted is an ALLOW-list, not a deny-list. A deny-list silently admits
@@ -284,18 +307,6 @@ func permitted(section Section, c Classification) bool {
 	}
 	return section == SectionEncrypted &&
 		(c == ClassCodex32Secret || c == ClassMnemonic)
-}
-
-// isPreimageRecord is H0's own predicate, asked of a record the allow-list has
-// already refused, so a screen can say "a hashlock preimage, not a seed"
-// instead of "unknown format" (F-474).
-//
-// It is deliberately not part of Classify: H0 rejected a Classification of its
-// own for the kind, and adding one here would put a preimage on a code path
-// that classifies rather than one that refuses.
-func isPreimageRecord(r []byte) bool {
-	c, err := codex32.New(string(r))
-	return err == nil && codex32.IsPreimage(c)
 }
 
 // AdmitSection runs all three passes over one section's records. On any failure
@@ -316,13 +327,14 @@ func AdmitSection(records [][]byte, section Section) ([]AdmittedRecord, error) {
 			return nil, fmt.Errorf("%w: record %d, byte %d", ErrNotLowercase, i, pos)
 		}
 		// Pass 2 — §10.2.1's allow-list.
-		c := Classify(r)
+		c, isPreimage := classify(r)
 		if !permitted(section, c) {
 			wipe(out)
-			// isPreimageRecord runs ONLY here, on the refusal path that returns
-			// immediately, so the happy path pays nothing for it (F-474).
+			// The preimage answer comes from the classification that just ran
+			// (F-474 asked for it on the refusal path only; F-483 removed the
+			// second parse and the second unwipeable string it cost).
 			return nil, &RecordNotPermittedError{
-				Index: i, Class: c, Section: section, Preimage: isPreimageRecord(r),
+				Index: i, Class: c, Section: section, Preimage: isPreimage,
 			}
 		}
 		// Pass 2a — §10.2.1a. An ms1 the seed plate cannot hold is refused HERE,
