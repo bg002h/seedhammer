@@ -416,6 +416,29 @@ func composerCopyHashlockDerivingLead() string {
 // holds no hash: record; otherwise the matches/no-match line. otherPath is ""
 // unless another path of this policy already carries a different hash.
 //
+// "THE PHRASE AND METHOD ARE NOT ON THIS DEVICE" WAS FALSIFIED BY THIS STAGE
+// and is rewritten here (H6 R0 round 0, journey I-2). §2.2 stores both in
+// hashlockHeld for the composition's lifetime and §6 engraves both onto a
+// plate: in hashlockPhraseRoute the falsification is ONE STATEMENT WIDE, since
+// the next production statement after this modal is accepted is
+// composerHoldHashlockMaterial. It is the same sentence, in the same direction
+// of error, that §10.1's held arms were written to fix -- "saying a backup does
+// not exist when it is about to be cut is the direction that costs the operator
+// a plate" -- but those arms are guarded by composerEveryPathHashed, which is
+// false the moment one path is keyed, i.e. on the ordinary mixed hashlock
+// wallet. So the stage fixed the sentence on the banner drawn NOWHERE and left
+// it false on the modal drawn on EVERY phrase route. The write-down instruction
+// stays: it is what the operator should do whether or not a plate is cut.
+//
+// THE REPLACEMENT IS ONE CHARACTER SHORTER THAN WHAT IT REPLACES, and that is a
+// measurement rather than taste. This body has 107 characters of headroom
+// against modalBodyMargin = 80, so there are 27 characters of room, not the
+// "well inside the margin" the finding assumed: the suggested wording ("...and
+// can cut a plate for them at Done") measures 364 drawn and headroom 64, which
+// TestConfirmScreensThisBlockTouchesAreDrawnInFull REFUSES. Where the plate is
+// offered is §5.3's own screen; what this modal owes the operator is a true
+// statement about where the material lives.
+//
 // THE HEADROOM NUMBER, CORRECTED (H5 §6 records; tests M-1 = journey N-1). The
 // comment on composerCopyHashlockReconcile used to claim this body's measured
 // headroom was 186; it is 107, and it was 107 before H5 touched it. The number
@@ -433,10 +456,36 @@ func composerCopyHashlockConfirm(first8last8, method string, chars int, relation
 		b += otherPath + "\n"
 	}
 	return b +
-		"Write down this phrase, the method and this digest now. The phrase and " +
-		"method are not on this device. Without both, this path can never be spent.\n" +
+		"Write down this phrase, the method and this digest now. This composition " +
+		"holds them until it ends. Without both, this path can never be spent.\n" +
 		"One phrase per policy. Never use this phrase as a passphrase or a password " +
 		"anywhere else."
+}
+
+// composerCopyHashlockPreimageConfirm is §5.1's confirm body for a PREIMAGE
+// RECORD the payload delivered.
+//
+// A SEPARATE BODY FROM composerCopyHashlockConfirm, and the reason is what the
+// operator holds. That body's fields are `method` and `chars`, and its
+// instruction is to write down the phrase and the method -- a preimage record
+// has none of the three. Reusing it would draw `method: hardened   chars: 0` on
+// the screen that gates funds, which is a measurement of nothing wearing the
+// clothes of one.
+//
+// WHAT REPLACES THE WRITE-DOWN LINE is the thing that IS true here: the
+// preimage is in the payload, in flash, and a plate is the way it leaves.
+func composerCopyHashlockPreimageConfirm(first8last8, relation, otherPath string) string {
+	b := "hash  " + first8last8 + "\n" +
+		"from a preimage record in this payload\n"
+	if relation != "" {
+		b += relation + "\n"
+	}
+	if otherPath != "" {
+		b += otherPath + "\n"
+	}
+	return b +
+		"Spending this path needs that preimage. It is in the payload and not on " +
+		"these plates. Cut a preimage plate for it at Done, or keep the payload."
 }
 
 func composerCopyHashlockRelation(i int) string {

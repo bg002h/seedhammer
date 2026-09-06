@@ -24,6 +24,22 @@ import (
 // maps site -> program through the table below, and asserts each named class
 // against `admitted`. A NEW consumption site fails until it appears here with an
 // admitted class, which is the property that makes this worth its weight.
+//
+// AND A SECOND CONSUMPTION SHAPE, added by H6 Task 8b. `syswOffer`/`take` is not
+// the only way production reads the payload: a flow that wants EVERY record of
+// one class ranges `s.records` and filters on `r.class`, and four such sites
+// were already shipped and invisible here -- composerPayloadDigests
+// (ClassHash), composerNowRecords (ClassNow) and, from H6, the two new
+// `Which hash?` bands (ClassPreimage, ClassPhrase). Those are consumption by
+// every definition this oracle cares about: the class is hard-coded at the
+// site, and the site decides what the program may see. Leaving the shape
+// unmatched is exactly "a site nobody mapped is a site nobody checked" -- and it
+// was measured: H6 Task 7 added ClassPreimage and ClassPhrase to
+// progWalletPolicy's admission row, and DELETING that row again left the whole
+// package green, because no consumption the oracle could see named either
+// class. So the matcher below also walks `r.class == sysw.ClassX` and
+// `r.class != sysw.ClassX` comparisons, and those sites are registered here
+// with the rest.
 
 // syswConsumer is one production consumption site: the function that names a
 // class, and the programs its callers belong to.
@@ -82,6 +98,23 @@ var syswConsumers = []syswConsumer{
 	{"composer_sources.go", "composerCardSources", []syswProgram{progWalletPolicy},
 		"the composer's mk1 card sources; their stubs are ignored at seating because " +
 			"the composed policy does not exist yet (§7d)"},
+	// ─── the FILTER shape (H6 Task 8b) ───────────────────────────────────────
+	//
+	// These range s.records and hard-code the class they keep. They are not
+	// syswOffer/take sites and were invisible to this test until the matcher
+	// below grew the second shape; the first two are SHIPPED sites that had
+	// never been reconciled against §3.3.2 at all.
+	{"composer_hash.go", "composerPayloadDigests", []syswProgram{progWalletPolicy},
+		"`Which hash?` band 1: the payload's hash: digests (SPEC_hashlock_H2_device §5)"},
+	{"composer_state.go", "composerBoundFrom", []syswProgram{progWalletPolicy},
+		"the composer's now: record (SPEC_wallet_policy_composer §6a)"},
+	{"composer_hash.go", "composerPayloadPreimages", []syswProgram{progWalletPolicy},
+		"H6 §5.1 band 2: the payload's preimage PLATE records. THIS is the site " +
+			"that gates progWalletPolicy's ClassPreimage cell -- Task 7 added the " +
+			"cell and nothing consumed it, so deleting it again changed no test"},
+	{"composer_hash.go", "composerPayloadPhrases", []syswProgram{progWalletPolicy},
+		"H6 §5.1 band 3: the payload's phrase: records, UNDERIVED at row-build " +
+			"time. The ClassPhrase half of the same gate"},
 }
 
 // classNames maps the sysw.Class identifiers a call site can name to their
@@ -109,6 +142,64 @@ var classNames = map[string]sysw.Class{
 	"ClassKey":  sysw.ClassKey,
 	"ClassHash": sysw.ClassHash,
 	"ClassNow":  sysw.ClassNow,
+	// H6's two, for the SAME reason again: the two new `Which hash?` bands
+	// hard-code them, and a site naming an unmapped class is reported as
+	// "names no sysw.Class constant" -- a true failure with a false cause.
+	"ClassPreimage": sysw.ClassPreimage,
+	"ClassPhrase":   sysw.ClassPhrase,
+}
+
+// syswFilteredClass matches the FILTER consumption shape -- a comparison of a
+// payload record's `class` field against a sysw.Class constant -- and returns
+// the constant's identifier.
+//
+// IT MATCHES THE FIELD NAME, NOT THE RECEIVER'S TYPE, because the AST here is
+// untyped: `r.class` is all there is to go on, and `class` is the field name
+// syswRecord uses. The cost of that looseness is a false positive on some other
+// struct with a `class` field compared against a sysw.Class constant -- which
+// would be a consumption site by any reading anyway.
+func syswFilteredClass(n ast.Node) (string, bool) {
+	bin, ok := n.(*ast.BinaryExpr)
+	if !ok || (bin.Op != token.EQL && bin.Op != token.NEQ) {
+		return "", false
+	}
+	field, ok := bin.X.(*ast.SelectorExpr)
+	if !ok || field.Sel.Name != "class" {
+		return "", false
+	}
+	sel, ok := bin.Y.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "sysw" {
+		return "", false
+	}
+	if _, known := classNames[sel.Sel.Name]; !known {
+		return "", false
+	}
+	return sel.Sel.Name, true
+}
+
+// syswCheckSite reconciles one site against §3.3.2, shared by both shapes.
+func syswCheckSite(t *testing.T, file, fn, class string, index map[string]syswConsumer) {
+	t.Helper()
+	key := file + ":" + fn
+	c, mapped := index[key]
+	if !mapped {
+		t.Errorf("NEW consumption site %s (class %s) is not in "+
+			"syswConsumers — add it with the programs it runs inside, so "+
+			"§3.3.2's table can be checked against it. This is the whole "+
+			"point of this test: a site nobody mapped is a site nobody "+
+			"checked", key, class)
+		return
+	}
+	for _, p := range c.progs {
+		if !admits(p, classNames[class]) {
+			t.Errorf("%s names %s, which §3.3.2 REFUSES to program %d (%s)",
+				key, class, p, c.why)
+		}
+	}
 }
 
 func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
@@ -145,6 +236,14 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 				continue
 			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				// The FILTER shape: `r.class == sysw.ClassX` / `!=`, which is
+				// how a flow that wants every record of one class reads the
+				// payload. Checked first because it is not a CallExpr at all.
+				if cls, ok := syswFilteredClass(n); ok {
+					sites++
+					syswCheckSite(t, name, fn.Name.Name, cls, index)
+					return true
+				}
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true

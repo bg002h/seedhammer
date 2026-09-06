@@ -390,6 +390,14 @@ func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			composerConfirmBody(composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
 				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
 		},
+		{
+			// H6 §5.1: the payload PREIMAGE record's confirm, longest variant
+			// -- both relation lines present, which is the widest this body
+			// gets.
+			"the payload preimage-record confirm, longest variant (H6 §5.1)",
+			composerConfirmBody(composerCopyHashlockPreimageConfirm("b867db87..edbc96cb",
+				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+		},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			assertModalBodyFits(t, tc.what, confirmWarningBody, tc.body)

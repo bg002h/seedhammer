@@ -132,7 +132,12 @@ func composerCopyTable() []composerCopyRow {
 			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
 			"hash  b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
 				"another path has a different hash: back up every phrase " +
-				"Write down this phrase, the method and this digest now. The phrase and method are not on this device. Without both, this path can never be spent. " +
+				// H6 R0 round 0 (journey I-2): the middle sentence used to read
+				// "The phrase and method are not on this device", which §2.2's
+				// retention and §6's plate make FALSE. SPEC_hashlock_H2_device
+				// §4.5's blockquote is rewritten with it by Task 13, and H6 §0
+				// lists it as the FIFTH record this stage falsifies.
+				"Write down this phrase, the method and this digest now. This composition holds them until it ends. Without both, this path can never be spent. " +
 				"One phrase per policy. Never use this phrase as a passphrase or a password anywhere else."},
 		{"composerCopyHashlockRelation", "H2-4.5", composerCopyHashlockRelation(0),
 			"matches hash 1 in the payload"},
@@ -149,6 +154,20 @@ func composerCopyTable() []composerCopyRow {
 		// a bool literal no longer exists to set.
 		{"composerCopyHashEveryPathFor", "H2-4.7", composerCopyHashEveryPathFor(composerStateByPhraseForCopyTable()),
 			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
+		// H6 §5.1's payload PREIMAGE-record confirm. NOT a §8 blockquote: H6's
+		// §8 has no body for it, because the spec's §5.1 names
+		// composerCopyHashlockConfirm for both payload carriers and that body
+		// is phrase-shaped (`method`, `chars`, "write down this phrase"), all
+		// three false of a record that carries X and nothing else. Filed as a
+		// spec addition; the `verbatim` column is this build's own text, which
+		// is what §11's "a quoted string in its table" admits.
+		{"composerCopyHashlockPreimageConfirm", "H6-5.1", composerCopyHashlockPreimageConfirm("b867db87..edbc96cb",
+			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
+			"hash  b867db87..edbc96cb from a preimage record in this payload " +
+				"no hash: record in the payload has this digest " +
+				"another path has a different hash: back up every phrase " +
+				"Spending this path needs that preimage. It is in the payload and not on these plates. " +
+				"Cut a preimage plate for it at Done, or keep the payload."},
 	}
 }
 
@@ -253,8 +272,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// round 0 fold: composerCopyHashlockOtherPath (journey I-1) and
 	// composerCopyHashlockReconcile (adversarial I-1 = fidelity I-2 =
 	// journey I-3, the line §8h's guard had made unreachable).
-	if declared != 53 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 53 -- "+
+	// 54 SINCE H6 TASK 8b added composerCopyHashlockPreimageConfirm (§5.1's
+	// confirm for a payload PREIMAGE record, whose fields the phrase-shaped
+	// confirm body does not have).
+	if declared != 54 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 54 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

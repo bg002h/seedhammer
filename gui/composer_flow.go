@@ -19,6 +19,9 @@ import (
 // composer_state_hook_tinygo.go says why "nothing" is the claim and not "0 B".
 func composerFlowExit(st *composerState) {
 	st.reg.scrub()
+	// H6 §2.2 item 3. IN this defer, not beside it: a second `defer` costs 96 B
+	// of flash for the reason composerFlow's own comment records.
+	composerScrubHashlockHeld(st)
 	clearComposerStateHook()
 }
 
