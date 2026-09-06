@@ -242,6 +242,15 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		if okBtn.Clicked(ctx) {
 			phrase := []byte(kbd.Fragment)
 			if err := hashlock.ValidatePhrase(phrase); err != nil {
+				// The COPY is ours and the refusal abandons it, so zero it
+				// before looping: a rejected phrase is usually retyped, and
+				// without this every attempt leaves another unreferenced copy
+				// behind for the GC to move around at its leisure. The keyboard
+				// fragment itself is an immutable Go string and cannot be
+				// wiped -- that is F-483's accepted residue (H6 brainstorm
+				// decision 9, RAM retention until Done), and this is the part
+				// of it that WAS avoidable.
+				clear(phrase)
 				showError(ctx, th, "Hashlock phrase", composerCopyHashlockRefusal(err))
 				continue
 			}
