@@ -25,6 +25,9 @@ const (
 	composerRouteScan composerRoute = iota
 	composerRouteFromPayload
 	composerRouteBuild
+	// composerRouteHashlockPlates is H6 §5.2's fourth route, offered only when
+	// the loaded payload holds a record it could cut.
+	composerRouteHashlockPlates
 )
 
 // composerDoorCounts reports what the loaded payload holds, for §8r.
@@ -34,9 +37,14 @@ const (
 // offered to nobody and reach no screen (sysw/descriptor.go:46-48). It is
 // the ONE line that covers all three composer classes' malformations, since
 // a bad hash: or now: changes no other count (§6a).
-func composerDoorCounts(s *syswSession) (keys, seeds, inert int) {
+// H6 §5.2 step 2 adds `preimages`: the ClassPreimage and ClassPhrase records
+// together, because the door offers ONE route for both and a lead that counted
+// them separately would describe two routes that do not exist. Without this
+// count the door drew composerCopyNoKeys -- a lead saying there are no keys --
+// directly above a route offered for exactly the records it did not mention.
+func composerDoorCounts(s *syswSession) (keys, seeds, preimages, inert int) {
 	if s == nil || !s.loaded {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
 	for _, r := range s.records {
 		switch r.class {
@@ -44,11 +52,13 @@ func composerDoorCounts(s *syswSession) (keys, seeds, inert int) {
 			keys++
 		case sysw.ClassMnemonic, sysw.ClassCodex32Secret:
 			seeds++
+		case sysw.ClassPreimage, sysw.ClassPhrase:
+			preimages++
 		case sysw.ClassUnknown:
 			inert++
 		}
 	}
-	return keys, seeds, inert
+	return keys, seeds, preimages, inert
 }
 
 // composerDoorLines is §8r, in §7a's order.
@@ -63,7 +73,7 @@ func composerDoorLines(s *syswSession, payloadInFlash bool) []string {
 		}
 		return []string{composerCopyNoKeys()}
 	}
-	keys, seeds, inert := composerDoorCounts(s)
+	keys, seeds, preimages, inert := composerDoorCounts(s)
 	var lines []string
 	switch {
 	case keys > 0 && seeds > 0:
@@ -74,6 +84,13 @@ func composerDoorLines(s *syswSession, payloadInFlash bool) []string {
 		lines = append(lines, composerCopySeedOnly())
 	default:
 		lines = append(lines, composerCopyNoKeys())
+	}
+	// H6 §5.2: the records the fourth route acts on, named. It is APPENDED
+	// rather than folded into the key-state arm above: the key-state line stays
+	// true either way (a build with no keys IS key-less), and a fifth arm of
+	// that switch would have to answer for every combination of the two counts.
+	if preimages > 0 {
+		lines = append(lines, composerCopyPreimagesLoaded(preimages))
 	}
 	if inert > 0 {
 		lines = append(lines, composerCopyNotUnderstood(inert))
@@ -115,6 +132,13 @@ func composerDoorFlow(ctx *Context, th *Colors) (composerRoute, bool) {
 	}
 	choices = append(choices, "Build a new policy")
 	routes = append(routes, composerRouteBuild)
+	// H6 §5.2's fourth route, CONDITIONAL for composerDoorHasConsumablePolicy's
+	// own reason: a door row that names a route it cannot take is the F-437
+	// defect this door exists to remove.
+	if composerDoorHasPreimage(ctx.sysw) {
+		choices = append(choices, "Hashlock plates")
+		routes = append(routes, composerRouteHashlockPlates)
+	}
 
 	cs := &ChoiceScreen{Title: "Wallet Policy", Lead: lead, Choices: choices}
 	sel, ok := cs.Choose(ctx, th)

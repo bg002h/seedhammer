@@ -29,3 +29,29 @@ func EncodeMS1(entropy []byte) (string, error) {
 	}
 	return s.String(), nil
 }
+
+// EncodeMS1Preimage encodes a hashlock preimage X as the ms1 kind-0x03 plate
+// string: NewSeed("ms", 0, "hash", 's', [0x03‖X]). It is the Go port of
+// ms_codec::encode(Tag::HASH, &Payload::Preimage(x)) (SPEC_ms_hashlock §1
+// rule 2) and is DOWNSTREAM of it — the Rust side decides the wire form.
+//
+// The id is the FIXED literal "hash" and there is no parameter for it. That is
+// the whole point: NewSeed will mint a kind-0x03 payload under id "entr" quite
+// happily, and the Rust encoder refuses that shape outright with
+// Error::TagKindMismatch, so the id must not be reachable from a caller here
+// either. A mistagged plate satisfies the wide IsPreimage, fails
+// IsPreimagePlate, and is therefore an operator's only backup of a spend
+// secret, on steel, that no tool will read.
+//
+// The returned string is SECRET (it embeds the preimage); the caller scrubs.
+// DecodeMS1Preimage(New(EncodeMS1Preimage(x))) == x.
+func EncodeMS1Preimage(x [32]byte) (string, error) {
+	payload := make([]byte, 0, 1+len(x))
+	payload = append(payload, msPrefixPreimage)
+	payload = append(payload, x[:]...)
+	s, err := NewSeed("ms", 0, "hash", 's', payload)
+	if err != nil {
+		return "", err
+	}
+	return s.String(), nil
+}

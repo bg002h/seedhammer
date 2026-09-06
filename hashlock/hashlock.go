@@ -11,6 +11,7 @@ package hashlock
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 
 	"seedhammer.com/seal"
@@ -156,4 +157,34 @@ func isHex(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// MethodLine is §8.6's METHOD DEFINITION, the line a hashlock PHRASE plate
+// carries and the line the QR text embeds -- ms_codec::hashlock::qr_text's own
+// method string, ported byte for byte (Rust is primary).
+//
+// A WIRE RECORD CARRIES A SELECTOR AND A PLATE CARRIES THE DEFINITION, and the
+// difference is the whole reason this string is long. `phrase:` carries
+// `hardened` because it is read by a tool that already knows the parameter set;
+// a plate is read years later by a person who may have neither the tool nor
+// this firmware, so it spells the parameters out.
+//
+// IT IS BUILT FROM THIS PACKAGE'S OWN CONSTANTS. A literal here could drift
+// from Iterations, Salt or PreimageLen without a single test noticing -- and
+// the failure would be a plate whose method line describes a derivation that
+// does not produce its digest.
+func MethodLine(hardened bool) string {
+	if !hardened {
+		return "method: sha256"
+	}
+	return fmt.Sprintf("method: pbkdf2-hmac-sha256 iterations=%d salt=%s dklen=%d",
+		Iterations, Salt, PreimageLen)
+}
+
+// QRText is ms_codec::hashlock::qr_text: the text §8.6's QR encodes.
+//
+// NEVER THE ms1 STRING (§6.4, decision 1): a QR on a phrase plate carries the
+// phrase and its method, and the string form's plate carries no QR at all.
+func QRText(hardened bool, phrase string) string {
+	return "hashlock v1\n" + MethodLine(hardened) + "\nphrase: " + phrase
 }

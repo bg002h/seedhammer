@@ -1010,6 +1010,9 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 	// report the auto-fit size while the engraver used the chosen one.
 	var cacheSize float32
 	cacheValid := false
+	// H6 §9: the text this operator has already been warned about, so the
+	// warning fires once per composition and is re-armed by an edit.
+	var ms1Warned string
 	evaluate := func() ftFit {
 		if !cacheValid || cacheText != kbd.Fragment || cacheQR != *useQR ||
 			cachePlan != *plan || cacheSize != *size {
@@ -1056,6 +1059,13 @@ func ftTextEntryFlow(ctx *Context, th *Colors, params engrave.Params, prior stri
 			}
 			if kbd.Fragment == "" {
 				showError(ctx, th, "Text", "The Text field is required.")
+				continue
+			}
+			// H6 §9, AT THIS SCREEN and not at the confirm summary: it is the
+			// last moment the operator is still asking whether they are in the
+			// right program. NEVER A REFUSAL -- declining stays here so the
+			// text can be edited, and continuing cuts it as typed.
+			if !syswWarnMS1Shaped(ctx, th, "Engrave Text", kbd.Fragment, &ms1Warned) {
 				continue
 			}
 			f := evaluate()

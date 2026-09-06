@@ -67,8 +67,12 @@ func DecodeMS1(s String) (prefix, language int, entropy []byte, err error) {
 // codex32 SECRET and no class of its own — because every path that admits
 // ClassCodex32Secret ends at backup.EngraveSeedString, and a hashlock
 // preimage is not a seed: engraved as one it exposes a spend secret as a
-// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix;
-// the device learns to USE a preimage in stage H2, not here.
+// backup. DecodeMS1 is deliberately unchanged and still refuses the prefix.
+// (This header used to end "the device learns to USE a preimage in stage H2,
+// not here", which H6 makes false in its second half: H2 taught the device to
+// USE one and H6 to CUT one -- EncodeMS1Preimage at codex32/msencode.go:48,
+// IsPreimagePlate at :145 of this file, backup.EngraveHashlock. None of that
+// runs through IsPreimage, whose answer is still "not a seed".)
 //
 // The question is "is this a preimage SINGLE", not "does some byte equal 3":
 // the check is singles-only (§1 rule 2 -- a share's data part is an SSS
@@ -124,4 +128,24 @@ func DecodeMS1Preimage(s String) (preimage [32]byte, err error) {
 	}
 	copy(preimage[:], d[1:])
 	return preimage, nil
+}
+
+// IsPreimagePlate is IsPreimage PLUS the id `hash` (SPEC_ms_hashlock §1 rule 2,
+// ruling L14). H0's kind-byte rule is unchanged and still governs INERTNESS
+// everywhere else; this narrower predicate governs ADMISSION to a flow that
+// ENGRAVES.
+//
+// The two predicates differ because H6 inverts the consequence of a false
+// positive. Under H0 a false positive was a REFUSAL — "a refusal costs a
+// re-encode; a wrong cut exposes a spend secret", which is why IsPreimage does
+// not consult the id. On the H6 admission path a false positive routes a string
+// INTO a flow that engraves it under a band reading NOT A SEED, so a plain
+// BIP-93 33-byte secret beginning 0x03 — roughly 1 in 256 of them — must not
+// arrive. Hence the id.
+func IsPreimagePlate(s String) bool {
+	if !IsPreimage(s) {
+		return false
+	}
+	id, _, _ := s.Split()
+	return id == "hash"
 }

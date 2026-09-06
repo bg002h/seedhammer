@@ -52,6 +52,34 @@ type composerState struct {
 	// It is nil until the first HOLD; composerNotePhraseDigest allocates.
 	phraseDigests map[[32]byte]struct{}
 
+	// hashlockHeld is the material THIS COMPOSITION may cut onto a preimage
+	// plate, keyed by digest exactly as phraseDigests is (H6 §2.2). H5 §2's
+	// C16 reasoning applies unchanged: "Remove path" splices the slice, so an
+	// index is not an identity.
+	//
+	// H6 REVERSES THREE OF RULING L7's FOUR VERBS. L7 scoped the device to the
+	// digest alone -- "It never stores, shows, engraves or sources a preimage"
+	// -- and H2 implemented it literally: hashlockPhraseRoute derived X on the
+	// stack and dropped it when the function returned. H6 lifts store, show and
+	// engrave, and leaves the fourth (SOURCE: reading a preimage plate back
+	// into a seed flow) refused.
+	//
+	// ONE INSERTION SITE, composerHoldHashlockMaterial, which ALLOCATES when
+	// the map is nil. composerState is built at its one production site
+	// (composerFlow) as a struct literal setting two fields, and the same way
+	// in every test, so this map arrives NIL and an assignment into a nil map
+	// panics -- in the GUI goroutine, at the moment the operator holds to
+	// confirm a hash that gates funds. That is composerNotePhraseDigest's rule
+	// applied to the second map, and it is normative for the same demonstrated
+	// reason.
+	//
+	// NOTHING DELETES. A digest no path carries is not removed; it is REPORTED
+	// at Done ("not on any path, will not be cut"). The scrub is the flow-exit
+	// defer, composerFlowExit, and it goes IN that defer rather than beside it:
+	// a second defer costs 96 B of firmware flash because TinyGo removes the
+	// empty stub's CALL and not the defer bookkeeping around it.
+	hashlockHeld map[[32]byte]hashlockMaterial
+
 	// NO CONFIRM MEMO LIVES HERE, and its absence is the fix rather than an
 	// omission. §8a and §8b were memoised by the operator's path INDEX, and an
 	// index is not an identity: "Remove path" splices the slice and left the
@@ -282,6 +310,63 @@ func composerNotePhraseDigest(st *composerState, h [32]byte) {
 		st.phraseDigests = make(map[[32]byte]struct{})
 	}
 	st.phraseDigests[h] = struct{}{}
+}
+
+// hashlockProvenance records WHICH PATH RAN, not a runtime test: a phrase
+// typed on this device takes hashlockPhraseRoute, and a payload preimage or
+// `phrase:` record takes §5.1's derive-only sibling. The §10 copy that has to
+// tell the two apart therefore reads a recorded fact rather than re-deriving
+// one.
+type hashlockProvenance int
+
+const (
+	// hashlockFromPhrase: typed here, on this device, in this composition.
+	hashlockFromPhrase hashlockProvenance = iota
+	// hashlockFromPayload: delivered in the loaded payload.
+	hashlockFromPayload
+)
+
+// hashlockMaterial is what one held digest may be cut as (H6 §2.2, §5.3).
+//
+// Phrase and Method are EMPTY for a payload-delivered preimage record: that
+// carrier holds X and H and no phrase at all, which is why §5.3's pick step
+// offers the phrase forms only when Phrase is non-empty.
+type hashlockMaterial struct {
+	phrase     []byte
+	method     hashlockMethod
+	preimage   [32]byte
+	provenance hashlockProvenance
+}
+
+// composerHoldHashlockMaterial is the ONE insertion site, and it ALLOCATES.
+//
+// MUTATION-RELEVANT: assigning straight into st.hashlockHeld panics on the
+// zero-value state composerFlow builds, which is every production run's first
+// HOLD.
+func composerHoldHashlockMaterial(st *composerState, h [32]byte, m hashlockMaterial) {
+	if st.hashlockHeld == nil {
+		st.hashlockHeld = make(map[[32]byte]hashlockMaterial)
+	}
+	st.hashlockHeld[h] = m
+}
+
+// composerScrubHashlockHeld wipes every held phrase and zeroes every preimage.
+//
+// It is called from composerFlowExit -- the EXISTING defer -- so every exit
+// (a Back, a refusal, a ctx.Done unwind, a panic) is covered by construction.
+//
+// The map ENTRIES are left in place with their secrets zeroed rather than
+// deleted: a value type cannot be wiped through a map, so each entry is read
+// out, wiped, and written back. F-483 already records that the typed phrase
+// also lives in kbd.Fragment, an immutable Go string, before anything here
+// stores it; that is non-gating by the 2026-08-27 ruling and is a follow-up.
+func composerScrubHashlockHeld(st *composerState) {
+	for h, m := range st.hashlockHeld {
+		wipeBytes(m.phrase)
+		m.phrase = nil
+		m.preimage = [32]byte{}
+		st.hashlockHeld[h] = m
+	}
 }
 
 // composerAnyPathByPhrase is §8h's provenance condition (H5 §2, H2 §4.7): some

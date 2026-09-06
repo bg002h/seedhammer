@@ -50,6 +50,13 @@ func walletPolicyFlow(ctx *Context, th *Colors) {
 		if !ok {
 			return
 		}
+		// H6 §5.2's route is a LOOP MEMBER for composerRouteBuild's own reason:
+		// it is one level down from the door, so a Back out of it lands on the
+		// door rather than on the carousel.
+		if route == composerRouteHashlockPlates {
+			composerHashlockPlatesFlow(ctx, th)
+			continue
+		}
 		if route != composerRouteBuild {
 			break
 		}

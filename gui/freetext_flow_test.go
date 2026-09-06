@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	qrpkg "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/backup"
@@ -1270,4 +1271,84 @@ func TestFaceSummaryReportsTheMeasuredRuns(t *testing.T) {
 	if got := ftFaceSummary(&ftPlanSH, mixed, nil); got != ftFaceSH.Name {
 		t.Errorf("a single-face plan now summarises as %q, want %q", got, ftFaceSH.Name)
 	}
+}
+
+// ─── H6 §9: the ms1-shaped warning in the free-text program ──────────────────
+//
+// TestFTMS1WarningWarnsAndStillCuts is §9's "NEVER A REFUSAL", driven through
+// the REAL program: an ms1-shaped string warns at OK on the text-entry screen
+// and, once confirmed, is cut as plain text exactly as typed.
+//
+// MUTATION: refuse instead of warning -> the still-cut assertion fails, and an
+// operator with a legitimate reason to engrave an ms1 string as text has no way
+// to do it.
+// MUTATION: warn at the confirm SUMMARY instead of at the entry screen -> the
+// warning arrives after four more fields, which is after the operator has
+// stopped asking whether they are in the right program; the first assertion
+// below fails because the entry screen never drew it.
+func TestFTMS1WarningWarnsAndStillCuts(t *testing.T) {
+	h, r := startFT(t)
+	ftPastQR(h, false)
+	h.mustReach("lines")
+	ftSetText(h, h6MS1Shaped)
+	ftOK(h)
+	if !uiContains(h.content, "looks like an ms1 string") {
+		t.Fatalf("§9's warning did not fire at the entry screen; got %q", h.content)
+	}
+	if !uiContains(h.content, "Wallet Policy program") {
+		t.Errorf("the warning does not say where a marked hashlock plate comes from; got %q", h.content)
+	}
+	// DECLINE: back to the entry screen, nothing lost, and the program has not
+	// returned.
+	h.tapNav(Button1)
+	if !h.pump(16, "lines") {
+		t.Fatalf("declining did not return to the entry screen; got %q", h.content)
+	}
+	if r.done {
+		t.Fatal("declining §9's warning left the program: it is a warning, not a refusal")
+	}
+	if got := ftKbd(h).Fragment; got != h6MS1Shaped {
+		t.Errorf("declining changed the field to %q", got)
+	}
+	// ACCEPT: the program advances, and the string is unchanged.
+	ftOK(h)
+	if !uiContains(h.content, "looks like an ms1 string") {
+		t.Fatalf("the warning was not re-drawn after a decline; got %q", h.content)
+	}
+	ppHoldNav(h, Button3)
+	if !h.pump(24, "Title") {
+		t.Fatalf("accepting §9's warning did not advance the program; got %q", h.content)
+	}
+}
+
+// ppHoldNav holds the nav slot for b past confirmDelay and RELEASES.
+//
+// The release is not optional: EventRouter.Events tracks exactly ONE pointer
+// contact globally, so a second hold with no release in between is routed to
+// the first screen's now-defunct Clickable and never leaves 0% progress. That
+// is composer_hashlock_test.go's own measurement, and this helper exists
+// because ppHarness has no hold of its own.
+func ppHoldNav(h *ppHarness, b Button) {
+	h.t.Helper()
+	pos := h.navPoint(b)
+	d := h.drawer()
+	tag, _, hit := d.Hit(pos)
+	if !hit {
+		h.t.Fatalf("hold %v: no touch target at %v", b, pos)
+	}
+	c, ok := tag.(*Clickable)
+	if !ok || (c.Button != b && c.AltButton != b) {
+		h.t.Fatalf("hold %v: the target at %v is %v", b, pos, tag)
+	}
+	h.ctx.Router.Events(d, PointerEvent{Pressed: true, Entered: true, Pos: pos}.Event())
+	h.next("hold press")
+	// A REAL sleep, exactly as sessionHarness.holdConfirm does it: these
+	// harnesses do not run inside a synctest bubble, and a frame-counting loop
+	// is a race -- 4096 cheap frames elapse in well under confirmDelay on an
+	// idle box and in more than it under a 24-shard load, so the release lands
+	// on either side of the gesture depending on the machine.
+	time.Sleep(confirmDelay)
+	h.step()
+	h.ctx.Router.Events(h.drawer(), PointerEvent{Pressed: false, Entered: true, Pos: pos}.Event())
+	h.step()
 }

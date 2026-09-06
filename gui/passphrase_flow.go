@@ -81,6 +81,9 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof 
 	hookPPWidget("kbd", kbd)
 	hookPPWidget("back", backBtn)
 	hookPPWidget("ok", okBtn)
+	// H6 §9: the text this operator has already been warned about, so the
+	// warning fires once per composition and is re-armed by an edit.
+	var ms1Warned string
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
@@ -102,6 +105,13 @@ func passphraseEntryFlow(ctx *Context, th *Colors, dst []byte, n int, loadProof 
 			}
 			if err := passphrase.ValidatePassphrase(kbd.Fragment); err != nil {
 				showError(ctx, th, "Passphrase", ppEntryError(err))
+				continue
+			}
+			// H6 §9, the SAME body the free-text program draws. NEVER A
+			// REFUSAL: this program cuts the passphrase as typed, and the
+			// sentence that matters -- what the string looks like, and where a
+			// marked hashlock plate comes from -- is identical in both.
+			if !syswWarnMS1Shaped(ctx, th, "BIP-39 Password", kbd.Fragment, &ms1Warned) {
 				continue
 			}
 			// copy, not append: dst is the caller's wipeable buffer and must
@@ -664,6 +674,14 @@ func engravePassphraseFlowFrom(ctx *Context, th *Colors, body []byte, src syswSo
 				n = copy(secret, raw)
 				src = srcPayload
 			}
+		} else {
+			// H6 §8.8. The offer above draws NOTHING when the payload holds no
+			// ClassPassphrase (syswOfferAlt returns before any screen), so an
+			// operator whose payload carries a hashlock PHRASE meets the
+			// ordinary keyboard with no explanation. The notice is that
+			// explanation, and it draws only when there is no `pass:` record --
+			// with one the offer above did draw and there is nothing to say.
+			syswNoticeHashlockPhrase(ctx, th)
 		}
 	}
 	// F3, and F4: this class IS secret, so a record off a tag says plainly that

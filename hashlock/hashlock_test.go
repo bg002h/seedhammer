@@ -10,7 +10,7 @@ import (
 )
 
 const corpusPath = "testdata/hashlock-v0.8.json"
-const corpusSHA256 = "a46c197a3640fe8af4ca4370b46a9637466649227163ce6761bb032354811d30"
+const corpusSHA256 = "4f1819cdd0862b101afd48d0478e8f0b218f933dd3da449915fa3c5eaaba21d4"
 
 type corpus struct {
 	Derivation []struct {

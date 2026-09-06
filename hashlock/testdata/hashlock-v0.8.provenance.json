@@ -1,18 +1,23 @@
 {
   "_comment": [
-    "PROVENANCE PIN for the vendored copy of ms-codec 0.8.0's hashlock corpus (SPEC_hashlock_H2_device §7.1).",
+    "PROVENANCE PIN for the vendored copy of ms-codec's hashlock corpus (SPEC_hashlock_H2_device §7.1).",
     "The rows are MEASURED constants (python3 hashlib + openssl kdf) recorded by the H1 plan; never edited by hand.",
     "hashlock/hashlock_test.go fails if sha256 and the file disagree or if any derivation row disagrees with the Go port.",
+    "H6 re-vendored this file for the seven qr_text rows SPEC_hashlock_H6 §8.6/§11.2 adds; the format string moved to v0.9",
+    "while the FILENAME stayed hashlock-v0.8.json, which is what every reader of it already opens.",
+    "hashlock/methodline_h6_test.go pins MethodLine and QRText against those rows, and backup/hashlock_test.go pins the plate against them.",
     "TO RE-SYNC: cp ../mnemonic-secret/crates/ms-codec/tests/vectors/hashlock-v0.8.json hashlock/testdata/ ;",
     "  git -C ../mnemonic-secret rev-parse HEAD ; sha256sum hashlock/testdata/hashlock-v0.8.json"
   ],
   "repo": "mnemonic-secret",
   "remote": "git@github.com:bg002h/mnemonic-secret.git",
   "path": "crates/ms-codec/tests/vectors/hashlock-v0.8.json",
-  "commit": "cd0a60f",
-  "release": "ms-codec-v0.8.0 (crates.io 0.8.0, 2026-09-05)",
-  "sha256": "a46c197a3640fe8af4ca4370b46a9637466649227163ce6761bb032354811d30",
+  "commit": "ffdb77d428d9e5cb55aafe11da163bb2f6bc2de4",
+  "release": "ms-codec 0.9.0 (H6 Task 1, branch h6-a; version bump at ca71516511db0b608a14c7dc3f82376424b107a8, which leaves this file byte-identical to the pin below -- verified with git show | sha256sum). The previous pin was ms-codec-v0.8.0 (crates.io 0.8.0, 2026-09-05) at cd0a60f",
+  "format": "ms hashlock corpus v0.9 (SPEC_ms_hashlock §8; qr_text rows added by SPEC_hashlock_H6 §8.6/§11.2)",
+  "sha256": "4f1819cdd0862b101afd48d0478e8f0b218f933dd3da449915fa3c5eaaba21d4",
   "derivation_rows": 11,
   "refusals_rows": 15,
+  "qr_text_rows": 7,
   "recorded_at": "2026-09-05"
 }

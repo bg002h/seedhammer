@@ -19,12 +19,20 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip32"
+	"seedhammer.com/hashlock"
 )
 
 const (
 	KeyPrefix  = "key:"
 	HashPrefix = "hash:"
 	NowPrefix  = "now:"
+	// PhrasePrefix carries a hashlock PHRASE and its method, as
+	// `phrase:<hex of "<method>,<phrase>">` -- the now: idiom exactly: hex of a
+	// UTF-8 text, one comma, cut on the FIRST comma so the phrase may itself
+	// contain commas. RESERVED like the other three, so a phrase: record whose
+	// body is not valid lowercase hex is ClassUnknown and refused rather than
+	// treated as free text.
+	PhrasePrefix = "phrase:"
 
 	composerMaxHeight  uint64 = 499_999_999
 	composerMaxSeconds uint64 = 2_147_483_647
@@ -34,7 +42,39 @@ var (
 	ErrKeyRecord  = errors.New("sysw: key: needs [fingerprint/path]xpub with an origin")
 	ErrHashRecord = errors.New("sysw: hash: must be exactly 64 lowercase hex characters")
 	ErrNowRecord  = errors.New("sysw: now: must be <seconds>[,<height>] in range")
+	// ErrPhraseRecord covers every failure of the phrase: body -- not hex, not
+	// UTF-8, no comma, an unknown method selector, or a phrase the rule
+	// refuses. One error, one §8n line, exactly as the other three have.
+	ErrPhraseRecord = errors.New("sysw: phrase: must be <method>,<phrase> with method hardened or sha256")
 )
+
+// HashlockMethod is the method SELECTOR a phrase: record carries. The wire
+// carries a selector and the PLATE carries the method DEFINITION (H6 §8.6), and
+// the difference is deliberate: a wire record is read by a tool that already
+// knows the parameter set, while a plate is read by a person who may have
+// neither the tool nor this firmware.
+type HashlockMethod int
+
+const (
+	// HashlockHardened is `hardened`: PBKDF2-HMAC-SHA256 over the phrase
+	// (hashlock.PreimageHardened, 100,000 iterations, salt "ms-hashlock-v1").
+	HashlockHardened HashlockMethod = iota
+	// HashlockSHA256 is `sha256`: a single SHA-256 of the phrase.
+	HashlockSHA256
+)
+
+func (m HashlockMethod) String() string {
+	if m == HashlockSHA256 {
+		return "sha256"
+	}
+	return "hardened"
+}
+
+// PhraseRecord is a parsed phrase: record. Phrase is SECRET; the caller scrubs.
+type PhraseRecord struct {
+	Method HashlockMethod
+	Phrase string
+}
 
 // KeyRecord is a parsed key: record.
 type KeyRecord struct {
@@ -56,7 +96,8 @@ type NowRecord struct {
 // prefixes, well-formed or not (a malformed one is still OURS: refused, never
 // passed to the sniffers).
 func IsComposerRecord(record string) bool {
-	return strings.HasPrefix(record, KeyPrefix) || strings.HasPrefix(record, HashPrefix) || strings.HasPrefix(record, NowPrefix)
+	return strings.HasPrefix(record, KeyPrefix) || strings.HasPrefix(record, HashPrefix) ||
+		strings.HasPrefix(record, NowPrefix) || strings.HasPrefix(record, PhrasePrefix)
 }
 
 func classifyComposer(record string) Class {
@@ -73,8 +114,59 @@ func classifyComposer(record string) Class {
 		if _, err := ParseNowRecord(record); err == nil {
 			return ClassNow
 		}
+	case strings.HasPrefix(record, PhrasePrefix):
+		if _, err := ParsePhraseRecord(record); err == nil {
+			return ClassPhrase
+		}
 	}
 	return ClassUnknown
+}
+
+// ParsePhraseRecord: hex of "<method>,<phrase>", cut on the FIRST comma.
+//
+// The order of the checks is the host's and is not decorative: hex, UTF-8,
+// a comma, the method selector, then the phrase rule of SPEC_ms_hashlock §4.3
+// in ITS host order (empty, printable ASCII, ms1-shaped, the 100-character cap,
+// 64 hex). hashlock.ValidatePhrase is that rule and is called here rather than
+// re-spelled, so the record parser and the keyboard cannot disagree about what
+// a phrase is.
+//
+// CUT ON THE FIRST COMMA, never the last: a phrase may contain commas, and
+// cutting on the last would take everything after the final comma as the phrase
+// and derive a different preimage from the one the host packed.
+func ParsePhraseRecord(record string) (PhraseRecord, error) {
+	body, ok := strings.CutPrefix(record, PhrasePrefix)
+	if !ok {
+		return PhraseRecord{}, ErrPhraseRecord
+	}
+	b, ok := unhexLower(body)
+	if !ok || !utf8.Valid(b) {
+		return PhraseRecord{}, ErrPhraseRecord
+	}
+	methodText, phrase, hasComma := strings.Cut(string(b), ",")
+	if !hasComma {
+		return PhraseRecord{}, ErrPhraseRecord
+	}
+	var method HashlockMethod
+	switch methodText {
+	case "hardened":
+		method = HashlockHardened
+	case "sha256":
+		method = HashlockSHA256
+	default:
+		return PhraseRecord{}, ErrPhraseRecord
+	}
+	if err := hashlock.ValidatePhrase([]byte(phrase)); err != nil {
+		return PhraseRecord{}, ErrPhraseRecord
+	}
+	return PhraseRecord{Method: method, Phrase: phrase}, nil
+}
+
+// PhraseRecordString builds a phrase: record. The text is NOT validated here;
+// ParsePhraseRecord is the gate, so a test can build a malformed record on
+// purpose. The returned string is SECRET.
+func PhraseRecordString(method HashlockMethod, phrase string) string {
+	return PhrasePrefix + hex.EncodeToString([]byte(method.String()+","+phrase))
 }
 
 // unhexLower is the host's unhex_lower: even length, every character in

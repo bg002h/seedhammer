@@ -11,13 +11,23 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/hashlock"
+	"seedhammer.com/sysw"
 )
 
 // The phrase route of `Which hash?` (SPEC_hashlock_H2_device §4): phrase screen ->
 // method pick (+ its modal) -> derivation -> hold-to-confirm. One loop, so every
 // inner Back moves WITHIN the route with the phrase intact, and only Back at the
-// phrase screen returns to `Which hash?` (§4.6). The preimage lives on the stack
-// here and is dropped when this function returns (L7, L15).
+// phrase screen returns to `Which hash?` (§4.6).
+//
+// THE PREIMAGE NO LONGER DIES WITH THIS FUNCTION. This record used to read "the
+// preimage lives on the stack here and is dropped when this function returns
+// (L7, L15)"; H6 §2.2 HOLDS it, with the phrase and the method, in
+// composerState.hashlockHeld for the life of the composition, so §5.3 can offer
+// a plate for it at Done. composerHoldHashlockMaterial
+// (gui/composer_state.go:346) is the next production statement after the
+// confirm modal is accepted, and composerScrubHashlockHeld
+// (gui/composer_state.go:363) runs from composerFlowExit's ONE defer. L7 and
+// L15 are superseded on store/show/engrave and unchanged on `source`.
 
 type hashlockOutcome int
 
@@ -68,6 +78,13 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 				d := h
 				st.list.Paths[idx].Hash = &d
 				composerNotePhraseDigest(st, d)
+				// H6 §2.2: the phrase TYPED HERE is held for this composition,
+				// so §5.3 can offer a preimage plate for it at Done. L7's
+				// "never stores" is the verb H6 reverses; the flow-exit defer
+				// is what keeps the reversal bounded to one composition.
+				composerHoldHashlockMaterial(st, d, hashlockMaterial{
+					phrase: phrase, method: m, preimage: x, provenance: hashlockFromPhrase,
+				})
 				// The reconciliation line, on its own screen and reachable for
 				// EVERY policy that has a phrase-set hash (r0 adversarial I-1 =
 				// fidelity I-2 = journey I-3). Spec §4.5's drop-order step 2
@@ -86,6 +103,75 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			// Back on the confirm -> method pick, nothing assigned
 		}
 	}
+}
+
+// hashlockPayloadRoute is §5.1's DERIVE-ONLY sibling of hashlockPhraseRoute,
+// for a phrase: record the payload delivered.
+//
+// A DIFFERENT FUNCTION, not a flag on the phrase route, because
+// hashlockPhraseRoute does BOTH of the things a payload phrase must not do: it
+// calls hashlockMethodPick (the method is the RECORD's, so offering a pick is
+// J4-1's mistake -- a phrase derived under a method its record does not name
+// produces a digest nothing else in the payload agrees with), and it ends on
+// composerCopyHashlockReconcile, whose instruction ("run ms hashlock with this
+// phrase") is a no-op for a phrase the host already has.
+//
+// AND THAT SPLIT IS WHAT MAKES §10.2 TRUE BY CONSTRUCTION.
+// composerCopyHashlockReconcile has exactly ONE call site in the whole tree,
+// inside hashlockPhraseRoute, so a payload phrase can never reach it. There is
+// no runtime guard and no test for one, because the guard would be dead code.
+//
+// THERE IS NO PHRASE SCREEN AND NO METHOD PICK, so the only Back before the
+// confirm is the derivation countdown's, which returns to `Which hash?` with
+// nothing assigned -- the same contract the phrase route's own phrase screen
+// has (§4.6).
+func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, rec sysw.PhraseRecord, payload [][32]byte) hashlockOutcome {
+	phrase := []byte(rec.Phrase)
+	m := hashlockMethodOf(rec.Method)
+	x, ok := hashlockDeriveFlow(ctx, th, phrase, m)
+	if !ok {
+		return hashlockBackToWhichHash
+	}
+	h := hashlock.Digest(&x)
+	body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
+		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h))
+	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
+		return hashlockBackToWhichHash
+	}
+	d := h
+	st.list.Paths[idx].Hash = &d
+	// H6 §2.2: the material is HELD, so §5.3 can offer a plate for it at Done.
+	// composerNotePhraseDigest is deliberately NOT called: that map is H5's
+	// record of a phrase TYPED HERE, which drives the §8h banner that says the
+	// preimage "is not on this device" -- false for a payload phrase, whose
+	// provenance is recorded in the material instead.
+	composerHoldHashlockMaterial(st, h, hashlockMaterial{
+		phrase: phrase, method: m, preimage: x, provenance: hashlockFromPayload,
+	})
+	return hashlockAssigned
+}
+
+// hashlockPreimageRecordRoute is the same shape WITHOUT the KDF: a preimage
+// plate record carries X directly, so there is no countdown, no phrase and no
+// method.
+//
+// IT DOES NOT REUSE composerCopyHashlockConfirm. That body is phrase-shaped --
+// it prints `method: <m>   chars: <n>` and tells the operator to write down the
+// phrase and the method -- and for a preimage record every one of those is
+// false: there is no phrase, no method, and `chars: 0` would be a measurement
+// of nothing on the screen that gates funds.
+func hashlockPreimageRecordRoute(ctx *Context, th *Colors, st *composerState, idx int, p hashlockPayloadPreimage, payload [][32]byte) hashlockOutcome {
+	body := composerCopyHashlockPreimageConfirm(hashlockFirst8Last8(p.digest),
+		hashlockRelationLine(payload, p.digest), hashlockOtherPathLine(st, idx, p.digest))
+	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
+		return hashlockBackToWhichHash
+	}
+	d := p.digest
+	st.list.Paths[idx].Hash = &d
+	composerHoldHashlockMaterial(st, p.digest, hashlockMaterial{
+		preimage: p.preimage, provenance: hashlockFromPayload,
+	})
+	return hashlockAssigned
 }
 
 // hashlockRelationLine is §4.5's relation line: which payload `hash:` record

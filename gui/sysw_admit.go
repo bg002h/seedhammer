@@ -70,6 +70,17 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 		sysw.ClassKey:           true,
 		sysw.ClassHash:          true,
 		sysw.ClassNow:           true,
+		// H6: a hashlock PREIMAGE plate and a `phrase:` record, admitted at
+		// this program and AT NO OTHER ROW, exactly as Key, Hash and Now are.
+		//
+		// A HASHLOCK PHRASE IS NOT A BIP-39 PASSPHRASE and is never admitted at
+		// progPassword. The terminology ruling L2 exists because interchanging
+		// them opens a different wallet, so progPassword's row stays
+		// {ClassPassphrase} and the operator who opens the program whose NAME
+		// matches what they are holding gets §8.8's notice instead of a
+		// keyboard that would quietly accept the wrong secret.
+		sysw.ClassPreimage: true,
+		sysw.ClassPhrase:   true,
 	},
 	progBip85: {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true},
 	// Engrave Transaction consumes exactly the two transaction record forms.

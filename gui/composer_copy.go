@@ -416,6 +416,29 @@ func composerCopyHashlockDerivingLead() string {
 // holds no hash: record; otherwise the matches/no-match line. otherPath is ""
 // unless another path of this policy already carries a different hash.
 //
+// "THE PHRASE AND METHOD ARE NOT ON THIS DEVICE" WAS FALSIFIED BY THIS STAGE
+// and is rewritten here (H6 R0 round 0, journey I-2). §2.2 stores both in
+// hashlockHeld for the composition's lifetime and §6 engraves both onto a
+// plate: in hashlockPhraseRoute the falsification is ONE STATEMENT WIDE, since
+// the next production statement after this modal is accepted is
+// composerHoldHashlockMaterial. It is the same sentence, in the same direction
+// of error, that §10.1's held arms were written to fix -- "saying a backup does
+// not exist when it is about to be cut is the direction that costs the operator
+// a plate" -- but those arms are guarded by composerEveryPathHashed, which is
+// false the moment one path is keyed, i.e. on the ordinary mixed hashlock
+// wallet. So the stage fixed the sentence on the banner drawn NOWHERE and left
+// it false on the modal drawn on EVERY phrase route. The write-down instruction
+// stays: it is what the operator should do whether or not a plate is cut.
+//
+// THE REPLACEMENT IS ONE CHARACTER SHORTER THAN WHAT IT REPLACES, and that is a
+// measurement rather than taste. This body has 107 characters of headroom
+// against modalBodyMargin = 80, so there are 27 characters of room, not the
+// "well inside the margin" the finding assumed: the suggested wording ("...and
+// can cut a plate for them at Done") measures 364 drawn and headroom 64, which
+// TestConfirmScreensThisBlockTouchesAreDrawnInFull REFUSES. Where the plate is
+// offered is §5.3's own screen; what this modal owes the operator is a true
+// statement about where the material lives.
+//
 // THE HEADROOM NUMBER, CORRECTED (H5 §6 records; tests M-1 = journey N-1). The
 // comment on composerCopyHashlockReconcile used to claim this body's measured
 // headroom was 186; it is 107, and it was 107 before H5 touched it. The number
@@ -433,10 +456,36 @@ func composerCopyHashlockConfirm(first8last8, method string, chars int, relation
 		b += otherPath + "\n"
 	}
 	return b +
-		"Write down this phrase, the method and this digest now. The phrase and " +
-		"method are not on this device. Without both, this path can never be spent.\n" +
+		"Write down this phrase, the method and this digest now. This composition " +
+		"holds them until it ends. Without both, this path can never be spent.\n" +
 		"One phrase per policy. Never use this phrase as a passphrase or a password " +
 		"anywhere else."
+}
+
+// composerCopyHashlockPreimageConfirm is §5.1's confirm body for a PREIMAGE
+// RECORD the payload delivered.
+//
+// A SEPARATE BODY FROM composerCopyHashlockConfirm, and the reason is what the
+// operator holds. That body's fields are `method` and `chars`, and its
+// instruction is to write down the phrase and the method -- a preimage record
+// has none of the three. Reusing it would draw `method: hardened   chars: 0` on
+// the screen that gates funds, which is a measurement of nothing wearing the
+// clothes of one.
+//
+// WHAT REPLACES THE WRITE-DOWN LINE is the thing that IS true here: the
+// preimage is in the payload, in flash, and a plate is the way it leaves.
+func composerCopyHashlockPreimageConfirm(first8last8, relation, otherPath string) string {
+	b := "hash  " + first8last8 + "\n" +
+		"from a preimage record in this payload\n"
+	if relation != "" {
+		b += relation + "\n"
+	}
+	if otherPath != "" {
+		b += otherPath + "\n"
+	}
+	return b +
+		"Spending this path needs that preimage. It is in the payload and not on " +
+		"these plates. Cut a preimage plate for it at Done, or keep the payload."
 }
 
 func composerCopyHashlockRelation(i int) string {
@@ -524,9 +573,217 @@ func composerCopyHashEveryPathPhrase() string {
 		"method, and every preimage plate, separately."
 }
 
+// composerCopyHashEveryPathFor chooses among §8h's FOUR arms (H6 §10.1).
+//
+// THE HELD ARMS COME FIRST because they are the true statement when they apply:
+// the shipped two say the preimage "is not on this device", and H6 §2.2 makes
+// that false for a composition that holds it. Saying a backup does not exist
+// when it is about to be cut is the direction that costs the operator a plate.
 func composerCopyHashEveryPathFor(st *composerState) string {
+	if composerEveryHashedPathHeld(st) {
+		if composerEveryHeldPathHasAPhrase(st) {
+			return composerCopyHashEveryPathHeldPhrase()
+		}
+		return composerCopyHashEveryPathHeld()
+	}
 	if composerAnyPathByPhrase(st) {
 		return composerCopyHashEveryPathPhrase()
 	}
 	return composerCopyHashEveryPath()
+}
+
+// ─── H6 §8.3, §8.4, §8.5, §10.1: the preimage plates' copy ───────────────────
+
+// composerCopyPreimagePlateLead is §5.3 item 7's masked pick lead: the digest,
+// the path, and the phrase's LENGTH and method -- no character of the phrase.
+//
+// `phrase: <n> characters` IS THE WHOLE AFFORDANCE. It is what a person
+// comparing this screen against a host card can check without the secret ever
+// reaching the panel, and it is the one signal that shows a stray space.
+// TWO LINES, AND THE NUMBER IS MEASURED. composerPickScreen draws the lead as a
+// per-page header through composerPageLines, so every line the lead spends is a
+// ROW the operator loses: at sh2DisplaySize a four-line lead leaves 3 of this
+// screen's 4 rows on the first page, and `do not cut this preimage` is the row
+// an operator reaches for to UNDO. Two lines leave all four
+// (TestComposerPreimagePlatePickDrawsAllFourRows).
+func composerCopyPreimagePlateLead(first8last8 string, path, chars int, method string) string {
+	head := "hash  " + first8last8
+	if path > 0 {
+		head += fmt.Sprintf("   path %d", path)
+	}
+	if chars == 0 {
+		return head + "\npreimage held, phrase not: only the string form can be cut"
+	}
+	return head + fmt.Sprintf("\nphrase: %d characters   method: %s", chars, method)
+}
+
+// composerCopyPreimageQRWarning is §8.5, confirm-to-proceed on the model of
+// ftWarnQR (gui/freetext_flow.go:1214-1216), which already warns for strictly
+// less dangerous content.
+func composerCopyPreimageQRWarning() string {
+	return "The QR makes the phrase readable by any camera. A photograph of the " +
+		"plate is a copy of the phrase, and the phrase spends this path."
+}
+
+// composerCopyPreimagePlateHeading is §8.3's heading.
+//
+// "plate(s)" IS THE SPEC'S OWN SPELLING and is kept verbatim, against this
+// file's house style (composerSlotWord renders "slot @3" or "slots @3 and @4"
+// so a refusal never reads "slots @3"). Changing spec copy inside a build gate
+// would put the shipped string and the document that is diffed against it out
+// of step; it is filed instead.
+func composerCopyPreimagePlateHeading(n int) string {
+	return fmt.Sprintf("Plus %d preimage plate(s), cut first and NOT part of this backup:", n)
+}
+
+// composerCopyPreimagePlateRow is §8.3's per-plate row.
+func composerCopyPreimagePlateRow(path int, first8last8, form string) string {
+	return fmt.Sprintf("path %d  %s  %s", path, first8last8, form)
+}
+
+// composerCopyPreimageNotOnAnyPath is §8.3's row for a retained preimage no
+// CURRENT path carries: LISTED, never cut, and nothing is deleted from
+// hashlockHeld to achieve it (§2.2 item 2).
+func composerCopyPreimageNotOnAnyPath(first8last8 string) string {
+	return "preimage " + first8last8 + ": not on any path, will not be cut"
+}
+
+// composerCopyPreimageDeclined is §8.3's row for a plate the operator declined.
+func composerCopyPreimageDeclined(first8last8 string) string {
+	return "preimage " + first8last8 + ": declined, will not be cut"
+}
+
+func composerCopyPreimageKeepApart() string {
+	return "Keep each preimage plate apart from the policy plates and from the others."
+}
+
+// composerCopyPreimageOnlyNotice is §8.3's stand-alone notice form, for a review
+// whose ONLY preimage entry is one no path carries. The terse row says what
+// happened; on a review with nothing else to read there is room to say what to
+// do about it.
+func composerCopyPreimageOnlyNotice() string {
+	return "One preimage this composition holds is on no path of this policy. It " +
+		"will not be cut. Go back and set a path's hash to it, or leave it."
+}
+
+// composerCopyAbortNoPreimage is §8.4a.
+func composerCopyAbortNoPreimage() string {
+	return "NO PREIMAGE PLATE WAS CUT. The phrase dies with this composition. " +
+		"Do not fund this wallet."
+}
+
+// composerCopyAbortPreimageCut is §8.4b.
+func composerCopyAbortPreimageCut() string {
+	return "A PREIMAGE PLATE WAS CUT and no policy plate was. Store or destroy it " +
+		"now; do not leave it with the blanks."
+}
+
+// composerCopyHashEveryPathHeld is §10.1's THIRD §8h arm: every hashed path's
+// digest has material this composition holds, and none of it is a phrase.
+func composerCopyHashEveryPathHeld() string {
+	return "HASH ON EVERY PATH\n" +
+		"Every way to spend this wallet needs the preimage of a hash. This " +
+		"composition holds the preimage for each one and can cut a plate for it " +
+		"at Done. Store those plates apart from these, and apart from each other."
+}
+
+// composerCopyHashEveryPathHeldPhrase is §10.1's FOURTH arm: the same, and the
+// phrase and method are held too.
+func composerCopyHashEveryPathHeldPhrase() string {
+	return "HASH ON EVERY PATH\n" +
+		"Every way to spend this wallet needs a hashlock preimage. This " +
+		"composition holds the phrase and method for each one and can cut a plate " +
+		"at Done. Store those plates apart from these, and apart from each other."
+}
+
+// composerCopyPreimagePlateRefusal is the refusal when a decided preimage plate
+// cannot be built or does not fit the plate. It names the form so the operator
+// can choose a smaller one rather than being told only that something failed.
+func composerCopyPreimagePlateRefusal() string {
+	return "Couldn't build that preimage plate. Go back and choose a smaller " +
+		"form: the phrase without a QR, or the preimage string."
+}
+
+// ─── H6 §5.2: the Hashlock plates flow's copy ────────────────────────────────
+
+// composerCopyHashlockPlatesLead is the list's lead. It says what the rows ARE,
+// because a preimage plate is not a backup of this device's state -- it is
+// bearer access to whatever path its digest locks.
+func composerCopyHashlockPlatesLead(n int) string {
+	if n == 1 {
+		return "1 record can be cut as a preimage plate. Whoever holds that plate can spend its path."
+	}
+	return fmt.Sprintf("%d records can be cut as preimage plates. Whoever holds one can spend its path.", n)
+}
+
+// composerCopyHashlockPlatesEmpty is unreachable from the door, whose predicate
+// asks the same question. It exists so the flow refuses rather than drawing an
+// empty picker.
+func composerCopyHashlockPlatesEmpty() string {
+	return "This payload holds no preimage or phrase record to cut."
+}
+
+// composerCopyHashlockPlatesNotCut is this flow's abort, and it is NOT either
+// §8.4 arm. Those say the phrase "dies with this composition" and speak about a
+// run that also cuts policy plates; here the material stays in the payload, in
+// flash, and saying a secret is gone when it is not is false in the dangerous
+// direction.
+func composerCopyHashlockPlatesNotCut() string {
+	return "That plate was not cut. The record is still in this payload, so you can " +
+		"cut it again from this list."
+}
+
+// composerCopyPreimagesLoaded is §5.2 step 2's door count. Without it the door
+// draws composerCopyNoKeys above a route offered for exactly the records that
+// lead says are not there.
+func composerCopyPreimagesLoaded(n int) string {
+	if n == 1 {
+		return "1 preimage or phrase record loaded."
+	}
+	return fmt.Sprintf("%d preimage or phrase records loaded.", n)
+}
+
+// ─── H6 §9 and §8.8: two bodies about a string being mistaken for another ────
+//
+// THEY LIVE IN THIS FILE FOR THE GATE, not because they are composer copy.
+// TestComposerCopyTableCoversEveryBody scans composer_copy.go's composerCopy*
+// declarations and requires a row for each, and that row is what carries §12
+// item 5's four gates -- the glyph check, the raster floor, the modal-fits
+// measurement and a fires-on-condition test. A body declared beside its screen
+// instead would ship with none of them and nothing would say so; that is the
+// defect the same test's own comment records.
+
+// composerCopyHashlockLooksLikeMS1 is §9's warning, shown by BOTH the free-text
+// and the passphrase programs when what has been typed looks like an ms1 string.
+//
+// NEVER A REFUSAL. Both programs cut what the operator typed; this tells them
+// what the string looks like and where the marked plate comes from, and lets
+// them continue.
+//
+// THE PASSPHRASE PROGRAM SHOWS THE SAME BODY. The string is about to become a
+// BIP-39 passphrase rather than a plate, but the sentence that matters -- what
+// it looks like, and where a marked hashlock plate comes from -- is identical,
+// and two near-identical bodies is how one of them goes stale.
+func composerCopyHashlockLooksLikeMS1() string {
+	return "This looks like an ms1 string. A seed plate comes from a payload; a " +
+		"marked hashlock plate comes from the Wallet Policy program, from a phrase " +
+		"typed there or a preimage packed on the host. Continue here to cut it as " +
+		"plain text."
+}
+
+// composerCopyHashlockPhraseNotPassphrase is §8.8's notice at progPassword.
+//
+// WHAT IT REPLACES IS SILENCE, and silence is what routes the operator around
+// the guard. The refusal at progPassword is correct and structural
+// (syswOfferAlt returns before any screen is drawn when the payload holds no
+// ClassPassphrase), so an operator who packs a hashlock phrase, taps, and opens
+// the program whose NAME matches what they are holding gets the ordinary
+// passphrase keyboard -- no offer, no mention, no reason. The obvious next move
+// is the harmful one: re-pack the phrase as a `pass:` record so it "works",
+// which is the substitution ruling L2 exists to prevent and whose stated stake
+// is a different wallet.
+func composerCopyHashlockPhraseNotPassphrase() string {
+	return "This payload holds a HASHLOCK PHRASE, not a BIP-39 passphrase. They are " +
+		"not interchangeable: using one as the other opens a different wallet. A " +
+		"hashlock phrase is used in the Wallet Policy program."
 }

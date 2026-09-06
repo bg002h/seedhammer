@@ -132,7 +132,12 @@ func composerCopyTable() []composerCopyRow {
 			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
 			"hash  b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
 				"another path has a different hash: back up every phrase " +
-				"Write down this phrase, the method and this digest now. The phrase and method are not on this device. Without both, this path can never be spent. " +
+				// H6 R0 round 0 (journey I-2): the middle sentence used to read
+				// "The phrase and method are not on this device", which §2.2's
+				// retention and §6's plate make FALSE. SPEC_hashlock_H2_device
+				// §4.5's blockquote is rewritten with it by Task 13, and H6 §0
+				// lists it as the FIFTH record this stage falsifies.
+				"Write down this phrase, the method and this digest now. This composition holds them until it ends. Without both, this path can never be spent. " +
 				"One phrase per policy. Never use this phrase as a passphrase or a password anywhere else."},
 		{"composerCopyHashlockRelation", "H2-4.5", composerCopyHashlockRelation(0),
 			"matches hash 1 in the payload"},
@@ -149,6 +154,67 @@ func composerCopyTable() []composerCopyRow {
 		// a bool literal no longer exists to set.
 		{"composerCopyHashEveryPathFor", "H2-4.7", composerCopyHashEveryPathFor(composerStateByPhraseForCopyTable()),
 			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
+		// H6 §5.1's payload PREIMAGE-record confirm. NOT a §8 blockquote: H6's
+		// §8 has no body for it, because the spec's §5.1 names
+		// composerCopyHashlockConfirm for both payload carriers and that body
+		// is phrase-shaped (`method`, `chars`, "write down this phrase"), all
+		// three false of a record that carries X and nothing else. Filed as a
+		// spec addition; the `verbatim` column is this build's own text, which
+		// is what §11's "a quoted string in its table" admits.
+		{"composerCopyHashlockPreimageConfirm", "H6-5.1", composerCopyHashlockPreimageConfirm("b867db87..edbc96cb",
+			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
+			"hash  b867db87..edbc96cb from a preimage record in this payload " +
+				"no hash: record in the payload has this digest " +
+				"another path has a different hash: back up every phrase " +
+				"Spending this path needs that preimage. It is in the payload and not on these plates. " +
+				"Cut a preimage plate for it at Done, or keep the payload."},
+		// H6 §5.3, §8.3, §8.4, §8.5, §10.1. The `verbatim` column is the plan's
+		// own text for the §8.3 rows and the two §8.4 arms; the pick lead, the
+		// plate refusal and §8.5's warning are quoted strings in this table for
+		// §11's reason.
+		{"composerCopyPreimagePlateLead", "H6-5.3", composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened"),
+			"hash  b867db87..edbc96cb   path 2 phrase: 100 characters   method: hardened"},
+		{"composerCopyPreimageQRWarning", "H6-8.5", composerCopyPreimageQRWarning(),
+			"The QR makes the phrase readable by any camera. A photograph of the plate is a copy of the phrase, and the phrase spends this path."},
+		{"composerCopyPreimagePlateHeading", "H6-8.3", composerCopyPreimagePlateHeading(2),
+			"Plus 2 preimage plate(s), cut first and NOT part of this backup:"},
+		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, "b867db87..edbc96cb", "phrase, hardened, QR"),
+			"path 2  b867db87..edbc96cb  phrase, hardened, QR"},
+		{"composerCopyPreimageNotOnAnyPath", "H6-8.3", composerCopyPreimageNotOnAnyPath("b867db87..edbc96cb"),
+			"preimage b867db87..edbc96cb: not on any path, will not be cut"},
+		{"composerCopyPreimageDeclined", "H6-8.3", composerCopyPreimageDeclined("b867db87..edbc96cb"),
+			"preimage b867db87..edbc96cb: declined, will not be cut"},
+		{"composerCopyPreimageKeepApart", "H6-8.3", composerCopyPreimageKeepApart(),
+			"Keep each preimage plate apart from the policy plates and from the others."},
+		{"composerCopyPreimageOnlyNotice", "H6-8.3", composerCopyPreimageOnlyNotice(),
+			"One preimage this composition holds is on no path of this policy. It will not be cut. Go back and set a path's hash to it, or leave it."},
+		{"composerCopyPreimagePlateRefusal", "H6-5.3", composerCopyPreimagePlateRefusal(),
+			"Couldn't build that preimage plate. Go back and choose a smaller form: the phrase without a QR, or the preimage string."},
+		{"composerCopyAbortNoPreimage", "H6-8.4a", composerCopyAbortNoPreimage(),
+			"NO PREIMAGE PLATE WAS CUT. The phrase dies with this composition. Do not fund this wallet."},
+		{"composerCopyAbortPreimageCut", "H6-8.4b", composerCopyAbortPreimageCut(),
+			"A PREIMAGE PLATE WAS CUT and no policy plate was. Store or destroy it now; do not leave it with the blanks."},
+		{"composerCopyHashEveryPathHeld", "H6-10.1", composerCopyHashEveryPathHeld(),
+			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. This composition holds the preimage for each one and can cut a plate for it at Done. Store those plates apart from these, and apart from each other."},
+		{"composerCopyHashEveryPathHeldPhrase", "H6-10.1", composerCopyHashEveryPathHeldPhrase(),
+			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. This composition holds the phrase and method for each one and can cut a plate at Done. Store those plates apart from these, and apart from each other."},
+		// H6 §5.2's Hashlock plates flow. Quoted strings in this table for
+		// §11's reason: H6's §8 carries no blockquote for this route's screens.
+		{"composerCopyHashlockPlatesLead", "H6-5.2", composerCopyHashlockPlatesLead(2),
+			"2 records can be cut as preimage plates. Whoever holds one can spend its path."},
+		{"composerCopyHashlockPlatesEmpty", "H6-5.2", composerCopyHashlockPlatesEmpty(),
+			"This payload holds no preimage or phrase record to cut."},
+		{"composerCopyHashlockPlatesNotCut", "H6-5.2", composerCopyHashlockPlatesNotCut(),
+			"That plate was not cut. The record is still in this payload, so you can cut it again from this list."},
+		{"composerCopyPreimagesLoaded", "H6-5.2", composerCopyPreimagesLoaded(2),
+			"2 preimage or phrase records loaded."},
+		// H6 §9 and §8.8. These two are NOT composer copy; they live in
+		// composer_copy.go so this table's four gates reach them, which is the
+		// reason the file's own comment gives.
+		{"composerCopyHashlockLooksLikeMS1", "H6-9", composerCopyHashlockLooksLikeMS1(),
+			"This looks like an ms1 string. A seed plate comes from a payload; a marked hashlock plate comes from the Wallet Policy program, from a phrase typed there or a preimage packed on the host. Continue here to cut it as plain text."},
+		{"composerCopyHashlockPhraseNotPassphrase", "H6-8.8", composerCopyHashlockPhraseNotPassphrase(),
+			"This payload holds a HASHLOCK PHRASE, not a BIP-39 passphrase. They are not interchangeable: using one as the other opens a different wallet. A hashlock phrase is used in the Wallet Policy program."},
 	}
 }
 
@@ -253,8 +319,20 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// round 0 fold: composerCopyHashlockOtherPath (journey I-1) and
 	// composerCopyHashlockReconcile (adversarial I-1 = fidelity I-2 =
 	// journey I-3, the line §8h's guard had made unreachable).
-	if declared != 53 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 53 -- "+
+	// 54 SINCE H6 TASK 8b added composerCopyHashlockPreimageConfirm (§5.1's
+	// confirm for a payload PREIMAGE record, whose fields the phrase-shaped
+	// confirm body does not have).
+	// 67 SINCE H6 TASK 9 added the Done review's thirteen: §5.3's masked pick
+	// lead and the plate refusal, §8.5's QR warning, §8.3's five row forms and
+	// its stand-alone notice, both §8.4 arms and both §10.1 held arms.
+	// 71 SINCE H6 TASK 10 added the Hashlock plates flow's four: the list lead,
+	// the empty-payload refusal, this flow's own abort (which is NEITHER §8.4
+	// arm) and the door's preimage count.
+	// 73 SINCE H6 TASK 11 added §9's shared ms1-shaped warning and §8.8's
+	// Password-program notice. Neither is composer copy; both live in this file
+	// so the four gates above reach them.
+	if declared != 73 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 73 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

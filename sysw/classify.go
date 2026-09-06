@@ -45,6 +45,14 @@ func classifyConstellation(record string) Class {
 	if isStrictMnemonic(record) {
 		return ClassMnemonic
 	}
+	// BEFORE isStrictMs1, so the two rules never overlap. isStrictMs1's last
+	// line is `err == nil && !codex32.IsPreimage(c)` -- H0's inertness -- and it
+	// is UNCHANGED: a preimage is still never a seed class. What H6 adds is a
+	// class of its OWN for the narrower shape, so a preimage plate stops being
+	// ClassUnknown and starts being admissible at progWalletPolicy alone.
+	if isPreimagePlateRecord(record) {
+		return ClassPreimage
+	}
 	if isStrictMs1(record) {
 		return ClassCodex32Secret
 	}
@@ -108,6 +116,29 @@ func isStrictMnemonic(record string) bool {
 	}
 	m, err := bip39.ParseMnemonic(record)
 	return err == nil && m.Valid()
+}
+
+// isPreimagePlateRecord is the H6 ADMISSION shape: an engraveable ms1 string
+// that is a preimage plate -- kind 0x03, 33 bytes, unshared AND under the id
+// `hash` (codex32.IsPreimagePlate).
+//
+// THE ID IS THE WHOLE DIFFERENCE from H0's predicate, and it is here because
+// H6 INVERTS the consequence of a false positive. Under H0 a false positive was
+// a REFUSAL, so the wide kind-byte rule was the safe direction: "a refusal costs
+// a re-encode; a wrong cut exposes a spend secret". On this path a false
+// positive routes a string INTO a flow that ENGRAVES it under a band reading
+// NOT A SEED, so a plain BIP-93 33-byte secret beginning 0x03 -- roughly 1 in
+// 256 of them -- must not arrive. A kind-0x03 single under any other id stays
+// ClassUnknown and inert, and the host names it in its refusal.
+func isPreimagePlateRecord(record string) bool {
+	if len(record) > MaxEngraveableMs1Len {
+		return false
+	}
+	if !strings.HasPrefix(strings.ToLower(record), "ms1") {
+		return false
+	}
+	c, err := codex32.New(record)
+	return err == nil && codex32.IsPreimagePlate(c)
 }
 
 // isStrictMs1 matches Rust: HRP `ms` only, and no longer than a plate can

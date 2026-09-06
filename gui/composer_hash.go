@@ -4,11 +4,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+	"strings"
 
+	"seedhammer.com/codex32"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
+	"seedhammer.com/hashlock"
 	"seedhammer.com/sysw"
 )
 
@@ -24,8 +27,15 @@ import (
 // never be spent, and the reference wallet's own README records months of
 // exactly that.
 //
-// THE COMPOSER DERIVES A PREIMAGE IN RAM FOR ONE SCREEN (H2) AND NEVER STORES,
-// SHOWS OR ENGRAVES IT. It puts a digest in a script.
+// THE COMPOSER HOLDS A PREIMAGE FOR THE LIFE OF ONE COMPOSITION (H6 §2.2) AND
+// CAN CUT IT ONTO A PLATE OF ITS OWN (§5.3, §6). This record used to read "THE
+// COMPOSER DERIVES A PREIMAGE IN RAM FOR ONE SCREEN (H2) AND NEVER STORES,
+// SHOWS OR ENGRAVES IT", which was H2's literal reading of ruling L7. H6 lifts
+// three of L7's four verbs -- store, show, engrave -- and leaves the fourth
+// refused: a preimage plate presented to a seed flow is still not a seed
+// (H0; codex32.IsPreimage). The material lives in composerState.hashlockHeld
+// (gui/composer_state.go:81) and is scrubbed by composerFlowExit; what goes in
+// the SCRIPT is still only the digest.
 
 // composerHexKeys is the fallback pad's alphabet: hex digits only, so an
 // entry that is 64 characters long is 64 VALID characters by construction.
@@ -138,6 +148,143 @@ func composerHexEntry(ctx *Context, th *Colors) ([32]byte, bool) {
 
 const composerHashRowPhrase = "Type a hashlock phrase"
 
+// composerHashInPayloadRow is §5.1 Step 2's annotated form of the band-1 row.
+//
+// WHY A HASH ROW NEEDS AN ANNOTATION AT ALL. When a hash: record and a
+// preimage record in the SAME payload carry the same digest, bands 1 and 2 draw
+// identical digest text, adjacent, differing by one word -- and the
+// consequences differ completely: band 1 assigns the digest and holds NO
+// material, so no plate is offered at Done, while band 2 holds the preimage and
+// offers a plate. The annotation is what makes the two rows readable as
+// different choices rather than as a duplicate.
+//
+// `(in payload)` and NOT `(preimage in payload)`: measured at sh2DisplaySize,
+// the longer wording is 50 characters and wraps to two lines in
+// composerPageLines' band, which a picker row cannot spend
+// (TestWhichHashRowsDrawOnOneLine).
+func composerHashInPayloadRow(i int, digest [32]byte) string {
+	return composerHashRow(i, digest) + "  (in payload)"
+}
+
+// composerHashPreimageRow is band 2: a preimage PLATE record in the payload,
+// whose digest is computed directly from the record -- no KDF, no countdown.
+func composerHashPreimageRow(i int, digest [32]byte) string {
+	h := hex.EncodeToString(digest[:])
+	return fmt.Sprintf("preimage %d  %s..%s", i, h[:8], h[56:])
+}
+
+// composerHashPhraseRow is band 3, in its two forms (§5.1 Step 1).
+//
+// d == nil is the row BEFORE derivation, and it says why it cannot show a
+// digest rather than showing a blank or a placeholder: deriving to draw the
+// list is the "three records would be a 30 s stall before a list could be
+// drawn" §5.1 rejects. Once the record has been derived in this composition the
+// row carries the digest, read back out of hashlockHeld.
+func composerHashPhraseRow(i int, d *[32]byte) string {
+	if d == nil {
+		return fmt.Sprintf("phrase record %d (derive to see the digest)", i)
+	}
+	h := hex.EncodeToString(d[:])
+	return fmt.Sprintf("phrase %d  %s..%s", i, h[:8], h[56:])
+}
+
+// hashlockPayloadPreimage is one ClassPreimage record of the loaded payload,
+// decoded once at row-build time. Both fields are SECRET; the composition's
+// flow-exit defer scrubs whatever reaches hashlockHeld, and nothing here
+// outlives the row set.
+type hashlockPayloadPreimage struct {
+	preimage [32]byte
+	digest   [32]byte
+}
+
+// composerPayloadPreimages returns every well-formed preimage PLATE record, in
+// payload order.
+//
+// IT DECODES THROUGH codex32.DecodeMS1Preimage rather than trusting the class.
+// Classification already ran isPreimagePlateRecord, so the decode cannot fail
+// here; the arm exists so no value is consumed from a call that errored, which
+// is composerPayloadDigests' own rule on the sibling band.
+func composerPayloadPreimages(s *syswSession) []hashlockPayloadPreimage {
+	if s == nil || !s.loaded {
+		return nil
+	}
+	var out []hashlockPayloadPreimage
+	for _, r := range s.records {
+		if r.class != sysw.ClassPreimage {
+			continue
+		}
+		c, err := codex32.New(strings.TrimSpace(r.body))
+		if err != nil {
+			continue
+		}
+		x, err := codex32.DecodeMS1Preimage(c)
+		if err != nil {
+			continue
+		}
+		out = append(out, hashlockPayloadPreimage{preimage: x, digest: hashlock.Digest(&x)})
+	}
+	return out
+}
+
+// composerPayloadPhrases returns every well-formed phrase: record, in payload
+// order. NOTHING IS DERIVED HERE (§5.1 Step 3).
+func composerPayloadPhrases(s *syswSession) []sysw.PhraseRecord {
+	if s == nil || !s.loaded {
+		return nil
+	}
+	var out []sysw.PhraseRecord
+	for _, r := range s.records {
+		if r.class != sysw.ClassPhrase {
+			continue
+		}
+		rec, err := sysw.ParsePhraseRecord(r.body)
+		if err != nil {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// hashlockMethodOf maps the WIRE selector a phrase: record carries onto the
+// screen's method. Two enumerations, deliberately: sysw owns the record grammar
+// and gui owns the derivation, and a shared type would make the wire format
+// depend on a screen.
+func hashlockMethodOf(m sysw.HashlockMethod) hashlockMethod {
+	if m == sysw.HashlockSHA256 {
+		return hashlockSHA256
+	}
+	return hashlockHardened
+}
+
+// hashlockDerivedDigest reports the digest THIS COMPOSITION already derived for
+// a phrase: record, or nil.
+//
+// IT READS hashlockHeld RATHER THAN A SECOND MAP. Task 8a's map is keyed by
+// digest and carries the phrase, the method and the provenance, so "has this
+// record been derived here" is answerable from it exactly -- and a second,
+// index-keyed map would be a second answer to the same question, which is the
+// drift composerHashRowSet's own label-keying exists to prevent. It also
+// survives a Back out to `Which hash?` and back in, so the KDF runs once per
+// record per composition.
+func hashlockDerivedDigest(st *composerState, rec sysw.PhraseRecord) *[32]byte {
+	if st == nil {
+		return nil
+	}
+	want := hashlockMethodOf(rec.Method)
+	for h, m := range st.hashlockHeld {
+		if m.provenance != hashlockFromPayload || m.method != want {
+			continue
+		}
+		if string(m.phrase) != rec.Phrase {
+			continue
+		}
+		d := h
+		return &d
+	}
+	return nil
+}
+
 // composerHashRowSet builds `Which hash?` ONCE and records where each named row
 // sits, so the dispatch below is by label, never by index arithmetic (spec §5;
 // r2 review C-4: the shipped default arm cleared the lock when a row moved).
@@ -149,18 +296,53 @@ type composerHashRowSet struct {
 	labels    []string
 	lead      string
 	digests   [][32]byte
-	phraseRow int
-	hexRow    int
-	noneRow   int
+	preimages []hashlockPayloadPreimage
+	phrases   []sysw.PhraseRecord
+	// The first row index of each band. A band with no records still records
+	// its start, which equals the next band's start -- so `sel >= start &&
+	// sel < start+len(band)` is empty for it and no arm can be entered by an
+	// index that belongs to another band.
+	preimageRow  int
+	phraseRecRow int
+	phraseRow    int
+	hexRow       int
+	noneRow      int
 }
 
-func composerHashRows(s *syswSession) composerHashRowSet {
+// composerHashRows builds §5.1's SIX bands, in order, and records where each
+// begins.
+//
+// IT TAKES THE COMPOSITION STATE because band 3's row form depends on what this
+// composition has already derived (§5.1 Step 1). st may be nil, which is the
+// row set as a fresh composition first draws it.
+func composerHashRows(s *syswSession, st *composerState) composerHashRowSet {
 	digests := composerPayloadDigests(s)
-	labels := make([]string, 0, len(digests)+3)
+	preimages := composerPayloadPreimages(s)
+	phrases := composerPayloadPhrases(s)
+	r := composerHashRowSet{
+		digests: digests, preimages: preimages, phrases: phrases, lead: "Which hash?",
+	}
+	labels := make([]string, 0, len(digests)+len(preimages)+len(phrases)+3)
+	// Band 1: the payload's hash: digests, annotated when the SAME payload also
+	// carries the material for one (§5.1 Step 2).
 	for i, d := range digests {
+		if composerHashInPayload(r, st, d) {
+			labels = append(labels, composerHashInPayloadRow(i+1, d))
+			continue
+		}
 		labels = append(labels, composerHashRow(i+1, d))
 	}
-	r := composerHashRowSet{digests: digests, lead: "Which hash?"}
+	// Band 2: the payload's preimage plate records.
+	r.preimageRow = len(labels)
+	for i, p := range preimages {
+		labels = append(labels, composerHashPreimageRow(i+1, p.digest))
+	}
+	// Band 3: the payload's phrase: records, UNDERIVED unless this composition
+	// has already derived them.
+	r.phraseRecRow = len(labels)
+	for i, rec := range phrases {
+		labels = append(labels, composerHashPhraseRow(i+1, hashlockDerivedDigest(st, rec)))
+	}
 	r.phraseRow = len(labels)
 	labels = append(labels, composerHashRowPhrase)
 	r.hexRow = len(labels)
@@ -168,10 +350,33 @@ func composerHashRows(s *syswSession) composerHashRowSet {
 	r.noneRow = len(labels)
 	labels = append(labels, "No hash lock")
 	r.labels = labels
-	if len(digests) == 0 {
+	if len(digests) == 0 && len(preimages) == 0 && len(phrases) == 0 {
 		r.lead = composerCopyHashlockNoPayloadLead()
 	}
 	return r
+}
+
+// composerHashInPayload reports whether the SAME payload carries the material
+// for this digest -- a preimage record with that digest, or a phrase: record
+// this composition has already derived to it.
+//
+// AN UNDERIVED phrase: RECORD CANNOT BE COUNTED HERE, and that is a property of
+// §5.1 rather than an omission: its digest is not knowable without running the
+// KDF, which is exactly what Step 3 forbids at row-build time. Its hash: row
+// gains the annotation the moment the record is derived, because the row set is
+// rebuilt on every pass of composerHashEdit's loop.
+func composerHashInPayload(r composerHashRowSet, st *composerState, d [32]byte) bool {
+	for _, p := range r.preimages {
+		if p.digest == d {
+			return true
+		}
+	}
+	for _, rec := range r.phrases {
+		if h := hashlockDerivedDigest(st, rec); h != nil && *h == d {
+			return true
+		}
+	}
+	return false
 }
 
 // composerHashEdit sets or clears one path's hashlock.
@@ -184,14 +389,22 @@ func composerHashRows(s *syswSession) composerHashRowSet {
 func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool {
 	title := fmt.Sprintf("Path %d hash", idx+1)
 	for {
-		rows := composerHashRows(ctx.sysw)
+		rows := composerHashRows(ctx.sysw, st)
 		sel, ok := composerPickScreen(ctx, th, title, rows.lead, rows.labels)
 		if !ok {
 			return false // Back at `Which hash?` -- the ONLY false this function returns (spec §4.6)
 		}
-		// The §8i rule fires when the operator is TAKING a hash: a payload row,
-		// the phrase row or the hex row -- stated as that predicate.
-		taking := sel < len(rows.digests) || sel == rows.phraseRow || sel == rows.hexRow
+		// The §8i rule fires when the operator is TAKING a hash, which is every
+		// row of the six bands EXCEPT `No hash lock` (H6 §5.1 Step 4).
+		//
+		// STATED AS THE ONE ROW IT IS NOT, rather than as a disjunction over the
+		// rows it is. The shipped predicate enumerated the taking rows
+		// (`sel < len(rows.digests) || sel == rows.phraseRow || sel == rows.hexRow`),
+		// and adding a band to a screen would then silently leave the 32-byte
+		// rule unstated for it -- the failure being that the operator takes a
+		// hash without ever being told what a preimage must be. A predicate
+		// keyed on the single clearing row cannot go stale that way.
+		taking := sel != rows.noneRow
 		if taking {
 			showError(ctx, th, title, composerCopyHashRule())
 		}
@@ -200,6 +413,26 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			d := rows.digests[sel]
 			st.list.Paths[idx].Hash = &d
 			return true
+		case sel >= rows.preimageRow && sel < rows.preimageRow+len(rows.preimages):
+			// §5.1: a preimage RECORD takes the phrase route's shape without
+			// the KDF -- DecodeMS1Preimage gave X at row-build time, so there
+			// is no countdown and no phrase.
+			switch hashlockPreimageRecordRoute(ctx, th, st, idx, rows.preimages[sel-rows.preimageRow], rows.digests) {
+			case hashlockAssigned:
+				return true
+			case hashlockBackToWhichHash:
+				continue
+			}
+		case sel >= rows.phraseRecRow && sel < rows.phraseRecRow+len(rows.phrases):
+			// DERIVATION IS LAZY and the payload path is a DIFFERENT FUNCTION
+			// (§5.1 Step 3): hashlockPhraseRoute picks a method and ends on the
+			// reconciliation screen, and a payload phrase must do neither.
+			switch hashlockPayloadRoute(ctx, th, st, idx, rows.phrases[sel-rows.phraseRecRow], rows.digests) {
+			case hashlockAssigned:
+				return true
+			case hashlockBackToWhichHash:
+				continue
+			}
 		case sel == rows.phraseRow:
 			switch hashlockPhraseRoute(ctx, th, st, idx, rows.digests) {
 			case hashlockAssigned:

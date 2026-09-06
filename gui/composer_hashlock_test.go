@@ -15,6 +15,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/hashlock"
 	"seedhammer.com/md"
+	"seedhammer.com/sysw"
 )
 
 // The anchor phrase and the corpus digests (hashlock/testdata/hashlock-v0.8.json,
@@ -1140,4 +1141,272 @@ func TestRemovePathThenAHexHashDrawsThePlainBanner(t *testing.T) {
 			t.Errorf("§8h drew the phrase form for a composition with no phrase-set hash:\n%q", got)
 		}
 	})
+}
+
+// ─── H6 Task 8b: the payload routes (spec §5.1) ──────────────────────────────
+
+// TestComposerHashEditDispatchesTheTwoNewBands drives composerHashEdit BY TOUCH
+// through each new band, with one record of every class loaded, so a reversion
+// to index arithmetic moves a row and this test taps the wrong one.
+//
+// MUTATION: dispatch the preimage band on `sel < len(rows.digests)+len(rows.preimages)`
+// without subtracting rows.preimageRow -> the wrong record is taken and the
+// digest assertion fails.
+func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
+	x := composerTestPreimageX()
+	xh := hashlock.Digest(&x)
+	sessionOf := func(t *testing.T) *syswSession {
+		return composerSessionWith(nil, []string{
+			composerTestPreimageRecord(t, x),
+			composerTestPhraseRecord(sysw.HashlockSHA256, hashlockAnchorPhrase),
+		})
+	}
+
+	// Rows, in §5.1's order: preimage 1, phrase record 1, Type a hashlock
+	// phrase, Type 64 hex, No hash lock.
+	//
+	// NO hash: RECORD IN THIS FIXTURE, and that is a MEASUREMENT rather than a
+	// convenience: the first page of this pick screen holds FIVE rows after the
+	// lead and its spacer (TestWhichHashPageHoldsFiveRows), so a sixth would
+	// have to be reached by paging and tapRow drives ONE page. The band
+	// dispatch is what these rows exercise; the paging is measured on its own.
+	const rowCount = 5
+
+	t.Run("the preimage row assigns its digest and HOLDS the material", func(t *testing.T) {
+		st := composerStateWithPaths(t, 1)
+		var ret bool
+		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
+		h.mustReach("Which hash?")
+		h.tapRow(0, rowCount)
+		h.mustReach("32-byte value") // §8i: a preimage row TAKES a hash
+		h.tapNav(Button3)
+		h.mustReach("preimage record in this payload")
+		h.holdConfirm()
+		h.waitDone()
+		if !ret {
+			t.Fatal("composerHashEdit returned false after the preimage row was taken")
+		}
+		if got := st.list.Paths[0].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
+			t.Fatalf("hash = %v, want the preimage record's digest %s", got, hashlockAnchorSHA_H)
+		}
+		m, ok := st.hashlockHeld[xh]
+		if !ok {
+			t.Fatalf("the preimage was not held (%d entries)", len(st.hashlockHeld))
+		}
+		if m.preimage != x {
+			t.Error("the held preimage is not the record's")
+		}
+		if len(m.phrase) != 0 {
+			t.Error("a preimage record carries no phrase, so none may be held for it")
+		}
+		if m.provenance != hashlockFromPayload {
+			t.Errorf("provenance = %v, want hashlockFromPayload", m.provenance)
+		}
+	})
+
+	t.Run("the phrase-record row derives and never picks a method", func(t *testing.T) {
+		st := composerStateWithPaths(t, 1)
+		var ret bool
+		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
+		h.mustReach("Which hash?")
+		h.tapRow(1, rowCount)
+		h.mustReach("32-byte value")
+		h.tapNav(Button3)
+		// STRAIGHT to the confirm: no phrase screen, no method pick, no
+		// reconcile screen. The method is the RECORD's.
+		body := h.mustReach("Write down this phrase")
+		if strings.Contains(normalizeDrawn(body), normalizeDrawn("Which method?")) {
+			t.Error("a payload phrase reached the method pick; the record names its own method")
+		}
+		wantTok := "hash " + hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
+		if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantTok)) {
+			t.Errorf("the confirm modal drew %q, want %q", normalizeDrawn(body), wantTok)
+		}
+		if !strings.Contains(normalizeDrawn(body), normalizeDrawn("method: sha256")) {
+			t.Errorf("the confirm modal does not name the RECORD's method: %q", normalizeDrawn(body))
+		}
+		h.holdConfirm()
+		h.waitDone()
+		if !ret {
+			t.Fatal("composerHashEdit returned false after the phrase-record row was taken")
+		}
+		if got := st.list.Paths[0].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
+			t.Fatalf("hash = %v, want %s", got, hashlockAnchorSHA_H)
+		}
+		m, ok := st.hashlockHeld[xh]
+		if !ok {
+			t.Fatalf("the derived material was not held (%d entries)", len(st.hashlockHeld))
+		}
+		if string(m.phrase) != hashlockAnchorPhrase || m.method != hashlockSHA256 {
+			t.Error("the held material is not the record's phrase and method")
+		}
+		if m.provenance != hashlockFromPayload {
+			t.Errorf("provenance = %v, want hashlockFromPayload", m.provenance)
+		}
+		// §10.2 BY CONSTRUCTION: composerCopyHashlockReconcile has ONE call
+		// site, inside hashlockPhraseRoute, so a payload phrase can never draw
+		// it. Asserted on the LAST frame the route produced.
+		if strings.Contains(normalizeDrawn(body), normalizeDrawn("run ms hashlock with this phrase")) {
+			t.Error("a payload phrase reached the reconciliation screen, whose instruction is a no-op for it")
+		}
+	})
+
+	t.Run("the shipped rows keep their behaviour behind the new bands", func(t *testing.T) {
+		st := composerStateWithPaths(t, 1)
+		var ret bool
+		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
+		h.mustReach("Which hash?")
+		h.tapRow(3, rowCount) // Type 64 hex
+		h.mustReach("32-byte value")
+		h.tapNav(Button3)
+		h.mustReach("0 of 64 hex")
+		if *h.done {
+			t.Fatal("`Type 64 hex` returned instead of opening the pad: C-4's regression")
+		}
+	})
+
+	t.Run("No hash lock still clears without the rule modal", func(t *testing.T) {
+		st := composerStateWithPaths(t, 1)
+		var preset [32]byte
+		preset[0] = 0x11
+		st.list.Paths[0].Hash = &preset
+		var ret bool
+		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
+		h.mustReach("Which hash?")
+		h.tapRow(4, rowCount)
+		h.waitDone()
+		if !ret || st.list.Paths[0].Hash != nil {
+			t.Fatal("`No hash lock` behind the two new bands did not clear the hash")
+		}
+	})
+}
+
+// TestWhichHashDoesNotDeriveAtRowBuildTime is §5.1 Step 3's LAZY rule, measured
+// rather than asserted structurally: building the row set for a payload holding
+// a HARDENED phrase record must not run the 100,000-iteration KDF.
+//
+// MUTATION: derive at row-build time -> composerHashRows takes about 10 s on
+// the device (measured 9,715 it/s) and well over the budget below here.
+func TestWhichHashDoesNotDeriveAtRowBuildTime(t *testing.T) {
+	s := composerSessionWith(nil, []string{
+		composerTestPhraseRecord(sysw.HashlockHardened, hashlockAnchorPhrase),
+	})
+	st := composerStateWithPaths(t, 1)
+	// A single hardened derivation on this host, measured, as the control.
+	t0 := time.Now()
+	hashlock.PreimageHardened([]byte(hashlockAnchorPhrase))
+	kdf := time.Since(t0)
+	t1 := time.Now()
+	rows := composerHashRows(s, st)
+	build := time.Since(t1)
+	t.Logf("one hardened derivation %v; composerHashRows %v", kdf, build)
+	if len(rows.phrases) != 1 {
+		t.Fatalf("the phrase record did not reach the row set: %v", rows.labels)
+	}
+	if rows.labels[rows.phraseRecRow] != "phrase record 1 (derive to see the digest)" {
+		t.Errorf("the underived row does not say so: %q", rows.labels[rows.phraseRecRow])
+	}
+	if build > kdf/4 {
+		t.Errorf("composerHashRows took %v against a %v derivation: the row set is deriving, "+
+			"which §5.1 refuses -- three records would be a 30 s stall before a list could be drawn",
+			build, kdf)
+	}
+}
+
+// TestWhichHashPhraseRowShowsTheDigestOnceDerived is §5.1 Step 1's second form:
+// after a derivation the row reads `phrase <i>  <first8>..<last8>`, read back
+// out of hashlockHeld rather than re-derived.
+func TestWhichHashPhraseRowShowsTheDigestOnceDerived(t *testing.T) {
+	s := composerSessionWith(nil, []string{
+		composerTestPhraseRecord(sysw.HashlockSHA256, hashlockAnchorPhrase),
+	})
+	st := composerStateWithPaths(t, 1)
+	if got := composerHashRows(s, st).labels[0]; got != "phrase record 1 (derive to see the digest)" {
+		t.Fatalf("before derivation the row reads %q", got)
+	}
+	x := hashlock.PreimageSHA256([]byte(hashlockAnchorPhrase))
+	h := hashlock.Digest(&x)
+	composerHoldHashlockMaterial(st, h, hashlockMaterial{
+		phrase: []byte(hashlockAnchorPhrase), method: hashlockSHA256,
+		preimage: x, provenance: hashlockFromPayload,
+	})
+	want := "phrase 1  " + hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
+	if got := composerHashRows(s, st).labels[0]; got != want {
+		t.Errorf("after derivation the row reads %q, want %q", got, want)
+	}
+}
+
+// TestWhichHashRuleFiresForTheTwoNewBands is §8i's `taking` predicate extended.
+//
+// MUTATION: restore the shipped three-arm disjunction
+// (`sel < len(rows.digests) || sel == rows.phraseRow || sel == rows.hexRow`)
+// -> a preimage row and a phrase-record row take a hash with the 32-byte rule
+// never stated, and both rows below fail.
+func TestWhichHashRuleFiresForTheTwoNewBands(t *testing.T) {
+	x := composerTestPreimageX()
+	for _, tc := range []struct {
+		name string
+		row  int
+	}{
+		{"the preimage band", 0},
+		{"the phrase-record band", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := composerStateWithPaths(t, 1)
+			var ret bool
+			sess := composerSessionWith(nil, []string{
+				composerTestPreimageRecord(t, x),
+				composerTestPhraseRecord(sysw.HashlockSHA256, hashlockAnchorPhrase),
+			})
+			h := runComposerHashEdit(t, st, sess, 0, &ret)
+			h.mustReach("Which hash?")
+			h.tapRow(tc.row, 5)
+			h.mustReach("32-byte value")
+		})
+	}
+}
+
+// TestWhichHashPageHoldsFiveRows is the MEASUREMENT the two new bands make
+// necessary, and it is a finding as much as a test.
+//
+// The shipped screen's longest row set was 2 payload digests plus the three
+// fixed rows -- five, exactly one page. §5.1 adds two bands, so a payload
+// carrying a hash: record, a preimage record and a phrase: record draws SIX,
+// and the sixth (`No hash lock`) falls past composerPageLines' content box: the
+// row PITCH is 29 px (a 23 px label plus the 6 px gap), the box is 224 px, and
+// the lead and its spacer take two pitches before any row is drawn.
+//
+// That is not a defect -- composerPickScreen pages on Button2 and draws the
+// pager icon only when a second page exists -- but it is the fact the plan
+// carried no number for, and `No hash lock` is the row an operator reaches for
+// to UNDO a lock. So it is measured here and its reachability asserted.
+func TestWhichHashPageHoldsFiveRows(t *testing.T) {
+	x := composerTestPreimageX()
+	sess := composerSessionWith([]string{composerTestHashRecord}, []string{
+		composerTestPreimageRecord(t, x),
+		composerTestPhraseRecord(sysw.HashlockSHA256, hashlockAnchorPhrase),
+	})
+	st := composerStateWithPaths(t, 1)
+	rows := composerHashRows(sess, st)
+	if len(rows.labels) != 6 {
+		t.Fatalf("this fixture draws %d rows, not the six the measurement is about: %v",
+			len(rows.labels), rows.labels)
+	}
+	var ret bool
+	h := runComposerHashEdit(t, st, sess, 0, &ret)
+	content := h.mustReach("Which hash?")
+	pts := plateHitPoints(h.ctx, h.drawer())
+	t.Logf("six rows: page 1 draws %d touch targets", len(pts))
+	if len(pts) != 5 {
+		t.Errorf("page 1 draws %d tappable rows, and the measurement recorded in the plan "+
+			"is 5. If this moved, every row count in Task 8b moved with it.", len(pts))
+	}
+	if uiContains(content, "No hash lock") {
+		t.Errorf("page 1 already carries `No hash lock`; this measurement is stale.\nFrame: %q", content)
+	}
+	h.tapNav(Button2) // page
+	content = h.mustReach("No hash lock")
+	if !uiContains(content, "No hash lock") {
+		t.Fatalf("`No hash lock` is not reachable by paging.\nFrame: %q", content)
+	}
 }

@@ -1376,3 +1376,69 @@ func TestPassphraseEntryFitsPanel(t *testing.T) {
 		}
 	}
 }
+
+// ─── H6 §9: the ms1-shaped warning in the BIP-39 Password program ────────────
+//
+// TestPassphraseMS1WarningWarnsAndStillCuts is §9 at the sibling program, and
+// the reason it exists at all: the passphrase program is the one where an
+// operator holding a hashlock plate string is most likely to be in the wrong
+// place, and its entry screen said nothing.
+//
+// MUTATION: refuse instead of warning -> the accepted row fails, and a
+// passphrase that happens to be ms1-shaped can never be entered.
+// MUTATION: draw a DIFFERENT body here -> §9's own rule is that two
+// near-identical bodies is how one of them goes stale; the shared-body
+// assertion fails.
+func TestPassphraseMS1WarningWarnsAndStillCuts(t *testing.T) {
+	h, r := startPPEntry(t)
+	h.typeString(h6MS1Shaped)
+	h.tapWidget("ok")
+	if !uiContains(h.content, "looks like an ms1 string") {
+		t.Fatalf("§9's warning did not fire at the passphrase entry screen; got %q", h.content)
+	}
+	// THE SAME BODY the free-text program draws, by construction.
+	if !uiContains(h.content, composerCopyHashlockLooksLikeMS1()) {
+		t.Errorf("the passphrase program draws a different §9 body; got %q", h.content)
+	}
+	if r.done {
+		t.Fatal("the entry step returned before the operator answered the warning")
+	}
+	// DECLINE: still on the entry screen, nothing accepted, nothing lost.
+	h.tapNav(Button1)
+	if !h.pump(16, "Passphrase") {
+		t.Fatalf("declining did not return to the entry screen; got %q", h.content)
+	}
+	if r.done {
+		t.Fatal("declining §9's warning ended the step: it is a warning, not a refusal")
+	}
+	// ACCEPT: the step returns the string EXACTLY as typed.
+	h.tapWidget("ok")
+	if !uiContains(h.content, "looks like an ms1 string") {
+		t.Fatalf("the warning was not re-drawn after a decline; got %q", h.content)
+	}
+	ppHoldNav(h, Button3)
+	for i := 0; i < 32 && !r.done; i++ {
+		h.frame()
+	}
+	if !r.done || !r.ok {
+		t.Fatalf("the entry step did not accept the string (done=%v ok=%v)", r.done, r.ok)
+	}
+	if got := string(r.dst[:r.n]); got != h6MS1Shaped {
+		t.Fatalf("the entry step returned %q, want the string as typed", got)
+	}
+}
+
+// TestPassphraseMS1WarningIsSilentForAnOrdinaryPassphrase is the direction a
+// warning that fires on everything would pass.
+func TestPassphraseMS1WarningIsSilentForAnOrdinaryPassphrase(t *testing.T) {
+	h, r := startPPEntry(t)
+	h.typeString("hunter2")
+	h.tapWidget("ok")
+	for i := 0; i < 8 && !r.done; i++ {
+		h.frame()
+	}
+	if !r.done || !r.ok {
+		t.Fatalf("an ordinary passphrase did not pass the entry step (done=%v ok=%v): %q",
+			r.done, r.ok, h.content)
+	}
+}

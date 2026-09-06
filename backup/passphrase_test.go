@@ -773,13 +773,21 @@ func TestPassphraseNoPanicOverCharset(t *testing.T) {
 
 // A passphrase too long for a constant-time QR must return an error, never
 // panic and never fall back to the content-timed engraver.
+//
+// H6 MOVED THE CEILING AND THIS TEST MOVED WITH IT. Until H6 ConstantQR
+// refused anything over v5 (dim 37) and a 200-character passphrase was over it;
+// H6 §7 raised the bound to v9 (dim 53) for the hashlock phrase plate, and 200
+// bytes at ECC-L is dim 53, which is now ADMITTED. The property under test is
+// unchanged -- an error, never a panic, never a fall back to engrave.QR -- so
+// the length moved to 240, which is dim 57 and the first version with no
+// alignment-centre row and no fuzzed budget.
 func TestPassphraseQRTooLong(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("EngravePassphrase panicked instead of returning an error: %v", r)
 		}
 	}()
-	plate := Passphrase{Passphrase: strings.Repeat("a", 200), QR: true, Font: constant.Font}
+	plate := Passphrase{Passphrase: strings.Repeat("a", 240), QR: true, Font: constant.Font}
 	if _, err := EngravePassphrase(params, plate); err == nil {
 		t.Error("want an error for a QR beyond ConstantQR's reach, got nil")
 	}
