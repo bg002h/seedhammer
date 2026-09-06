@@ -280,5 +280,131 @@
     "record": "key:5b37336335646130612f2b3438272f30272f30272f32275d7870756236446b4641585751326448787132766174727439717941336258595534546f57517743486266355842326d5354657863485a43654b5331565a5963506f4264355838795663625846484a523952385543567074383256583156685232386d43797855464c3472364b467266",
     "class": "Unknown",
     "host_line": "record 0: key: needs [fingerprint/path]xpub with an origin; a bare xpub is not a key record"
+  },
+  {
+    "name": "phrase-hardened",
+    "record": "phrase:68617264656e65642c636f727265637420686f727365206261747465727920737461706c65",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-sha256",
+    "record": "phrase:7368613235362c636f727265637420686f727365206261747465727920737461706c65",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-containing-a-comma",
+    "record": "phrase:68617264656e65642c6f6e652c2074776f2c207468726565",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-space-after-the-comma",
+    "record": "phrase:68617264656e65642c20636f727265637420686f727365206261747465727920737461706c65",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-containing-a-colon",
+    "record": "phrase:68617264656e65642c6e6f74653a20756e64657220746865206d6174",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-one-character",
+    "record": "phrase:68617264656e65642c78",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-100-characters",
+    "record": "phrase:68617264656e65642c30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+    "class": "Phrase",
+    "host_line": null
+  },
+  {
+    "name": "phrase-101-characters",
+    "record": "phrase:68617264656e65642c3030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-empty",
+    "record": "phrase:68617264656e65642c",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-64-hex",
+    "record": "phrase:68617264656e65642c61626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-ms1-shaped",
+    "record": "phrase:68617264656e65642c6d7331306861736873717734366832617434773436683261743477343668326174347734366832617434773436683261743477343668326174347734366b7a76326e6379363075377a3963",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-ms1-shaped-grouped",
+    "record": "phrase:68617264656e65642c6d7331306861736873712077343668326174347734203668326174347734366820326174347734366832612074347734366832617434207734366832617434773420366b7a76326e637936302075377a3963",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-unknown-method",
+    "record": "phrase:7363727970742c636f727265637420686f727365206261747465727920737461706c65",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-uppercase-method",
+    "record": "phrase:48415244454e45442c636f727265637420686f727365206261747465727920737461706c65",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-no-comma",
+    "record": "phrase:68617264656e6564",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-body-not-hex",
+    "record": "phrase:zz",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-body-uppercase-hex",
+    "record": "phrase:68617264656E65642C78",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-body-odd-length",
+    "record": "phrase:686",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-body-not-utf8",
+    "record": "phrase:ff",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-body-empty",
+    "record": "phrase:",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+  },
+  {
+    "name": "phrase-non-printable-tab",
+    "record": "phrase:68617264656e65642c6f6e650974776f",
+    "class": "Unknown",
+    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
   }
 ]

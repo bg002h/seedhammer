@@ -22,6 +22,10 @@ type recordClassRow struct {
 
 var recordClassByName = map[string]Class{
 	"Key": ClassKey, "Hash": ClassHash, "Now": ClassNow, "Unknown": ClassUnknown,
+	// H6: the fourth composer prefix. ClassPreimage is NOT here -- a preimage
+	// plate carries no prefix and is placed by classifyConstellation, so it has
+	// no CASES row in this corpus and is pinned by the seam corpus instead.
+	"Phrase": ClassPhrase,
 }
 
 func loadRecordClassRows(t *testing.T) []recordClassRow {
@@ -52,8 +56,8 @@ func loadRecordClassRows(t *testing.T) []recordClassRow {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatalf("parsing fixture: %v", err)
 	}
-	if len(rows) != pin.Vectors || len(rows) != 47 {
-		t.Fatalf("fixture has %d rows, pin says %d, plan says 47", len(rows), pin.Vectors)
+	if len(rows) != pin.Vectors || len(rows) != 68 {
+		t.Fatalf("fixture has %d rows, pin says %d, plan says 68", len(rows), pin.Vectors)
 	}
 	return rows
 }
@@ -79,7 +83,7 @@ func TestComposerRecordsClassifyExactlyAsTheHost(t *testing.T) {
 			t.Errorf("%s: host_line present=%v but class %s", row.Name, row.HostLine != nil, row.Class)
 		}
 	}
-	for _, cls := range []string{"Key", "Hash", "Now", "Unknown"} {
+	for _, cls := range []string{"Key", "Hash", "Now", "Phrase", "Unknown"} {
 		if seen[cls] == 0 {
 			t.Errorf("fixture exercises no %s row; the gate would prove nothing for that class", cls)
 		}
@@ -203,5 +207,53 @@ func TestKeyRecordPathGrammarMatchesTheHost(t *testing.T) {
 		if _, err := ParseKeyRecord(rec(bad)); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+// H6 Task 7, ADDED BY THE IMPLEMENTER because the plan left the two new classes
+// with no gate on this side (recorded as a deviation).
+//
+// The class corpus above pins ClassPhrase; NOTHING pinned ClassPreimage or the
+// secrecy of either. sysw/codex32_seam_test.go asserts only
+// `Classify(s) == ClassCodex32Secret`, which is false for a preimage plate
+// BEFORE and AFTER this task -- so an isPreimagePlateRecord that returned false
+// unconditionally, or an IsSecret that forgot the two classes, left `go test
+// ./sysw/` green. Those are the mutations this pins.
+//
+// The strings are the seam corpus's own rows (testdata/codex32_seam_vectors.json),
+// which is why the id partition is testable at all: the same kind-0x03 shape
+// under `hash`, under `entr`, and under a plain BIP-93 id.
+func TestPreimagePlateIsItsOwnClassAndOnlyUnderTheHashID(t *testing.T) {
+	const (
+		// kind 0x03, 33 bytes, unshared, id `hash`: the H6 admission shape.
+		plate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
+		// the same shape under `entr` -- the id/kind mismatch the host
+		// diagnoses elsewhere; it must NOT reach a flow that engraves.
+		entrID = "ms10entrsqv0qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5gz69g08wwtz9"
+		// THE COLLISION: a plain BIP-93 33-byte secret whose payload begins
+		// 0x03, under the id `test`. Roughly 1 in 256 of them look like this.
+		collision = "ms10testsqvrsu9guyv4rzwplgex4gkmzd9c8wl593jfe4gdg47mtm3xt6tv7qh3pm4xrfdlvvp"
+	)
+	if got := Classify(plate); got != ClassPreimage {
+		t.Errorf("Classify(preimage plate under `hash`) = %v, want ClassPreimage", got)
+	}
+	for _, r := range []string{entrID, collision} {
+		if got := Classify(r); got != ClassUnknown {
+			t.Errorf("Classify(%.20q...) = %v, want ClassUnknown -- only the id `hash` "+
+				"reaches the flow that engraves (H6 §4.3)", r, got)
+		}
+	}
+	// H0's inertness is UNCHANGED: no kind-0x03 string is a seed class.
+	for _, r := range []string{plate, entrID, collision} {
+		if got := Classify(r); got == ClassCodex32Secret {
+			t.Errorf("Classify(%.20q...) = ClassCodex32Secret; isStrictMs1 must still refuse a preimage", r)
+		}
+	}
+	// Both new classes are BEARER, so both are secret (H6 §3.4): this is what
+	// makes an unsealed payload holding one raise F1 at load.
+	if !ClassPreimage.IsSecret() || !ClassPhrase.IsSecret() {
+		t.Errorf("IsSecret: preimage=%v phrase=%v, want both true -- whoever holds one "+
+			"can spend any key-less hashlock path it unlocks",
+			ClassPreimage.IsSecret(), ClassPhrase.IsSecret())
 	}
 }

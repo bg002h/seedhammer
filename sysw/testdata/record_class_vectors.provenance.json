@@ -6,15 +6,16 @@
     "or if any row's class differs from Classify's answer.",
     "TO RE-SYNC: cp ../mnemonic-engrave/crates/me-cli/testdata/record_class_vectors.json sysw/testdata/ ;",
     "  git -C ../mnemonic-engrave rev-parse HEAD ; git -C ../mnemonic-engrave log -1 --format=%H -- crates/me-cli/testdata/record_class_vectors.json ;",
-    "  sha256sum sysw/testdata/record_class_vectors.json"
+    "  sha256sum sysw/testdata/record_class_vectors.json",
+    "PROVISIONAL COMMIT PIN (H6 Task 7): `commit`/`file_commit` name engrave master at the time this corpus was re-vendored, NOT the commit that carries the 68-row file -- H6 Task 2 had not landed on master yet. Re-record both once Task 2 is merged; sha256 and vectors are already the final values."
   ],
   "repo": "mnemonic-engrave",
   "remote": "git@github.com:bg002h/mnemonic-engrave.git",
   "path": "crates/me-cli/testdata/record_class_vectors.json",
-  "commit": "c05074f1d45970ca416785dfa9d9a812aaa21dbd",
-  "file_commit": "c05074f1d45970ca416785dfa9d9a812aaa21dbd",
+  "commit": "17ba56c1e843ca2a16a9dec4dfdf7ddc05aca6b0",
+  "file_commit": "17ba56c1e843ca2a16a9dec4dfdf7ddc05aca6b0",
   "repo_clean_when_recorded": true,
-  "sha256": "5b3960cad7f924f6f1e7f19ef49599814733cee4874d0f5eb48c28af4cd8b312",
-  "vectors": 47,
-  "recorded_at": "2026-09-02"
+  "sha256": "3575ccb0e12d12646c45dde583380199170cff815ea5e8d86d4d37d4a1c4abaf",
+  "vectors": 68,
+  "recorded_at": "2026-09-05"
 }

@@ -52,6 +52,20 @@ const (
 	ClassKey
 	ClassHash
 	ClassNow
+	// ClassPreimage is a hashlock preimage PLATE: the ms1 kind-0x03 string
+	// under the id `hash` (SPEC_ms_hashlock §1 rule 2). ClassPhrase is a
+	// `phrase:` record carrying a hashlock phrase and its method.
+	//
+	// BOTH ARE SECRET and both are BEARER: whoever holds one can spend any
+	// key-less hashlock path it unlocks. IsSecret answers true for each, which
+	// is what makes an unsealed payload holding one raise F1 at load and what
+	// makes `me sysw pack` seal by default.
+	//
+	// A hashlock phrase is NOT a BIP-39 passphrase (ruling L2): interchanging
+	// them opens a different wallet, so ClassPhrase is admitted at
+	// progWalletPolicy alone and progPassword's row stays {ClassPassphrase}.
+	ClassPreimage
+	ClassPhrase
 )
 
 // IsSecret extends the shipped predicate (seal/session.go:17, which is
@@ -62,7 +76,8 @@ const (
 // might do. A class claiming secrecy it cannot enforce is the over-claim F-123
 // was filed against.
 func (c Class) IsSecret() bool {
-	return c == ClassMnemonic || c == ClassCodex32Secret || c == ClassPassphrase
+	return c == ClassMnemonic || c == ClassCodex32Secret || c == ClassPassphrase ||
+		c == ClassPreimage || c == ClassPhrase
 }
 
 var ErrBadHex = errors.New("sysw: reserved prefix with a body that is not lowercase hex")
