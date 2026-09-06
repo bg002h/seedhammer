@@ -508,3 +508,47 @@ func TestHashlockPlatesListsAPaddedPreimageRecordLikeTheDoorDoes(t *testing.T) {
 		}
 	}
 }
+
+// TestHashlockPlatesStubReadsAPaddedMD1LikeTheDoorDoes is the H6 post-impl
+// delta review's M-3, one row down the same file as I-1: `sysw.Classify` trims
+// an md1 record before classifying it ClassMDMK, so the door counts a padded
+// md1 -- and `hashlockPlatesStub` must read the same record the same way, or
+// the plate silently loses its `mk1 stub` locator row (§6.3) while the door
+// and the census both say the payload holds a policy.
+//
+// MUTATION: drop the strings.TrimSpace in hashlockPlatesStub -> the three
+// padded sessions return an empty stub against the bare session's, and this
+// fails.
+func TestHashlockPlatesStubReadsAPaddedMD1LikeTheDoorDoes(t *testing.T) {
+	x := hashlock.PreimageSHA256([]byte(hashlockAnchorPhrase))
+	st := composerH6PlateState(t, "anchor a")
+	chunks, err := composerTemplateChunksFor(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := composerSessionWith(chunks, []string{composerTestPreimageRecord(t, x)})
+	wantStub, wantPolicy := hashlockPlatesStub(bare)
+	if wantStub == "" {
+		t.Fatalf("the bare fixture yields no stub -- the fixture is wrong")
+	}
+	for _, tc := range []struct{ name, before, after string }{
+		{"trailing space", "", " "},
+		{"leading space", " ", ""},
+		{"trailing CR", "", "\r"},
+	} {
+		padded := make([]string, len(chunks))
+		for i, c := range chunks {
+			padded[i] = tc.before + c + tc.after
+		}
+		s := composerSessionWith(padded, []string{composerTestPreimageRecord(t, x)})
+		_, _, _, inert := composerDoorCounts(s)
+		if inert != 0 {
+			t.Fatalf("%s: the door counts %d inert records -- the padded md1 no longer classifies", tc.name, inert)
+		}
+		stub, isPolicy := hashlockPlatesStub(s)
+		if stub != wantStub || isPolicy != wantPolicy {
+			t.Errorf("%s: stub (%q, %v), want (%q, %v) -- the plate would lose its mk1 stub row on a payload the door counts as holding a policy",
+				tc.name, stub, isPolicy, wantStub, wantPolicy)
+		}
+	}
+}

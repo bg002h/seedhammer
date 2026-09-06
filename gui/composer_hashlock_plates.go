@@ -163,8 +163,11 @@ func hashlockPlatesStub(s *syswSession) (stub string, isPolicy bool) {
 	}
 	var chunks []string
 	for _, r := range s.records {
-		if r.class == sysw.ClassMDMK && codex32.ValidMD(r.body) {
-			chunks = append(chunks, r.body)
+		// TrimSpace, as sysw.Classify did to call it ClassMDMK (post-impl
+		// delta review M-3): the door and this reader see the same md1.
+		body := strings.TrimSpace(r.body)
+		if r.class == sysw.ClassMDMK && codex32.ValidMD(body) {
+			chunks = append(chunks, body)
 		}
 	}
 	if len(chunks) == 0 {
