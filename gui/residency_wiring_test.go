@@ -100,11 +100,22 @@ func TestEngraveScreenReleasesResumeStateOnReturn(t *testing.T) {
 			t.Fatal("INCONCLUSIVE: the engrave screen exited before the job started")
 		}
 		time.Sleep(confirmDelay)
+		// synctest.Wait() before each check, not frames alone (F-490). The
+		// engrave goroutine does real work; a fixed number of frames is a bet
+		// that the host scheduler ran it enough times before we looked, and
+		// under load -- this test shares a shard with a 2,000,000-iteration KDF
+		// test -- it loses that bet and reports INCONCLUSIVE for a reason that
+		// has nothing to do with the code under test. Wait() returns only when
+		// every other goroutine in the bubble is durably blocked, so each
+		// iteration asks about a settled state rather than a racing one. The
+		// bound stays as a backstop against a job that genuinely never
+		// finishes; it is no longer what the test depends on.
 		for i := 0; i < 32; i++ {
-			if _, ok := frame(); !ok {
+			synctest.Wait()
+			if scr.job.Status().State == engraveDone {
 				break
 			}
-			if scr.job.Status().State == engraveDone {
+			if _, ok := frame(); !ok {
 				break
 			}
 		}
