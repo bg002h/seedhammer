@@ -14,7 +14,7 @@
 // policy holds d" is asserting the weaker of the two claims at the moment funds
 // depend on the stronger.
 //
-// composerState is a LOCAL of composerFlow (gui/composer_flow.go:34) with no
+// composerState is a LOCAL of composerFlow (gui/composer_flow.go) with no
 // path out of this package, which is why a hook is needed at all: there is no
 // accessor to add, no field to export, and giving the state a package-level home
 // to make it readable would be a far larger change than the seam.
