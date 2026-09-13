@@ -42,7 +42,17 @@ import (
 // contract as address.Supported, which is `Receive(desc, 0)` without an error,
 // and it cannot drift from what the emitters actually accept.
 func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint32, bool) (string, error), bool) {
-	// F-531: NO ADDRESS FOR A POLICY THAT REUSES A KEY SLOT, on either route.
+	// F-531: NO ADDRESS FOR A POLICY THAT REPEATS A KEY SLOT INSIDE ONE SCRIPT
+	// EXPRESSION, on either route.
+	//
+	// THAT IS NARROWER THAN "reuses a key", and the difference is F-533. The
+	// predicate is md.DuplicateKeySlot, which answers CORE's question by
+	// design and scopes to one expression, so tr(@0, multi_a(2,@0,@1)) -- the
+	// same slot at the internal key and in a leaf -- reports DuplicateNone and
+	// still derives, while BIP 388 forbids it and the Rust primary refuses it.
+	// Two corpus vectors sit in that gap. Do not read the line below as the
+	// wider rule; closing it needs a second predicate, not a wider read of
+	// this one.
 	//
 	// The gate sits ABOVE the deriver, and above it rather than inside it, so
 	// that the deriver stays callable by the test carrying the Bitcoin Core

@@ -279,33 +279,47 @@ const addrProofPerChain = 2
 // keyless template concludes the card was stripped -- a false diagnosis, on a
 // consent screen, about the card in their hand.
 //
-// FOUR CASES, IN THE ORDER THEY BECOME TRUE. Keylessness first because it is
-// the loudest fact about the card; the duplicate-key refusal before the generic
-// one because it is the only one of the four with a cause the operator can act
-// on.
+// THE REUSE WARNING IS A PREFIX, NOT AN ARM -- review I-2. It was a fourth
+// alternative, placed after the two keyless ones, and so it never fired for a
+// KEYLESS repeated-seat template: `wsh(sortedmulti(1,@0,@0,@1))` with the xpub
+// TLV dropped passes md.TemplateEngraveShapeGuardChunks, reaches the Engrave
+// Wallet Policy consent one confirm from steel, and read "Template has no keys
+// - no addresses." with nothing about the reuse. The operator sees "1-of-3",
+// counts two slots, and cuts.
+//
+// Reuse is a fact about the CARD; keylessness is a fact about what can be
+// derived from it. They are independent, so the sentence that names the reuse
+// leads and the sentence that explains the absence follows.
+//
+// THEN THREE CASES FOR THE ABSENCE, in the order they become true. The
+// duplicate one is reached only when keys are present -- with none, the honest
+// reason for having no address is that there is nothing to derive from, not the
+// refusal.
 func noAddressLines(md1 []string, keys []md.ExpandedKey) []string {
-	if len(keys) == 0 {
-		return []string{"", "Keyless template - no addresses.", "Verify off-device."}
-	}
-	for _, k := range keys {
-		if !k.XpubPresent {
-			return []string{"", "Template has no keys - no addresses.", "Verify off-device."}
-		}
-	}
 	// F-531: the refusal keeps the F-514 sentence. The warning lived on the
 	// branch that HAS addresses, so declining to derive would otherwise have
 	// dropped the operator on a screen that says nothing about the one thing
 	// wrong with their wallet -- which is the exact silence F-514 was filed to
 	// end, reintroduced by its own remedy.
+	var lines []string
+	dup := false
 	if slot, kind, err := md.DuplicateKeySlotChunks(md1); err == nil && kind != md.DuplicateNone {
-		return []string{"", composerCopyDuplicateKeys(slot, kind), "",
-			composerCopyNoAddressesDuplicateKeys(), "Verify off-device."}
+		lines = append(lines, "", composerCopyDuplicateKeys(slot, kind))
+		dup = true
+	}
+	switch {
+	case len(keys) == 0:
+		return append(lines, "", "Keyless template - no addresses.", "Verify off-device.")
+	case !allSlotsHaveXpub(keys):
+		return append(lines, "", "Template has no keys - no addresses.", "Verify off-device.")
+	case dup:
+		return append(lines, "", composerCopyNoAddressesDuplicateKeys(), "Verify off-device.")
 	}
 	// Keys are present and it still cannot derive: an unsupported shape
 	// (F-214). Say which of the two it is — "no addresses" for a policy that
 	// HAS keys means something different, and an operator who reads it as
 	// "keyless" would conclude the card was stripped.
-	return []string{"", "This device can't derive", "addresses for this policy."}
+	return append(lines, "", "This device can't derive", "addresses for this policy.")
 }
 
 // walletPolicyAddressLines derives the consent screen's address proof, or says
@@ -320,14 +334,19 @@ func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedK
 	if !ok {
 		return noAddressLines(md1, keys)
 	}
+	// NO DUPLICATE-KEY WARNING HERE, AND THAT IS NOT AN OVERSIGHT (review I-1).
+	// F-514 put one on this branch, qualifying the addresses below it. F-531
+	// made the branch unreachable for a duplicate: policyAddressAt refuses
+	// every non-DuplicateNone kind, so `ok` here implies DuplicateNone and the
+	// block could not fire. It was deleted rather than left, because a test
+	// asserting coverage of code that cannot run is worse than no test --
+	// mutating it away left 1312/1312 green.
+	//
+	// IF A DUPLICATE EVER DERIVES AGAIN -- F-533 proposes moving the refusal
+	// onto a BIP-388 predicate while the warning stays on md.DuplicateKeySlot,
+	// which would do exactly that -- this block has to come back, and it will
+	// have no coverage. noAddressLines is where the sentence lives now.
 	lines := []string{""}
-	// THE WARNING SITS WITH THE ADDRESSES IT QUALIFIES (F-514). The device
-	// derives these correctly, and a Core-based coordinator will refuse the
-	// descriptor they belong to; an operator shown an address and nothing else
-	// has no way to learn that before funding it.
-	if slot, kind, err := md.DuplicateKeySlotChunks(md1); err == nil && kind != md.DuplicateNone {
-		lines = append(lines, composerCopyDuplicateKeys(slot, kind), "")
-	}
 	for _, chain := range []struct {
 		label  string
 		change bool

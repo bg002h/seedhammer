@@ -7,6 +7,7 @@ import (
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/hashlock"
+	"seedhammer.com/md"
 )
 
 // ─── F-185: the CLASS check, not another per-screen trim ─────────────────────
@@ -307,6 +308,27 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 		{
 			"the end-of-engrave ms1 reminder (F-182's screen)",
 			bundleMs1ReminderText(),
+		},
+		// F-531's inspect refusal, both duplicate kinds AND both key forms.
+		// This block did not author it; review M-4 did -- the modal concatenates
+		// two sentences, and the only other test that reads this screen asserts
+		// a 40-character prefix of the FIRST one, so an edit pushing the refusal
+		// past the fold passes everything else. Measured at 159 and 145 drawn
+		// characters with 80px of margin, which is comfortable and is exactly
+		// the kind of number that stops being true after one copy edit.
+		{
+			"F-531's inspect refusal, fewer-keys, keyed",
+			composerCopyDuplicateKeys(0, md.DuplicateFewerKeys) + " " +
+				composerCopyNoAddressesDuplicateKeys(),
+		},
+		{
+			"F-531's inspect refusal, refused-by-core, keyed",
+			composerCopyDuplicateKeys(0, md.DuplicateRefusedByCore) + " " +
+				composerCopyNoAddressesDuplicateKeys(),
+		},
+		{
+			"F-531's inspect refusal, fewer-keys, keyless (warning alone)",
+			composerCopyDuplicateKeys(0, md.DuplicateFewerKeys),
 		},
 		{
 			"the build's unshowable-keys refusal",

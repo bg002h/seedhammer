@@ -35,6 +35,12 @@ var dupSeatVectors = []struct {
 	name    string
 	k       uint8
 	indices []uint8
+	// keyless drops the Pubkeys TLV, leaving a TEMPLATE that declares the
+	// slots and carries a key for none of them. Review I-2: this form passes
+	// TemplateEngraveShapeGuardChunks and reaches the consent screen one
+	// confirm from steel, so it needs a fixture of its own -- the keyed one
+	// exercises a different arm of every screen.
+	keyless bool
 	why     string
 }{
 	{
@@ -45,6 +51,11 @@ var dupSeatVectors = []struct {
 		name: "dup_seat_wsh_sortedmulti_k2", k: 2, indices: []uint8{0, 0, 1},
 		why: "2-of-3 over two slots: k >= 2, where the fewer-keys sentence is true",
 	},
+	{
+		name: "dup_seat_wsh_sortedmulti_k1_keyless", k: 1, indices: []uint8{0, 0, 1},
+		keyless: true,
+		why:     "the same shape with no keys: engravable as a template, and silent about the reuse until review I-2",
+	},
 }
 
 // dupSeatDescriptor builds the repeated-seat descriptor for one vector.
@@ -52,7 +63,7 @@ var dupSeatVectors = []struct {
 // The two cosigner keys are the encode_multisig test constants, so the fixture
 // shares its key material with the rest of this package rather than inventing
 // more of it.
-func dupSeatDescriptor(t *testing.T, k uint8, indices []uint8) *descriptor {
+func dupSeatDescriptor(t *testing.T, k uint8, indices []uint8, keyless bool) *descriptor {
 	t.Helper()
 	cc, pk := mkXpub65(t,
 		"101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
@@ -82,6 +93,10 @@ func dupSeatDescriptor(t *testing.T, k uint8, indices []uint8) *descriptor {
 	d.tree = node{tag: tagWsh, body: childrenBody{children: []node{{
 		tag: tagSortedMulti, body: multiKeysBody{k: k, indices: indices},
 	}}}}
+	if keyless {
+		d.tlv.pubPresent = false
+		d.tlv.pubkeys = nil
+	}
 	return d
 }
 
@@ -98,7 +113,7 @@ func TestDupSeatFixturesMatchTheirGenerator(t *testing.T) {
 	regen := os.Getenv("MD_REGEN_DUP_SEAT") == "1"
 	for _, v := range dupSeatVectors {
 		t.Run(v.name, func(t *testing.T) {
-			d := dupSeatDescriptor(t, v.k, v.indices)
+			d := dupSeatDescriptor(t, v.k, v.indices, v.keyless)
 			chunks, err := split(d)
 			if err != nil {
 				t.Fatalf("split: %v", err)
@@ -143,6 +158,22 @@ func TestDupSeatFixturesAreTheShapeTheyClaim(t *testing.T) {
 			tpl, keys, err := ExpandWalletPolicyChunks(chunks)
 			if err != nil {
 				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+			}
+			for _, k := range keys {
+				if k.XpubPresent == v.keyless {
+					t.Fatalf("keyless=%v but slot @%d XpubPresent=%v; the fixture is not "+
+						"the form it claims and the screens it exercises take the other arm",
+						v.keyless, k.Index, k.XpubPresent)
+				}
+			}
+			if v.keyless {
+				// The whole point of the keyless form: the device will ENGRAVE
+				// it. If the shape guard ever refuses it, review I-2's screen is
+				// unreachable and its test is testing nothing.
+				if err := TemplateEngraveShapeGuardChunks(chunks); err != nil {
+					t.Fatalf("the keyless repeated-seat template is refused for engrave (%v), "+
+						"so the consent screen it goes silent on is no longer reachable", err)
+				}
 			}
 			if tpl.M != len(v.indices) {
 				t.Errorf("M=%d, want %d seats", tpl.M, len(v.indices))

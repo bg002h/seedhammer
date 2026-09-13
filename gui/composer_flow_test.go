@@ -579,7 +579,8 @@ func TestConsentNamesTheScript(t *testing.T) {
 // on the taproot pair — which Core ACCEPTS — would be a warning the operator
 // learns to read past.
 //
-// MUTATION: remove the duplicate-key block from composerConsentLinesFor and the
+// MUTATION: remove the duplicate-key block from noAddressLines -- which is
+// where composerConsentLinesFor's sentence comes from since F-531 -- and the
 // wsh case fails; make md.DuplicateKeySlot ignore the tap-leaf scoping and the
 // taproot cases fail.
 func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
@@ -649,9 +650,17 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 // is NOT, and the deriver is asserted absent directly. A gate that survives the
 // removal of its own subject is not a gate.
 //
-// MUTATION: delete the block in any of the three producers and its row fails;
-// remove either gate (gui/md1_expand.go's repeatsASeat arm, or
-// complexAddressSource's) and the address half fails.
+// MUTATION, CORRECTED at review I-1. The producers this once named --
+// composerConsentLinesFor's, walletPolicyAddressLines' and policyIDHeader's
+// F-514 blocks -- were made UNREACHABLE by F-531's gates and have been deleted;
+// the reviewer demonstrated that removing all three left 1312/1312 green, so
+// the note asserting they were covered was the second time this gate went
+// vacuous while claiming it had not.
+//
+// The live producers are noAddressLines (gui/wallet_policy.go) for both consent
+// rows and duplicateRefusalBody (gui/md1_gather.go) for the inspect row.
+// Deleting either turns its rows red; removing either gate (repeatsASeat, or
+// complexAddressSource's) turns the address half red.
 func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	chunks := loadVectorChunks(t, "keyed_wsh_timelock_hashlock")
 	slot, kind, err := md.DuplicateKeySlotChunks(chunks)
@@ -748,7 +757,10 @@ func assertCarriesWarning(t *testing.T, lines []string, want, where string) {
 func assertShowsNoAddress(t *testing.T, lines []string, where string) {
 	t.Helper()
 	joined := strings.Join(lines, "\n")
-	for _, forbidden := range []string{"bc1", "Receive 0:", "Change 0:"} {
+	// "bc1q"/"bc1p", NOT "bc1" (review N-1): these same line sets carry 32-hex
+	// wallet ids, and an id containing "bc1" would fail here with an
+	// address-shaped accusation about a hex string.
+	for _, forbidden := range []string{"bc1q", "bc1p", "Receive 0:", "Change 0:"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("%s offers an address (%q) for a policy that reuses a key. The "+
 				"device does not derive for this shape (F-531), so anything address-shaped "+
@@ -771,7 +783,8 @@ func assertShowsNoAddress(t *testing.T, lines []string, where string) {
 //	wsh(and_v(v:pk(A),pk(A)))  "is not sane: contains duplicate public keys"
 //
 // So the multisig shape keeps a warning — it is the MORE dangerous of the two,
-// since one key filling two seats can meet the threshold alone — but it gets
+// since one key filling two seats drops the distinct keys needed from k to
+// max(1, k-m+1) — but it gets
 // the sentence that is true of it.
 //
 // MUTATION: make kindForRoot always return DuplicateRefusedByCore and the

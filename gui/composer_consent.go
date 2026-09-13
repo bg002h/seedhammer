@@ -214,11 +214,11 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 		// refusal except one, and F-531 made a second of them reachable here.
 		return append(lines, noAddressLines(chunks, keys)...), nil
 	}
+	// NO DUPLICATE-KEY WARNING HERE (review I-1): F-531's gates make this
+	// branch unreachable for a duplicate, so the F-514 block that used to sit
+	// on it could not fire. It lives in noAddressLines now, on the branch
+	// above. See the longer note at gui/wallet_policy.go's equivalent.
 	lines = append(lines, "")
-	// Same warning, same reason, on the composer's own consent surface (F-514).
-	if slot, kind, err := md.DuplicateKeySlotChunks(chunks); err == nil && kind != md.DuplicateNone {
-		lines = append(lines, composerCopyDuplicateKeys(slot, kind), "")
-	}
 	for _, chain := range []struct {
 		label  string
 		change bool

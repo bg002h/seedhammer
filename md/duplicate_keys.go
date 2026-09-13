@@ -21,13 +21,24 @@ package md
 //
 // This predicate answers CORE's question, because that is the one that predicts
 // whether the wallet an operator is about to engrave will be accepted by the
-// coordinator they will try to spend from. The device derives a fundable
-// address for that wsh policy today and says nothing (F-514); a plate cut from
-// it is a plate whose descriptor a Core-based coordinator refuses.
+// coordinator they will try to spend from.
 //
-// It is a WARNING's predicate, never a refusal's. Refusing on-device would
-// strand a card that may already be engraved, which is worse than telling the
-// operator nothing at all.
+// IT IS NOW A REFUSAL'S PREDICATE TOO (F-531), and this paragraph used to say
+// the opposite -- "a WARNING's predicate, never a refusal's", on the ground
+// that refusing would strand an already-engraved card. The device declines to
+// derive an ADDRESS for any policy this reports, on both address routes, while
+// the card still decodes, displays, verifies and warns; so nothing is stranded,
+// and what F-514 weighed was the wider refusal of the card itself.
+//
+// THAT MAKES THE SCOPING ABOVE LOAD-BEARING IN A SECOND WAY. As a warning's
+// predicate, answering Core's question rather than BIP 388's was simply
+// correct. As a refusal's, it is narrower than the operator's ruling on
+// BIP-388-forbidden wallets: tr(@0, multi_a(2,@0,@1)) repeats a slot across the
+// internal key and a leaf, BIP 388 forbids it, the Rust primary refuses it, and
+// this reports DuplicateNone because Core imports it. Two vectors are in that
+// gap today and the corpus gate names them. Filed as F-533, whose remedy is a
+// SECOND predicate for BIP 388's rule -- not a change to this one, whose two
+// sentences are Core verdicts and would become false.
 
 // DuplicateKind says WHICH harm a repeated slot carries, because the two are
 // different and an operator told the wrong one looks in the wrong place.
@@ -145,8 +156,10 @@ func kindOf(dup bool, k DuplicateKind) DuplicateKind {
 // MultisigDescriptor, and "contains duplicate public keys" comes from
 // miniscript's IsSane, which such a descriptor never reaches. So telling the
 // operator that Core refuses it would be FALSE for that shape -- and the shape
-// is not harmless, it is the more dangerous of the two: one key filling two
-// seats of a threshold can meet it alone.
+// is not harmless, it is the more dangerous of the two: a slot filling m >= 2
+// seats drops the distinct keys needed from k to max(1, k-m+1). (This said "can
+// meet it alone", which is false for every k > m and was retracted at review
+// I-5; the retraction had reached gui/composer_copy.go and not here.)
 func kindForRoot(n node) DuplicateKind {
 	switch n.tag {
 	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:

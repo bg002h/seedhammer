@@ -174,7 +174,9 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 // MultisigDescriptor, and the duplicate-key refusal comes from miniscript's
 // IsSane, which such a descriptor never reaches. Telling the operator Core
 // refuses it would be false — and that shape is the MORE dangerous one, since
-// one key filling two seats can meet the threshold alone, so it needs the other
+// one key filling two seats drops the distinct keys needed from k to
+// max(1, k-m+1) (NOT "can meet the threshold alone", retracted at review I-5),
+// so it needs the other
 // sentence rather than no sentence.
 //
 // MUTATION: make kindForRoot always return DuplicateRefusedByCore and the

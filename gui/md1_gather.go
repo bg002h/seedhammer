@@ -171,6 +171,22 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 		}
 		return
 	}
+	// THE REUSE IS ANNOUNCED BEFORE THE ROUTING, not inside one arm of it
+	// (review I-2). It is a fact about the CARD; which arm renders the card is
+	// a fact about this device. Putting it in the expandUnsupported arm alone
+	// left the KEYLESS repeated-seat template -- expandTemplateOnly -- going
+	// straight to md1DisplayFlow with no modal, no header and no sentence, for
+	// the very shape F-531 refuses.
+	//
+	// AND IT REPLACES "Complex policy - display only" for these cards, which
+	// was the wrong sentence twice over: a sorted multisig is the simplest
+	// shape this device renders, and the operator would read a device
+	// limitation where there is a fact about their wallet.
+	if body, ok := duplicateRefusalBody(collected, keys); ok {
+		showError(ctx, th, "Inspect descriptor", body)
+		md1DisplayFlow(ctx, th, tpl)
+		return
+	}
 	desc, status := expandedToDescriptor(tpl, keys)
 	switch status {
 	case expandOK:
@@ -190,26 +206,28 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 			md1PolicyFlow(ctx, th, tpl, policyIDHeader(collected), at)
 			return
 		}
-		// F-531: A REFUSAL WITH A REASON. Both address routes now decline a
-		// policy that reuses a key slot, and this branch is where such a card
-		// lands. "Complex policy - display only" would be the wrong sentence
-		// for it twice over: the policy is not complex -- a sorted multisig is
-		// the simplest shape this device renders -- and the operator would read
-		// a device limitation where there is a fact about their wallet.
-		//
-		// The warning FIRST and the consequence second, in that order, because
-		// the error screen is what stops them; policyIDHeader, which carries
-		// the same sentence on the screen this card no longer reaches, is not
-		// on this path at all.
-		if slot, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
-			showError(ctx, th, "Inspect descriptor",
-				composerCopyDuplicateKeys(slot, kind)+" "+composerCopyNoAddressesDuplicateKeys())
-			md1DisplayFlow(ctx, th, tpl)
-			return
-		}
 		showError(ctx, th, "Inspect descriptor", "Complex policy - display only.")
 		md1DisplayFlow(ctx, th, tpl)
 	}
+}
+
+// duplicateRefusalBody is the modal text for a card that reuses a key slot, or
+// !ok when it does not.
+//
+// TWO SENTENCES WHEN THERE ARE KEYS, ONE WHEN THERE ARE NOT. The refusal
+// sentence explains a MISSING address, and a keyless template was never going
+// to have one -- saying the device declines to derive would name a cause that
+// is not the operative one. The warning is owed either way.
+func duplicateRefusalBody(collected []string, keys []md.ExpandedKey) (string, bool) {
+	slot, kind, err := md.DuplicateKeySlotChunks(collected)
+	if err != nil || kind == md.DuplicateNone {
+		return "", false
+	}
+	body := composerCopyDuplicateKeys(slot, kind)
+	if len(keys) > 0 && allSlotsHaveXpub(keys) {
+		body += " " + composerCopyNoAddressesDuplicateKeys()
+	}
+	return body, true
 }
 
 // policyIDHeader labels the wallet id this screen is showing, or returns nothing
@@ -225,17 +243,10 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 // this MY wallet".
 func policyIDHeader(collected []string) []string {
 	var out []string
-	// THE WARNING LEADS. This screen pages, and a warning below the fold is a
-	// warning unread; the policy id is a reference the operator copies at their
-	// leisure, the warning is the thing that should stop them.
-	//
-	// WRAPPED ON WORD BOUNDARIES here, not left to the caller. md1PolicyFlow
-	// hard-chunks anything over 20 bytes, which is right for an id or a bech32
-	// address and wrong for a sentence: it rendered this one as nine mid-word
-	// fragments -- "twic|e", "Bit|coin", "dupl|icate" (review M-6).
-	if slot, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
-		out = append(out, wrapWords(composerCopyDuplicateKeys(slot, kind), 20)...)
-	}
+	// NO DUPLICATE-KEY WARNING HERE EITHER (review I-1). This header is built
+	// only inside `if at, ok := complexAddressSource(...); ok`, and that gate
+	// now refuses every duplicate, so the F-514 block here could not fire. The
+	// card is stopped by the modal above, before this screen is reached at all.
 	if id, err := md.WalletPolicyIdChunks(collected); err == nil {
 		out = append(out, "Policy id: "+hex.EncodeToString(id[:]))
 	}

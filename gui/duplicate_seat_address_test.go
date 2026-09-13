@@ -359,3 +359,114 @@ func TestEmitterMatchesBitcoinCoreOnARepeatedSeatPolicy(t *testing.T) {
 		})
 	}
 }
+
+// ─── review I-2: the KEYLESS form of the same shape ──────────────────────────
+//
+// The warning was an ARM of noAddressLines, placed after the two keyless ones,
+// so it never fired for a repeated-seat template carrying no keys. That card is
+// not a curiosity: md.TemplateEngraveShapeGuardChunks admits it, the Engrave
+// Wallet Policy consent is one confirm and one bundle review from bundleEngrave,
+// and the screen said "Template has no keys - no addresses." and nothing else.
+// The operator reads "P2WSH 1-of-3 multisig (sorted)", counts the two slots
+// listed under it, and cuts steel.
+//
+// Reuse is a fact about the CARD and keylessness is a fact about what can be
+// derived from it, so the sentence that names the reuse now LEADS both.
+const dupSeatKeyless = "dup_seat_wsh_sortedmulti_k1_keyless"
+
+func TestKeylessRepeatedSeatTemplateIsNotSilent(t *testing.T) {
+	chunks := forkBuiltChunks(t, dupSeatKeyless)
+	slot, kind, err := md.DuplicateKeySlotChunks(chunks)
+	if err != nil {
+		t.Fatalf("DuplicateKeySlotChunks: %v", err)
+	}
+	if kind == md.DuplicateNone {
+		t.Fatal("the keyless fixture carries no duplicate, so this test asserts nothing")
+	}
+	want := composerCopyDuplicateKeys(slot, kind)
+
+	// THE ENGRAVE CONSENT ITSELF, not the address block beneath it. This is the
+	// screen the plate is cut from, and walletPolicyConsentLines is what it
+	// renders; asserting one layer down would have passed while the screen an
+	// operator actually reads stayed silent.
+	lines, err := walletPolicyConsentLines(chunks, nil)
+	if err != nil {
+		t.Fatalf("walletPolicyConsentLines: %v", err)
+	}
+	assertCarriesWarning(t, lines, want, "the Engrave Wallet Policy consent")
+	assertShowsNoAddress(t, lines, "the Engrave Wallet Policy consent")
+
+	consent, err := composerConsentLinesFor(chunks, nil, 0)
+	if err != nil {
+		t.Fatalf("composerConsentLinesFor: %v", err)
+	}
+	assertCarriesWarning(t, consent, want, "the composer consent screen")
+
+	// AND THE REASON FOR THE ABSENCE IS THE KEYLESSNESS, not the refusal. Both
+	// sentences are true of this card; only one of them is why there is no
+	// address, and naming the other would send the operator to fix the wrong
+	// thing.
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "no addresses") {
+		t.Errorf("the consent never says there are no addresses:\n%s", joined)
+	}
+	if strings.Contains(joined, composerCopyNoAddressesDuplicateKeys()) {
+		t.Errorf("the consent blames the refusal for a keyless template's missing "+
+			"addresses. There was nothing to derive from; the reuse is a separate "+
+			"fact and is stated separately:\n%s", joined)
+	}
+
+	t.Run("inspect descriptor", func(t *testing.T) {
+		// expandTemplateOnly, the arm that had no modal at all: a keyless card
+		// went straight to md1DisplayFlow. This is why the announcement was
+		// hoisted above the routing rather than added to one more arm.
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, quit := runUI(ctx, func() {
+				gatheredDescriptorFlow(ctx, &descriptorTheme, chunks)
+			})
+			defer quit()
+			if got, ok := pumpUntil(frame, want[:40], 24); !ok {
+				t.Errorf("the Inspect-descriptor screen shows a keyless repeated-seat "+
+					"template and never mentions the reuse.\nLast frame: %q", got)
+			}
+		})
+	})
+}
+
+// TestTheRestoreDocNamesTheReuse is review M-3: the sentence added to the
+// restore document had no test, and deleting it left 1312/1312 green.
+//
+// It matters more than most copy. §4.4 calls the restore document "the one that
+// matters most", and it is what a reader holds in five years with no device
+// behind it -- "Addresses unavailable for this policy shape" tells that reader
+// the shape was exotic, when the truth is that their wallet reuses a key.
+func TestTheRestoreDocNamesTheReuse(t *testing.T) {
+	for _, name := range []string{"dup_seat_wsh_sortedmulti_k1", "dup_seat_wsh_sortedmulti_k2"} {
+		t.Run(name, func(t *testing.T) {
+			chunks := forkBuiltChunks(t, name)
+			tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
+			if err != nil {
+				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+			}
+			lines, hasAddr, err := multisigRestoreLines(tpl, keys)
+			if err != nil {
+				t.Fatalf("multisigRestoreLines: %v", err)
+			}
+			if hasAddr {
+				t.Fatal("the restore doc derives addresses for a repeated-seat policy")
+			}
+			joined := strings.Join(lines, "\n")
+			if !strings.Contains(joined, "seats one key") {
+				t.Errorf("the restore document does not name the reuse, so a reader is told "+
+					"the SHAPE was unsupported when the fact is that their wallet reuses a "+
+					"key:\n%s", joined)
+			}
+			if strings.Contains(joined, "Addresses unavailable for this policy shape.") {
+				t.Errorf("the restore document fell back to the generic sentence:\n%s", joined)
+			}
+		})
+	}
+}
