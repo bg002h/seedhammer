@@ -186,8 +186,11 @@ func composerScriptLine(tpl md.Template) string {
 //   - composerStartStep passes its running `w`, which on a second pass through
 //     the Back leg is the operator's own last pick rather than the wrapper in
 //     force. That is the same rule every other picker follows -- Back preserves
-//     what was entered -- and a no-op confirm there is still gated by §8j and
-//     then by §4e, so it proposes rather than commits.
+//     what was entered -- and a no-op confirm there is still gated by §8j, a
+//     hold-to-confirm, so it proposes rather than commits. (§4e refuses too,
+//     but only for the legacy wrappers: md/compose.go's isLegacy() is
+//     ComposeSh || ComposeShWsh, so a second-pass pick of tr or wsh meets §8j
+//     alone.)
 //
 // Do not "fix" the second case into the first without reading both: making the
 // Back leg forget the operator's pick is the mirror of the bug this closes.

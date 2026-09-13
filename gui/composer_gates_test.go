@@ -1574,8 +1574,14 @@ func rootName(k md.ScriptKind, innerWsh bool) string {
 }
 
 func TestWrapperLabelsNameTheirOwnWrapper(t *testing.T) {
-	if len(composerWrapperLabels) != len(composerWrapperOrder) {
-		t.Fatalf("the tables are %d labels and %d wrappers: the picker indexes both",
+	// The count is pinned, not just matched. Equal lengths alone are satisfied
+	// by two EMPTY tables, and then the loop below never runs and this test
+	// passes having asserted nothing (review N-3). Four is the number of script
+	// wrappers the composer offers; a fifth is a deliberate change that should
+	// come here and add its root to the table below.
+	if len(composerWrapperLabels) != 4 || len(composerWrapperOrder) != 4 {
+		t.Fatalf("the tables are %d labels and %d wrappers, want 4 and 4: the picker "+
+			"indexes both, and two empty tables would make this test vacuous",
 			len(composerWrapperLabels), len(composerWrapperOrder))
 	}
 	// token -> the DECODED root that wrapper must produce. sh(wsh(...)) and bare
