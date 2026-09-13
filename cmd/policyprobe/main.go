@@ -64,6 +64,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -189,9 +190,36 @@ func probe(c caseIn) (res caseOut) {
 
 	tpl, keys, err := md.ExpandWalletPolicyChunks(c.Chunks)
 	if err != nil {
-		res.Stage = stageExpand
-		res.Error = err.Error()
-		return res
+		// A card that is ONE md1 string is not a chunk set, and md.Reassemble
+		// requires the chunked header: it reads the first four bits as a wire
+		// version, finds something else, and reports "md: wire version
+		// mismatch". That sentence is true about a header this card does not
+		// have and badly false about the card, which the device reads without
+		// complaint -- 13 of the 67 vendored vectors are exactly this shape, and
+		// every one of them was being counted as a codec failure.
+		//
+		// So ask the decoder the device asks for a single card. If it reads,
+		// the card is fine and the probe carries on with NO keys, which is the
+		// literal truth about a keyless template and which the address router
+		// will refuse on its own terms. If it does not read, the original chunk
+		// error stands: that is the honest error for a card that is neither.
+		tpl2, serr := singleStringTemplate(c.Chunks)
+		if serr != nil {
+			res.Stage = stageExpand
+			// For a card that IS one string, the chunk-set error is never the
+			// right one to report: it describes a header this card was never
+			// supposed to have. sh_wpkh is the case in the corpus -- the device
+			// refuses it as "md: missing explicit origin", which is a documented
+			// refusal (md/testdata_test.go:35), and reporting it as a wire
+			// version mismatch would send a reader looking for a codec bug.
+			if errors.Is(serr, errNotOneString) {
+				res.Error = err.Error()
+			} else {
+				res.Error = serr.Error()
+			}
+			return res
+		}
+		tpl, keys = tpl2, nil
 	}
 	n := len(keys)
 	res.Keys = &n
@@ -231,6 +259,24 @@ func probe(c caseIn) (res caseOut) {
 	res.Change = change
 	return res
 }
+
+// singleStringTemplate reads a card that is one md1 string rather than a chunk
+// set, via the same md.Decode the device uses for one.
+//
+// It is deliberately NOT a fallback for a malformed chunk set: it insists on
+// exactly one string, so a genuine multi-chunk failure can never be re-labelled
+// as a single-card success. A chunk set that lost a chunk must stay an expand
+// failure, because "the operator is missing a card" is the finding.
+func singleStringTemplate(chunks []string) (md.Template, error) {
+	if len(chunks) != 1 {
+		return md.Template{}, errNotOneString
+	}
+	return md.Decode(chunks[0])
+}
+
+// errNotOneString keeps the "several chunks" case from reaching md.Decode,
+// whose error would then describe the first chunk rather than the set.
+var errNotOneString = errors.New("policyprobe: not a single-string card")
 
 // sourceRefusalNote describes a refusal for the driver's triage.
 //
