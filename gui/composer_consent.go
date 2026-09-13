@@ -213,8 +213,8 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	}
 	lines = append(lines, "")
 	// Same warning, same reason, on the composer's own consent surface (F-514).
-	if slot, dup, err := md.DuplicateKeySlotChunks(chunks); err == nil && dup {
-		lines = append(lines, composerCopyDuplicateKeys(slot), "")
+	if slot, kind, err := md.DuplicateKeySlotChunks(chunks); err == nil && kind != md.DuplicateNone {
+		lines = append(lines, composerCopyDuplicateKeys(slot, kind), "")
 	}
 	for _, chain := range []struct {
 		label  string

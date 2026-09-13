@@ -298,8 +298,8 @@ func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedK
 	// derives these correctly, and a Core-based coordinator will refuse the
 	// descriptor they belong to; an operator shown an address and nothing else
 	// has no way to learn that before funding it.
-	if slot, dup, err := md.DuplicateKeySlotChunks(md1); err == nil && dup {
-		lines = append(lines, composerCopyDuplicateKeys(slot), "")
+	if slot, kind, err := md.DuplicateKeySlotChunks(md1); err == nil && kind != md.DuplicateNone {
+		lines = append(lines, composerCopyDuplicateKeys(slot, kind), "")
 	}
 	for _, chain := range []struct {
 		label  string

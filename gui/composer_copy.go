@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"seedhammer.com/hashlock"
+
+	"seedhammer.com/md"
 )
 
 // Every operator-facing string the wallet-policy COMPOSER draws, in one file
@@ -318,19 +320,36 @@ func composerCopyIdChanged() string {
 // four bytes of an id that did not move -- and is refused by slotMatchesCard.
 // Saying "this id changed" there would be false, and saying nothing at all was
 // the defect review I-2 constructed.
-// composerCopyDuplicateKeys is the §8s warning for a policy whose miniscript
-// repeats a key — Bitcoin Core's "contains duplicate public keys" sanity rule.
+// composerCopyDuplicateKeys is the §8s warning for a policy whose script repeats
+// a key, in the words of the harm that repeat actually carries.
 //
-// It names CORE, not BIP 388, because Core's verdict is the one that predicts
-// what happens next: the operator takes this wallet to a coordinator, and a
-// Core-based coordinator refuses the descriptor outright. Naming the standard
-// instead would be true and useless at the moment it is read.
+// TWO HARMS, TWO SENTENCES, because Bitcoin Core treats the two shapes
+// differently and an operator told the wrong one looks in the wrong place.
+// Measured on Core 25.0.0 via getdescriptorinfo, same key twice:
 //
-// A WARNING AND NOT A REFUSAL. The device derives a correct, fundable address
-// for this policy, and refusing here would strand a card that may already be
-// engraved — worse than telling the operator nothing. What was unacceptable was
-// saying nothing at all while showing them an address to send to (F-514).
-func composerCopyDuplicateKeys(slot uint8) string {
+//	wsh(sortedmulti(2,A,A,B))  ACCEPTED  -- Core imports it happily
+//	wsh(and_v(v:pk(A),pk(A)))  "is not sane: contains duplicate public keys"
+//
+// Core parses a top-level multi/sortedmulti as a MultisigDescriptor and never
+// runs miniscript's sanity check on it. An earlier draft of this copy told the
+// operator Core refuses the descriptor in BOTH cases; for the multisig one that
+// is simply false, and a false sentence on the screen that consents to steel is
+// worse than no sentence.
+//
+// The multisig case is the MORE dangerous of the two, which is why it keeps a
+// warning rather than losing one: one key filling two seats of a threshold can
+// meet that threshold alone, so a 2-of-3 with one key twice is a 1-of-2 wearing
+// a 2-of-3's label.
+//
+// A WARNING AND NOT A REFUSAL, in both cases. The device derives a correct,
+// fundable address either way, and refusing here would strand a card that may
+// already be engraved. What was unacceptable was saying nothing at all while
+// showing an address to send to (F-514).
+func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
+	if kind == md.DuplicateInMultisig {
+		return fmt.Sprintf("Slot @%d fills two seats of this multisig, so one key can "+
+			"meet the threshold alone. Check this is what you meant before you fund it.", slot)
+	}
 	return fmt.Sprintf("Slot @%d is used twice in one script. Bitcoin Core refuses this "+
 		"descriptor (\"duplicate public keys\"), so a coordinator may not import it. "+
 		"Check before you fund it.", slot)

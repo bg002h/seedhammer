@@ -205,9 +205,20 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 // refuses without them), so the key-dependent one is the one that answers "is
 // this MY wallet".
 func policyIDHeader(collected []string) []string {
-	id, err := md.WalletPolicyIdChunks(collected)
-	if err != nil {
-		return nil
+	var out []string
+	if id, err := md.WalletPolicyIdChunks(collected); err == nil {
+		out = append(out, "Policy id: "+hex.EncodeToString(id[:]))
 	}
-	return []string{"Policy id: " + hex.EncodeToString(id[:])}
+	// THE DUPLICATE-KEY WARNING BELONGS ON EVERY SCREEN THAT SHOWS AN ADDRESS
+	// (F-514, review C-1). This header feeds md1PolicyFlow, which puts a live
+	// address deriver on Button2 and lists real mainnet addresses -- it was the
+	// third such surface, and the one the finding was originally measured on,
+	// and it carried no warning while the two consent screens did.
+	//
+	// It is appended even when the id could not be computed: an unreadable id
+	// is no reason to withhold a warning about the addresses below it.
+	if slot, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
+		out = append(out, composerCopyDuplicateKeys(slot, kind))
+	}
+	return out
 }

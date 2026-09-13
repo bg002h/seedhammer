@@ -45,27 +45,32 @@ func vectorChunksFor(t *testing.T, name string) []string {
 // table: warning about a wallet Core accepts trains the operator to tap through
 // the warning that matters.
 //
-// MUTATION: make duplicateInTapTree count the whole taptree at once instead of
-// per leaf, and both tr rows fail. Scope the wsh case to a single or_i arm and
-// the wsh row fails.
+// MUTATION: scope the wsh case to a single or_i arm and the wsh row fails.
+//
+// AND ONE THAT DOES NOT, stated because an earlier version of this comment
+// claimed it did (review I-3): counting the whole taptree at once instead of
+// per leaf leaves BOTH tr rows green. It has to, and the reason is in
+// TestDuplicateKeySlotScopesPerTapLeaf: no vendored vector separates the two
+// scopings, because the corpus's only taproot reuse is between the internal key
+// and a leaf, which both scopings report identically. That hand-built test is
+// the ONLY coverage the scoping rule has, so do not delete it as redundant.
 func TestDuplicateKeySlotMatchesBitcoinCore(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		wantDup bool
-		why     string
+		name string
+		want DuplicateKind
+		why  string
 	}{
-		{"keyed_tr_multi_a", false, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_tr_sortedmulti_a", false, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_wsh_timelock_hashlock", true, "Core REFUSES: one slot repeats inside one miniscript"},
+		{"keyed_tr_multi_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_tr_sortedmulti_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_wsh_timelock_hashlock", DuplicateInMiniscript, "Core REFUSES: one slot repeats inside one miniscript"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			slot, dup, err := DuplicateKeySlotChunks(vectorChunksFor(t, tc.name))
+			slot, kind, err := DuplicateKeySlotChunks(vectorChunksFor(t, tc.name))
 			if err != nil {
 				t.Fatalf("DuplicateKeySlotChunks: %v", err)
 			}
-			if dup != tc.wantDup {
-				t.Errorf("duplicate=%v (slot @%d), want %v -- %s",
-					dup, slot, tc.wantDup, tc.why)
+			if kind != tc.want {
+				t.Errorf("kind=%v (slot @%d), want %v -- %s", kind, slot, tc.want, tc.why)
 			}
 		})
 	}
@@ -82,12 +87,12 @@ func TestDuplicateKeySlotIsQuietOnPoliciesWithoutReuse(t *testing.T) {
 		"keyed_compose_preset_plain_multisig",
 	} {
 		t.Run(name, func(t *testing.T) {
-			slot, dup, err := DuplicateKeySlotChunks(vectorChunksFor(t, name))
+			slot, kind, err := DuplicateKeySlotChunks(vectorChunksFor(t, name))
 			if err != nil {
 				t.Fatalf("DuplicateKeySlotChunks: %v", err)
 			}
-			if dup {
-				t.Errorf("reported @%d duplicated in a policy with no key reuse", slot)
+			if kind != DuplicateNone {
+				t.Errorf("reported @%d as %v in a policy with no key reuse", slot, kind)
 			}
 		})
 	}
@@ -126,7 +131,7 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 
 	t.Run("one key in two leaves is not a duplicate", func(t *testing.T) {
 		// Core sees two expressions, each holding @0 once.
-		if slot, dup := DuplicateKeySlot(trWith(branch(key(0), key(0)))); dup {
+		if slot, kind := DuplicateKeySlot(trWith(branch(key(0), key(0)))); kind != DuplicateNone {
 			t.Errorf("reported @%d duplicated across two LEAVES; each leaf is its own "+
 				"miniscript expression and Core accepts this", slot)
 		}
@@ -135,8 +140,8 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 	t.Run("one key twice in ONE leaf is a duplicate", func(t *testing.T) {
 		// multi(2,@0,@0) inside a single leaf: one expression, key repeated.
 		leaf := node{tag: tagMulti, body: multiKeysBody{k: 2, indices: []uint8{0, 0}}}
-		slot, dup := DuplicateKeySlot(trWith(branch(leaf, key(1))))
-		if !dup {
+		slot, kind := DuplicateKeySlot(trWith(branch(leaf, key(1))))
+		if kind == DuplicateNone {
 			t.Fatal("a key repeated inside ONE leaf went unreported; that is the shape " +
 				"Core refuses as \"contains duplicate public keys\"")
 		}
@@ -153,4 +158,59 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 				"traversal order", slot, dup)
 		}
 	})
+}
+
+// TestDuplicateKindSplitsByWhatCoreDoes pins the discriminant, which is the
+// half of this predicate that decides WHICH SENTENCE the operator reads.
+//
+// Measured on Bitcoin Core 25.0.0, getdescriptorinfo on a throwaway regtest
+// datadir, same key twice:
+//
+//	wsh(sortedmulti(2,A,A,B))  ACCEPTED
+//	wsh(multi(2,A,A,B))        ACCEPTED
+//	wsh(and_v(v:pk(A),pk(A)))  "is not sane: contains duplicate public keys"
+//
+// Core parses a top-level multi/sortedmulti under wsh/sh as a
+// MultisigDescriptor, and the duplicate-key refusal comes from miniscript's
+// IsSane, which such a descriptor never reaches. Telling the operator Core
+// refuses it would be false — and that shape is the MORE dangerous one, since
+// one key filling two seats can meet the threshold alone, so it needs the other
+// sentence rather than no sentence.
+//
+// MUTATION: make kindForRoot always return DuplicateInMiniscript and the
+// multisig rows fail.
+func TestDuplicateKindSplitsByWhatCoreDoes(t *testing.T) {
+	dup := func(tag tag) node {
+		return node{tag: tag, body: multiKeysBody{k: 2, indices: []uint8{0, 0, 1}}}
+	}
+	wsh := func(inner node) node {
+		return node{tag: tagWsh, body: childrenBody{children: []node{inner}}}
+	}
+	shWsh := func(inner node) node {
+		return node{tag: tagSh, body: childrenBody{children: []node{wsh(inner)}}}
+	}
+	// and_v(v:pk(@0), pk(@0)) — a miniscript expression, not a bare threshold.
+	nested := node{tag: tagAndV, body: childrenBody{children: []node{
+		{tag: tagPkK, body: keyArgBody{index: 0}},
+		{tag: tagPkK, body: keyArgBody{index: 0}},
+	}}}
+
+	for _, tc := range []struct {
+		name string
+		tree node
+		want DuplicateKind
+	}{
+		{"wsh(sortedmulti)", wsh(dup(tagSortedMulti)), DuplicateInMultisig},
+		{"wsh(multi)", wsh(dup(tagMulti)), DuplicateInMultisig},
+		{"sh(wsh(sortedmulti))", shWsh(dup(tagSortedMulti)), DuplicateInMultisig},
+		{"wsh(and_v(pk,pk))", wsh(nested), DuplicateInMiniscript},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			slot, kind := DuplicateKeySlot(tc.tree)
+			if kind != tc.want {
+				t.Errorf("%s reported %v (@%d), want %v -- the operator would read the "+
+					"sentence that is not true of this shape", tc.name, kind, slot, tc.want)
+			}
+		})
+	}
 }

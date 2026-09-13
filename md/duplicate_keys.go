@@ -29,8 +29,27 @@ package md
 // strand a card that may already be engraved, which is worse than telling the
 // operator nothing at all.
 
+// DuplicateKind says WHICH harm a repeated slot carries, because the two are
+// different and an operator told the wrong one looks in the wrong place.
+type DuplicateKind int
+
+const (
+	// DuplicateNone: no slot repeats within one expression.
+	DuplicateNone DuplicateKind = iota
+	// DuplicateInMiniscript: the repeat is inside a miniscript expression, so
+	// Bitcoin Core refuses the descriptor outright --
+	// "is not sane: contains duplicate public keys".
+	DuplicateInMiniscript
+	// DuplicateInMultisig: the repeat is inside a TOP-LEVEL multi/sortedmulti,
+	// which Core parses as a MultisigDescriptor and never runs the miniscript
+	// sanity check on. Core IMPORTS it. The harm is the other one: one key fills
+	// two of the threshold's seats, so a 2-of-3 with one key twice can be spent
+	// by that key alone.
+	DuplicateInMultisig
+)
+
 // DuplicateKeySlot reports the lowest key slot that appears more than once
-// inside a SINGLE miniscript expression.
+// inside a SINGLE miniscript expression, and which harm that carries.
 //
 // The scoping is the whole of the rule:
 //
@@ -41,33 +60,78 @@ package md
 //     a slot repeated anywhere within it is a duplicate.
 //
 // The second return is false when there is none.
-func DuplicateKeySlot(tree node) (uint8, bool) {
+func DuplicateKeySlot(tree node) (uint8, DuplicateKind) {
 	switch tree.tag {
 	case tagTr:
 		b, ok := tree.body.(trBody)
 		if !ok || b.tree == nil {
-			return 0, false
+			return 0, DuplicateNone
 		}
-		return duplicateInTapTree(*b.tree)
+		slot, dup := duplicateInTapTree(*b.tree)
+		return slot, kindOf(dup, DuplicateInMiniscript)
 	case tagWsh, tagSh:
 		b, ok := tree.body.(childrenBody)
 		if !ok || len(b.children) != 1 {
-			return 0, false
+			return 0, DuplicateNone
 		}
-		return duplicateInExpression(b.children[0])
+		inner := b.children[0]
+		// sh(wsh(X)) -- unwrap so the discriminant below sees the script that
+		// actually runs, not the wrapper around it.
+		if tree.tag == tagSh && inner.tag == tagWsh {
+			ib, ok := inner.body.(childrenBody)
+			if !ok || len(ib.children) != 1 {
+				return 0, DuplicateNone
+			}
+			inner = ib.children[0]
+		}
+		slot, dup := duplicateInExpression(inner)
+		return slot, kindOf(dup, kindForRoot(inner))
 	default:
-		return duplicateInExpression(tree)
+		slot, dup := duplicateInExpression(tree)
+		return slot, kindOf(dup, kindForRoot(tree))
 	}
 }
 
+func kindOf(dup bool, k DuplicateKind) DuplicateKind {
+	if !dup {
+		return DuplicateNone
+	}
+	return k
+}
+
+// kindForRoot distinguishes the two harms by what sits at the TOP of the
+// script.
+//
+// Measured on Bitcoin Core 25.0.0, a throwaway regtest datadir,
+// getdescriptorinfo, with the same key twice:
+//
+//	wsh(sortedmulti(2,A,A,B))         ACCEPTED
+//	wsh(multi(2,A,A,B))               ACCEPTED
+//	wsh(and_v(v:pk(A),pk(A)))         "is not sane: contains duplicate public keys"
+//	the corpus's keyed_wsh_timelock_hashlock  same refusal
+//
+// Core parses a top-level multi/sortedmulti under wsh/sh as a
+// MultisigDescriptor, and "contains duplicate public keys" comes from
+// miniscript's IsSane, which such a descriptor never reaches. So telling the
+// operator that Core refuses it would be FALSE for that shape -- and the shape
+// is not harmless, it is the more dangerous of the two: one key filling two
+// seats of a threshold can meet it alone.
+func kindForRoot(n node) DuplicateKind {
+	switch n.tag {
+	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
+		return DuplicateInMultisig
+	}
+	return DuplicateInMiniscript
+}
+
 // DuplicateKeySlotChunks is DuplicateKeySlot over a gathered md1 chunk set.
-func DuplicateKeySlotChunks(strs []string) (uint8, bool, error) {
+func DuplicateKeySlotChunks(strs []string) (uint8, DuplicateKind, error) {
 	d, err := Reassemble(strs)
 	if err != nil {
-		return 0, false, err
+		return 0, DuplicateNone, err
 	}
-	slot, dup := DuplicateKeySlot(d.tree)
-	return slot, dup, nil
+	slot, kind := DuplicateKeySlot(d.tree)
+	return slot, kind, nil
 }
 
 // duplicateInTapTree checks each LEAF separately, because each leaf is its own
