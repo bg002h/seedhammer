@@ -542,3 +542,63 @@ func TestConsentNamesTheScript(t *testing.T) {
 		})
 	}
 }
+
+// TestConsentWarnsOnDuplicateKeys is F-514: the device derived a fundable
+// receive address, in silence, for a policy whose descriptor Bitcoin Core
+// refuses as "is not sane: contains duplicate public keys".
+//
+// The addresses are CORRECT — they match the vector's own conformance data, and
+// that is why this is a warning rather than a refusal. What was missing was any
+// way for the operator to learn, before funding the address they are being
+// shown, that the coordinator they will try to spend from will not import the
+// wallet. Refusing on-device would strand a card that may already be engraved,
+// which is worse than telling them nothing; saying nothing while showing them
+// an address to send to was worse still.
+//
+// The positive and negative cases are both here, against vectors whose Core
+// verdicts were measured on a throwaway regtest datadir. A warning that fired
+// on the taproot pair — which Core ACCEPTS — would be a warning the operator
+// learns to read past.
+//
+// MUTATION: remove the duplicate-key block from composerConsentLinesFor and the
+// wsh case fails; make md.DuplicateKeySlot ignore the tap-leaf scoping and the
+// taproot cases fail.
+func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
+	for _, tc := range []struct {
+		vector string
+		warn   bool
+		core   string
+	}{
+		{"keyed_wsh_timelock_hashlock", true, "Core REFUSES: duplicate keys in one miniscript"},
+		{"keyed_tr_multi_a", false, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_tr_sortedmulti_a", false, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_compose_wsh_timelock_hashlock", false, "no key reuse at all"},
+	} {
+		t.Run(tc.vector, func(t *testing.T) {
+			chunks := loadVectorChunks(t, tc.vector)
+			slot, dup, err := md.DuplicateKeySlotChunks(chunks)
+			if err != nil {
+				t.Fatalf("DuplicateKeySlotChunks: %v", err)
+			}
+			if dup != tc.warn {
+				t.Fatalf("the predicate says duplicate=%v (@%d); %s", dup, slot, tc.core)
+			}
+			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			if err != nil {
+				t.Fatalf("composerConsentLinesFor: %v", err)
+			}
+			joined := strings.Join(lines, "\n")
+			got := strings.Contains(joined, "duplicate public keys")
+			if got != tc.warn {
+				if tc.warn {
+					t.Errorf("the consent screen shows addresses for a descriptor Core "+
+						"refuses and says nothing about it.\n%s", joined)
+				} else {
+					t.Errorf("the consent screen warns about duplicate keys on a wallet "+
+						"Core accepts (%s); a warning that cries wolf is one the "+
+						"operator reads past.\n%s", tc.core, joined)
+				}
+			}
+		})
+	}
+}

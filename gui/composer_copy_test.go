@@ -99,6 +99,8 @@ func composerCopyTable() []composerCopyRow {
 			"A payload is in flash but not loaded. Load it from the carousel first."},
 		{"composerCopyIdChanged", "8s", composerCopyIdChanged(),
 			"The shape changed, so this id changed. Cards minted with the old stub will not seat here."},
+		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(1),
+			"Slot @1 is used twice in one script. Bitcoin Core refuses this descriptor (\"duplicate public keys\"), so a coordinator may not import it. Check before you fund it."},
 		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),
 			"Same id, but the slot origins below changed. Cards minted for the old origins will not seat here."},
 		{"composerCopySeatPrompt", "8s", composerCopySeatPrompt(2, 1, 2, 3),
@@ -346,8 +348,13 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// construction -- and a card minted for a stale origin passes the stub check
 	// and is refused by slotMatchesCard. Two failures at two layers need two
 	// sentences, or the operator is sent to look in the wrong place.
-	if declared != 75 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 75 -- "+
+	// 76 SINCE F-514: the device derived a fundable address, in silence, for a
+	// policy whose descriptor Bitcoin Core refuses as "contains duplicate
+	// public keys". The address is correct; what was missing was any way for
+	// the operator to learn before funding it that the coordinator they will
+	// spend from will not import the wallet.
+	if declared != 76 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 76 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

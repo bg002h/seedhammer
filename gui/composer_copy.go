@@ -318,6 +318,24 @@ func composerCopyIdChanged() string {
 // four bytes of an id that did not move -- and is refused by slotMatchesCard.
 // Saying "this id changed" there would be false, and saying nothing at all was
 // the defect review I-2 constructed.
+// composerCopyDuplicateKeys is the §8s warning for a policy whose miniscript
+// repeats a key — Bitcoin Core's "contains duplicate public keys" sanity rule.
+//
+// It names CORE, not BIP 388, because Core's verdict is the one that predicts
+// what happens next: the operator takes this wallet to a coordinator, and a
+// Core-based coordinator refuses the descriptor outright. Naming the standard
+// instead would be true and useless at the moment it is read.
+//
+// A WARNING AND NOT A REFUSAL. The device derives a correct, fundable address
+// for this policy, and refusing here would strand a card that may already be
+// engraved — worse than telling the operator nothing. What was unacceptable was
+// saying nothing at all while showing them an address to send to (F-514).
+func composerCopyDuplicateKeys(slot uint8) string {
+	return fmt.Sprintf("Slot @%d is used twice in one script. Bitcoin Core refuses this "+
+		"descriptor (\"duplicate public keys\"), so a coordinator may not import it. "+
+		"Check before you fund it.", slot)
+}
+
 func composerCopyOriginsChanged() string {
 	return "Same id, but the slot origins below changed. Cards minted for the " +
 		"old origins will not seat here."

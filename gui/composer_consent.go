@@ -212,6 +212,10 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 		return append(lines, "", "Keyless template - no addresses.", "Verify off-device."), nil
 	}
 	lines = append(lines, "")
+	// Same warning, same reason, on the composer's own consent surface (F-514).
+	if slot, dup, err := md.DuplicateKeySlotChunks(chunks); err == nil && dup {
+		lines = append(lines, composerCopyDuplicateKeys(slot), "")
+	}
 	for _, chain := range []struct {
 		label  string
 		change bool
