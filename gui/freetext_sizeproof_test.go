@@ -784,6 +784,20 @@ func TestSizeProofQRStepReturnsFalseOverAStaleOptIn(t *testing.T) {
 		if cs.choice != 0 {
 			t.Errorf("the unavailable state opens on index %d with a prior opt-in behind it", cs.choice)
 		}
+		// Review M-3, and it must be the FIELD, not just cs.choice. Since the
+		// migration to ChoiceScreen's Initial, an Initial of 1 on this one-row
+		// screen is CLAMPED back to 0 by Choose -- so the branch would keep
+		// behaving correctly while the guard against it had quietly stopped
+		// being able to fail. Measured: hoisting `if prior { cs.Initial = 1 }`
+		// out of the unsized branch leaves cs.choice at 0 and this whole file
+		// green without the line below.
+		//
+		// It is the assertion that matters the day someone adds a second row
+		// here, which is the day the clamp stops hiding it.
+		if cs.Initial != 0 {
+			t.Errorf("the sized step opens on row %d with a prior opt-in behind it; "+
+				"carrying it in is the thing this screen exists to stop", cs.Initial)
+		}
 		ftChoose(h, "qr", 0)
 		for i := 0; i < 8 && !ok; i++ {
 			h.frame()

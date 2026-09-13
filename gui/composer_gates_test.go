@@ -2,6 +2,7 @@ package gui
 
 import (
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -1515,5 +1516,129 @@ func TestComposerScriptPickerShowsTheScriptInForce(t *testing.T) {
 				"the setting changed it. The operator engraves a Taproot wallet having "+
 				"specified Segwit, and nothing on this path tells them.", st.list.Wrapper)
 		}
+		// Review N-2: the wrapper surviving is only half of C-1's harm. A
+		// wrapper change renumbers slots, so it also DISCARDS every seat and
+		// releases every source -- a no-op confirm that kept the wrapper but
+		// dropped the seats would still cost the operator their work, and this
+		// test would have called it a pass.
+		if !composerAnySlotAssigned(st) {
+			t.Error("the no-op confirm discarded the seated key: nothing changed, so " +
+				"nothing should have been cleared")
+		}
+		if !st.sources[0].used {
+			t.Error("the no-op confirm released the seated source, so it would be " +
+				"offered again as though it had never been used")
+		}
 	})
+}
+
+// TestWrapperLabelsNameTheirOwnWrapper binds composerWrapperLabels[i] to
+// composerWrapperOrder[i]. Review finding I-1.
+//
+// The preselect fix computes the highlighted INDEX from composerWrapperOrder
+// and draws the row from composerWrapperLabels, and nothing asserted that
+// row i's words describe row i's wrapper. Swapping only the labels of rows 1
+// and 2 was green across all 1294 tests: a wsh policy would open the picker
+// with the highlight on a row reading "Nested (sh-wsh)", which is journey C-1's
+// harm restated one layer up -- the operator opens the screen to read the
+// script in force and reads the wrong one.
+//
+// It matters twice over now, because the Review shares these labels (journey
+// I-7). A mislabelled row would put the wrong script name on the screen the
+// operator copies onto steel, not just on the picker.
+//
+// HOW IT BINDS THEM. The label's parenthesised token is the descriptor function
+// that wrapper actually produces, so the test composes a real policy with
+// composerWrapperOrder[i] and checks the encoded template's root against the
+// token parsed out of composerWrapperLabels[i]. That is a fact about the codec
+// rather than a second copy of the table, which a test restating the pairs
+// would be -- and a second copy drifts in exactly the way the first one did.
+//
+// MUTATION: swap any two entries of composerWrapperLabels, or of
+// composerWrapperOrder, and this fails naming the row.
+// rootName spells a decoded root, because a failure message carrying md's
+// unexported ScriptKind integers is one a reader will misparse.
+func rootName(k md.ScriptKind, innerWsh bool) string {
+	switch k {
+	case md.ScriptTr:
+		return "tr(...)"
+	case md.ScriptWsh:
+		return "wsh(...)"
+	case md.ScriptSh:
+		if innerWsh {
+			return "sh(wsh(...))"
+		}
+		return "sh(...)"
+	}
+	return fmt.Sprintf("ScriptKind(%d)", int(k))
+}
+
+func TestWrapperLabelsNameTheirOwnWrapper(t *testing.T) {
+	if len(composerWrapperLabels) != len(composerWrapperOrder) {
+		t.Fatalf("the tables are %d labels and %d wrappers: the picker indexes both",
+			len(composerWrapperLabels), len(composerWrapperOrder))
+	}
+	// token -> the DECODED root that wrapper must produce. sh(wsh(...)) and bare
+	// sh(...) both decode to ScriptSh and differ only by InnerWsh, and they hash
+	// to different addresses, so the two are distinguished here rather than
+	// collapsed.
+	//
+	// The expectation is parsed from the LABEL TEXT and checked against the
+	// codec. It deliberately does NOT go through composerScriptLine, which maps
+	// a root back through the same two tables -- that would pass happily with
+	// the labels swapped, since both directions would be wrong together.
+	roots := map[string]struct {
+		root     md.ScriptKind
+		innerWsh bool
+	}{
+		"tr":     {md.ScriptTr, false},
+		"wsh":    {md.ScriptWsh, false},
+		"sh-wsh": {md.ScriptSh, true},
+		"sh":     {md.ScriptSh, false},
+	}
+	for i, label := range composerWrapperLabels {
+		open := strings.IndexByte(label, '(')
+		closeAt := strings.IndexByte(label, ')')
+		if open < 0 || closeAt < open {
+			t.Errorf("row %d label %q carries no (token): the operator reads the script "+
+				"off this row, so it must name the script", i, label)
+			continue
+		}
+		token := label[open+1 : closeAt]
+		rule, ok := roots[token]
+		if !ok {
+			t.Errorf("row %d label %q names %q, which this test has no rule for. A new "+
+				"wrapper needs its root added here, not a rule removed", i, label, token)
+			continue
+		}
+		list := md.PathList{Wrapper: composerWrapperOrder[i], Paths: []md.SpendPath{
+			{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+		}}
+		c, err := md.Compose(list)
+		if err != nil {
+			t.Errorf("row %d (%s): md.Compose: %v", i, label, err)
+			continue
+		}
+		chunks, err := c.Chunks()
+		if err != nil {
+			t.Errorf("row %d (%s): Chunks: %v", i, label, err)
+			continue
+		}
+		tpl, _, err := md.ExpandWalletPolicyChunks(chunks)
+		if err != nil {
+			t.Errorf("row %d (%s): decode: %v", i, label, err)
+			continue
+		}
+		if tpl.Root != rule.root {
+			t.Errorf("row %d reads %q but its wrapper encodes %s, not the %s that %q "+
+				"names.\nThe operator opens this screen to read the script in force "+
+				"and would read the wrong one.",
+				i, label, rootName(tpl.Root, tpl.InnerWsh), rootName(rule.root, rule.innerWsh), token)
+			continue
+		}
+		if tpl.Root == md.ScriptSh && tpl.InnerWsh != rule.innerWsh {
+			t.Errorf("row %d reads %q but its wrapper encodes InnerWsh=%v; the two sh "+
+				"forms hash to different addresses", i, label, tpl.InnerWsh)
+		}
+	}
 }

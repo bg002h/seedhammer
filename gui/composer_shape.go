@@ -172,15 +172,25 @@ func composerScriptLine(tpl md.Template) string {
 // composerWrapperPick is §4a. The legacy wrappers are offered because C7's
 // migration needs them, and §4e then holds them to ONE unlocked, unhashed
 // key set with n >= 2.
-// It opens on the script CURRENTLY IN FORCE, not on row 0 (journey C-1). A
-// picker that always opens on row 0 is not showing a setting, it is proposing
-// one, and an operator who opened "Change the script" to READ the wrapper and
-// left by the forward button committed Taproot over their Segwit policy with
-// nothing downstream to report it. Preselecting makes that tap a no-op.
+// It opens on `current`, never on row 0 (journey C-1). A picker that always
+// opens on row 0 is not showing a setting, it is proposing one, and an operator
+// who opened "Change the script" to READ the wrapper and left by the forward
+// button committed Taproot over their Segwit policy with nothing downstream to
+// report it. Preselecting makes that tap a no-op.
 //
-// The same preselection is right on the new-policy leg: `current` is the zero
-// wrapper there, which is row 0, so nothing changes -- except that stepping
-// Back to this screen now shows what was chosen instead of forgetting it.
+// WHAT `current` IS DIFFERS BY CALLER, and both are right (review M-1):
+//
+//   - the path list's "Change the script" row passes st.list.Wrapper, the
+//     script actually in force. That is the C-1 case, and there the screen is
+//     somewhere the setting can be READ.
+//   - composerStartStep passes its running `w`, which on a second pass through
+//     the Back leg is the operator's own last pick rather than the wrapper in
+//     force. That is the same rule every other picker follows -- Back preserves
+//     what was entered -- and a no-op confirm there is still gated by §8j and
+//     then by §4e, so it proposes rather than commits.
+//
+// Do not "fix" the second case into the first without reading both: making the
+// Back leg forget the operator's pick is the mirror of the bug this closes.
 func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (md.ComposeWrapper, bool) {
 	choices := composerWrapperLabels
 	wrappers := composerWrapperOrder
