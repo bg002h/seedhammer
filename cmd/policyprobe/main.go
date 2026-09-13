@@ -14,11 +14,18 @@
 // # Why it derives the way it does
 //
 // It walks the SAME path the inspect screen walks: md.ExpandWalletPolicyChunks,
-// then gui.PolicyAddressSource (which is complexAddressSource, exported without
-// a body of its own), then at(index, false) and at(index, true). A library
-// shortcut would be easier and would measure the wrong thing — a harness that
-// agrees with Rust about a path no operator's device takes has proved nothing
-// about the device.
+// then gui.PolicyAddressAt (which is policyAddressAt, exported without a body of
+// its own), then at(index, false) and at(index, true). A library shortcut would
+// be easier and would measure the wrong thing — a harness that agrees with Rust
+// about a path no operator's device takes has proved nothing about the device.
+//
+// policyAddressAt is the ROUTER, and wrapping the router rather than one of its
+// branches is load-bearing. It tries the flat *bip380.Descriptor route first and
+// falls back to complexAddressSource. The first cut of this tool wrapped the
+// complex branch alone, and so answered "the device declined this policy shape"
+// for every single-key, plain-multisig and sh(...) vector in the corpus — eight
+// of them — none of which the device declines for that reason. A harness that
+// reports the wrong branch's refusal manufactures device findings.
 //
 // MAINNET ONLY, and there is no flag to change it. The device's policy address
 // path is mainnet-only by design (gui/policy_address.go, D1), so a network flag
@@ -180,7 +187,7 @@ func probe(c caseIn) (res caseOut) {
 		}
 	}()
 
-	_, keys, err := md.ExpandWalletPolicyChunks(c.Chunks)
+	tpl, keys, err := md.ExpandWalletPolicyChunks(c.Chunks)
 	if err != nil {
 		res.Stage = stageExpand
 		res.Error = err.Error()
@@ -190,7 +197,7 @@ func probe(c caseIn) (res caseOut) {
 	res.Keys = &n
 
 	stage = stageSource
-	at, ok := gui.PolicyAddressSource(c.Chunks, keys)
+	at, ok := gui.PolicyAddressAt(c.Chunks, tpl, keys)
 	if !ok {
 		res.Stage = stageSource
 		res.Error = sourceRefusalNote(keys)
@@ -227,8 +234,8 @@ func probe(c caseIn) (res caseOut) {
 
 // sourceRefusalNote describes a refusal for the driver's triage.
 //
-// gui.PolicyAddressSource reports ok/!ok and no reason, so THE VERDICT IS ITS
-// ALONE and this text can never change it. What is written here is strictly an
+// gui.PolicyAddressAt reports ok/!ok and no reason, so THE VERDICT IS ITS ALONE
+// and this text can never change it. What is written here is strictly an
 // OBSERVATION of the expanded keys — facts the driver can re-check — and never
 // a claim about which branch inside the device fired, because that claim would
 // go stale the first time the refusal set changed and would then be a confident
@@ -246,5 +253,5 @@ func sourceRefusalNote(keys []md.ExpandedKey) string {
 	if len(missing) > 0 {
 		return fmt.Sprintf("the device declined: no xpub for %s", strings.Join(missing, ", "))
 	}
-	return "the device declined this policy shape: an unsupported use-site, or its index-0 derive probe failed"
+	return "the device declined this policy shape: neither the flat descriptor route nor the complex one could derive from it"
 }
