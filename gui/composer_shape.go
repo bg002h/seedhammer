@@ -150,16 +150,29 @@ func composerScriptLine(tpl md.Template) string {
 	case md.ScriptWsh:
 		w = md.ComposeWsh
 	case md.ScriptSh:
-		if tpl.InnerWsh {
+		// ScriptSh IS A THREE-WAY COLLAPSE, not two (review I-3). The decoder
+		// summarises a BIP-49 sh(wpkh) wire to Root==ScriptSh with InnerWpkh
+		// set (md/md.go:1220-1226), so splitting on InnerWsh alone named it
+		// "Legacy (sh)" -- a different script at a different address, stated
+		// confidently on the screen that consents to steel.
+		switch {
+		case tpl.InnerWsh:
 			w = md.ComposeShWsh
-		} else {
+		case tpl.InnerWpkh:
+			return "Script: Nested single-sig (sh(wpkh))"
+		default:
 			w = md.ComposeSh
 		}
+	case md.ScriptWpkh:
+		return "Script: Segwit single-sig (wpkh)"
+	case md.ScriptPkh:
+		return "Script: Legacy single-sig (pkh)"
 	default:
-		// Single-sig roots the composer cannot build. Naming the root honestly
-		// beats forcing it into one of the four labels, which would be a
-		// confident wrong answer on the screen that consents to steel.
-		return fmt.Sprintf("Script: %v", tpl.Root)
+		// A root this build does not know how to name. "Script: 3" names
+		// nothing to an operator (review M-1), and a wrong name is worse than
+		// an admitted gap on a screen that is about to become steel, so it
+		// says plainly that it cannot name it.
+		return "Script: UNKNOWN - do not engrave this card"
 	}
 	for i, cw := range composerWrapperOrder {
 		if cw == w {

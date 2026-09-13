@@ -487,7 +487,7 @@ func TestComposerLockAcceptRefusesFromTheScreen(t *testing.T) {
 func TestComposerStubLinesLabelASeatedSlot(t *testing.T) {
 	st, template, keyed := composerCardFixture(t)
 	_ = st
-	lines, err := composerStubLines(template, keyed, false)
+	lines, err := composerStubLines(template, keyed, composerStubUnchanged)
 	if err != nil {
 		t.Fatal(err)
 	}

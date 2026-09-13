@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -32,7 +33,7 @@ func composerTemplateChunks(t *testing.T) []string {
 // unseated slot names the origin a card must declare to seat there.
 func TestComposerStubLinesTeachTheStubAndTheOrigins(t *testing.T) {
 	chunks := composerTemplateChunks(t)
-	lines, err := composerStubLines(chunks, nil, false)
+	lines, err := composerStubLines(chunks, nil, composerStubUnchanged)
 	if err != nil {
 		t.Fatalf("composerStubLines: %v", err)
 	}
@@ -75,14 +76,14 @@ func TestComposerStubLinesTeachTheStubAndTheOrigins(t *testing.T) {
 // §12 item 5's condition test for it.
 func TestComposerStubScreenSaysTheIdChangedAfterAnEdit(t *testing.T) {
 	chunks := composerTemplateChunks(t)
-	fresh, err := composerStubLines(chunks, nil, false)
+	fresh, err := composerStubLines(chunks, nil, composerStubUnchanged)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(strings.Join(fresh, "\n"), composerCopyIdChanged()) {
 		t.Error("a first showing carries the changed-id line, which would be false")
 	}
-	after, err := composerStubLines(chunks, nil, true)
+	after, err := composerStubLines(chunks, nil, composerStubIdMoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestComposerStubScreenIsPagedAtItsMeasuredCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines, err := composerStubLines(chunks, nil, false)
+	lines, err := composerStubLines(chunks, nil, composerStubUnchanged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestComposerStubScreenIsPagedAtItsMeasuredCapacity(t *testing.T) {
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
 		frame, _, ink, quit := runUITouchRaster(ctx, func() {
-			composerStubFlow(ctx, &descriptorTheme, chunks, nil, false)
+			composerStubFlow(ctx, &descriptorTheme, chunks, nil, composerStubUnchanged)
 		})
 		defer quit()
 		content, ok := frame()
@@ -199,7 +200,7 @@ func TestComposerTemplateEngraveScreenUsesTheStubLabel(t *testing.T) {
 // exactly why the old predicate looked correct. Return a constant false and the
 // "genuinely different shape" case fails; return a constant true and the
 // unchanged case fails.
-func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
+func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	chunksFor := func(t *testing.T, list md.PathList) []string {
 		t.Helper()
 		c, err := md.Compose(list)
@@ -220,7 +221,7 @@ func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
 	}}
 
 	t.Run("never shown one is not a change", func(t *testing.T) {
-		if composerIdChanged(nil, chunksFor(t, oneKey)) {
+		if composerStubDelta(nil, chunksFor(t, oneKey)) != composerStubUnchanged {
 			t.Error("the first visit reported a changed id; there was nothing to change from")
 		}
 	})
@@ -228,7 +229,7 @@ func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
 	t.Run("same shape re-derived is not a change", func(t *testing.T) {
 		a := chunksFor(t, oneKey)
 		b := chunksFor(t, oneKey)
-		if composerIdChanged(a, b) {
+		if composerStubDelta(a, b) != composerStubUnchanged {
 			t.Error("re-deriving an untouched shape reported a changed id. This is the " +
 				"false statement F-520 measured, on the screen whose job is to be " +
 				"copied onto steel: an operator who has already minted cosigner " +
@@ -237,7 +238,7 @@ func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
 	})
 
 	t.Run("a genuinely different shape is a change", func(t *testing.T) {
-		if !composerIdChanged(chunksFor(t, oneKey), chunksFor(t, twoOfThree)) {
+		if composerStubDelta(chunksFor(t, oneKey), chunksFor(t, twoOfThree)) != composerStubIdMoved {
 			t.Error("editing 1 key to 2-of-3 did not report a changed id; the banner " +
 				"would be silent on the day it is true")
 		}
@@ -246,8 +247,112 @@ func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
 	t.Run("an unreadable id is reported as changed", func(t *testing.T) {
 		// Between a spurious warning and a missing one on a screen that is
 		// about to become steel, the spurious one is the survivable mistake.
-		if !composerIdChanged([]string{"md1notacard"}, chunksFor(t, oneKey)) {
+		if composerStubDelta([]string{"md1notacard"}, chunksFor(t, oneKey)) != composerStubIdMoved {
 			t.Error("an unreadable prior set was silently treated as unchanged")
 		}
 	})
+}
+
+// TestComposerStubDeltaCatchesOriginDriftUnderOneId is review I-2, and it is the
+// case that made narrowing this predicate to the id alone a mistake.
+//
+// The Template-ID is origin-invariant BY CONSTRUCTION -- md/template_id.go
+// hashes the use-site path and the tree and nothing else, no keys, no
+// fingerprints, no origins. Seating, meanwhile, DECLARES origins, and the codec
+// hands the still-unseated slots the lowest free accounts. So seating slot @0 at
+// an unusual account shifts what slots @1 and @2 advertise, under an id that
+// cannot move.
+//
+// Those "expects a key at" lines are not decoration: they are the screen's own
+// instruction for minting the cosigner card. An operator who wrote one down,
+// minted the card, then seated @0 and came back would see a different origin
+// advertised with no warning at all. The card passes layer 1 -- the stub is the
+// top four bytes of an unchanged id -- and is refused by slotMatchesCard at
+// layer 2 with errSeatNoSlot.
+//
+// The commit that narrowed this said "if two chunk sets really do carry one id,
+// the cards DO seat and there was nothing to warn about." That claim is what
+// this test falsifies.
+//
+// MUTATION: drop the origin comparison from composerStubDelta and this reports
+// Unchanged -- the silence the operator would have engraved against.
+func TestComposerStubDeltaCatchesOriginDriftUnderOneId(t *testing.T) {
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+	}}
+	chunksWith := func(t *testing.T, declared []*md.SlotOrigin) []string {
+		t.Helper()
+		c, err := md.ComposeWith(list, declared)
+		if err != nil {
+			t.Fatalf("md.ComposeWith: %v", err)
+		}
+		ch, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("Chunks: %v", err)
+		}
+		return ch
+	}
+
+	before := chunksWith(t, make([]*md.SlotOrigin, 3))
+
+	seated := make([]*md.SlotOrigin, 3)
+	seated[0] = &md.SlotOrigin{
+		// Account 5', which the defaults would not have chosen, so the
+		// unseated slots below it shift down.
+		Origin:      composerTestOrigin(2, 5),
+		Fingerprint: [4]byte{0xde, 0xad, 0xbe, 0xef},
+		FpPresent:   true,
+	}
+	after := chunksWith(t, seated)
+
+	// The fixture must actually hold the id still, or this test proves nothing.
+	beforeID, beforeKind, err := md.FormAwareIdChunks(before)
+	if err != nil {
+		t.Fatalf("id before: %v", err)
+	}
+	afterID, afterKind, err := md.FormAwareIdChunks(after)
+	if err != nil {
+		t.Fatalf("id after: %v", err)
+	}
+	if beforeID != afterID || beforeKind != afterKind {
+		t.Fatalf("the fixture moved the id (%x -> %x): it no longer isolates origin drift",
+			beforeID, afterID)
+	}
+	if slices.Equal(before, after) {
+		t.Fatal("the fixture produced identical chunks: seating declared nothing")
+	}
+
+	beforeOrigins, err := composerAdvertisedOrigins(before)
+	if err != nil {
+		t.Fatalf("origins before: %v", err)
+	}
+	afterOrigins, err := composerAdvertisedOrigins(after)
+	if err != nil {
+		t.Fatalf("origins after: %v", err)
+	}
+	if slices.Equal(beforeOrigins, afterOrigins) {
+		t.Fatalf("the advertised origins did not move:\n before %v\n after  %v",
+			beforeOrigins, afterOrigins)
+	}
+
+	if got := composerStubDelta(before, after); got != composerStubOriginsMoved {
+		t.Errorf("composerStubDelta = %v, want composerStubOriginsMoved.\n"+
+			"The id did not move and the origins did. An operator who minted a "+
+			"cosigner card against\n  %v\nwould come back to\n  %v\nand be told "+
+			"nothing; the card fails slotMatchesCard with errSeatNoSlot.",
+			got, beforeOrigins, afterOrigins)
+	}
+
+	// And the screen must SAY origins, not id -- the whole point of the split.
+	lines, err := composerStubLines(after, nil, composerStubDelta(before, after))
+	if err != nil {
+		t.Fatalf("composerStubLines: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, composerCopyOriginsChanged()) {
+		t.Errorf("the screen does not carry the origins line.\n%s", joined)
+	}
+	if strings.Contains(joined, composerCopyIdChanged()) {
+		t.Errorf("the screen claims the id changed; it did not.\n%s", joined)
+	}
 }

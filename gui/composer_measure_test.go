@@ -62,7 +62,7 @@ func TestComposerMeasureSection13Numbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stub, err := composerStubLines(chunks, nil, true)
+	stub, err := composerStubLines(chunks, nil, composerStubIdMoved)
 	if err != nil {
 		t.Fatal(err)
 	}

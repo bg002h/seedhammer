@@ -308,6 +308,21 @@ func composerCopyIdChanged() string {
 		"will not seat here."
 }
 
+// composerCopyOriginsChanged is the §8s line for the case the id line cannot
+// state: the id is UNCHANGED and the per-slot origins this screen told the
+// operator to mint against are not.
+//
+// It needs its own sentence because the two failures happen at different
+// layers, and an operator told the wrong one looks in the wrong place. A card
+// minted against a stale origin passes the stub check -- the stub is the top
+// four bytes of an id that did not move -- and is refused by slotMatchesCard.
+// Saying "this id changed" there would be false, and saying nothing at all was
+// the defect review I-2 constructed.
+func composerCopyOriginsChanged() string {
+	return "Same id, but the slot origins below changed. Cards minted for the " +
+		"old origins will not seat here."
+}
+
 // composerCopySeatPrompt names the OPERATOR's listed path index, never an
 // emitted leaf index (§7d), beside the EMITTED slot index the labels use.
 func composerCopySeatPrompt(slot uint8, path, keyIdx, keyCount int) string {

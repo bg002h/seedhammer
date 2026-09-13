@@ -92,7 +92,8 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		// §8s's changed-id line is decided by COMPARING THE IDS THEMSELVES.
+		// §8s's changed-id line is decided by comparing BOTH facts this screen
+		// tells the operator to copy: the id, and the per-slot origins.
 		//
 		// It was an "edited" flag once, set on any Back out of the stub screen,
 		// the consent or §8l and never reset. That was replaced by comparing
@@ -101,18 +102,23 @@ func composerFlow(ctx *Context, th *Colors) {
 		// stub will not seat here", and both of those are propositions about
 		// the ID. A journey walk then measured the banner firing on a revisit
 		// where the printed Template-ID was byte-identical two lines below it
-		// (F-520). Comparing the thing the sentence is about makes that
-		// impossible by construction, whichever leg produced the differing
-		// chunks -- and if two chunk sets really do carry one id, the cards DO
-		// seat and there was nothing to warn about.
+		// (F-520), so the sentence was false. Narrowing it to the id ALONE
+		// then broke the other direction: review I-2 constructed a seating
+		// that shifts the unseated slots' advertised origins under an id that
+		// cannot move, and the card minted from the old origins fails
+		// slotMatchesCard. An earlier revision of this comment claimed that
+		// one id means the cards seat; that claim was measured and is FALSE.
+		// So the banner was right to fire and its text was wrong, and
+		// composerStubDelta says which fact moved instead of asserting the id
+		// did.
 		//
 		// A false statement here is worse than a missing one: this is the
 		// screen whose whole job is to be copied onto steel, and an operator
 		// who has already minted cosigner cards reads that their cards, and
 		// other people's, are now useless. Crying wolf trains them to discount
 		// the line on the day it is true.
-		changed := composerIdChanged(shown, template)
-		if !composerStubFlow(ctx, th, template, nil, changed) {
+		change := composerStubDelta(shown, template)
+		if !composerStubFlow(ctx, th, template, nil, change) {
 			shown = template
 			continue
 		}
@@ -126,7 +132,7 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		if len(keyed) > 0 && !composerStubFlow(ctx, th, template, keyed, false) {
+		if len(keyed) > 0 && !composerStubFlow(ctx, th, template, keyed, composerStubUnchanged) {
 			continue
 		}
 		consent := template
