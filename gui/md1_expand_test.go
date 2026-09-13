@@ -2,6 +2,7 @@ package gui
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -337,5 +338,68 @@ func TestShWpkhNoCollision(t *testing.T) {
 	aNested, _ := address.Receive(dNested, 0)
 	if aWpkh == aBare || aWpkh == aNested || aBare == aNested {
 		t.Fatalf("collision: P2SH_P2WPKH=%s P2SH=%s P2SH_P2WSH=%s must be pairwise-distinct", aWpkh, aBare, aNested)
+	}
+}
+
+// TestScriptLineNamesEverySingleSigRoot is review I-3 and M-1.
+//
+// md.ScriptSh is a THREE-way collapse, not two. The decoder summarises a BIP-49
+// sh(wpkh) wire to Root==ScriptSh with InnerWpkh set, so splitting on InnerWsh
+// alone named it "Legacy (sh)" -- a different script at a different address,
+// stated confidently on the screen that consents to steel. The other single-sig
+// roots fell to a default arm that printed the enum's integer: "Script: 0"
+// names nothing to an operator, while the comment above it promised to "name
+// the root honestly".
+//
+// The composer cannot BUILD these, but composerConsentLinesFor renders from
+// chunks and md1 cards carry them, so the Review can meet one.
+//
+// MUTATION: remove the InnerWpkh arm and sh(wpkh) is named "Legacy (sh)";
+// remove the ScriptWpkh or ScriptPkh arm and that row falls to the unknown
+// line.
+func TestScriptLineNamesEverySingleSigRoot(t *testing.T) {
+	m := abandonAboutMnemonic()
+	for _, tc := range []struct {
+		purpose int
+		kind    md.ScriptKind
+		want    string
+		notWant string
+	}{
+		{49, md.ScriptShWpkh, "Nested single-sig (sh(wpkh))", "Legacy (sh)"},
+		{84, md.ScriptWpkh, "Segwit single-sig (wpkh)", "Script: 0"},
+		{44, md.ScriptPkh, "Legacy single-sig (pkh)", "Script: 1"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			path := singleSigPath(tc.purpose)
+			xpub, masterFP, err := deriveAccountXpub(m, "", &chaincfg.MainNetParams, path)
+			if err != nil {
+				t.Fatalf("deriveAccountXpub: %v", err)
+			}
+			cc, pk, _, err := decodeXpubBytes(xpub)
+			if err != nil {
+				t.Fatalf("decodeXpubBytes: %v", err)
+			}
+			var fp [4]byte
+			binary.BigEndian.PutUint32(fp[:], masterFP)
+			strs, err := md.EncodeSingleSig(cc, pk, fp, originComponents(path), tc.kind)
+			if err != nil {
+				t.Fatalf("EncodeSingleSig: %v", err)
+			}
+			tpl, _, err := md.ExpandWalletPolicyChunks(strs)
+			if err != nil {
+				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+			}
+			got := composerScriptLine(tpl)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("composerScriptLine = %q, want it to name %q "+
+					"(Root=%v InnerWsh=%v InnerWpkh=%v)",
+					got, tc.want, tpl.Root, tpl.InnerWsh, tpl.InnerWpkh)
+			}
+			if strings.Contains(got, tc.notWant) {
+				t.Errorf("composerScriptLine = %q, which names %q -- a different "+
+					"script at a different address, on the screen that consents to steel",
+					got, tc.notWant)
+			}
+		})
 	}
 }

@@ -134,6 +134,13 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	}
 
 	var lines []string
+	// THE SCRIPT, FIRST (journey I-7). Every other line on the Review describes
+	// the policy WITHIN a wrapper, and the path list is byte-identical under
+	// all four, so without this line there is nowhere before steel that the
+	// operator's script choice can be confirmed. That silence is what made
+	// journey C-1 -- a picker that committed Taproot over a Segwit policy --
+	// invisible all the way to the plate.
+	lines = append(lines, composerScriptLine(tpl))
 	sole := len(shape.Branches) == 1
 	// THE OPERATOR'S PATH NUMBER, NOT THE BRANCH ORDINAL. PolicyShape.Branches
 	// are LEAVES, and a taproot internal key is reported through KeyPath

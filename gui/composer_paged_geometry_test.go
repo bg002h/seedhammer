@@ -156,7 +156,7 @@ func composerPagedScreens(t *testing.T) map[string][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines, err := composerStubLines(chunks, nil, true)
+	lines, err := composerStubLines(chunks, nil, composerStubIdMoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func composerPagedScreens(t *testing.T) map[string][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines2, err := composerStubLines(chunks2, nil, false)
+	lines2, err := composerStubLines(chunks2, nil, composerStubUnchanged)
 	if err != nil {
 		t.Fatal(err)
 	}

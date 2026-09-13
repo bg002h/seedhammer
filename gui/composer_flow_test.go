@@ -489,3 +489,56 @@ func TestComposerKeylessConfirmFiresAgainForANewPathAtAReusedIndex(t *testing.T)
 		add("a second key-less path at the same index")
 	})
 }
+
+// TestConsentNamesTheScript is journey I-7: the Review must say which script
+// wrapper the policy uses, in the words the operator chose it with.
+//
+// Before this, all four Review pages under wsh -- paths, Template-ID, the hash
+// rule, the keyless notice -- never said wsh, Segwit, tr or Taproot. That is
+// what made journey C-1 invisible: the picker committed Taproot over a Segwit
+// policy, the path list is byte-identical under every wrapper, and the Review
+// was the last place before steel where the choice could have been confirmed.
+// C-1 is fixed, but the blind spot outlives it -- any future way to change a
+// wrapper inherits the same silence.
+//
+// The label is asserted against composerWrapperLabels rather than a literal,
+// because "the words the operator chose it with" is the requirement: a Review
+// that said "P2WSH" while the picker said "Segwit (wsh)" would pass a literal
+// check and still leave the operator comparing two vocabularies.
+//
+// MUTATION: drop the composerScriptLine append in composerConsentLinesFor and
+// every sub-test fails with its wrapper's label missing.
+func TestConsentNamesTheScript(t *testing.T) {
+	for _, tc := range []struct {
+		wrapper md.ComposeWrapper
+		want    string
+	}{
+		{md.ComposeWsh, composerWrapperLabels[1]},
+		{md.ComposeTr, composerWrapperLabels[0]},
+		{md.ComposeShWsh, composerWrapperLabels[2]},
+		{md.ComposeSh, composerWrapperLabels[3]},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			list := md.PathList{Wrapper: tc.wrapper, Paths: []md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+			}}
+			c, err := md.Compose(list)
+			if err != nil {
+				t.Fatalf("md.Compose: %v", err)
+			}
+			chunks, err := c.Chunks()
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			if err != nil {
+				t.Fatalf("composerConsentLinesFor: %v", err)
+			}
+			joined := strings.Join(lines, "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Errorf("the Review never names the script.\nwant a line carrying %q\ngot:\n%s",
+					tc.want, joined)
+			}
+		})
+	}
+}

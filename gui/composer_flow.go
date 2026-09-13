@@ -2,7 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"slices"
 
 	"seedhammer.com/codex32"
 	"seedhammer.com/md"
@@ -74,6 +73,13 @@ func composerFlow(ctx *Context, th *Colors) {
 	}
 
 	var shown []string // the chunk set the stub screen last displayed (§8s)
+	// seen outlives `shown` on purpose: it is the last origin each slot was ever
+	// seen ADVERTISING, and it is never pruned. Comparing each reading only
+	// against the one before it goes silent across a gap -- seat every slot and
+	// the advertising set is empty, so the reading after that has nothing to
+	// differ from, while a cosigner card minted before the gap can already be
+	// stale (review I-4).
+	seen := composerOriginMemory{}
 	for !ctx.Done {
 		if !composerShapeFlow(ctx, th, st) {
 			// BACK AT THE PATH LIST GOES BACK ONE SCREEN, to "Start from?",
@@ -93,15 +99,37 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		// §8s's changed-id line is decided by COMPARING CHUNK SETS, not by an
-		// "edited" flag. The flag was set on any Back out of the stub screen,
-		// the consent or §8l and never reset, so re-reaching the stub screen
-		// without touching the shape asserted that the id had changed -- a
-		// false statement on the screen whose job is to be copied onto steel,
-		// which trains the operator to discount the line that will one day be
-		// true.
-		changed := shown != nil && !slices.Equal(shown, template)
-		if !composerStubFlow(ctx, th, template, nil, changed) {
+		// §8s's changed-id line is decided by comparing BOTH facts this screen
+		// tells the operator to copy: the id, and the per-slot origins.
+		//
+		// It was an "edited" flag once, set on any Back out of the stub screen,
+		// the consent or §8l and never reset. That was replaced by comparing
+		// CHUNK SETS, which is closer but still not the claim the line makes:
+		// the sentence says "this id changed" and "cards minted with the old
+		// stub will not seat here", and both of those are propositions about
+		// the ID. A journey walk then measured the banner firing on a revisit
+		// where the printed Template-ID was byte-identical two lines below it
+		// (F-520), so the sentence was false. Narrowing it to the id ALONE
+		// then broke the other direction: review I-2 constructed a seating
+		// that shifts the unseated slots' advertised origins under an id that
+		// cannot move, and the card minted from the old origins fails
+		// slotMatchesCard. An earlier revision of this comment claimed that
+		// one id means the cards seat; that claim was measured and is FALSE.
+		// So the banner was right to fire and its text was wrong, and
+		// composerStubDelta says which fact moved instead of asserting the id
+		// did.
+		//
+		// A false statement here is worse than a missing one: this is the
+		// screen whose whole job is to be copied onto steel, and an operator
+		// who has already minted cosigner cards reads that their cards, and
+		// other people's, are now useless. Crying wolf trains them to discount
+		// the line on the day it is true.
+		change, advertised := composerStubDelta(shown, seen, template)
+		// Recorded on BOTH legs, because the operator READ the screen on both:
+		// what matters for the next comparison is what they were shown, not
+		// which button they left by.
+		seen.remember(advertised)
+		if !composerStubFlow(ctx, th, template, nil, change) {
 			shown = template
 			continue
 		}
@@ -115,7 +143,7 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		if len(keyed) > 0 && !composerStubFlow(ctx, th, template, keyed, false) {
+		if len(keyed) > 0 && !composerStubFlow(ctx, th, template, keyed, composerStubUnchanged) {
 			continue
 		}
 		consent := template
@@ -166,7 +194,7 @@ func composerStartStep(ctx *Context, th *Colors, st *composerState, fromPaths bo
 	for !ctx.Done {
 		if !fromPaths {
 			var ok bool
-			if w, ok = composerWrapperPick(ctx, th); !ok {
+			if w, ok = composerWrapperPick(ctx, th, w); !ok {
 				return false
 			}
 		}

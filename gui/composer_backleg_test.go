@@ -229,7 +229,12 @@ func TestComposerBackLegWrapperChangeAsksBeforeDiscardingSeats(t *testing.T) {
 		if got, ok := pumpUntil(frame, "Which script?", 12); !ok {
 			t.Fatalf("Back did not reach the wrapper picker.\nLast frame: %q", got)
 		}
-		click(&ctx.Router, Button3) // Taproot (tr)
+		// The picker opens on the script in force (journey C-1), so tr takes a
+		// deliberate move. That this test used to reach tr by pressing only the
+		// forward button is the finding restated: the Back leg carried the same
+		// silent rewrap as the path list's row, and the same fix closes both.
+		click(&ctx.Router, Up)      // Segwit (row 1) -> Taproot (row 0)
+		click(&ctx.Router, Button3) // Taproot (tr), chosen on purpose
 		pumpUntil(frame, "Start from?", 12)
 		click(&ctx.Router, Button3) // Build my own paths: keep the shape
 

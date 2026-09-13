@@ -99,6 +99,8 @@ func composerCopyTable() []composerCopyRow {
 			"A payload is in flash but not loaded. Load it from the carousel first."},
 		{"composerCopyIdChanged", "8s", composerCopyIdChanged(),
 			"The shape changed, so this id changed. Cards minted with the old stub will not seat here."},
+		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),
+			"Same id, but the slot origins below changed. Cards minted for the old origins will not seat here."},
 		{"composerCopySeatPrompt", "8s", composerCopySeatPrompt(2, 1, 2, 3),
 			"Slot @2, Path 1 key 2 of 3: choose a key"},
 		{"composerCopySeatKeyPathPrompt", "8s", composerCopySeatKeyPathPrompt(0),
@@ -338,8 +340,14 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// what THIS composition will cut and that plates cut in earlier runs are
 	// unknown to the device (operator ruling 2026-09-06: the limitation is
 	// accepted and the copy owns it).
-	if declared != 74 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 74 -- "+
+	// 75 SINCE review I-2 split §8s's changed-id line in two. The id line cannot
+	// state the case where the id is UNCHANGED and the per-slot origins moved --
+	// which seating can do, because the Template-ID is origin-invariant by
+	// construction -- and a card minted for a stale origin passes the stub check
+	// and is refused by slotMatchesCard. Two failures at two layers need two
+	// sentences, or the operator is sent to look in the wrong place.
+	if declared != 75 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 75 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

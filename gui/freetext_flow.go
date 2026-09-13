@@ -537,7 +537,7 @@ func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block)
 		cs.Lead = ftQRLead
 		cs.Choices = []string{"No QR", "Add QR"}
 		if prior {
-			cs.choice = 1 // preserve a deliberate opt-in across Back
+			cs.Initial = 1 // preserve a deliberate opt-in across Back
 		}
 	}
 	hookPPWidget("qr", cs)
@@ -771,7 +771,7 @@ func ftSpeedChoiceFlow(ctx *Context, th *Colors, params engrave.Params, proofLoa
 		want = ftDefaultSpeedMM(params)
 	}
 	if i := slices.Index(speeds, want); i > 0 {
-		cs.choice = i
+		cs.Initial = i
 	}
 	hookPPWidget("speed", cs)
 	sel, ok := cs.Choose(ctx, th)
@@ -824,7 +824,7 @@ func ftPassChoiceFlow(ctx *Context, th *Colors, proofLoaded bool, prior int) (in
 		want = 1
 	}
 	if i := slices.Index(passes, want); i > 0 {
-		cs.choice = i
+		cs.Initial = i
 	}
 	hookPPWidget("passes", cs)
 	sel, ok := cs.Choose(ctx, th)
@@ -895,7 +895,7 @@ func ftFaceChoiceFlow(ctx *Context, th *Colors, prior *ftPlan) (*ftPlan, bool) {
 	// opt-in. choice starts at 0, which is sh: the default is a property of
 	// ftFaceOptions' ordering, so do not reorder it.
 	if i := slices.Index(plans, prior); i > 0 {
-		cs.choice = i
+		cs.Initial = i
 	}
 	hookPPWidget("face", cs)
 	sel, ok := cs.Choose(ctx, th)
@@ -914,7 +914,7 @@ func ftSizeChoiceFlow(ctx *Context, th *Colors, plan *ftPlan, prior float32) (fl
 		cs.Lead = ftSizeLeadFixed
 	}
 	if i := slices.Index(sizes, prior); i > 0 {
-		cs.choice = i
+		cs.Initial = i
 	}
 	hookPPWidget("size", cs)
 	sel, ok := cs.Choose(ctx, th)

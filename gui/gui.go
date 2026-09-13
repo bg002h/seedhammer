@@ -1909,8 +1909,36 @@ type ChoiceScreen struct {
 	// over already made the opposite call for a strictly SMALLER loss -- a
 	// payload, not a seed -- and named the reason in its own code.
 	BackIcon *alpha4.Image
+	// Initial is the row the highlight starts on. The ZERO VALUE is row 0, so
+	// all existing call sites are unaffected by construction -- the same
+	// contract BackIcon above is built on.
+	//
+	// It exists because a picker that always opens on row 0 is not showing a
+	// SETTING, it is proposing one, and the two are indistinguishable to
+	// whoever opened it. The composer's script picker was the case: an operator
+	// who opened "Change the script" to see which wrapper was in force, and
+	// left by the forward button that advances every other screen in the flow,
+	// committed row 0 and rebuilt the wallet as Taproot. Nothing downstream
+	// reported it -- the path list is byte-identical under every wrapper and
+	// the Review never names the script -- so the wrong wallet reached the
+	// plate with no signal at any point after the tap.
+	//
+	// Preselecting what is in force makes ✓ a no-op and turns the screen into
+	// somewhere the setting can be READ, which is what it was opened for.
+	Initial  int
 	children []Choice
 	choice   int
+	// seeded records that Initial has been applied, so it is applied ONCE per
+	// screen value and not on every Choose.
+	//
+	// This distinction is load-bearing. Several screens keep one ChoiceScreen
+	// and call Choose again when the operator steps Back into it, and they rely
+	// on the highlight still sitting where it was left -- that is what "Back
+	// preserves entered values" means for a picker. Re-seeding from Initial on
+	// every call would throw the operator's own last answer away every time
+	// they stepped back, which is a smaller version of the very bug Initial
+	// exists to fix. Five tests caught exactly that when this was unguarded.
+	seeded bool
 }
 
 type Choice struct {
@@ -1920,6 +1948,19 @@ type Choice struct {
 }
 
 func (s *ChoiceScreen) Choose(ctx *Context, th *Colors) (int, bool) {
+	// Seeded once per screen value, so a Back that re-enters this picker keeps
+	// the operator's own selection instead of resetting to Initial.
+	//
+	// Clamped rather than trusted: an out-of-range Initial would otherwise
+	// return an index its caller cannot map, and a picker that hands back a row
+	// that does not exist is worse than one that opens in the wrong place.
+	if !s.seeded {
+		s.seeded = true
+		s.choice = s.Initial
+		if s.choice < 0 || s.choice >= len(s.Choices) {
+			s.choice = 0
+		}
+	}
 	inp := new(InputTracker)
 	cancelBtn := &Clickable{Button: Button1}
 	chooseBtn := &Clickable{Button: Button3, AltButton: Center}

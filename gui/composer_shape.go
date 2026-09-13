@@ -112,16 +112,120 @@ func composerShapeGuard(ctx *Context, th *Colors, st *composerState) bool {
 		composerConfirmBody(composerCopyEditClearsKeys()))
 }
 
+// composerWrapperLabels is the operator's name for each script wrapper, and the
+// ONE place those words are written.
+//
+// Shared with the Review (journey I-7) on purpose. The requirement there is not
+// "name the script" but "name it in the words the operator chose it with": a
+// Review that said "P2WSH" while the picker said "Segwit (wsh)" would be
+// telling the truth in a second vocabulary, and would leave the operator
+// comparing two things instead of reading one. Two literals drift; one does
+// not.
+//
+// Index-aligned with composerWrapperOrder, and the ORDER IS LOAD-BEARING in
+// both directions: the picker's rows are these, and ChoiceScreen returns an
+// index into them.
+var composerWrapperLabels = []string{"Taproot (tr)", "Segwit (wsh)", "Nested (sh-wsh)", "Legacy (sh)"}
+
+// composerWrapperOrder is composerWrapperLabels' wrapper for each row.
+var composerWrapperOrder = []md.ComposeWrapper{md.ComposeTr, md.ComposeWsh, md.ComposeShWsh, md.ComposeSh}
+
+// composerScriptLine names the script a DECODED template uses, in the picker's
+// words, for the Review (journey I-7).
+//
+// It reads the decoded template rather than the composer's own PathList because
+// the Review is rendered from the CHUNKS -- the bytes that will be engraved.
+// Asking the composition would report what the operator asked for; asking the
+// card reports what they are about to cut, and those are the two things a
+// review exists to tell apart.
+//
+// sh(wsh(...)) and bare sh(...) both summarise to ScriptSh and differ only by
+// InnerWsh, and they hash to DIFFERENT addresses (md.Template.InnerWsh), so the
+// two are never collapsed here.
+func composerScriptLine(tpl md.Template) string {
+	var w md.ComposeWrapper
+	switch tpl.Root {
+	case md.ScriptTr:
+		w = md.ComposeTr
+	case md.ScriptWsh:
+		w = md.ComposeWsh
+	case md.ScriptSh:
+		// ScriptSh IS A THREE-WAY COLLAPSE, not two (review I-3). The decoder
+		// summarises a BIP-49 sh(wpkh) wire to Root==ScriptSh with InnerWpkh
+		// set (md/md.go:1220-1226), so splitting on InnerWsh alone named it
+		// "Legacy (sh)" -- a different script at a different address, stated
+		// confidently on the screen that consents to steel.
+		switch {
+		case tpl.InnerWsh:
+			w = md.ComposeShWsh
+		case tpl.InnerWpkh:
+			return "Script: Nested single-sig (sh(wpkh))"
+		default:
+			w = md.ComposeSh
+		}
+	case md.ScriptWpkh:
+		return "Script: Segwit single-sig (wpkh)"
+	case md.ScriptPkh:
+		return "Script: Legacy single-sig (pkh)"
+	default:
+		// A root this build does not know how to name. "Script: 3" names
+		// nothing to an operator (review M-1), and a wrong name is worse than
+		// an admitted gap on a screen that is about to become steel, so it
+		// says plainly that it cannot name it.
+		return "Script: UNKNOWN - do not engrave this card"
+	}
+	for i, cw := range composerWrapperOrder {
+		if cw == w {
+			return "Script: " + composerWrapperLabels[i]
+		}
+	}
+	return fmt.Sprintf("Script: %v", tpl.Root)
+}
+
 // composerWrapperPick is §4a. The legacy wrappers are offered because C7's
 // migration needs them, and §4e then holds them to ONE unlocked, unhashed
 // key set with n >= 2.
-func composerWrapperPick(ctx *Context, th *Colors) (md.ComposeWrapper, bool) {
-	choices := []string{"Taproot (tr)", "Segwit (wsh)", "Nested (sh-wsh)", "Legacy (sh)"}
-	wrappers := []md.ComposeWrapper{md.ComposeTr, md.ComposeWsh, md.ComposeShWsh, md.ComposeSh}
-	cs := &ChoiceScreen{Title: "New policy", Lead: "Which script?", Choices: choices}
+// It opens on `current`, never on row 0 (journey C-1). A picker that always
+// opens on row 0 is not showing a setting, it is proposing one, and an operator
+// who opened "Change the script" to READ the wrapper and left by the forward
+// button committed Taproot over their Segwit policy with nothing downstream to
+// report it. Preselecting makes that tap a no-op.
+//
+// WHAT `current` IS DIFFERS BY CALLER, and both are right (review M-1):
+//
+//   - the path list's "Change the script" row passes st.list.Wrapper, the
+//     script actually in force. That is the C-1 case, and there the screen is
+//     somewhere the setting can be READ.
+//   - composerStartStep passes its running `w`, which on a second pass through
+//     the Back leg is the operator's own last pick rather than the wrapper in
+//     force. That is the same rule every other picker follows -- Back preserves
+//     what was entered -- and a no-op confirm there is still gated by §8j, a
+//     hold-to-confirm, so it proposes rather than commits. (§4e refuses too,
+//     but only for the legacy wrappers: md/compose.go's isLegacy() is
+//     ComposeSh || ComposeShWsh, so a second-pass pick of tr or wsh meets §8j
+//     alone.)
+//
+// Do not "fix" the second case into the first without reading both: making the
+// Back leg forget the operator's pick is the mirror of the bug this closes.
+func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (md.ComposeWrapper, bool) {
+	choices := composerWrapperLabels
+	wrappers := composerWrapperOrder
+	initial := 0
+	for i, w := range wrappers {
+		if w == current {
+			initial = i
+			break
+		}
+	}
+	cs := &ChoiceScreen{
+		Title:   "New policy",
+		Lead:    "Which script?",
+		Choices: choices,
+		Initial: initial,
+	}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
-		return md.ComposeTr, false
+		return current, false
 	}
 	return wrappers[sel], true
 }
@@ -425,7 +529,7 @@ func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 				continue
 			}
 			composerApplyShapeEdit(st, func() {
-				w, ok := composerWrapperPick(ctx, th)
+				w, ok := composerWrapperPick(ctx, th, st.list.Wrapper)
 				if !ok {
 					return
 				}
