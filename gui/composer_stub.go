@@ -63,54 +63,71 @@ const (
 // Unreadable input reports the ID as moved. Between a spurious warning and a
 // missing one on a screen about to become steel, the spurious one is the
 // survivable mistake.
-func composerStubDelta(shown, current []string) composerStubChange {
+// composerOriginMemory is the last origin each slot was seen ADVERTISING, and
+// it is never pruned.
+//
+// It exists because the comparison has to survive a GAP. Review I-4's walk: a
+// cosigner mints a card for "Slot @2 expects a key at m/48h/0h/2h/2h"; the
+// operator then seats every slot, which empties the advertising set entirely;
+// then releases @2, which now advertises a different origin. Comparing each
+// reading against the one before it is silent at every step -- the middle
+// reading has nothing in it to differ from -- while the card the cosigner is
+// holding now matches no slot at all and is refused with errSeatNoSlot.
+//
+// Remembering per slot rather than per reading is what closes that. A slot that
+// departs the set keeps its last advertised origin on the books, so when it
+// comes back the comparison still has something to compare against.
+type composerOriginMemory map[uint8]string
+
+// remember records an advertising set. It only ever ADDS: a slot missing from
+// `now` has been seated, and forgetting it there is precisely the gap above.
+func (m composerOriginMemory) remember(now map[uint8]string) {
+	for idx, origin := range now {
+		m[idx] = origin
+	}
+}
+
+func composerStubDelta(shown []string, seen composerOriginMemory, current []string) (composerStubChange, map[uint8]string) {
+	nowOrigins, originsErr := composerAdvertisedOrigins(current)
 	if len(shown) == 0 {
-		return composerStubUnchanged
+		return composerStubUnchanged, nowOrigins
 	}
 	wasID, wasKind, err := md.FormAwareIdChunks(shown)
 	if err != nil {
-		return composerStubIdMoved
+		return composerStubIdMoved, nowOrigins
 	}
 	nowID, nowKind, err := md.FormAwareIdChunks(current)
 	if err != nil {
-		return composerStubIdMoved
+		return composerStubIdMoved, nowOrigins
 	}
 	// The KIND is compared too (review M-3). A template id and a policy id are
 	// both 16 bytes of hex and differ for the same wallet; md/template_id.go
 	// exists to keep the two spaces apart, and comparing the bytes alone would
 	// let a crossing read as no change at all.
 	if wasID != nowID || wasKind != nowKind {
-		return composerStubIdMoved
+		return composerStubIdMoved, nowOrigins
 	}
-	// These two legs return OriginsMoved, NOT IdMoved. By the time they run the
-	// ids have been proved equal, so claiming the id changed would print that
+	// This leg returns OriginsMoved, NOT IdMoved. By the time it runs the ids
+	// have been proved equal, so claiming the id changed would print that
 	// sentence above a byte-identical Template-ID -- journey I-5's exact shape,
 	// reintroduced by the error path of its own fix. Unreachable today
 	// (ExpandWalletPolicy has no error returns), which is precisely why it is
 	// worth getting right now rather than the day it becomes reachable.
-	wasOrigins, err := composerAdvertisedOrigins(shown)
-	if err != nil {
-		return composerStubOriginsMoved
+	if originsErr != nil {
+		return composerStubOriginsMoved, nil
 	}
-	nowOrigins, err := composerAdvertisedOrigins(current)
-	if err != nil {
-		return composerStubOriginsMoved
-	}
-	// INTERSECTION, not equality. A slot that was advertising an origin and is
-	// now seated simply LEAVES the instruction set; that is the operator
-	// answering the instruction, not the instruction changing under them. Plain
-	// equality counted the departure as a drift and warned on the one action
-	// this screen is asking for.
-	//
-	// What is compared is every slot still asking for a card in BOTH readings,
-	// which is exactly the set an operator could have minted for and could
-	// still be holding.
-	for idx, was := range wasOrigins {
-		if now, ok := nowOrigins[idx]; ok && now != was {
-			return composerStubOriginsMoved
+	// Against MEMORY, not against the previous reading. A slot still asking for
+	// a card whose origin differs from the last one it asked with is a slot
+	// somebody may already have minted the wrong card for. A slot absent from `seen`
+	// has never advertised before and cannot have been minted against; a slot
+	// absent from `nowOrigins` is seated, and the operator answering the
+	// instruction is not the instruction changing under them.
+	for idx, origin := range nowOrigins {
+		if was, ok := seen[idx]; ok && was != origin {
+			return composerStubOriginsMoved, nowOrigins
 		}
 	}
-	return composerStubUnchanged
+	return composerStubUnchanged, nowOrigins
 }
 
 // composerAdvertisedOrigins is the per-slot "expects a key at" facts -- the

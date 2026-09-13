@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -200,6 +201,22 @@ func TestComposerTemplateEngraveScreenUsesTheStubLabel(t *testing.T) {
 // exactly why the old predicate looked correct. Return a constant false and the
 // "genuinely different shape" case fails; return a constant true and the
 // unchanged case fails.
+// deltaWalk mirrors composerFlow's own use of the pair: compare against memory,
+// then record what this reading advertised. A test that compared without
+// recording would be testing a caller nobody writes.
+func deltaWalk(readings ...[]string) []composerStubChange {
+	seen := composerOriginMemory{}
+	var shown []string
+	out := make([]composerStubChange, 0, len(readings))
+	for _, r := range readings {
+		change, advertised := composerStubDelta(shown, seen, r)
+		seen.remember(advertised)
+		shown = r
+		out = append(out, change)
+	}
+	return out
+}
+
 func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	chunksFor := func(t *testing.T, list md.PathList) []string {
 		t.Helper()
@@ -221,7 +238,7 @@ func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	}}
 
 	t.Run("never shown one is not a change", func(t *testing.T) {
-		if composerStubDelta(nil, chunksFor(t, oneKey)) != composerStubUnchanged {
+		if got := deltaWalk(chunksFor(t, oneKey)); got[0] != composerStubUnchanged {
 			t.Error("the first visit reported a changed id; there was nothing to change from")
 		}
 	})
@@ -229,7 +246,7 @@ func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	t.Run("same shape re-derived is not a change", func(t *testing.T) {
 		a := chunksFor(t, oneKey)
 		b := chunksFor(t, oneKey)
-		if composerStubDelta(a, b) != composerStubUnchanged {
+		if got := deltaWalk(a, b); got[1] != composerStubUnchanged {
 			t.Error("re-deriving an untouched shape reported a changed id. This is the " +
 				"false statement F-520 measured, on the screen whose job is to be " +
 				"copied onto steel: an operator who has already minted cosigner " +
@@ -238,7 +255,7 @@ func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	})
 
 	t.Run("a genuinely different shape is a change", func(t *testing.T) {
-		if composerStubDelta(chunksFor(t, oneKey), chunksFor(t, twoOfThree)) != composerStubIdMoved {
+		if got := deltaWalk(chunksFor(t, oneKey), chunksFor(t, twoOfThree)); got[1] != composerStubIdMoved {
 			t.Error("editing 1 key to 2-of-3 did not report a changed id; the banner " +
 				"would be silent on the day it is true")
 		}
@@ -247,7 +264,7 @@ func TestComposerStubDeltaNamesWhatMoved(t *testing.T) {
 	t.Run("an unreadable id is reported as changed", func(t *testing.T) {
 		// Between a spurious warning and a missing one on a screen that is
 		// about to become steel, the spurious one is the survivable mistake.
-		if composerStubDelta([]string{"md1notacard"}, chunksFor(t, oneKey)) != composerStubIdMoved {
+		if got := deltaWalk([]string{"md1notacard"}, chunksFor(t, oneKey)); got[1] != composerStubIdMoved {
 			t.Error("an unreadable prior set was silently treated as unchanged")
 		}
 	})
@@ -341,7 +358,7 @@ func TestComposerStubDeltaCatchesOriginDriftUnderOneId(t *testing.T) {
 			beforeOrigins, afterOrigins)
 	}
 
-	if got := composerStubDelta(before, after); got != composerStubOriginsMoved {
+	if got := deltaWalk(before, after)[1]; got != composerStubOriginsMoved {
 		t.Errorf("composerStubDelta = %v, want composerStubOriginsMoved.\n"+
 			"The id did not move and the origins did. An operator who minted a "+
 			"cosigner card against\n  %v\nwould come back to\n  %v\nand be told "+
@@ -350,7 +367,7 @@ func TestComposerStubDeltaCatchesOriginDriftUnderOneId(t *testing.T) {
 	}
 
 	// And the screen must SAY origins, not id -- the whole point of the split.
-	lines, err := composerStubLines(after, nil, composerStubDelta(before, after))
+	lines, err := composerStubLines(after, nil, deltaWalk(before, after)[1])
 	if err != nil {
 		t.Fatalf("composerStubLines: %v", err)
 	}
@@ -409,7 +426,7 @@ func TestComposerStubDeltaIgnoresSeatingASoleSlot(t *testing.T) {
 	if slices.Equal(before, after) {
 		t.Fatal("seating the sole slot changed nothing on the wire: the fixture proves nothing")
 	}
-	if got := composerStubDelta(before, after); got != composerStubUnchanged {
+	if got := deltaWalk(before, after)[1]; got != composerStubUnchanged {
 		lines, err := composerStubLines(after, nil, got)
 		if err == nil {
 			t.Errorf("seating the ONLY slot reported %v and the screen says:\n%s\n"+
@@ -418,5 +435,104 @@ func TestComposerStubDeltaIgnoresSeatingASoleSlot(t *testing.T) {
 		} else {
 			t.Errorf("seating the ONLY slot reported %v, want Unchanged", got)
 		}
+	}
+}
+
+// TestComposerStubDeltaSurvivesAFullySeatedGap is review I-4, and it is the
+// case an intersection-of-adjacent-readings rule cannot see.
+//
+// The walk, one id throughout, no shape edit at any point:
+//
+//	E1  nothing seated. "Slot @2 expects a key at m/48h/0h/2h/2h", and a
+//	    cosigner mints a card for exactly that.
+//	E2  every slot seated. The advertising set is now EMPTY.
+//	E3  @2 released. It advertises a DIFFERENT origin, because the accounts
+//	    below it were taken while it was away.
+//
+// Comparing each reading against the one before it is silent at every step: E2
+// has nothing to differ from, and at E3 the previous reading's advertising set
+// was empty. Meanwhile the card minted at E1 matches no slot and is refused
+// with errSeatNoSlot.
+//
+// So the memory is per SLOT and never pruned: a slot that leaves the
+// advertising set keeps its last advertised origin on the books, and the
+// comparison still has something to compare against when it returns.
+//
+// MUTATION: make composerOriginMemory.remember prune slots missing from `now`,
+// or compare against the previous reading instead of the memory, and E3 goes
+// silent.
+func TestComposerStubDeltaSurvivesAFullySeatedGap(t *testing.T) {
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+	}}
+	chunksWith := func(t *testing.T, declared []*md.SlotOrigin) []string {
+		t.Helper()
+		c, err := md.ComposeWith(list, declared)
+		if err != nil {
+			t.Fatalf("md.ComposeWith: %v", err)
+		}
+		ch, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("Chunks: %v", err)
+		}
+		return ch
+	}
+	seat := func(account uint32, b byte) *md.SlotOrigin {
+		return &md.SlotOrigin{
+			Origin:      composerTestOrigin(2, account),
+			Fingerprint: [4]byte{0xde, 0xad, 0xbe, b},
+			FpPresent:   true,
+		}
+	}
+
+	e1 := chunksWith(t, make([]*md.SlotOrigin, 3))
+	e2 := chunksWith(t, []*md.SlotOrigin{seat(0, 0), seat(1, 1), seat(2, 2)})
+	// @2 released; @0 and @1 stay seated, at accounts that push @2's advertised
+	// origin somewhere it has not been before.
+	e3 := chunksWith(t, []*md.SlotOrigin{seat(2, 0), seat(1, 1), nil})
+
+	// The fixture must hold the id still, or this is a test about shape edits.
+	ids := make([]string, 0, 3)
+	for _, r := range [][]string{e1, e2, e3} {
+		id, kind, err := md.FormAwareIdChunks(r)
+		if err != nil {
+			t.Fatalf("id: %v", err)
+		}
+		ids = append(ids, fmt.Sprintf("%v:%x", kind, id))
+	}
+	if ids[0] != ids[1] || ids[1] != ids[2] {
+		t.Fatalf("the fixture moved the id across the walk (%v): it no longer "+
+			"isolates origin drift", ids)
+	}
+
+	// E1's advertised origin for @2 must differ from E3's, or there is nothing
+	// for the memory to catch and this test would pass vacuously.
+	a1, err := composerAdvertisedOrigins(e1)
+	if err != nil {
+		t.Fatalf("origins e1: %v", err)
+	}
+	a2, err := composerAdvertisedOrigins(e2)
+	if err != nil {
+		t.Fatalf("origins e2: %v", err)
+	}
+	a3, err := composerAdvertisedOrigins(e3)
+	if err != nil {
+		t.Fatalf("origins e3: %v", err)
+	}
+	if len(a2) != 0 {
+		t.Fatalf("E2 still advertises %v: the fixture has no gap to survive", a2)
+	}
+	if a1[2] == "" || a3[2] == "" || a1[2] == a3[2] {
+		t.Fatalf("@2 advertises %q at E1 and %q at E3: the fixture has no drift",
+			a1[2], a3[2])
+	}
+
+	got := deltaWalk(e1, e2, e3)
+	if got[2] != composerStubOriginsMoved {
+		t.Errorf("E3 reported %v, want OriginsMoved.\n"+
+			"A cosigner minted a card for @2 at %s, every slot was then seated, "+
+			"and @2 now asks for %s. The card matches no slot and is refused with "+
+			"errSeatNoSlot -- and the operator was told nothing at any step.",
+			got[2], a1[2], a3[2])
 	}
 }

@@ -73,6 +73,13 @@ func composerFlow(ctx *Context, th *Colors) {
 	}
 
 	var shown []string // the chunk set the stub screen last displayed (§8s)
+	// seen outlives `shown` on purpose: it is the last origin each slot was ever
+	// seen ADVERTISING, and it is never pruned. Comparing each reading only
+	// against the one before it goes silent across a gap -- seat every slot and
+	// the advertising set is empty, so the reading after that has nothing to
+	// differ from, while a cosigner card minted before the gap can already be
+	// stale (review I-4).
+	seen := composerOriginMemory{}
 	for !ctx.Done {
 		if !composerShapeFlow(ctx, th, st) {
 			// BACK AT THE PATH LIST GOES BACK ONE SCREEN, to "Start from?",
@@ -117,7 +124,11 @@ func composerFlow(ctx *Context, th *Colors) {
 		// who has already minted cosigner cards reads that their cards, and
 		// other people's, are now useless. Crying wolf trains them to discount
 		// the line on the day it is true.
-		change := composerStubDelta(shown, template)
+		change, advertised := composerStubDelta(shown, seen, template)
+		// Recorded on BOTH legs, because the operator READ the screen on both:
+		// what matters for the next comparison is what they were shown, not
+		// which button they left by.
+		seen.remember(advertised)
 		if !composerStubFlow(ctx, th, template, nil, change) {
 			shown = template
 			continue
