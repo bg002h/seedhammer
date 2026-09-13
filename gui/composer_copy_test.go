@@ -100,7 +100,7 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyIdChanged", "8s", composerCopyIdChanged(),
 			"The shape changed, so this id changed. Cards minted with the old stub will not seat here."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(1, md.DuplicateRefusedByCore),
-			"Check before funding: slot @1 repeats in one script, and Bitcoin Core refuses such a descriptor (\"duplicate public keys\")."},
+			"Check before funding: slot @1 repeats in one script, and Bitcoin Core refuses such a descriptor."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(2, md.DuplicateFewerKeys),
 			"Check before funding: slot @2 fills more than one seat, so fewer separate keys can spend this than its k-of-n says."},
 		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),

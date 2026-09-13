@@ -39,12 +39,25 @@ const (
 	// DuplicateRefusedByCore: the repeat is inside a WSH/SH miniscript
 	// expression, so Bitcoin Core refuses the descriptor outright --
 	// "is not sane: contains duplicate public keys".
+	//
+	// THIS NAME IS A CLAIM ABOUT A VERSION, and the file it lives in has no
+	// version in it. Everything here was measured on Core 25.0.0. The two kinds
+	// are asymmetric for that reason: DuplicateFewerKeys states a property of
+	// the POLICY and cannot go stale, while this one states a verdict of
+	// somebody else's software.
+	//
+	// WHAT WOULD FALSIFY IT: Core 25 has no tapscript miniscript at all, which
+	// is why every taproot shape is FewerKeys below. If a later Core runs
+	// IsSane on tapscript, a tapleaf multi_a with a repeated key plausibly
+	// starts failing it, and the tr arm becomes wrong in the other direction --
+	// silently, because nothing here watches Core's version. Re-measure before
+	// trusting this on a newer node.
 	DuplicateRefusedByCore
 	// DuplicateFewerKeys: Core IMPORTS this shape, so the harm is the other one
 	// -- one key fills more than one seat, and the wallet needs fewer separate
 	// keys than its k-of-n says.
 	//
-	// NAMED FOR THE HARM, NOT THE PLACE. It was DuplicateFewerKeys, and that
+	// NAMED FOR THE HARM, NOT THE PLACE. It was DuplicateInMultisig, and that
 	// name encoded an assumption that turned out to be false: WHERE the repeat
 	// sits does not predict what Core does. A tapleaf multi_a is "miniscript"
 	// by shape and Core still imports it, because Core 25.0.0 has no tapscript

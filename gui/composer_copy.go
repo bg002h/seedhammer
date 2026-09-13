@@ -357,8 +357,13 @@ func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 		return fmt.Sprintf("Check before funding: slot @%d fills more than one seat, "+
 			"so fewer separate keys can spend this than its k-of-n says.", slot)
 	}
+	// 96 chars, 6 lines, so it FITS page one of the Inspect screen, which holds
+	// 7. The shipped version was 122 chars and 8 lines, and page one ended on a
+	// dangling ("duplicate public with keys"). overleaf (review M-9). Line count
+	// decides, not length: 122 chars landed on 8 only because of where the words
+	// break, so measure a replacement rather than counting it.
 	return fmt.Sprintf("Check before funding: slot @%d repeats in one script, and "+
-		"Bitcoin Core refuses such a descriptor (\"duplicate public keys\").", slot)
+		"Bitcoin Core refuses such a descriptor.", slot)
 }
 
 func composerCopyOriginsChanged() string {

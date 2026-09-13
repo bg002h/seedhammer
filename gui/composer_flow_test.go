@@ -588,7 +588,12 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 				t.Fatalf("composerConsentLinesFor: %v", err)
 			}
 			joined := strings.Join(lines, "\n")
-			got := strings.Contains(joined, "duplicate public keys")
+			// AGAINST THE COPY FUNCTION, NOT A LITERAL. This assertion used to
+			// search for "duplicate public keys", and trimming that parenthetical
+			// out of the sentence to make it fit the Inspect screen's page broke
+			// it -- the third time in this cycle a copy edit broke a test that
+			// had hardcoded the words rather than asking for them.
+			got := strings.Contains(joined, composerCopyDuplicateKeys(slot, tc.want))
 			if got != (tc.want == md.DuplicateRefusedByCore) {
 				if tc.want == md.DuplicateRefusedByCore {
 					t.Errorf("the consent screen shows addresses for a descriptor Core "+
