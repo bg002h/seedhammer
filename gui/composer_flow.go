@@ -125,15 +125,19 @@ func composerFlow(ctx *Context, th *Colors) {
 		// other people's, are now useless. Crying wolf trains them to discount
 		// the line on the day it is true.
 		change, advertised := composerStubDelta(shown, seen, template)
-		// Recorded on BOTH legs, because the operator READ the screen on both:
-		// what matters for the next comparison is what they were shown, not
-		// which button they left by.
-		seen.remember(advertised)
-		if !composerStubFlow(ctx, th, template, nil, change) {
+		forward, drew := composerStubFlow(ctx, th, template, nil, change)
+		// Recorded only when the screen was actually DRAWN, and then on both
+		// legs, because the operator read it whichever button they left by. A
+		// render failure put an error screen up instead, and recording there
+		// would make the device believe it displayed a stub nobody saw
+		// (F-528).
+		if drew {
+			seen.remember(advertised)
 			shown = template
+		}
+		if !forward {
 			continue
 		}
-		shown = template
 
 		if !composerSeatingStep(ctx, th, st) {
 			continue
@@ -143,8 +147,10 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		if len(keyed) > 0 && !composerStubFlow(ctx, th, template, keyed, composerStubUnchanged) {
-			continue
+		if len(keyed) > 0 {
+			if forward, _ := composerStubFlow(ctx, th, template, keyed, composerStubUnchanged); !forward {
+				continue
+			}
 		}
 		consent := template
 		if len(keyed) > 0 {
