@@ -233,15 +233,44 @@ func TestTheTitleCannotPushTheWarningOffTheScreen(t *testing.T) {
 
 // TestTheDisplayedTitleIsBounded pins the cap itself, and that it is a DISPLAY
 // cap: the descriptor keeps its full Title for everything downstream.
+//
+// PROBED INSIDE THE NATURAL-CLIP WINDOW, which is the whole difficulty (fold
+// review NEW-2). The first version asked whether a 400-character Title was
+// drawn in full -- and the screen's own viewport already hides anything past
+// roughly 200-300 characters, so the answer was "no" whatever maxTitleDrawn
+// was set to. Deleting the truncateForDisplay call site left it green, and so
+// did raising the cap tenfold. It read as a test of the cap and tested
+// clipping.
+//
+// So it probes at a length the viewport still draws in full, where truncation
+// is the ONLY thing that can shorten the title, and it asserts the marker --
+// which is the visible consequence of the call site having run.
 func TestTheDisplayedTitleIsBounded(t *testing.T) {
-	long := wideWords(400)
+	const probe = 120 // inside the viewport, comfortably past maxTitleDrawn
+
 	desc := loadTestDesc(t, descDistinctKeys)
-	desc.Title = long
-	drawn := drawDescriptorScreenDesc(t, desc)
-	if strings.Contains(normalizeDrawn(drawn), normalizeDrawn(long)) {
-		t.Error("the whole 400-character Title is drawn; a scanned string with no length " +
-			"bound displaces whatever the device chose to say after it")
+	desc.Title = wideWords(probe)
+	drawn := normalizeDrawn(drawDescriptorScreenDesc(t, desc))
+	if strings.Contains(drawn, normalizeDrawn(desc.Title)) {
+		t.Errorf("the whole %d-character Title is drawn. The viewport still shows a "+
+			"title this long, so nothing but the cap can shorten it -- and the cap is "+
+			"what keeps a scanned string from displacing the Type and Script lines",
+			probe)
 	}
+	if !strings.Contains(drawn, "...") {
+		t.Errorf("no truncation marker on screen for a %d-character Title, so "+
+			"truncateForDisplay's call site did not run. The marker is the only visible "+
+			"evidence that it did; without this assertion, deleting the call site "+
+			"keeps every test green (fold review NEW-2)", probe)
+	}
+	head := string([]rune(desc.Title)[:maxTitleDrawn])
+	if !strings.Contains(drawn, normalizeDrawn(head)) {
+		t.Errorf("the first %d characters of the Title are not on screen; the cap should "+
+			"shorten the name, not replace it", maxTitleDrawn)
+	}
+
+	long := wideWords(400)
+	desc.Title = long
 	if desc.Title != long {
 		t.Error("Draw mutated the descriptor's Title. The cap is for the screen only -- " +
 			"what is engraved must not change because of how it was displayed")

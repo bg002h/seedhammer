@@ -1308,6 +1308,23 @@
    "source": "F-530 review C-2: the SAME wallet as duplicate-key-same-use-site with the second key's use site left implicit. derive::receive_path states that an absent path IS <0;1>/*, so these are one key at two seats -- and conjunct 8(b) compared a.children == b.children, admitted it, and derived the same key twice."
   },
   {
+   "name": "gate/duplicate-key-change-chain-only",
+   "input": "wsh(sortedmulti(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/3/*,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<2;3>/*))",
+   "sha256": "e90dfe8ba57c906e10c9a94d79f2521d8aeae4483619d81bd9337305a723c17f",
+   "host_admits": false,
+   "device_admits": true,
+   "md1_admits": false,
+   "format": "bip380",
+   "gate_open": true,
+   "outcome": "descriptor-refusal",
+   "exit_code": 3,
+   "refusal_row": "key-identity-duplicate",
+   "covers": [
+    "gate"
+   ],
+   "source": "F-530 fold review NEW-1: a fixed child and a multipath key that are ONE key on the change chain and two on receive. Conjunct 8(b) compared receive only, so the primary admitted what the Go port refused; the shared file carried no row of this shape, so the parity gate could not see the divergence."
+  },
+  {
    "name": "gate/colliding-origin-multi",
    "input": "wsh(multi(2,[dc567276/48h/0h/0h/2h]xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan/<0;1>/*,[dc567276/48h/0h/0h/2h]xpub6DnT4E1fT8VxuAZW29avMjr5i99aYTHBp9d7fiLnpL5t4JEprQqPMbTw7k7rh5tZZ2F5g8PJpssqrZoebzBChaiJrmEvWwUTEMAbHsY39Ge/<0;1>/*))",
    "sha256": "eae1fc5fa78655c7ebfa31a1e5fb8cf57356f9252379c8dd6aa82347f6a94e61",

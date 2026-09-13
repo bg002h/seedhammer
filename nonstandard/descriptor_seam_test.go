@@ -39,7 +39,7 @@ import (
 // The package is `nonstandard_test` (EXTERNAL) deliberately: once §5.2's
 // classifier arm lands, `sysw` imports `nonstandard`, and an internal test
 // importing `sysw` for the sysw_class column would be an import cycle.
-const seamVectorsSHA256 = "6352aa45592d0f328c2293eda146327f6ebe60ecba08d3ae833f872c2d9e4323"
+const seamVectorsSHA256 = "ed3706e29fde0ee86e13accd0ecc6492ea2ad9391ff2d911d798d69bb03760f4"
 
 const seamVectorsPath = "testdata/descriptor_seam_vectors.json"
 
@@ -69,8 +69,8 @@ type seamRow struct {
 // carries no address or wallet-id columns -- so only rows, device-true and the
 // single-line count move.
 const (
-	wantRows        = 73
-	wantDeviceTrue  = 39
+	wantRows        = 74
+	wantDeviceTrue  = 40
 	wantDeviceFalse = 34
 	wantCanonical   = 19
 	wantAddress0    = 20
@@ -83,7 +83,7 @@ const (
 	// therefore cannot contain one. Measured from the file, not read off it,
 	// and pinned identically in the Rust half (SINGLE_LINE_ROWS /
 	// SINGLE_LINE_ADMITTED, crates/me-cli/tests/descriptor_seam.rs).
-	wantSingleLine = 60
+	wantSingleLine = 61
 	// ... of which this many are host_admits, so the derived rule below is
 	// satisfiable in BOTH directions rather than vacuously one-sided.
 	wantSingleLineAdmitted = 15

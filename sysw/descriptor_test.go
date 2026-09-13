@@ -164,6 +164,16 @@ func TestAdmissionRefusesEverySpellingOfADuplicateKey(t *testing.T) {
 			false, "a range resolves to Index on the receive chain -- the chain that gets funded"},
 		{"disjoint multipath", "wsh(sortedmulti(2," + oriA + xpubA + "/<0;1>/*," + oriA + xpubA + "/<2;3>/*))",
 			true, "BIP 388 permits one key at DISJOINT multipath sets, and this conjunct's own comment says so"},
+		// FOLD REVIEW NEW-1. A fixed child derives the SAME key on both chains
+		// (derivePubKey never consults `change` for a plain Child), and
+		// /<2;3>/* uses 3 on change -- so these are one key on the change chain
+		// and two on receive. Comparing receive alone called it two keys, and
+		// for a while the primary did exactly that while this half did not: the
+		// port was stricter than what it ports, on an input the shared vector
+		// file had no row for. Both sides ask the same question now, and
+		// gate/duplicate-key-change-chain-only covers the shape.
+		{"collides on the change chain only", "wsh(sortedmulti(2," + oriA + xpubA + "/3/*," + oriA + xpubA + "/<2;3>/*))",
+			false, "one key on the change chain, and change addresses hold funds"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := nonstandard.OutputDescriptor([]byte(tc.desc))
