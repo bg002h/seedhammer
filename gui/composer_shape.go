@@ -112,6 +112,63 @@ func composerShapeGuard(ctx *Context, th *Colors, st *composerState) bool {
 		composerConfirmBody(composerCopyEditClearsKeys()))
 }
 
+// composerWrapperLabels is the operator's name for each script wrapper, and the
+// ONE place those words are written.
+//
+// Shared with the Review (journey I-7) on purpose. The requirement there is not
+// "name the script" but "name it in the words the operator chose it with": a
+// Review that said "P2WSH" while the picker said "Segwit (wsh)" would be
+// telling the truth in a second vocabulary, and would leave the operator
+// comparing two things instead of reading one. Two literals drift; one does
+// not.
+//
+// Index-aligned with composerWrapperOrder, and the ORDER IS LOAD-BEARING in
+// both directions: the picker's rows are these, and ChoiceScreen returns an
+// index into them.
+var composerWrapperLabels = []string{"Taproot (tr)", "Segwit (wsh)", "Nested (sh-wsh)", "Legacy (sh)"}
+
+// composerWrapperOrder is composerWrapperLabels' wrapper for each row.
+var composerWrapperOrder = []md.ComposeWrapper{md.ComposeTr, md.ComposeWsh, md.ComposeShWsh, md.ComposeSh}
+
+// composerScriptLine names the script a DECODED template uses, in the picker's
+// words, for the Review (journey I-7).
+//
+// It reads the decoded template rather than the composer's own PathList because
+// the Review is rendered from the CHUNKS -- the bytes that will be engraved.
+// Asking the composition would report what the operator asked for; asking the
+// card reports what they are about to cut, and those are the two things a
+// review exists to tell apart.
+//
+// sh(wsh(...)) and bare sh(...) both summarise to ScriptSh and differ only by
+// InnerWsh, and they hash to DIFFERENT addresses (md.Template.InnerWsh), so the
+// two are never collapsed here.
+func composerScriptLine(tpl md.Template) string {
+	var w md.ComposeWrapper
+	switch tpl.Root {
+	case md.ScriptTr:
+		w = md.ComposeTr
+	case md.ScriptWsh:
+		w = md.ComposeWsh
+	case md.ScriptSh:
+		if tpl.InnerWsh {
+			w = md.ComposeShWsh
+		} else {
+			w = md.ComposeSh
+		}
+	default:
+		// Single-sig roots the composer cannot build. Naming the root honestly
+		// beats forcing it into one of the four labels, which would be a
+		// confident wrong answer on the screen that consents to steel.
+		return fmt.Sprintf("Script: %v", tpl.Root)
+	}
+	for i, cw := range composerWrapperOrder {
+		if cw == w {
+			return "Script: " + composerWrapperLabels[i]
+		}
+	}
+	return fmt.Sprintf("Script: %v", tpl.Root)
+}
+
 // composerWrapperPick is §4a. The legacy wrappers are offered because C7's
 // migration needs them, and §4e then holds them to ONE unlocked, unhashed
 // key set with n >= 2.
@@ -125,8 +182,8 @@ func composerShapeGuard(ctx *Context, th *Colors, st *composerState) bool {
 // wrapper there, which is row 0, so nothing changes -- except that stepping
 // Back to this screen now shows what was chosen instead of forgetting it.
 func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (md.ComposeWrapper, bool) {
-	choices := []string{"Taproot (tr)", "Segwit (wsh)", "Nested (sh-wsh)", "Legacy (sh)"}
-	wrappers := []md.ComposeWrapper{md.ComposeTr, md.ComposeWsh, md.ComposeShWsh, md.ComposeSh}
+	choices := composerWrapperLabels
+	wrappers := composerWrapperOrder
 	initial := 0
 	for i, w := range wrappers {
 		if w == current {
