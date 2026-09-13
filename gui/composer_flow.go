@@ -2,7 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"slices"
 
 	"seedhammer.com/codex32"
 	"seedhammer.com/md"
@@ -93,14 +92,26 @@ func composerFlow(ctx *Context, th *Colors) {
 			composerShowRefusal(ctx, th, "Template", err)
 			continue
 		}
-		// §8s's changed-id line is decided by COMPARING CHUNK SETS, not by an
-		// "edited" flag. The flag was set on any Back out of the stub screen,
-		// the consent or §8l and never reset, so re-reaching the stub screen
-		// without touching the shape asserted that the id had changed -- a
-		// false statement on the screen whose job is to be copied onto steel,
-		// which trains the operator to discount the line that will one day be
-		// true.
-		changed := shown != nil && !slices.Equal(shown, template)
+		// §8s's changed-id line is decided by COMPARING THE IDS THEMSELVES.
+		//
+		// It was an "edited" flag once, set on any Back out of the stub screen,
+		// the consent or §8l and never reset. That was replaced by comparing
+		// CHUNK SETS, which is closer but still not the claim the line makes:
+		// the sentence says "this id changed" and "cards minted with the old
+		// stub will not seat here", and both of those are propositions about
+		// the ID. A journey walk then measured the banner firing on a revisit
+		// where the printed Template-ID was byte-identical two lines below it
+		// (F-520). Comparing the thing the sentence is about makes that
+		// impossible by construction, whichever leg produced the differing
+		// chunks -- and if two chunk sets really do carry one id, the cards DO
+		// seat and there was nothing to warn about.
+		//
+		// A false statement here is worse than a missing one: this is the
+		// screen whose whole job is to be copied onto steel, and an operator
+		// who has already minted cosigner cards reads that their cards, and
+		// other people's, are now useless. Crying wolf trains them to discount
+		// the line on the day it is true.
+		changed := composerIdChanged(shown, template)
 		if !composerStubFlow(ctx, th, template, nil, changed) {
 			shown = template
 			continue

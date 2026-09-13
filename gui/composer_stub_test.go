@@ -175,3 +175,79 @@ func TestComposerTemplateEngraveScreenUsesTheStubLabel(t *testing.T) {
 			"is the label md.WalletIdKind gives the 16-byte id:\n%s", joined)
 	}
 }
+
+// TestComposerIdChangedComparesIdsNotChunks is journey I-5 / F-520: the §8s
+// banner claims "this id changed" and "cards minted with the old stub will not
+// seat here", and both are propositions about the ID.
+//
+// The predicate compared CHUNK STRINGS, which is a different question. A
+// journey walk measured the banner firing on a revisit where the Template-ID
+// printed two lines below it was byte-identical (F-520). Comparing the thing
+// the sentence is about makes that impossible by construction, whichever leg
+// produced the differing chunks -- and if two chunk sets ever did carry one id,
+// the cards WOULD seat and there was nothing to warn about.
+//
+// WHAT THIS TEST CANNOT DO, stated plainly: it does not reproduce the leg that
+// produced differing chunks for an unchanged shape. composerTemplateChunksFor
+// is deterministic -- measured, twice over one state, byte-identical -- so the
+// leg is a state change that moves the chunks without moving the id, and it is
+// still unidentified. This fix removes the whole CLASS rather than that one
+// leg, which is why it does not wait on finding it.
+//
+// MUTATION: compare the chunk slices instead of the ids and the "same shape,
+// re-derived" case still passes, because derivation is deterministic -- that is
+// exactly why the old predicate looked correct. Return a constant false and the
+// "genuinely different shape" case fails; return a constant true and the
+// unchanged case fails.
+func TestComposerIdChangedComparesIdsNotChunks(t *testing.T) {
+	chunksFor := func(t *testing.T, list md.PathList) []string {
+		t.Helper()
+		c, err := md.Compose(list)
+		if err != nil {
+			t.Fatalf("md.Compose: %v", err)
+		}
+		ch, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("Chunks: %v", err)
+		}
+		return ch
+	}
+	oneKey := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 1}},
+	}}
+	twoOfThree := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
+	}}
+
+	t.Run("never shown one is not a change", func(t *testing.T) {
+		if composerIdChanged(nil, chunksFor(t, oneKey)) {
+			t.Error("the first visit reported a changed id; there was nothing to change from")
+		}
+	})
+
+	t.Run("same shape re-derived is not a change", func(t *testing.T) {
+		a := chunksFor(t, oneKey)
+		b := chunksFor(t, oneKey)
+		if composerIdChanged(a, b) {
+			t.Error("re-deriving an untouched shape reported a changed id. This is the " +
+				"false statement F-520 measured, on the screen whose job is to be " +
+				"copied onto steel: an operator who has already minted cosigner " +
+				"cards reads that their cards, and other people's, are now useless")
+		}
+	})
+
+	t.Run("a genuinely different shape is a change", func(t *testing.T) {
+		if !composerIdChanged(chunksFor(t, oneKey), chunksFor(t, twoOfThree)) {
+			t.Error("editing 1 key to 2-of-3 did not report a changed id; the banner " +
+				"would be silent on the day it is true")
+		}
+	})
+
+	t.Run("an unreadable id is reported as changed", func(t *testing.T) {
+		// Between a spurious warning and a missing one on a screen that is
+		// about to become steel, the spurious one is the survivable mistake.
+		if !composerIdChanged([]string{"md1notacard"}, chunksFor(t, oneKey)) {
+			t.Error("an unreadable prior set was silently treated as unchanged")
+		}
+	})
+}

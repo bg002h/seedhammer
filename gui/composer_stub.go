@@ -24,6 +24,35 @@ import (
 //
 // PAGED, because the body grows one line per slot and the grammar admits 32.
 
+// composerIdChanged reports whether the template the operator is looking at now
+// carries a DIFFERENT id from the one they were last shown.
+//
+// nil `shown` means they have not been shown one yet, which is not a change.
+//
+// It compares ids rather than chunk strings because that is what the §8s line
+// claims, and because the consequence the line describes -- cards minted with
+// the old stub will not seat -- is a fact about the id and the stub derived
+// from it, not about the encoding that carried them.
+//
+// An id it cannot read is reported as CHANGED. The alternative is to swallow
+// the warning on exactly the input the device could not understand, and between
+// a spurious warning and a missing one on a screen that is about to become
+// steel, the spurious one is the survivable mistake.
+func composerIdChanged(shown, current []string) bool {
+	if len(shown) == 0 {
+		return false
+	}
+	was, _, err := md.FormAwareIdChunks(shown)
+	if err != nil {
+		return true
+	}
+	now, _, err := md.FormAwareIdChunks(current)
+	if err != nil {
+		return true
+	}
+	return was != now
+}
+
 // composerStubLines builds the screen. `keyedChunks` is nil until a policy
 // has been seated; when present the keyed id and stub are added and the
 // screen recommends stamping BOTH (--policy-id-stub is repeatable).
