@@ -365,18 +365,6 @@ func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 		"Bitcoin Core refuses such a descriptor.", slot)
 }
 
-// composerCopyNoAddressesDuplicateKeys is the sentence that turns the F-531
-// refusal into something an operator can act on.
-//
-// IT EXISTS BECAUSE A SILENT REFUSAL IS A WORSE SCREEN THAN A WRONG ADDRESS IS
-// A SCREEN. "This device can't derive addresses for this policy" is true of the
-// shape and useless about it: it reads as a device limitation, and the operator
-// goes looking for a better tool instead of learning that their wallet reuses a
-// key. This names the cause and leaves the card readable.
-//
-// It is a SECOND line, under composerCopyDuplicateKeys rather than folded into
-// it, because that sentence is also shown where addresses ARE derived and must
-// not start claiming a refusal that did not happen.
 // composerCopyDescriptorRepeatsAKey is the F-530 sibling of
 // composerCopyDuplicateKeys, for a descriptor that arrived WITHOUT an md1.
 //
@@ -396,6 +384,18 @@ func composerCopyDescriptorRepeatsAKey() string {
 		"wallet, so fewer separate keys can spend it than its k-of-n says."
 }
 
+// composerCopyNoAddressesDuplicateKeys is the sentence that turns the F-531
+// refusal into something an operator can act on.
+//
+// IT EXISTS BECAUSE A SILENT REFUSAL IS A WORSE SCREEN THAN A WRONG ADDRESS IS
+// A SCREEN. "This device can't derive addresses for this policy" is true of the
+// shape and useless about it: it reads as a device limitation, and the operator
+// goes looking for a better tool instead of learning that their wallet reuses a
+// key. This names the cause and leaves the card readable.
+//
+// It is a SECOND line, under composerCopyDuplicateKeys rather than folded into
+// it, because that sentence is also shown where addresses ARE derived and must
+// not start claiming a refusal that did not happen.
 func composerCopyNoAddressesDuplicateKeys() string {
 	return "No addresses: this device does not derive them for a wallet that " +
 		"reuses a key."

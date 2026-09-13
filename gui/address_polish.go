@@ -15,8 +15,13 @@ import (
 const addrMaxIndex = 49 // show indices 0..49; bounds the paging loop
 
 // descriptorAddressFlow displays the descriptor's receive/change addresses for
-// on-device verification. Display-only: no engrave, no NFC, no mutation. The
-// caller opens this only when address.Supported(desc).
+// on-device verification. Display-only: no engrave, no NFC, no mutation.
+//
+// The caller opens this only when address.Supported(desc) AND the descriptor
+// does not reuse a key (gui/gui.go's `supported && !reusesAKey`, F-530). Both
+// halves matter to a reader checking whether a caller gate exists: the first is
+// a capability, the second a policy refusal, and this screen assumes neither on
+// its own.
 //
 // Long bech32 addresses wrap across several rows, so this MEASURES each line and
 // renders only the indices that FIT the content height, paging forward by the

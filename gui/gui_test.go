@@ -64,6 +64,24 @@ func BenchmarkAllocs(b *testing.B) {
 	ds := &DescriptorScreen{
 		Descriptor: desc,
 	}
+	// THE REPEATED-KEY BRANCH TOO (F-530 review M-2). fillDescriptor makes five
+	// DISTINCT keys, so the descriptor above never enters Draw's warning branch
+	// and never exercises the descriptorRepeatsAKey call that now runs on every
+	// frame of this screen. A 0-alloc gate that cannot reach the code added to
+	// the screen it guards is not guarding it.
+	dupDesc := &bip380.Descriptor{
+		Script:    bip380.P2WSH,
+		Type:      bip380.SortedMulti,
+		Threshold: 2,
+		Keys:      make([]bip380.Key, 5),
+	}
+	fillDescriptor(b, dupDesc, dupDesc.Script.DerivationPath(), 12, 0)
+	dupDesc.Keys[1] = dupDesc.Keys[0]
+	if _, _, dup := descriptorRepeatsAKey(dupDesc); !dup {
+		b.Fatal("the duplicate fixture is not a duplicate, so the branch this case " +
+			"exists to measure is still unreached")
+	}
+	dupDS := &DescriptorScreen{Descriptor: dupDesc}
 	m := new(StartScreen)
 	screens := []func(*Context){
 		func(ctx *Context) {
@@ -71,6 +89,9 @@ func BenchmarkAllocs(b *testing.B) {
 		},
 		func(ctx *Context) {
 			ds.Confirm(ctx, &descriptorTheme)
+		},
+		func(ctx *Context) {
+			dupDS.Confirm(ctx, &descriptorTheme)
 		},
 	}
 	var frames []func()
