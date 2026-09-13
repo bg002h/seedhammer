@@ -166,7 +166,7 @@ func composerStartStep(ctx *Context, th *Colors, st *composerState, fromPaths bo
 	for !ctx.Done {
 		if !fromPaths {
 			var ok bool
-			if w, ok = composerWrapperPick(ctx, th); !ok {
+			if w, ok = composerWrapperPick(ctx, th, w); !ok {
 				return false
 			}
 		}

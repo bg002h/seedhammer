@@ -403,7 +403,7 @@ func ppQRChoiceFlow(ctx *Context, th *Colors, prior bool) (bool, bool) {
 		Choices: []string{"No QR", "Add QR"},
 	}
 	if prior {
-		cs.choice = 1 // preserve a deliberate opt-in across Back
+		cs.Initial = 1 // preserve a deliberate opt-in across Back
 	}
 	hookPPWidget("qr", cs)
 	// ChoiceScreen.choice starts at 0, which is "No QR" -- the default is a

@@ -115,13 +115,34 @@ func composerShapeGuard(ctx *Context, th *Colors, st *composerState) bool {
 // composerWrapperPick is §4a. The legacy wrappers are offered because C7's
 // migration needs them, and §4e then holds them to ONE unlocked, unhashed
 // key set with n >= 2.
-func composerWrapperPick(ctx *Context, th *Colors) (md.ComposeWrapper, bool) {
+// It opens on the script CURRENTLY IN FORCE, not on row 0 (journey C-1). A
+// picker that always opens on row 0 is not showing a setting, it is proposing
+// one, and an operator who opened "Change the script" to READ the wrapper and
+// left by the forward button committed Taproot over their Segwit policy with
+// nothing downstream to report it. Preselecting makes that tap a no-op.
+//
+// The same preselection is right on the new-policy leg: `current` is the zero
+// wrapper there, which is row 0, so nothing changes -- except that stepping
+// Back to this screen now shows what was chosen instead of forgetting it.
+func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (md.ComposeWrapper, bool) {
 	choices := []string{"Taproot (tr)", "Segwit (wsh)", "Nested (sh-wsh)", "Legacy (sh)"}
 	wrappers := []md.ComposeWrapper{md.ComposeTr, md.ComposeWsh, md.ComposeShWsh, md.ComposeSh}
-	cs := &ChoiceScreen{Title: "New policy", Lead: "Which script?", Choices: choices}
+	initial := 0
+	for i, w := range wrappers {
+		if w == current {
+			initial = i
+			break
+		}
+	}
+	cs := &ChoiceScreen{
+		Title:   "New policy",
+		Lead:    "Which script?",
+		Choices: choices,
+		Initial: initial,
+	}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
-		return md.ComposeTr, false
+		return current, false
 	}
 	return wrappers[sel], true
 }
@@ -425,7 +446,7 @@ func composerShapeFlow(ctx *Context, th *Colors, st *composerState) bool {
 				continue
 			}
 			composerApplyShapeEdit(st, func() {
-				w, ok := composerWrapperPick(ctx, th)
+				w, ok := composerWrapperPick(ctx, th, st.list.Wrapper)
 				if !ok {
 					return
 				}

@@ -807,7 +807,12 @@ func TestComposerChangeTheScriptRowRewrapsAndDiscards(t *testing.T) {
 		if got, ok = pumpUntil(frame, "Which script?", 24); !ok {
 			t.Fatalf("the wrapper picker never drew.\nLast frame: %q", got)
 		}
-		click(&ctx.Router, Button3) // Taproot (index 0), a change from wsh
+		// The picker now OPENS on the script in force (journey C-1), so reaching
+		// Taproot takes a deliberate move. That is the point of the fix: this
+		// test used to reach row 0 by doing nothing at all, which is exactly
+		// how an operator reached it by accident.
+		click(&ctx.Router, Up)      // Segwit (row 1) -> Taproot (row 0)
+		click(&ctx.Router, Button3) // a change from wsh, now chosen on purpose
 		pumpUntil(frame, "Change the script", 24)
 		if st.list.Wrapper != md.ComposeTr {
 			t.Errorf("the wrapper is %v, want ComposeTr -- the row did not apply the change",
@@ -1452,4 +1457,63 @@ func composerFlowDone(t *testing.T, ctx *Context, frame func() (string, bool)) {
 		t.Fatalf("Done did not reach the key-order question.\nLast frame: %q", got)
 	}
 	click(&ctx.Router, Button3) // Sorted (usual)
+}
+
+// TestComposerScriptPickerShowsTheScriptInForce is journey C-1: opening
+// "Change the script" to SEE which wrapper is set must not change it.
+//
+// The picker was built fresh every time with no initial selection, so its
+// highlight sat on row 0, Taproot -- not on the script actually in force. The
+// forward button is the control that has advanced every other screen in this
+// flow, so an operator who opens the picker to check the setting and leaves by
+// ✓ commits row 0 and rebuilds the wallet as Taproot. Measured in the emulator
+// at 812ff06: a wsh composition with Template-ID 730513330db452b8e831426938b4f3d2
+// became 4f5306f9c6b23da7569b31f1e6039801, the Taproot id for that same shape.
+//
+// NOTHING DOWNSTREAM REPORTS IT on the key-less path: the path list is
+// byte-identical under every wrapper and the Review never names the script. So
+// the wrong wallet is engraved with no signal at any point after the mis-tap.
+//
+// MUTATION: drop the Initial assignment in composerWrapperPick, or the
+// s.choice = s.Initial clamp in ChoiceScreen.Choose, and this fails with
+// "the wrapper is ComposeTr, want ComposeWsh".
+func TestComposerScriptPickerShowsTheScriptInForce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		st := &composerState{list: composerTwoPathList(), reg: &seedRegistry{}}
+		if st.list.Wrapper != md.ComposeWsh {
+			t.Fatalf("fixture wrapper is %v, want ComposeWsh: this test needs a policy "+
+				"whose script is NOT row 0, or it proves nothing", st.list.Wrapper)
+		}
+		composerSizeAssignments(st)
+		st.assigned[0].src = 0
+		st.sources = []composerSource{{kind: composerSourceKey, seedID: -1, used: true}}
+		frame, quit := runUI(ctx, func() { composerShapeFlow(ctx, &descriptorTheme, st) })
+		defer quit()
+		if got, ok := pumpUntil(frame, "Change the script", 24); !ok {
+			t.Fatalf("the wrapper-change row is not offered.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Down, Down, Down)
+		click(&ctx.Router, Button3)
+		if got, ok := pumpUntil(frame, "EDITING THE SHAPE CLEARS THE KEYS", 24); !ok {
+			t.Fatalf("§8j did not fire.\nLast frame: %q", got)
+		}
+		press(&ctx.Router, Button3)
+		frame()
+		time.Sleep(confirmDelay)
+		frame()
+		if got, ok := pumpUntil(frame, "Which script?", 24); !ok {
+			t.Fatalf("the wrapper picker never drew.\nLast frame: %q", got)
+		}
+		// The whole finding: confirm WITHOUT moving the selection.
+		click(&ctx.Router, Button3)
+		pumpUntil(frame, "Change the script", 24)
+		if st.list.Wrapper != md.ComposeWsh {
+			t.Errorf("the wrapper is %v, want ComposeWsh -- opening the picker to look at "+
+				"the setting changed it. The operator engraves a Taproot wallet having "+
+				"specified Segwit, and nothing on this path tells them.", st.list.Wrapper)
+		}
+	})
 }
