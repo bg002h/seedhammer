@@ -330,8 +330,14 @@ func TestComposerStubDeltaCatchesOriginDriftUnderOneId(t *testing.T) {
 	if err != nil {
 		t.Fatalf("origins after: %v", err)
 	}
-	if slices.Equal(beforeOrigins, afterOrigins) {
-		t.Fatalf("the advertised origins did not move:\n before %v\n after  %v",
+	moved := 0
+	for idx, was := range beforeOrigins {
+		if now, ok := afterOrigins[idx]; ok && now != was {
+			moved++
+		}
+	}
+	if moved == 0 {
+		t.Fatalf("no slot that still advertises an origin moved:\n before %v\n after  %v",
 			beforeOrigins, afterOrigins)
 	}
 
@@ -354,5 +360,63 @@ func TestComposerStubDeltaCatchesOriginDriftUnderOneId(t *testing.T) {
 	}
 	if strings.Contains(joined, composerCopyIdChanged()) {
 		t.Errorf("the screen claims the id changed; it did not.\n%s", joined)
+	}
+}
+
+// TestComposerStubDeltaIgnoresSeatingASoleSlot is the false positive the fold's
+// own re-review found: the fix for review I-2 introduced one while removing
+// another.
+//
+// Comparing every slot's origin meant a SEATED slot counted. Seat the only slot
+// of a one-key policy at a non-default account and the origins list changes --
+// so the screen said "Cards minted for the old origins will not seat here" with
+// no unseated slot left to mint a card for. That is the class of warning this
+// predicate exists to remove, restated one revision later.
+//
+// The rule the code follows now: a slot still ADVERTISING an origin is an
+// instruction to mint against; a seated slot is a report of what was seated.
+// Only instructions are compared.
+//
+// MUTATION: stop skipping seated slots in composerAdvertisedOrigins and this
+// reports OriginsMoved. TestComposerStubDeltaCatchesOriginDriftUnderOneId is
+// the other half and must stay green under the fix -- there the slots that move
+// are @1 and @2, both unseated.
+func TestComposerStubDeltaIgnoresSeatingASoleSlot(t *testing.T) {
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 1}},
+	}}
+	chunksWith := func(t *testing.T, declared []*md.SlotOrigin) []string {
+		t.Helper()
+		c, err := md.ComposeWith(list, declared)
+		if err != nil {
+			t.Fatalf("md.ComposeWith: %v", err)
+		}
+		ch, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("Chunks: %v", err)
+		}
+		return ch
+	}
+
+	before := chunksWith(t, make([]*md.SlotOrigin, 1))
+	seated := []*md.SlotOrigin{{
+		Origin:      composerTestOrigin(2, 7),
+		Fingerprint: [4]byte{0xde, 0xad, 0xbe, 0xef},
+		FpPresent:   true,
+	}}
+	after := chunksWith(t, seated)
+
+	if slices.Equal(before, after) {
+		t.Fatal("seating the sole slot changed nothing on the wire: the fixture proves nothing")
+	}
+	if got := composerStubDelta(before, after); got != composerStubUnchanged {
+		lines, err := composerStubLines(after, nil, got)
+		if err == nil {
+			t.Errorf("seating the ONLY slot reported %v and the screen says:\n%s\n"+
+				"There is no unseated slot left to mint a card for, so this warns "+
+				"about work nobody can have done.", got, strings.Join(lines, "\n"))
+		} else {
+			t.Errorf("seating the ONLY slot reported %v, want Unchanged", got)
+		}
 	}
 }

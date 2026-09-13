@@ -2,7 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"slices"
 
 	"seedhammer.com/md"
 )
@@ -83,38 +82,68 @@ func composerStubDelta(shown, current []string) composerStubChange {
 	if wasID != nowID || wasKind != nowKind {
 		return composerStubIdMoved
 	}
+	// These two legs return OriginsMoved, NOT IdMoved. By the time they run the
+	// ids have been proved equal, so claiming the id changed would print that
+	// sentence above a byte-identical Template-ID -- journey I-5's exact shape,
+	// reintroduced by the error path of its own fix. Unreachable today
+	// (ExpandWalletPolicy has no error returns), which is precisely why it is
+	// worth getting right now rather than the day it becomes reachable.
 	wasOrigins, err := composerAdvertisedOrigins(shown)
 	if err != nil {
-		return composerStubIdMoved
+		return composerStubOriginsMoved
 	}
 	nowOrigins, err := composerAdvertisedOrigins(current)
 	if err != nil {
-		return composerStubIdMoved
-	}
-	if !slices.Equal(wasOrigins, nowOrigins) {
 		return composerStubOriginsMoved
+	}
+	// INTERSECTION, not equality. A slot that was advertising an origin and is
+	// now seated simply LEAVES the instruction set; that is the operator
+	// answering the instruction, not the instruction changing under them. Plain
+	// equality counted the departure as a drift and warned on the one action
+	// this screen is asking for.
+	//
+	// What is compared is every slot still asking for a card in BOTH readings,
+	// which is exactly the set an operator could have minted for and could
+	// still be holding.
+	for idx, was := range wasOrigins {
+		if now, ok := nowOrigins[idx]; ok && now != was {
+			return composerStubOriginsMoved
+		}
 	}
 	return composerStubUnchanged
 }
 
-// composerAdvertisedOrigins is the per-slot "expects a key at" facts, in the
-// form the screen prints them, so what is COMPARED is what was SHOWN.
+// composerAdvertisedOrigins is the per-slot "expects a key at" facts -- the
+// origins this screen is INSTRUCTING the operator to mint a card against.
 //
-// Deriving these separately from the lines the screen draws would let the two
-// drift, and a drift here is silent by construction: the comparison would go on
-// succeeding against facts nobody was ever told.
-func composerAdvertisedOrigins(chunks []string) ([]string, error) {
+// ONLY THE SLOTS STILL ADVERTISING ONE. A slot that is already seated is not an
+// instruction, it is a report of what was seated, and including it made this
+// comparison fire on a sole-slot policy the moment it was seated at a
+// non-default account: "Cards minted for the old origins will not seat here"
+// with no unseated slot left to mint for. That is the very class of false
+// warning this predicate exists to remove, so it was worth a second pass to
+// notice. Review I-2's case survives the restriction, because there it is @1
+// and @2 -- both unseated -- that move.
+//
+// The split is FingerprintPresent, the SAME predicate composerStubLines uses to
+// choose between "Slot @N: <fp> <path>" and "Slot @N expects a key at <path>".
+// Sharing the predicate is the point: this compares exactly the rows the screen
+// phrases as an instruction, so the comparison cannot drift away from the text
+// it is guarding. (It is not XpubPresent. A declared origin carries a
+// fingerprint and no xpub on a keyless template, so XpubPresent is false on
+// every row and skipping by it skips nothing -- measured, by writing that
+// version first and watching the sole-slot test still fire.)
+func composerAdvertisedOrigins(chunks []string) (map[uint8]string, error) {
 	_, keys, err := md.ExpandWalletPolicyChunks(chunks)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(keys))
+	out := make(map[uint8]string, len(keys))
 	for _, k := range keys {
-		if k.XpubPresent && k.FingerprintPresent {
-			out = append(out, fmt.Sprintf("@%d %x %s", k.Index, k.Fingerprint, k.OriginPath))
-			continue
+		if k.FingerprintPresent {
+			continue // seated: a report of what was seated, not an instruction
 		}
-		out = append(out, fmt.Sprintf("@%d %s", k.Index, k.OriginPath))
+		out[k.Index] = k.OriginPath.String()
 	}
 	return out, nil
 }
