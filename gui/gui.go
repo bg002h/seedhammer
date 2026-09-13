@@ -3236,12 +3236,27 @@ func (s *DescriptorScreen) Confirm(ctx *Context, th *Colors) (Plate, bool) {
 	// secp256k1 derivation (allocating); computing it per-frame would break the
 	// TestAllocs 0-alloc gate. Once, here. (spec §2 inv. 2/6, §4.1.)
 	supported := address.Supported(s.Descriptor)
+	// F-530: A POLICY REFUSAL, KEPT SEPARATE FROM THE CAPABILITY ANSWER.
+	//
+	// address.Supported asks "can this device derive it" and the answer here is
+	// yes -- address.Receive returns a perfectly good address for a descriptor
+	// with a repeated key. Folding the refusal into Supported would erase that
+	// distinction, and the F-531 review is explicit about why it matters: a
+	// capability gap is measured by its absence, a policy refusal has a working
+	// deriver underneath it, and a test that cannot tell them apart stops
+	// gating either.
+	//
+	// BOTH BRANCHES OF THE BUTTON, because both derive. "Verify an address"
+	// runs address.Find and answers "Controlled by this descriptor" -- an
+	// endorsement of one specific address the operator is about to send to,
+	// which is a stronger claim than merely listing addresses, not a weaker one.
+	_, _, reusesAKey := descriptorRepeatsAKey(s.Descriptor)
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			break
 		}
 		// Drain Button2 every frame; act only when supported (queue-head idiom).
-		if addrBtn.Clicked(ctx) && supported {
+		if addrBtn.Clicked(ctx) && supported && !reusesAKey {
 			cs := &ChoiceScreen{Title: "Addresses", Lead: "Choose", Choices: []string{"Show addresses", "Verify an address"}}
 			switch choice, ok := cs.Choose(ctx, th); {
 			case !ok:
@@ -3275,7 +3290,7 @@ func (s *DescriptorScreen) Confirm(ctx *Context, th *Colors) (Plate, bool) {
 		// StyleNone when unsupported (rendered empty) — NOT an append chain
 		// (which would heap-alloc and break TestAllocs on this benchmarked screen).
 		addrStyle := StyleSecondary
-		if !supported {
+		if !supported || reusesAKey {
 			addrStyle = StyleNone
 		}
 		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
@@ -3323,6 +3338,25 @@ func (s *DescriptorScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.O
 	bodytxt.Y += infoSpacing
 	bodytxt.Add(&ctx.B, subst, body.Dx(), th.Text, "Script")
 	bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, desc.Script.String())
+
+	// F-530: SAY IT, do not merely withhold the button.
+	//
+	// The address button renders StyleNone when it is not offered, which is an
+	// EMPTY button and no sentence anywhere. That is indistinguishable from a
+	// device that has no address feature, and it is precisely the silent
+	// refusal the F-531 review caught one level up (I-2): the operator goes
+	// looking for a better tool instead of learning that their wallet reuses a
+	// key.
+	//
+	// It sits under the Type line on purpose. That line reads "2-of-3
+	// multisig", counted from len(desc.Keys) -- so the screen states a
+	// redundancy this wallet does not have, and the correction belongs where
+	// the claim is.
+	if _, _, reused := descriptorRepeatsAKey(desc); reused {
+		bodytxt.Y += infoSpacing
+		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyDescriptorRepeatsAKey())
+		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyNoAddressesDuplicateKeys())
+	}
 
 	bodyOp := bodytxt.Content.Offset(body.Min.Add(image.Pt(0, scrollFadeDist)))
 

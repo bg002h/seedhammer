@@ -103,6 +103,8 @@ func composerCopyTable() []composerCopyRow {
 			"Check before funding: slot @1 repeats in one script, and Bitcoin Core refuses such a descriptor."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(2, md.DuplicateFewerKeys),
 			"Check before funding: slot @2 fills more than one seat, so fewer separate keys can spend this than its k-of-n says."},
+		{"composerCopyDescriptorRepeatsAKey", "8s", composerCopyDescriptorRepeatsAKey(),
+			"Check before funding: one key fills more than one seat of this wallet, so fewer separate keys can spend it than its k-of-n says."},
 		{"composerCopyNoAddressesDuplicateKeys", "8s", composerCopyNoAddressesDuplicateKeys(),
 			"No addresses: this device does not derive them for a wallet that reuses a key."},
 		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),
@@ -362,8 +364,12 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// F-514 body above qualifies an address; this one explains its absence, and
 	// folding them into one string would have made that body claim a refusal on
 	// the screens where addresses are still shown.
-	if declared != 77 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 77 -- "+
+	// 78 SINCE F-530 carried the same rule to a descriptor that arrived with no
+	// md1 behind it -- a scanned QR or a payload record. It needs its OWN
+	// sentence because the md1 one says "slot @N", and a scanned descriptor has
+	// no @N on any screen the operator has seen.
+	if declared != 78 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 78 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

@@ -377,6 +377,25 @@ func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 // It is a SECOND line, under composerCopyDuplicateKeys rather than folded into
 // it, because that sentence is also shown where addresses ARE derived and must
 // not start claiming a refusal that did not happen.
+// composerCopyDescriptorRepeatsAKey is the F-530 sibling of
+// composerCopyDuplicateKeys, for a descriptor that arrived WITHOUT an md1.
+//
+// IT NAMES NO SLOT, because there is none to name. The md1 sentence says
+// "slot @N", which is the operator's own label on a card they hold; a scanned
+// descriptor has key expressions at positions and no @N anywhere on any screen.
+// Quoting an index they have never seen would be the M-1 defect (a warning
+// citing a referent the screen does not show), so this names the FACT instead.
+//
+// THE HARM IS THE FEWER-KEYS ONE, always. bip380.Parse admits single keys and
+// top-level sortedmulti and nothing else, and Bitcoin Core parses a top-level
+// sortedmulti as a MultisigDescriptor that never reaches miniscript's IsSane --
+// so Core imports this shape rather than refusing it, and the refused-by-Core
+// sentence would be false here for every descriptor that can reach this screen.
+func composerCopyDescriptorRepeatsAKey() string {
+	return "Check before funding: one key fills more than one seat of this " +
+		"wallet, so fewer separate keys can spend it than its k-of-n says."
+}
+
 func composerCopyNoAddressesDuplicateKeys() string {
 	return "No addresses: this device does not derive them for a wallet that " +
 		"reuses a key."
