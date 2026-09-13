@@ -411,8 +411,8 @@ func TestScriptLineNamesEverySingleSigRoot(t *testing.T) {
 // tolerable only because scriptForTemplate admits exactly two policies:
 // PolicySingle, which has one key slot and cannot repeat, and
 // PolicySortedMulti, whose top-level sortedmulti makes any repeat
-// md.DuplicateInMultisig — warned on the consent screen that precedes steel. So
-// the route can never carry md.DuplicateInMiniscript and cannot reproduce the
+// md.DuplicateFewerKeys — warned on the consent screen that precedes steel. So
+// the route can never carry md.DuplicateRefusedByCore and cannot reproduce the
 // Critical.
 //
 // Add an arm for plain multi or any miniscript shape and that argument dies
@@ -422,10 +422,27 @@ func TestScriptLineNamesEverySingleSigRoot(t *testing.T) {
 // MUTATION: add a `case md.PolicyMulti:` arm returning true and this fails
 // naming it.
 func TestScriptForTemplateAdmitsOnlyTwo(t *testing.T) {
+	// EVERY PolicyKind, not a hand-picked few. The first version of this test
+	// enumerated three -- Single, SortedMulti, Multi -- and so omitted
+	// PolicyMultiA, PolicySortedMultiA and PolicyComplex, which are exactly the
+	// kinds whose duplicate is DuplicateRefusedByCore. It caught the one kind
+	// that could not break F-530's argument and missed all three that can
+	// (review I-7); adding PolicyComplex and PolicyMultiA arms to
+	// scriptForTemplate left it PASS with 1307/1307 green.
+	//
+	// The list is closed against the enum's own range: PolicyKind is an iota
+	// from PolicySingle to PolicyComplex, so counting up to it covers any kind
+	// added in between without this test needing to hear about it.
 	admitted := map[md.PolicyKind]bool{}
-	for _, policy := range []md.PolicyKind{
-		md.PolicySingle, md.PolicySortedMulti, md.PolicyMulti,
-	} {
+	var all []md.PolicyKind
+	for k := md.PolicySingle; k <= md.PolicyComplex; k++ {
+		all = append(all, k)
+	}
+	if len(all) < 6 {
+		t.Fatalf("PolicyKind enumerates %d values, expected at least 6; this test "+
+			"walks the enum's range and would silently narrow", len(all))
+	}
+	for _, policy := range all {
 		for _, root := range []md.ScriptKind{
 			md.ScriptWpkh, md.ScriptPkh, md.ScriptSh, md.ScriptWsh, md.ScriptTr,
 		} {

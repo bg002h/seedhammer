@@ -62,7 +62,7 @@ func TestDuplicateKeySlotMatchesBitcoinCore(t *testing.T) {
 	}{
 		{"keyed_tr_multi_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
 		{"keyed_tr_sortedmulti_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_wsh_timelock_hashlock", DuplicateInMiniscript, "Core REFUSES: one slot repeats inside one miniscript"},
+		{"keyed_wsh_timelock_hashlock", DuplicateRefusedByCore, "Core REFUSES: one slot repeats inside one miniscript"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			slot, kind, err := DuplicateKeySlotChunks(vectorChunksFor(t, tc.name))
@@ -177,7 +177,7 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 // one key filling two seats can meet the threshold alone, so it needs the other
 // sentence rather than no sentence.
 //
-// MUTATION: make kindForRoot always return DuplicateInMiniscript and the
+// MUTATION: make kindForRoot always return DuplicateRefusedByCore and the
 // multisig rows fail.
 func TestDuplicateKindSplitsByWhatCoreDoes(t *testing.T) {
 	dup := func(tag tag) node {
@@ -188,6 +188,12 @@ func TestDuplicateKindSplitsByWhatCoreDoes(t *testing.T) {
 	}
 	shWsh := func(inner node) node {
 		return node{tag: tagSh, body: childrenBody{children: []node{wsh(inner)}}}
+	}
+	trLeaf := func(leaf node) node {
+		tree := node{tag: tagTapTree, body: childrenBody{children: []node{
+			leaf, {tag: tagPkK, body: keyArgBody{index: 9}},
+		}}}
+		return node{tag: tagTr, body: trBody{isNums: true, tree: &tree}}
 	}
 	// and_v(v:pk(@0), pk(@0)) — a miniscript expression, not a bare threshold.
 	nested := node{tag: tagAndV, body: childrenBody{children: []node{
@@ -200,10 +206,20 @@ func TestDuplicateKindSplitsByWhatCoreDoes(t *testing.T) {
 		tree node
 		want DuplicateKind
 	}{
-		{"wsh(sortedmulti)", wsh(dup(tagSortedMulti)), DuplicateInMultisig},
-		{"wsh(multi)", wsh(dup(tagMulti)), DuplicateInMultisig},
-		{"sh(wsh(sortedmulti))", shWsh(dup(tagSortedMulti)), DuplicateInMultisig},
-		{"wsh(and_v(pk,pk))", wsh(nested), DuplicateInMiniscript},
+		{"wsh(sortedmulti)", wsh(dup(tagSortedMulti)), DuplicateFewerKeys},
+		{"wsh(multi)", wsh(dup(tagMulti)), DuplicateFewerKeys},
+		{"sh(wsh(sortedmulti))", shWsh(dup(tagSortedMulti)), DuplicateFewerKeys},
+		{"wsh(and_v(pk,pk))", wsh(nested), DuplicateRefusedByCore},
+		// TAPROOT IS ALWAYS THE FEWER-KEYS SENTENCE, and this row is the one
+		// that would have caught my wrong belief. I reasoned that a tapleaf
+		// multi_a IS miniscript to Core and so would be refused. Measured on
+		// Core 25.0.0: tr(A,multi_a(2,B,B)) and tr(A,sortedmulti_a(2,B,B)) are
+		// ACCEPTED, because Core has no tapscript miniscript at all --
+		// "Miniscript expressions can only be used in wsh". Telling the
+		// operator Core refuses it would be false for every taproot shape.
+		{"tr(multi_a with a repeat in one leaf)", trLeaf(dup(tagMultiA)), DuplicateFewerKeys},
+		{"tr(sortedmulti_a with a repeat in one leaf)", trLeaf(dup(tagSortedMultiA)), DuplicateFewerKeys},
+		{"tr(and_v(pk,pk) in one leaf)", trLeaf(nested), DuplicateFewerKeys},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			slot, kind := DuplicateKeySlot(tc.tree)

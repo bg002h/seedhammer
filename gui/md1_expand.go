@@ -106,10 +106,10 @@ func expandedKeysToBip380(keys []md.ExpandedKey) ([]bip380.Key, bool) {
 //
 //	PolicySingle       one key slot, which cannot repeat
 //	PolicySortedMulti  a top-level sortedmulti, so any repeat is
-//	                   md.DuplicateInMultisig and is warned on the consent
+//	                   md.DuplicateFewerKeys and is warned on the consent
 //	                   screen that precedes steel
 //
-// So that route can never carry md.DuplicateInMiniscript -- it cannot reproduce
+// So that route can never carry md.DuplicateRefusedByCore -- it cannot reproduce
 // the Critical -- and F-530 is a gap rather than a hole.
 //
 // THE DAY THIS GROWS AN ARM for plain multi, or for any miniscript shape, that

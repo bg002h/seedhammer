@@ -569,7 +569,7 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 		want   md.DuplicateKind
 		core   string
 	}{
-		{"keyed_wsh_timelock_hashlock", md.DuplicateInMiniscript, "Core REFUSES: duplicate keys in one miniscript"},
+		{"keyed_wsh_timelock_hashlock", md.DuplicateRefusedByCore, "Core REFUSES: duplicate keys in one miniscript"},
 		{"keyed_tr_multi_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
 		{"keyed_tr_sortedmulti_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
 		{"keyed_compose_wsh_timelock_hashlock", md.DuplicateNone, "no key reuse at all"},
@@ -589,8 +589,8 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 			}
 			joined := strings.Join(lines, "\n")
 			got := strings.Contains(joined, "duplicate public keys")
-			if got != (tc.want == md.DuplicateInMiniscript) {
-				if tc.want == md.DuplicateInMiniscript {
+			if got != (tc.want == md.DuplicateRefusedByCore) {
+				if tc.want == md.DuplicateRefusedByCore {
 					t.Errorf("the consent screen shows addresses for a descriptor Core "+
 						"refuses and says nothing about it.\n%s", joined)
 				} else {
@@ -625,7 +625,7 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DuplicateKeySlotChunks: %v", err)
 	}
-	if kind != md.DuplicateInMiniscript {
+	if kind != md.DuplicateRefusedByCore {
 		t.Fatalf("the fixture no longer carries a miniscript duplicate (%v); this "+
 			"test needs one, and a re-vendor from the primary would remove it (F-529)", kind)
 	}
@@ -674,7 +674,7 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 			// the sentence is longer than one page, so asserting the last
 			// clause would prove the warning exists somewhere, which for a
 			// warning is not the same as being seen.
-			if got, ok := pumpUntil(frame, "is used twice in one", 24); !ok {
+			if got, ok := pumpUntil(frame, "repeats in one script", 24); !ok {
 				t.Errorf("the Inspect-descriptor screen lists mainnet addresses for a "+
 					"descriptor Bitcoin Core refuses and never shows the warning.\n"+
 					"Last frame: %q", got)
@@ -710,7 +710,7 @@ func assertCarriesWarning(t *testing.T, lines []string, want, where string) {
 // since one key filling two seats can meet the threshold alone — but it gets
 // the sentence that is true of it.
 //
-// MUTATION: make kindForRoot always return DuplicateInMiniscript and the
+// MUTATION: make kindForRoot always return DuplicateRefusedByCore and the
 // multisig rows fail on the Core claim.
 func TestDuplicateWarningNamesTheRightHarm(t *testing.T) {
 	for _, tc := range []struct {
@@ -721,12 +721,12 @@ func TestDuplicateWarningNamesTheRightHarm(t *testing.T) {
 	}{
 		{
 			name: "top-level sortedmulti",
-			want: md.DuplicateInMultisig,
+			want: md.DuplicateFewerKeys,
 			says: "fewer separate keys", notSays: "Bitcoin Core refuses",
 		},
 		{
 			name: "nested miniscript",
-			want: md.DuplicateInMiniscript,
+			want: md.DuplicateRefusedByCore,
 			says: "Bitcoin Core refuses", notSays: "fewer separate keys",
 		},
 	} {

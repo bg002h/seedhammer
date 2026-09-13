@@ -36,16 +36,21 @@ type DuplicateKind int
 const (
 	// DuplicateNone: no slot repeats within one expression.
 	DuplicateNone DuplicateKind = iota
-	// DuplicateInMiniscript: the repeat is inside a miniscript expression, so
-	// Bitcoin Core refuses the descriptor outright --
+	// DuplicateRefusedByCore: the repeat is inside a WSH/SH miniscript
+	// expression, so Bitcoin Core refuses the descriptor outright --
 	// "is not sane: contains duplicate public keys".
-	DuplicateInMiniscript
-	// DuplicateInMultisig: the repeat is inside a TOP-LEVEL multi/sortedmulti,
-	// which Core parses as a MultisigDescriptor and never runs the miniscript
-	// sanity check on. Core IMPORTS it. The harm is the other one: one key fills
-	// two of the threshold's seats, so a 2-of-3 with one key twice can be spent
-	// by that key alone.
-	DuplicateInMultisig
+	DuplicateRefusedByCore
+	// DuplicateFewerKeys: Core IMPORTS this shape, so the harm is the other one
+	// -- one key fills more than one seat, and the wallet needs fewer separate
+	// keys than its k-of-n says.
+	//
+	// NAMED FOR THE HARM, NOT THE PLACE. It was DuplicateFewerKeys, and that
+	// name encoded an assumption that turned out to be false: WHERE the repeat
+	// sits does not predict what Core does. A tapleaf multi_a is "miniscript"
+	// by shape and Core still imports it, because Core 25.0.0 has no tapscript
+	// miniscript at all. Naming the kinds after the sentence they produce keeps
+	// the next such surprise from silently picking the wrong one.
+	DuplicateFewerKeys
 )
 
 // DuplicateKeySlot reports the lowest key slot that appears more than once
@@ -67,8 +72,19 @@ func DuplicateKeySlot(tree node) (uint8, DuplicateKind) {
 		if !ok || b.tree == nil {
 			return 0, DuplicateNone
 		}
+		// TAPROOT IS ALWAYS THE FEWER-KEYS SENTENCE, measured rather than
+		// reasoned. Core 25.0.0 rejects miniscript under tr outright --
+		// "Miniscript expressions can only be used in wsh" -- so a tapleaf
+		// multi_a or sortedmulti_a never reaches CheckDuplicateKey, and
+		// tr(A,multi_a(2,B,B)), tr(A,sortedmulti_a(2,B,B)) and
+		// tr(A,multi_a(2,A,A,B)) are all ACCEPTED.
+		//
+		// The earlier code said DuplicateRefusedByCore here, which told the
+		// operator Core refuses a descriptor Core imports. I believed tapscript
+		// multi_a WAS miniscript to Core and was wrong; the fix came from
+		// running getdescriptorinfo, not from reading the parser.
 		slot, dup := duplicateInTapTree(*b.tree)
-		return slot, kindOf(dup, DuplicateInMiniscript)
+		return slot, kindOf(dup, DuplicateFewerKeys)
 	case tagWsh, tagSh:
 		b, ok := tree.body.(childrenBody)
 		if !ok || len(b.children) != 1 {
@@ -107,6 +123,8 @@ func kindOf(dup bool, k DuplicateKind) DuplicateKind {
 //
 //	wsh(sortedmulti(2,A,A,B))         ACCEPTED
 //	wsh(multi(2,A,A,B))               ACCEPTED
+//	tr(A,multi_a(2,B,B))              ACCEPTED  -- no tapscript miniscript
+//	tr(A,sortedmulti_a(2,B,B))        ACCEPTED
 //	wsh(and_v(v:pk(A),pk(A)))         "is not sane: contains duplicate public keys"
 //	the corpus's keyed_wsh_timelock_hashlock  same refusal
 //
@@ -119,9 +137,9 @@ func kindOf(dup bool, k DuplicateKind) DuplicateKind {
 func kindForRoot(n node) DuplicateKind {
 	switch n.tag {
 	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
-		return DuplicateInMultisig
+		return DuplicateFewerKeys
 	}
-	return DuplicateInMiniscript
+	return DuplicateRefusedByCore
 }
 
 // DuplicateKeySlotChunks is DuplicateKeySlot over a gathered md1 chunk set.
