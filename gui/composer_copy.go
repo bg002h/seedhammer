@@ -347,8 +347,16 @@ func composerCopyIdChanged() string {
 // showing an address to send to (F-514).
 func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 	if kind == md.DuplicateInMultisig {
-		return fmt.Sprintf("Slot @%d fills two seats of this multisig, so one key can "+
-			"meet the threshold alone. Check this is what you meant before you fund it.", slot)
+		// "meets the threshold alone" was the first wording and it OVERSTATES.
+		// It is true only when the slot's multiplicity reaches k: in
+		// sortedmulti(3,@0,@0,@1,@2) two seats of three is not the threshold
+		// and @0 still needs a co-signer, while the screen above says
+		// "3-of-4 multisig" (review I-5). The harm is real at every k -- the
+		// wallet needs fewer distinct holders than its label implies -- so the
+		// sentence states that instead, and is true for all of them.
+		return fmt.Sprintf("Slot @%d fills more than one seat here, so this multisig "+
+			"needs fewer separate keys than its k-of-n says. Check this is what you "+
+			"meant before you fund it.", slot)
 	}
 	return fmt.Sprintf("Slot @%d is used twice in one script. Bitcoin Core refuses this "+
 		"descriptor (\"duplicate public keys\"), so a coordinator may not import it. "+

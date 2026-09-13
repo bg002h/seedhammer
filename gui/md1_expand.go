@@ -99,6 +99,22 @@ func expandedKeysToBip380(keys []md.ExpandedKey) ([]bip380.Key, bool) {
 
 // scriptForTemplate maps the renderable Template shape to a bip380 Script +
 // MultisigType, or reports !ok for a non-bip380-expressible shape (D2, R0-C2).
+// THE ARGUMENT F-530 RESTS ON LIVES HERE (review of F-514). The expandOK
+// address route -- descriptorFlow -> DescriptorScreen.Confirm ->
+// descriptorAddressFlow -- carries no duplicate-key warning, and that is
+// tolerable only because this function admits exactly two policies:
+//
+//	PolicySingle       one key slot, which cannot repeat
+//	PolicySortedMulti  a top-level sortedmulti, so any repeat is
+//	                   md.DuplicateInMultisig and is warned on the consent
+//	                   screen that precedes steel
+//
+// So that route can never carry md.DuplicateInMiniscript -- it cannot reproduce
+// the Critical -- and F-530 is a gap rather than a hole.
+//
+// THE DAY THIS GROWS AN ARM for plain multi, or for any miniscript shape, that
+// argument dies and F-530 becomes urgent. TestScriptForTemplateAdmitsOnlyTwo
+// pins the admitted set so the change cannot pass unnoticed.
 func scriptForTemplate(tpl md.Template) (bip380.Script, bip380.MultisigType, bool) {
 	if !tpl.Renderable {
 		return 0, 0, false

@@ -650,10 +650,36 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	})
 
 	t.Run("inspect descriptor", func(t *testing.T) {
-		// policyIDHeader is what md1PolicyFlow lays out above the address
-		// button, so this is the line set that screen actually draws.
-		assertCarriesWarning(t, policyIDHeader(chunks), want,
-			"the Inspect-descriptor policy screen")
+		// THE REAL ENTRY POINT, not the header and not md1PolicyFlow directly.
+		//
+		// Review I-4 was that this gate asserted policyIDHeader's return value,
+		// so trimming the CONSUMER put the screen back to silent while the test
+		// passed. My first fix for that drove md1PolicyFlow with a header the
+		// test built itself -- which is the same defect one level out, and the
+		// reviewer's own mutation (`h = h[len(h)-1:]` in gatheredDescriptorFlow)
+		// still left it green. Measured, not assumed.
+		//
+		// So it drives gatheredDescriptorFlow, the function the operator's tap
+		// actually reaches, and everything between it and the pixels is inside
+		// the test.
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, quit := runUI(ctx, func() {
+				gatheredDescriptorFlow(ctx, &descriptorTheme, chunks)
+			})
+			defer quit()
+			// The OPENING of the warning, not its tail: this screen pages and
+			// the sentence is longer than one page, so asserting the last
+			// clause would prove the warning exists somewhere, which for a
+			// warning is not the same as being seen.
+			if got, ok := pumpUntil(frame, "is used twice in one", 24); !ok {
+				t.Errorf("the Inspect-descriptor screen lists mainnet addresses for a "+
+					"descriptor Bitcoin Core refuses and never shows the warning.\n"+
+					"Last frame: %q", got)
+			}
+		})
 	})
 }
 
@@ -696,12 +722,12 @@ func TestDuplicateWarningNamesTheRightHarm(t *testing.T) {
 		{
 			name: "top-level sortedmulti",
 			want: md.DuplicateInMultisig,
-			says: "meet the threshold alone", notSays: "Bitcoin Core refuses",
+			says: "fewer separate keys", notSays: "Bitcoin Core refuses",
 		},
 		{
 			name: "nested miniscript",
 			want: md.DuplicateInMiniscript,
-			says: "Bitcoin Core refuses", notSays: "meet the threshold alone",
+			says: "Bitcoin Core refuses", notSays: "fewer separate keys",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

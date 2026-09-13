@@ -102,7 +102,7 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(1, md.DuplicateInMiniscript),
 			"Slot @1 is used twice in one script. Bitcoin Core refuses this descriptor (\"duplicate public keys\"), so a coordinator may not import it. Check before you fund it."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(2, md.DuplicateInMultisig),
-			"Slot @2 fills two seats of this multisig, so one key can meet the threshold alone. Check this is what you meant before you fund it."},
+			"Slot @2 fills more than one seat here, so this multisig needs fewer separate keys than its k-of-n says. Check this is what you meant before you fund it."},
 		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),
 			"Same id, but the slot origins below changed. Cards minted for the old origins will not seat here."},
 		{"composerCopySeatPrompt", "8s", composerCopySeatPrompt(2, 1, 2, 3),
