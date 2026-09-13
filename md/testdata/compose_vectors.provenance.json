@@ -8,7 +8,7 @@
   ],
   "repo": "descriptor-mnemonic",
   "remote": "git@github.com:bg002h/descriptor-mnemonic.git",
-  "commit": "1dc8d409f6e8daa099226937f5f107f56b64dd97",
+  "commit": "9f637cf1142e7fcbe7f0a656429a78ad93f99496",
   "repo_clean_when_recorded": true,
   "path": "crates/md-codec/tests/vectors",
   "files": [
@@ -577,6 +577,26 @@
       "sha256": "a0f8422a00e7e66a11a6d9bb672ba3654496d0891027d3c9ce991f3be1d30dc2"
     },
     {
+      "name": "keyed_compose_wsh_timelock_hashlock.bytes.hex",
+      "sha256": "207bd5c83cb082a7ea1b78313b66312a95fd761a961afff207aa8a1aae8b292f"
+    },
+    {
+      "name": "keyed_compose_wsh_timelock_hashlock.conformance.json",
+      "sha256": "ae8a54ebfdfe6a5d6b45c37be8fa5daef0f94ba176422d20932e1b44a1abc00a"
+    },
+    {
+      "name": "keyed_compose_wsh_timelock_hashlock.descriptor.json",
+      "sha256": "d55951cfc1d4ea5546d0c23df855f0313c2503e85b5c44daa128a8bc4b8cee61"
+    },
+    {
+      "name": "keyed_compose_wsh_timelock_hashlock.phrase.txt",
+      "sha256": "0c3f6334f93ce3848e5e88af7826e0398b0998c32a48f965a511a5948416d6d0"
+    },
+    {
+      "name": "keyed_compose_wsh_timelock_hashlock.template",
+      "sha256": "58cc02ff1923bc6d917b89465ace8ba02e9718331165eba08f23bea19b782ab2"
+    },
+    {
       "name": "keyed_compose_wsh_two_path_distinct_fingerprints.bytes.hex",
       "sha256": "224bc24123dc660f1174b721bea81fbc25313b06774be11185c1eaed5e971ba0"
     },
@@ -637,6 +657,6 @@
       "sha256": "d341f99cb5dc30ebefb8720e148f71a3a384c372f46b2af7bab018ac693c0185"
     }
   ],
-  "vectors": 32,
-  "recorded_at": "2026-09-02"
+  "vectors": 33,
+  "recorded_at": "2026-09-13"
 }
