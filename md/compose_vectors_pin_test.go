@@ -48,6 +48,7 @@ var composeVectorNames = []string{
 	"keyed_compose_tr_two_path_nums", "keyed_compose_tr_unsorted_sole_leaf",
 	"keyed_compose_wsh_hash_and_time", "keyed_compose_wsh_locked_head_or_i",
 	"keyed_compose_wsh_single_head_or_i", "keyed_compose_wsh_sole_sortedmulti",
+	"keyed_compose_wsh_timelock_hashlock",
 	"keyed_compose_wsh_three_paths", "keyed_compose_wsh_two_path_distinct_fingerprints",
 	"keyed_compose_wsh_two_path_or_d", "keyed_compose_wsh_unsorted_sole",
 	// The six archetype presets, exported by S0b (F-453) and vendored by
@@ -84,9 +85,11 @@ func TestComposeVectorsMatchTheirProvenancePin(t *testing.T) {
 	if p.Vectors != len(composeVectorNames) {
 		t.Fatalf("pin says %d vectors, this test knows %d", p.Vectors, len(composeVectorNames))
 	}
-	// 28 keyed vectors carry five files, 4 unkeyed carry four: 156.
-	if len(p.Files) != 156 {
-		t.Fatalf("pin lists %d files, want 156", len(p.Files))
+	// 29 keyed vectors carry five files, 4 unkeyed carry four: 161.
+	// The 29th is keyed_compose_wsh_timelock_hashlock, the composer's own
+	// three-path wsh policy with both timelock kinds and a hashlock.
+	if len(p.Files) != 161 {
+		t.Fatalf("pin lists %d files, want 161", len(p.Files))
 	}
 	pinned := map[string]bool{}
 	seen := map[string]bool{}
