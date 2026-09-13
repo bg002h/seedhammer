@@ -3319,9 +3319,36 @@ func (s *DescriptorScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.O
 
 	bodyst := ctx.Styles.body
 	subst := ctx.Styles.subtitle
+
+	// F-530: THE WARNING LEADS, above every line a scanned artefact controls.
+	//
+	// It used to sit last, after Title/Type/Script, and review I-1 pushed it off
+	// the bottom with a Title -- an unbounded string out of the scanned payload
+	// (nonstandard/parse.go's BlueWallet `Name:` and JSON `label`). At 200
+	// characters the funds sentence itself was cut mid-clause, leaving
+	// "2-of-3 multisig", a fragment, and an empty Button2: the silent refusal
+	// this block exists to prevent, restored by a field the attacker supplies.
+	// The plate is still engravable from this screen, so that decision was
+	// being made with no warning at all.
+	//
+	// Nothing can push it down now, because nothing is above it. That is a
+	// stronger guarantee than any length budget, which is why the ordering is
+	// the fix and the Title cap below is only the belt.
+	_, _, reused := descriptorRepeatsAKey(desc)
+	if reused {
+		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyDescriptorRepeatsAKey())
+		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyNoAddressesDuplicateKeys())
+		bodytxt.Y += infoSpacing
+	}
+
 	if desc.Title != "" {
 		bodytxt.Add(&ctx.B, subst, body.Dx(), th.Text, "Title")
-		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, desc.Title)
+		// TRUNCATED FOR DISPLAY ONLY (review I-1). The descriptor keeps its
+		// full Title -- this changes what this screen draws, not what is
+		// engraved. An unbounded scanned string on a screen that neither
+		// scrolls nor clips pushes whatever follows it into nowhere, and Type
+		// and Script are worth protecting too.
+		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, truncateForDisplay(desc.Title, maxTitleDrawn))
 		bodytxt.Y += infoSpacing
 	}
 	bodytxt.Add(&ctx.B, subst, body.Dx(), th.Text, "Type")
@@ -3338,25 +3365,6 @@ func (s *DescriptorScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.O
 	bodytxt.Y += infoSpacing
 	bodytxt.Add(&ctx.B, subst, body.Dx(), th.Text, "Script")
 	bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, desc.Script.String())
-
-	// F-530: SAY IT, do not merely withhold the button.
-	//
-	// The address button renders StyleNone when it is not offered, which is an
-	// EMPTY button and no sentence anywhere. That is indistinguishable from a
-	// device that has no address feature, and it is precisely the silent
-	// refusal the F-531 review caught one level up (I-2): the operator goes
-	// looking for a better tool instead of learning that their wallet reuses a
-	// key.
-	//
-	// It sits under the Type line on purpose. That line reads "2-of-3
-	// multisig", counted from len(desc.Keys) -- so the screen states a
-	// redundancy this wallet does not have, and the correction belongs where
-	// the claim is.
-	if _, _, reused := descriptorRepeatsAKey(desc); reused {
-		bodytxt.Y += infoSpacing
-		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyDescriptorRepeatsAKey())
-		bodytxt.Add(&ctx.B, bodyst, body.Dx(), th.Text, composerCopyNoAddressesDuplicateKeys())
-	}
 
 	bodyOp := bodytxt.Content.Offset(body.Min.Add(image.Pt(0, scrollFadeDist)))
 

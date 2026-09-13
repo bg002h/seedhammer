@@ -1,8 +1,7 @@
 package gui
 
 import (
-	"bytes"
-
+	"seedhammer.com/address"
 	"seedhammer.com/bip380"
 )
 
@@ -21,28 +20,20 @@ import (
 // operator pasted or scanned from somewhere else -- the case md1 cannot reach
 // by construction.
 
-// descriptorRepeatsAKey reports the first two positions in desc.Keys that are
-// the same KEY EXPRESSION, and so put the same public key at two seats of the
-// script.
+// descriptorRepeatsAKey reports the first two positions in desc.Keys that put
+// the same public key at two seats of the script.
 //
-// WHAT IS COMPARED, AND WHY EACH CHOICE. A multisig script holds derived
-// pubkeys and nothing else, so two entries collide exactly when they derive the
-// same pubkey at every index:
+// IT ASKS address.DerivesSameKey RATHER THAN COMPARING FIELDS. This function
+// used to compare KeyData, ChainCode and the Children STRUCT, and review C-1
+// broke it with a one-token edit: `A` and `A/<0;1>/*` are the same key written
+// two ways, derivePubKey normalises the first into the second, and the struct
+// comparison called them different -- so wsh(sortedmulti(2,A,A/<0;1>/*,B))
+// walked past the refusal and paid out the byte-identical address the refused
+// fixture produces. Three more spellings did the same.
 //
-//   - KeyData and ChainCode: the xpub itself. Same pair, same CKDpub output.
-//   - Children: the derivation applied at the use site. INCLUDED, and this is
-//     the load-bearing one -- X/0/* and X/1/* are the SAME xpub and derive
-//     DIFFERENT keys, BIP 388 permits exactly that on one placeholder, and a
-//     predicate ignoring Children would refuse a legal wallet. Refusing a good
-//     wallet is the expensive direction of wrong here, because the operator's
-//     recourse is to stop using this device.
-//
-// DELIBERATELY NOT COMPARED: MasterFingerprint and DerivationPath. Those record
-// where the xpub came from, they are metadata that never reaches the script,
-// and two entries differing only there still push identical bytes. Comparing
-// them would be a predicate that misses the defect whenever the two seats were
-// labelled with different origins -- which is what a coordinator bug producing
-// this shape would plausibly do.
+// The lesson is placement, not arithmetic: the normalisations belong to the
+// deriver, so the equality question does too. Anything here can only ever be a
+// copy of them, and a copy is what drifted.
 //
 // Returns the two indices ascending, so the answer does not depend on iteration
 // order.
@@ -50,9 +41,13 @@ func descriptorRepeatsAKey(desc *bip380.Descriptor) (int, int, bool) {
 	if desc == nil {
 		return 0, 0, false
 	}
+	// O(n^2), which is fine: BIP-388 caps a multisig at 20 key expressions and
+	// this device's limit is lower. A map keyed on a serialised expression
+	// would allocate, and DescriptorScreen.Draw is on the 0-alloc benchmarked
+	// path (TestAllocs).
 	for i := range desc.Keys {
 		for j := i + 1; j < len(desc.Keys); j++ {
-			if sameKeyExpression(desc.Keys[i], desc.Keys[j]) {
+			if address.DerivesSameKey(desc.Keys[i], desc.Keys[j]) {
 				return i, j, true
 			}
 		}
@@ -60,25 +55,25 @@ func descriptorRepeatsAKey(desc *bip380.Descriptor) (int, int, bool) {
 	return 0, 0, false
 }
 
-// sameKeyExpression reports whether two descriptor keys derive the same public
-// key at every index.
+// maxTitleDrawn bounds the descriptor Title this device DRAWS.
 //
-// O(n^2) over the key list above, which is fine: BIP-388 caps a multisig at 20
-// key expressions and this device's own limit is lower. A map keyed on the
-// serialized expression would allocate, and DescriptorScreen.Draw is on the
-// 0-alloc benchmarked path.
-func sameKeyExpression(a, b bip380.Key) bool {
-	if !bytes.Equal(a.KeyData, b.KeyData) || !bytes.Equal(a.ChainCode, b.ChainCode) {
-		return false
+// The value is a display budget, not a format rule: DescriptorScreen neither
+// scrolls nor clips, so every character of an unbounded scanned Title displaces
+// a character of something the device chose to say. 48 leaves the Type and
+// Script lines intact at the SH2's 480x320 while still showing a name long
+// enough to recognise a wallet by.
+const maxTitleDrawn = 48
+
+// truncateForDisplay shortens s to at most n runes, marking the cut.
+//
+// RUNES, NOT BYTES, so a multi-byte character is never split into invalid UTF-8
+// on its way to the rasteriser. ASCII "..." rather than an ellipsis: the body
+// face lacks that glyph, and a missing rune blanks the whole line rather than
+// degrading one character (gui/font_coverage_test.go).
+func truncateForDisplay(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
 	}
-	if len(a.Children) != len(b.Children) {
-		return false
-	}
-	for i := range a.Children {
-		x, y := a.Children[i], b.Children[i]
-		if x.Type != y.Type || x.Index != y.Index || x.End != y.End || x.Hardened != y.Hardened {
-			return false
-		}
-	}
-	return true
+	return string(r[:n]) + "..."
 }

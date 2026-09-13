@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"seedhammer.com/address"
 	"seedhammer.com/bip380"
 	"seedhammer.com/nonstandard"
 )
@@ -490,7 +491,22 @@ func keyIdentityOK(d *bip380.Descriptor) bool {
 				slices.Equal(a.DerivationPath, b.DerivationPath) {
 				return false
 			}
-			if same && slices.Equal(a.Children, b.Children) {
+			// COMPARED BY MEANING, NOT SPELLING (F-530 review C-2).
+			//
+			// This read slices.Equal(a.Children, b.Children), and
+			// address.derivePubKey normalises an ABSENT derivation into
+			// <0;1>/* before deriving -- so `A` and `A/<0;1>/*` are one key
+			// written two ways, and wsh(sortedmulti(2,A,A/<0;1>/*,B)) was
+			// admitted as a two-key wallet while deriving one key at two seats.
+			//
+			// CONVERGENCE PORT, NOT A LEAD. The primary carried the identical
+			// defect at me-cli/src/descriptor/admit.rs conjunct 8(b); it was
+			// fixed there first with a vector
+			// (gate/duplicate-key-implicit-use-site), and this follows.
+			//
+			// address.DerivesSameKey subsumes sameKeyMaterial's xpub check, so
+			// `same` is not re-tested here -- one predicate, asked once.
+			if address.DerivesSameKey(*a, *b) {
 				return false
 			}
 		}

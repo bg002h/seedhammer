@@ -130,3 +130,53 @@ func titledZeroKey(t *testing.T) *bip380.Descriptor {
 	}
 	return d
 }
+
+// ─── F-530 review C-2: conjunct 8(b) compared spelling ───────────────────────
+//
+// keyIdentityOK read slices.Equal(a.Children, b.Children), and
+// address.derivePubKey normalises an ABSENT derivation into <0;1>/* before
+// deriving. So the same wallet written two ways was admitted as a two-key
+// multisig while deriving one key at both seats -- and the gui gate added for
+// F-530 fired only on descriptors admission had ALREADY rejected, leaving this
+// route with nothing it actually caught.
+//
+// CONVERGENCE PORT. The primary carried the identical defect at
+// me-cli/src/descriptor/admit.rs conjunct 8(b); it was fixed there first, with
+// the vector gate/duplicate-key-implicit-use-site, and this followed.
+func TestAdmissionRefusesEverySpellingOfADuplicateKey(t *testing.T) {
+	const (
+		xpubA = "xpub6DiYrfRwNnjeX4vHsWMajJVFKrbEEnu8gAW9vDuQzgTWEsEHE16sGWeXXUV1LBWQE1yCTmeprSNcqZ3W74hqVdgDbtYHUv3eM4W2TEUhpan"
+		oriA  = "[dc567276/48h/0h/0h/2h]"
+	)
+	for _, tc := range []struct {
+		name  string
+		desc  string
+		admit bool
+		why   string
+	}{
+		{"explicit twice", "wsh(sortedmulti(2," + oriA + xpubA + "/<0;1>/*," + oriA + xpubA + "/<0;1>/*))",
+			false, "the spelling-equal case, refused before this fix too"},
+		{"implicit twice", "wsh(sortedmulti(2," + oriA + xpubA + "," + oriA + xpubA + "))",
+			false, "also spelling-equal: both absent"},
+		{"implicit vs explicit", "wsh(sortedmulti(2," + oriA + xpubA + "," + oriA + xpubA + "/<0;1>/*))",
+			false, "THE BYPASS: an absent path IS <0;1>/*, so these are one key twice"},
+		{"child vs range on receive", "wsh(sortedmulti(2," + oriA + xpubA + "/0/*," + oriA + xpubA + "/<0;1>/*))",
+			false, "a range resolves to Index on the receive chain -- the chain that gets funded"},
+		{"disjoint multipath", "wsh(sortedmulti(2," + oriA + xpubA + "/<0;1>/*," + oriA + xpubA + "/<2;3>/*))",
+			true, "BIP 388 permits one key at DISJOINT multipath sets, and this conjunct's own comment says so"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := nonstandard.OutputDescriptor([]byte(tc.desc))
+			if err != nil {
+				t.Fatalf("OutputDescriptor: %v", err)
+			}
+			if got := admitDescriptor(d); got != tc.admit {
+				verb := "admits"
+				if tc.admit {
+					verb = "refuses"
+				}
+				t.Errorf("§4.7 admission %s this descriptor; %s", verb, tc.why)
+			}
+		})
+	}
+}

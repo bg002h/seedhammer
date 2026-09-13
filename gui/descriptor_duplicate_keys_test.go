@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 
 	"seedhammer.com/address"
+	"seedhammer.com/bip380"
 )
 
 // ─── F-530: the duplicate-key rule over a *bip380.Descriptor ─────────────────
@@ -172,57 +173,116 @@ func TestDistinctKeyDescriptorStillOffersAddresses(t *testing.T) {
 //
 // THE EXTRACTOR RESPECTS CLIPPING, measured rather than assumed: padding the
 // body past the viewport drops the overflowing lines from the frame text
-// entirely (a 20-line filler left 2 of 20 on the frame and lost a trailing
-// sentinel). So a prefix match here is evidence about pixels, not about which
+// entirely. So a prefix match here is evidence about pixels, not about which
 // ops were emitted -- which is the difference between this gate and a false
 // PASS.
 //
-// The headroom is measured through the descriptor's own Title, which Draw
-// renders above everything else, so it is the screen's own input rather than a
-// seam added for the test.
+// MEASURED IN THE WORST TITLE THIS SCREEN WILL DRAW, not in an abstract
+// character count. The first version padded with strings.Repeat("x", n) and
+// certified "44 characters of Title to spare" -- review I-2 then overflowed the
+// screen with a 25-character title, because 'x' is a narrow glyph and one
+// unbroken token does not wrap. The number was not wrong about x's; it was not
+// a claim about titles. maxTitleDrawn now bounds what is drawn, so the gate
+// asserts the thing that matters directly: at the longest title the screen will
+// render, in the widest glyph the face has, the whole warning is still on it.
 func TestTheDescriptorWarningIsDrawnInFull(t *testing.T) {
-	// THE SCREEN IS NEARLY FULL, and the margin is set below the measured
-	// slack rather than at it: a threshold a test passes EXACTLY will flap on a
-	// font metric change and teach everyone to raise it. If this fails, the
-	// answer is shorter copy -- there is no more room on this screen, and the
-	// sentences cannot move to a second page because there is no page button.
-	const margin = 24 // characters of Title the screen must still absorb
-
 	both := composerCopyDescriptorRepeatsAKey() + composerCopyNoAddressesDuplicateKeys()
-	drawn := drawDescriptorScreen(t, descRepeatedKey, 0)
-	if ok, drew, want := bodyDrawnFully(drawn, both); !ok {
-		t.Fatalf("the Engrave Descriptor screen draws %d of the warning's %d characters. "+
-			"The rest is off the bottom of a screen that does not scroll, so it is text "+
-			"the operator cannot reach at all.\nlost: %q",
-			drew, want, normalizeDrawn(both)[drew:])
-	}
 
-	// Headroom: the longest Title that still leaves the whole warning on screen.
-	head := 0
-	for n := 0; n <= 400; n += 4 {
-		if ok, _, _ := bodyDrawnFully(drawDescriptorScreen(t, descRepeatedKey, n), both); !ok {
-			break
-		}
-		head = n
-	}
-	t.Logf("the warning fits with %d characters of Title to spare (margin %d)", head, margin)
-	if head < margin {
-		t.Errorf("the warning fits today with only %d characters to spare, under the %d "+
-			"margin. F-185's fix failed exactly here: a body that still fit could be "+
-			"re-broken without turning a test red. Shorten the sentences rather than "+
-			"lowering the margin.", head, margin)
+	for _, tc := range []struct {
+		name  string
+		title string
+	}{
+		{"no title", ""},
+		{"a realistic title", "Company Treasury Multisig Cold Storage 2026"},
+		{"the worst title the screen draws", wideWords(maxTitleDrawn)},
+		{"an unbounded scanned title", wideWords(400)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drawn := drawDescriptorScreen(t, descRepeatedKey, tc.title)
+			if ok, drew, want := bodyDrawnFully(drawn, both); !ok {
+				t.Fatalf("the Engrave Descriptor screen draws %d of the warning's %d "+
+					"characters with this title (%d chars). The rest is off the bottom of "+
+					"a screen that does not scroll, so it is text the operator cannot "+
+					"reach -- and the plate is still engravable from here.\nlost: %q",
+					drew, want, len([]rune(tc.title)), normalizeDrawn(both)[drew:])
+			}
+		})
 	}
 }
 
-// drawDescriptorScreen renders the Engrave Descriptor screen's first frame and
-// returns its extracted text. titlePad characters of Title push the body down,
-// which is how the headroom above is measured.
-func drawDescriptorScreen(t *testing.T, descStr string, titlePad int) string {
+// TestTheTitleCannotPushTheWarningOffTheScreen is review I-1 as an assertion
+// rather than a length budget.
+//
+// The warning is drawn FIRST, above every line a scanned artefact controls, so
+// no Title can displace it however long. This drives the length far past
+// anything maxTitleDrawn would allow, because the ordering -- not the cap -- is
+// what makes the guarantee, and a future edit moving the warning back below the
+// Title must fail here even if the cap survives.
+func TestTheTitleCannotPushTheWarningOffTheScreen(t *testing.T) {
+	both := composerCopyDescriptorRepeatsAKey() + composerCopyNoAddressesDuplicateKeys()
+	for _, n := range []int{50, 120, 200, 1000} {
+		drawn := drawDescriptorScreen(t, descRepeatedKey, wideWords(n))
+		if ok, drew, want := bodyDrawnFully(drawn, both); !ok {
+			t.Fatalf("a %d-character scanned Title pushed the warning off the screen "+
+				"(%d of %d characters drawn). An attacker-supplied field must not be able "+
+				"to silence a funds warning; draw the warning above it.\nlost: %q",
+				n, drew, want, normalizeDrawn(both)[drew:])
+		}
+	}
+}
+
+// TestTheDisplayedTitleIsBounded pins the cap itself, and that it is a DISPLAY
+// cap: the descriptor keeps its full Title for everything downstream.
+func TestTheDisplayedTitleIsBounded(t *testing.T) {
+	long := wideWords(400)
+	desc := loadTestDesc(t, descDistinctKeys)
+	desc.Title = long
+	drawn := drawDescriptorScreenDesc(t, desc)
+	if strings.Contains(normalizeDrawn(drawn), normalizeDrawn(long)) {
+		t.Error("the whole 400-character Title is drawn; a scanned string with no length " +
+			"bound displaces whatever the device chose to say after it")
+	}
+	if desc.Title != long {
+		t.Error("Draw mutated the descriptor's Title. The cap is for the screen only -- " +
+			"what is engraved must not change because of how it was displayed")
+	}
+	if got := truncateForDisplay("abc", 48); got != "abc" {
+		t.Errorf("truncateForDisplay shortened a short string to %q", got)
+	}
+	if got := truncateForDisplay(strings.Repeat("a", 60), 48); len([]rune(got)) != 51 {
+		t.Errorf("truncateForDisplay returned %d runes, want 48 + the 3-char marker",
+			len([]rune(got)))
+	}
+}
+
+// wideWords builds n characters of word-wrapping text in the widest glyph the
+// body face carries, which is what a real Title costs on this screen -- not the
+// narrow unbroken token the first version of this gate measured.
+func wideWords(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	for b.Len() < n {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString("mmmmmmmm")
+	}
+	return string([]rune(b.String())[:n])
+}
+
+// drawDescriptorScreen renders the Engrave Descriptor screen's first frame with
+// the given Title and returns its extracted text.
+func drawDescriptorScreen(t *testing.T, descStr, title string) string {
 	t.Helper()
 	desc := loadTestDesc(t, descStr)
-	if titlePad > 0 {
-		desc.Title = strings.Repeat("x", titlePad)
-	}
+	desc.Title = title
+	return drawDescriptorScreenDesc(t, desc)
+}
+
+func drawDescriptorScreenDesc(t *testing.T, desc *bip380.Descriptor) string {
+	t.Helper()
 	var out string
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
@@ -235,4 +295,99 @@ func drawDescriptorScreen(t *testing.T, descStr string, titlePad int) string {
 		out, _ = frame()
 	})
 	return out
+}
+
+// ─── review C-1: the four spellings that derive identically ─────────────────
+//
+// The predicate compared the Children STRUCT while address.derivePubKey
+// normalises before deriving, so each row below was a key written two ways that
+// the gate called two different keys. The first was verified end to end: the
+// screen opened the Addresses choice and listed the byte-identical address the
+// refused fixture produces.
+//
+// EACH ROW IS A SEPARATE BYPASS, so each gets a row rather than one standing in
+// for the family. Three of them differ from the fixture by a single token.
+func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a, b string
+		why  string
+	}{
+		{"implicit vs explicit", f530XpubA, f530XpubA + "/<0;1>/*",
+			"derivePubKey defaults empty Children to exactly <0;1>/*"},
+		{"child vs range on receive", f530XpubA + "/0/*", f530XpubA + "/<0;1>/*",
+			"a RangeDerivation resolves to Index on the receive chain -- the chain that gets funded"},
+		{"hardened vs not", f530XpubA + "/0h/*", f530XpubA + "/0/*",
+			"derivePubKey never consults Hardened"},
+		{"hardened wildcard vs not", f530XpubA + "/*h", f530XpubA + "/*",
+			"same reason, at the wildcard"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+","+f530XpubB+"))")
+			i, j, dup := descriptorRepeatsAKey(desc)
+			if !dup {
+				t.Fatalf("descriptorRepeatsAKey says these are different keys:\n  %s\n  %s\n"+
+					"They are not: %s. A gate that reads the spelling instead of the "+
+					"derivation is walked past by retyping the same wallet (review C-1).",
+					tc.a, tc.b, tc.why)
+			}
+			if i != 0 || j != 1 {
+				t.Errorf("positions %d,%d, want 0,1", i, j)
+			}
+		})
+	}
+}
+
+// TestGenuinelyDifferentSpellingsAreNotCaught is the false-positive half, and it
+// is the half that costs an operator a working wallet rather than costing them
+// a warning.
+func TestGenuinelyDifferentSpellingsAreNotCaught(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a, b string
+		why  string
+	}{
+		{"different fixed children", f530XpubA + "/0/*", f530XpubA + "/1/*",
+			"different child, different key, on both chains"},
+		{"disjoint multipath", f530XpubA + "/<0;1>/*", f530XpubA + "/<2;3>/*",
+			"BIP 388 permits one key at DISJOINT multipath sets, and these derive differently"},
+		{"different xpubs", f530XpubA, f530XpubB,
+			"two different keys, the ordinary case"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+"))")
+			if _, _, dup := descriptorRepeatsAKey(desc); dup {
+				t.Fatalf("descriptorRepeatsAKey refuses a wallet whose keys differ:\n  %s\n  %s\n"+
+					"%s. Refusing a good wallet is the expensive direction -- the "+
+					"operator's recourse is to stop using this device.", tc.a, tc.b, tc.why)
+			}
+		})
+	}
+}
+
+// TestTheReceiveChainAloneIsEnough pins the "either chain" rule, which is the
+// one a reader is most likely to tighten into "both".
+//
+// A/0/* and A/<0;1>/* derive the SAME key on receive and DIFFERENT keys on
+// change. Requiring both chains to collide would call that wallet safe -- while
+// every address an operator is handed to fund comes from the chain where the
+// two keys are one.
+func TestTheReceiveChainAloneIsEnough(t *testing.T) {
+	desc := loadTestDesc(t, "wsh(sortedmulti(2,"+f530XpubA+"/0/*,"+f530XpubA+"/<0;1>/*,"+f530XpubB+"))")
+	if _, _, dup := descriptorRepeatsAKey(desc); !dup {
+		t.Fatal("a collision on the receive chain alone is not reported. Receive is the " +
+			"chain that gets funded and the one descriptorAddressFlow opens on")
+	}
+	recv, err := address.Receive(desc, 0)
+	if err != nil {
+		t.Fatalf("address.Receive: %v", err)
+	}
+	chg, err := address.Change(desc, 0)
+	if err != nil {
+		t.Fatalf("address.Change: %v", err)
+	}
+	if recv == chg {
+		t.Fatal("receive and change agree for this fixture, so it does not demonstrate a " +
+			"receive-only collision and this test is not testing the rule it names")
+	}
 }

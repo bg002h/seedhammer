@@ -185,21 +185,109 @@ func sortedMultisigScript(keys []*address.AddressPubKey, threshold int) ([]byte,
 	return txscript.MultiSigScript(keys, threshold)
 }
 
-func derivePubKey(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
-	children := k.Children
-	if len(children) == 0 {
-		// Default to <0;1>/*.
-		children = append(children,
-			bip380.Derivation{
-				Type:  bip380.RangeDerivation,
-				Index: 0,
-				End:   1,
-			},
-			bip380.Derivation{
-				Type: bip380.WildcardDerivation,
-			},
-		)
+// defaultChildren is the derivation derivePubKey applies to a key that carries
+// none of its own: BIP-388's <0;1>/*.
+//
+// A PACKAGE-LEVEL VALUE, not an append inside derivePubKey, so that the
+// normalisation has ONE home. DerivesSameKey below has to apply exactly the
+// same default or it compares the spelling of a key expression against the
+// meaning of another, and a package-level slice also costs derivePubKey the
+// allocation the append used to make on every keyless-children derivation.
+var defaultChildren = []bip380.Derivation{
+	{Type: bip380.RangeDerivation, Index: 0, End: 1},
+	{Type: bip380.WildcardDerivation},
+}
+
+// effectiveChildren is a key's derivation as derivePubKey sees it.
+func effectiveChildren(k bip380.Key) []bip380.Derivation {
+	if len(k.Children) == 0 {
+		return defaultChildren
 	}
+	return k.Children
+}
+
+// resolveChild mirrors derivePubKey's switch EXACTLY: the id it would derive at
+// this element for this chain, and whether the element is the trailing wildcard
+// (whose id is the address index and so is equal for equal indices).
+//
+// It reports !ok for an element derivePubKey would refuse, so a key that cannot
+// derive is never reported as deriving the same thing as another.
+//
+// NOTE WHAT IS ABSENT: Hardened. derivePubKey never consults it -- /0h/* derives
+// the unhardened child and /*h the plain wildcard -- so two spellings differing
+// only in hardening produce the same key, and a comparison that treated them as
+// different would miss a real duplicate.
+func resolveChild(c bip380.Derivation, change bool) (id uint32, wildcard, ok bool) {
+	switch c.Type {
+	case bip380.ChildDerivation:
+		return c.Index, false, true
+	case bip380.RangeDerivation:
+		if c.End != c.Index+1 {
+			return 0, false, false
+		}
+		if change {
+			return c.End, false, true
+		}
+		return c.Index, false, true
+	case bip380.WildcardDerivation:
+		return 0, true, true
+	}
+	return 0, false, false
+}
+
+// DerivesSameKey reports whether two key expressions put the SAME public key at
+// every address index, on at least one chain.
+//
+// THE QUESTION A DUPLICATE-KEY RULE MUST ASK, answered here rather than by its
+// caller, because the answer depends on derivePubKey's normalisations and those
+// live in this file. A caller comparing struct fields compares the SPELLING of
+// an expression; four spellings that derive identically compare unequal that
+// way (F-530 review C-1), and each one walks a refusal that exists to protect
+// funds:
+//
+//	A            vs A/<0;1>/*   the empty default, materialised
+//	A/0/*        vs A/<0;1>/*   equal on the RECEIVE chain, which is the one funded
+//	A/0h/*       vs A/0/*       Hardened is not consulted
+//	A/*h         vs A/*         same
+//
+// EITHER CHAIN, not both. The second row above collides only on receive -- and
+// receive is the chain an operator funds and the chain descriptorAddressFlow
+// opens on, so a collision there is the whole harm even when change differs.
+//
+// ORIGIN METADATA IS NOT COMPARED, and that is deliberate rather than an
+// oversight: MasterFingerprint and DerivationPath record where an xpub came
+// from, never reach the script, and do not participate in CKDpub. Two seats
+// labelled with different origins still push identical bytes -- which is what a
+// coordinator bug producing this shape would plausibly do, so comparing them
+// would build a predicate that misses the defect exactly when it is most
+// likely. TestDerivesSameKeyIgnoresOriginMetadata pins it.
+func DerivesSameKey(a, b bip380.Key) bool {
+	if !bytes.Equal(a.KeyData, b.KeyData) || !bytes.Equal(a.ChainCode, b.ChainCode) {
+		return false
+	}
+	ac, bc := effectiveChildren(a), effectiveChildren(b)
+	if len(ac) != len(bc) {
+		return false
+	}
+	for _, change := range [...]bool{false, true} {
+		same := true
+		for i := range ac {
+			aid, awild, aok := resolveChild(ac[i], change)
+			bid, bwild, bok := resolveChild(bc[i], change)
+			if !aok || !bok || awild != bwild || (!awild && aid != bid) {
+				same = false
+				break
+			}
+		}
+		if same {
+			return true
+		}
+	}
+	return false
+}
+
+func derivePubKey(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
+	children := effectiveChildren(k)
 	xpub := k.ExtendedKey()
 	for _, c := range children {
 		var id uint32
