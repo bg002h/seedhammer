@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"seedhammer.com/engrave"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"seedhammer.com/backup"
 	"seedhammer.com/font/vector"
@@ -1672,4 +1674,113 @@ func TestPreviewSizesCoverEveryFreeTextPlate(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestFreeTextPickersReopenOnTheLiveValue is F-527: four of the six call sites
+// that set ChoiceScreen.Initial were asserted by nothing.
+//
+// Making Choose ignore Initial entirely — which reverts all six at once — reds
+// only TWO tests out of 1294: the passphrase QR step and the composer's script
+// picker. The free-text Speed, Passes, Font and Size pickers all preserve the
+// live value across Back the same way, and no test said so.
+//
+// The gap is PRE-EXISTING rather than introduced: those four poked the
+// unexported `choice` field before the migration and were equally uncovered
+// then. What the migration changed is that all six now share one mechanism, so
+// one edit can break all six.
+//
+// The failure mode is the composer's C-1 restated: a picker that opens on row 0
+// is proposing a setting rather than showing one, and an operator who steps
+// Back to check what they chose and leaves by the forward button changes it.
+// On these screens that silently re-engraves at a different speed or a
+// different number of passes.
+//
+// WHAT THIS COVERS, AND WHAT IT DOES NOT. Speed and Passes are here. Font and
+// Size are NOT, and the reason is worth recording rather than hiding: over a
+// loaded size ladder — the only path on which they appear at all — each offers
+// exactly ONE option, measured on all three trigger/QR combinations the harness
+// can reach ("sh+constant+sh+constant+sh+constant", "4.4+3.4+3.0mm"). Their
+// `i > 0` branch is therefore unreachable from any state a test can construct,
+// and a test asserting it would either skip forever or assert nothing. That is
+// a finding about those two call sites, not coverage of them.
+//
+// MUTATION: delete `cs.Initial = i` in ftSpeedChoiceFlow or ftPassChoiceFlow
+// and the matching sub-test fails.
+func TestFreeTextPickersReopenOnTheLiveValue(t *testing.T) {
+	// proofLoaded is true because that is the state in which these screens
+	// offer more than the single "(default)" row.
+	t.Run("speed", func(t *testing.T) {
+		labels, speeds := ftSpeedOptions(engrave.Params{}, true, 0)
+		if len(speeds) < 3 {
+			t.Fatalf("the speed step offers %d options (%v); this test needs a "+
+				"non-zero row to preserve", len(speeds), labels)
+		}
+		want := 2
+		prior := speeds[want]
+		captured := map[string]any{}
+		defer setPPWidgetHook(func(name string, w any) { captured[name] = w })()
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, quit := runUI(ctx, func() {
+				ftSpeedChoiceFlow(ctx, &descriptorTheme, engrave.Params{}, true, prior)
+			})
+			defer quit()
+			if got, ok := pumpUntil(frame, "Speed", 24); !ok {
+				t.Fatalf("the speed picker never drew.\nLast frame: %q", got)
+			}
+			cs, ok := captured["speed"].(*ChoiceScreen)
+			if !ok {
+				t.Fatal(`widget "speed" is not a *ChoiceScreen`)
+			}
+			if cs.Initial != want {
+				t.Errorf("the Speed picker opens on row %d with %v mm/s in force, want "+
+					"row %d. An operator stepping back to read the speed would "+
+					"change it.", cs.Initial, prior, want)
+			}
+		})
+	})
+
+	t.Run("passes", func(t *testing.T) {
+		labels, passes := ftPassOptions(true, 0)
+		if len(passes) < 3 {
+			t.Fatalf("the passes step offers %d options (%v); this test needs a "+
+				"non-zero row to preserve", len(passes), labels)
+		}
+		want := 2
+		prior := passes[want]
+		captured := map[string]any{}
+		defer setPPWidgetHook(func(name string, w any) { captured[name] = w })()
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, quit := runUI(ctx, func() {
+				ftPassChoiceFlow(ctx, &descriptorTheme, true, prior)
+			})
+			defer quit()
+			if got, ok := pumpUntil(frame, "Passes", 24); !ok {
+				t.Fatalf("the passes picker never drew.\nLast frame: %q", got)
+			}
+			cs, ok := captured["passes"].(*ChoiceScreen)
+			if !ok {
+				t.Fatal(`widget "passes" is not a *ChoiceScreen`)
+			}
+			if cs.Initial != want {
+				t.Errorf("the Passes picker opens on row %d with %d passes in force, "+
+					"want row %d. An operator stepping back to read the pass count "+
+					"would change it.", cs.Initial, prior, want)
+			}
+		})
+	})
+}
+
+// setPPWidgetHook installs a widget hook and returns the restore func, so a
+// test that drives one flow directly can reach the ChoiceScreen it built
+// without standing up the whole ppHarness.
+func setPPWidgetHook(f func(name string, w any)) func() {
+	prev := passphraseWidgetHook
+	passphraseWidgetHook = f
+	return func() { passphraseWidgetHook = prev }
 }

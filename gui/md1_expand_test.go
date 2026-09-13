@@ -403,3 +403,76 @@ func TestScriptLineNamesEverySingleSigRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestScriptForTemplateAdmitsOnlyTwo is the trip-wire F-530's argument rests on
+// (review of F-514).
+//
+// The expandOK address route carries no duplicate-key warning. That is
+// tolerable only because scriptForTemplate admits exactly two policies:
+// PolicySingle, which has one key slot and cannot repeat, and
+// PolicySortedMulti, whose top-level sortedmulti makes any repeat
+// md.DuplicateFewerKeys — warned on the consent screen that precedes steel. So
+// the route can never carry md.DuplicateRefusedByCore and cannot reproduce the
+// Critical.
+//
+// Add an arm for plain multi or any miniscript shape and that argument dies
+// silently, which is exactly the kind of change nobody connects to a follow-up
+// filed months earlier. This fails instead.
+//
+// MUTATION: add a `case md.PolicyMulti:` arm returning true and this fails
+// naming it.
+func TestScriptForTemplateAdmitsOnlyTwo(t *testing.T) {
+	// EVERY PolicyKind, not a hand-picked few. The first version of this test
+	// enumerated three -- Single, SortedMulti, Multi -- and so omitted
+	// PolicyMultiA, PolicySortedMultiA and PolicyComplex, which are exactly the
+	// kinds whose duplicate is DuplicateRefusedByCore. It caught the one kind
+	// that could not break F-530's argument and missed all three that can
+	// (review I-7); adding PolicyComplex and PolicyMultiA arms to
+	// scriptForTemplate left it PASS with 1307/1307 green.
+	//
+	// The list is closed against the enum's own range: PolicyKind is an iota
+	// from PolicySingle to PolicyComplex, so counting up to it covers any kind
+	// added in between without this test needing to hear about it.
+	admitted := map[md.PolicyKind]bool{}
+	var all []md.PolicyKind
+	for k := md.PolicySingle; k <= md.PolicyComplex; k++ {
+		all = append(all, k)
+	}
+	if len(all) < 6 {
+		t.Fatalf("PolicyKind enumerates %d values, expected at least 6; this test "+
+			"walks the enum's range and would silently narrow", len(all))
+	}
+	for _, policy := range all {
+		for _, root := range []md.ScriptKind{
+			md.ScriptWpkh, md.ScriptPkh, md.ScriptSh, md.ScriptWsh, md.ScriptTr,
+		} {
+			for _, inner := range []struct{ wsh, wpkh bool }{{false, false}, {true, false}, {false, true}} {
+				tpl := md.Template{
+					N: 2, Policy: policy, Root: root, Renderable: true,
+					InnerWsh: inner.wsh, InnerWpkh: inner.wpkh,
+					K: 2, M: 3,
+				}
+				if _, _, ok := scriptForTemplate(tpl); ok {
+					admitted[policy] = true
+				}
+			}
+		}
+	}
+	for policy, yes := range admitted {
+		if !yes {
+			continue
+		}
+		if policy != md.PolicySingle && policy != md.PolicySortedMulti {
+			t.Errorf("scriptForTemplate now admits %v. The expandOK address route shows "+
+				"addresses with no duplicate-key warning, and F-530 records that as a "+
+				"gap rather than a hole ONLY because this function could not reach a "+
+				"miniscript shape. Either warn on that route or explain why %v is still "+
+				"safe.", policy, policy)
+		}
+	}
+	if !admitted[md.PolicySingle] || !admitted[md.PolicySortedMulti] {
+		t.Errorf("scriptForTemplate no longer admits both of the two it is documented to "+
+			"admit (single=%v sortedmulti=%v); this test would then be vacuous",
+			admitted[md.PolicySingle], admitted[md.PolicySortedMulti])
+	}
+}

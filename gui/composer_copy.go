@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"seedhammer.com/hashlock"
+
+	"seedhammer.com/md"
 )
 
 // Every operator-facing string the wallet-policy COMPOSER draws, in one file
@@ -318,6 +320,52 @@ func composerCopyIdChanged() string {
 // four bytes of an id that did not move -- and is refused by slotMatchesCard.
 // Saying "this id changed" there would be false, and saying nothing at all was
 // the defect review I-2 constructed.
+// composerCopyDuplicateKeys is the §8s warning for a policy whose script repeats
+// a key, in the words of the harm that repeat actually carries.
+//
+// TWO HARMS, TWO SENTENCES, because Bitcoin Core treats the two shapes
+// differently and an operator told the wrong one looks in the wrong place.
+// Measured on Core 25.0.0 via getdescriptorinfo, same key twice:
+//
+//	wsh(sortedmulti(2,A,A,B))  ACCEPTED  -- Core imports it happily
+//	wsh(and_v(v:pk(A),pk(A)))  "is not sane: contains duplicate public keys"
+//
+// Core parses a top-level multi/sortedmulti as a MultisigDescriptor and never
+// runs miniscript's sanity check on it. An earlier draft of this copy told the
+// operator Core refuses the descriptor in BOTH cases; for the multisig one that
+// is simply false, and a false sentence on the screen that consents to steel is
+// worse than no sentence.
+//
+// The multisig case is the MORE dangerous of the two, which is why it keeps a
+// warning rather than losing one: one key filling two seats of a threshold can
+// meet that threshold alone, so a 2-of-3 with one key twice is a 1-of-2 wearing
+// a 2-of-3's label.
+//
+// A WARNING AND NOT A REFUSAL, in both cases. The device derives a correct,
+// fundable address either way, and refusing here would strand a card that may
+// already be engraved. What was unacceptable was saying nothing at all while
+// showing an address to send to (F-514).
+func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
+	// LEADING WITH THE ACTION, because the Inspect screen PAGES and this
+	// sentence was longer than one page: at width 20 it measured 261px against
+	// a 224px viewport, so "Check before you fund it." fell below the fold
+	// (review I-8). Raising the wrap width is not available -- md1PolicyFlow
+	// re-chunks anything over 20 bytes and the mid-word cuts come back -- so
+	// the sentence is shorter and the instruction comes first. What an operator
+	// reads on page one is now the thing to do.
+	if kind == md.DuplicateFewerKeys {
+		return fmt.Sprintf("Check before funding: slot @%d fills more than one seat, "+
+			"so fewer separate keys can spend this than its k-of-n says.", slot)
+	}
+	// 96 chars, 6 lines, so it FITS page one of the Inspect screen, which holds
+	// 7. The shipped version was 122 chars and 8 lines, and page one ended on a
+	// dangling ("duplicate public with keys"). overleaf (review M-9). Line count
+	// decides, not length: 122 chars landed on 8 only because of where the words
+	// break, so measure a replacement rather than counting it.
+	return fmt.Sprintf("Check before funding: slot @%d repeats in one script, and "+
+		"Bitcoin Core refuses such a descriptor.", slot)
+}
+
 func composerCopyOriginsChanged() string {
 	return "Same id, but the slot origins below changed. Cards minted for the " +
 		"old origins will not seat here."

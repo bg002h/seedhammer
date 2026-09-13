@@ -10,6 +10,8 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/md"
+
+	"strings"
 )
 
 // md1Gatherer accumulates md1 chunk strings toward a complete set. A near-clone
@@ -205,9 +207,54 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 // refuses without them), so the key-dependent one is the one that answers "is
 // this MY wallet".
 func policyIDHeader(collected []string) []string {
-	id, err := md.WalletPolicyIdChunks(collected)
-	if err != nil {
-		return nil
+	var out []string
+	// THE WARNING LEADS. This screen pages, and a warning below the fold is a
+	// warning unread; the policy id is a reference the operator copies at their
+	// leisure, the warning is the thing that should stop them.
+	//
+	// WRAPPED ON WORD BOUNDARIES here, not left to the caller. md1PolicyFlow
+	// hard-chunks anything over 20 bytes, which is right for an id or a bech32
+	// address and wrong for a sentence: it rendered this one as nine mid-word
+	// fragments -- "twic|e", "Bit|coin", "dupl|icate" (review M-6).
+	if slot, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
+		out = append(out, wrapWords(composerCopyDuplicateKeys(slot, kind), 20)...)
 	}
-	return []string{"Policy id: " + hex.EncodeToString(id[:])}
+	if id, err := md.WalletPolicyIdChunks(collected); err == nil {
+		out = append(out, "Policy id: "+hex.EncodeToString(id[:]))
+	}
+	return out
+}
+
+// wrapWords breaks a sentence on spaces so no word is split, falling back to a
+// hard cut for a single word longer than the width.
+//
+// It exists because the screens that page long text do it differently: the
+// consent screens word-wrap, md1PolicyFlow hard-chunks at 20 bytes for ids and
+// addresses. A sentence handed to the second one comes out in fragments.
+func wrapWords(s string, width int) []string {
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		for len(word) > width {
+			if line != "" {
+				out = append(out, line)
+				line = ""
+			}
+			out = append(out, word[:width])
+			word = word[width:]
+		}
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= width:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
 }

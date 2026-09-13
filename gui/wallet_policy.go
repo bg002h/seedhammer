@@ -294,6 +294,13 @@ func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedK
 		return []string{"", "This device can't derive", "addresses for this policy."}
 	}
 	lines := []string{""}
+	// THE WARNING SITS WITH THE ADDRESSES IT QUALIFIES (F-514). The device
+	// derives these correctly, and a Core-based coordinator will refuse the
+	// descriptor they belong to; an operator shown an address and nothing else
+	// has no way to learn that before funding it.
+	if slot, kind, err := md.DuplicateKeySlotChunks(md1); err == nil && kind != md.DuplicateNone {
+		lines = append(lines, composerCopyDuplicateKeys(slot, kind), "")
+	}
 	for _, chain := range []struct {
 		label  string
 		change bool

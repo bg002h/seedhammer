@@ -236,13 +236,23 @@ func composerStubLines(templateChunks, keyedChunks []string, change composerStub
 	return lines, nil
 }
 
-// composerStubFlow shows the screen. Back returns false so the caller can
-// send the operator back to the shape.
-func composerStubFlow(ctx *Context, th *Colors, templateChunks, keyedChunks []string, change composerStubChange) bool {
+// composerStubFlow shows the screen.
+//
+// TWO false RETURNS, TOLD APART (review N-1 / F-528). `forward` false means the
+// operator stepped Back and the caller should return them to the shape;
+// `shown` false means the screen was never drawn at all, because the lines
+// could not be built and an error screen went up instead.
+//
+// The caller has to tell them apart, because it records what the operator was
+// SHOWN -- the chunk set behind the stub, and the origins each slot advertised.
+// Recording after a render failure makes the device believe it displayed a stub
+// nobody saw, and a later §8s banner then speaks of "cards minted with the old
+// stub" for a stub that was never on screen.
+func composerStubFlow(ctx *Context, th *Colors, templateChunks, keyedChunks []string, change composerStubChange) (forward, shown bool) {
 	lines, err := composerStubLines(templateChunks, keyedChunks, change)
 	if err != nil {
 		showError(ctx, th, "Template", "Couldn't read back the template this device just built.")
-		return false
+		return false, false
 	}
-	return composerReadScreen(ctx, th, "Template", lines)
+	return composerReadScreen(ctx, th, "Template", lines), true
 }

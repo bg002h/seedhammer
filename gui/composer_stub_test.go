@@ -536,3 +536,89 @@ func TestComposerStubDeltaSurvivesAFullySeatedGap(t *testing.T) {
 			got[2], a1[2], a3[2])
 	}
 }
+
+// TestComposerStubFlowTellsBackApartFromNeverDrawing is review N-1 / F-528.
+//
+// composerStubFlow returned ONE false for two different events: the operator
+// stepped Back, and the lines could not be built so an error screen went up
+// instead. The caller records what the operator was SHOWN — the chunk set
+// behind the stub, and the origin each slot advertised — and it recorded on
+// both, so after a render failure the device believed it had displayed a stub
+// nobody saw. A later §8s banner then speaks of "cards minted with the old
+// stub" for a stub that was never on screen.
+//
+// Every outcome of that was safe-side, which is why it was a Nit and not a
+// gate. It is still a lie the device tells itself, and it is one return value
+// away from being fixed.
+//
+// MUTATION: return `true` for the second value on the error path and the
+// "never drew" case fails.
+func TestComposerStubFlowTellsBackApartFromNeverDrawing(t *testing.T) {
+	t.Run("unreadable chunks never draw the stub", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			var forward, drew bool
+			frame, quit := runUI(ctx, func() {
+				forward, drew = composerStubFlow(ctx, &descriptorTheme,
+					[]string{"md1notacard"}, nil, composerStubUnchanged)
+			})
+			defer quit()
+			if got, ok := pumpUntil(frame, "Couldn't read back", 24); !ok {
+				t.Fatalf("the error screen never drew.\nLast frame: %q", got)
+			}
+			// DISMISS IT AND LET THE CALL RETURN before reading the results.
+			// Without this the assertions below read the zero values of
+			// variables the goroutine has not assigned yet, and the test passes
+			// whatever composerStubFlow returns -- measured: mutating the error
+			// path to `return false, true` left it green.
+			click(&ctx.Router, Button3)
+			for i := 0; i < 12; i++ {
+				frame()
+			}
+			if forward {
+				t.Error("a render failure reported forward progress")
+			}
+			if drew {
+				t.Error("a render failure reported that the stub screen was SHOWN; the " +
+					"caller records what was shown, so the device would believe it " +
+					"displayed a stub nobody saw")
+			}
+		})
+	})
+
+	t.Run("a readable card reports that it drew", func(t *testing.T) {
+		list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+			{Keys: &md.KeySet{K: 1, N: 1}},
+		}}
+		c, err := md.Compose(list)
+		if err != nil {
+			t.Fatalf("md.Compose: %v", err)
+		}
+		chunks, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("Chunks: %v", err)
+		}
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			var drew bool
+			frame, quit := runUI(ctx, func() {
+				_, drew = composerStubFlow(ctx, &descriptorTheme, chunks, nil, composerStubUnchanged)
+			})
+			defer quit()
+			if got, ok := pumpUntil(frame, "mk1 stub (template):", 24); !ok {
+				t.Fatalf("the stub screen never drew.\nLast frame: %q", got)
+			}
+			click(&ctx.Router, Button1) // Back out so the goroutine finishes
+			for i := 0; i < 8; i++ {
+				frame()
+			}
+			if !drew {
+				t.Error("the stub screen drew and reported that it had not")
+			}
+		})
+	})
+}

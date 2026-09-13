@@ -542,3 +542,208 @@ func TestConsentNamesTheScript(t *testing.T) {
 		})
 	}
 }
+
+// TestConsentWarnsOnDuplicateKeys is F-514: the device derived a fundable
+// receive address, in silence, for a policy whose descriptor Bitcoin Core
+// refuses as "is not sane: contains duplicate public keys".
+//
+// The addresses are CORRECT — they match the vector's own conformance data, and
+// that is why this is a warning rather than a refusal. What was missing was any
+// way for the operator to learn, before funding the address they are being
+// shown, that the coordinator they will try to spend from will not import the
+// wallet. Refusing on-device would strand a card that may already be engraved,
+// which is worse than telling them nothing; saying nothing while showing them
+// an address to send to was worse still.
+//
+// The positive and negative cases are both here, against vectors whose Core
+// verdicts were measured on a throwaway regtest datadir. A warning that fired
+// on the taproot pair — which Core ACCEPTS — would be a warning the operator
+// learns to read past.
+//
+// MUTATION: remove the duplicate-key block from composerConsentLinesFor and the
+// wsh case fails; make md.DuplicateKeySlot ignore the tap-leaf scoping and the
+// taproot cases fail.
+func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
+	for _, tc := range []struct {
+		vector string
+		want   md.DuplicateKind
+		core   string
+	}{
+		{"keyed_wsh_timelock_hashlock", md.DuplicateRefusedByCore, "Core REFUSES: duplicate keys in one miniscript"},
+		{"keyed_tr_multi_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_tr_sortedmulti_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
+		{"keyed_compose_wsh_timelock_hashlock", md.DuplicateNone, "no key reuse at all"},
+	} {
+		t.Run(tc.vector, func(t *testing.T) {
+			chunks := loadVectorChunks(t, tc.vector)
+			slot, kind, err := md.DuplicateKeySlotChunks(chunks)
+			if err != nil {
+				t.Fatalf("DuplicateKeySlotChunks: %v", err)
+			}
+			if kind != tc.want {
+				t.Fatalf("the predicate says %v (@%d), want %v; %s", kind, slot, tc.want, tc.core)
+			}
+			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			if err != nil {
+				t.Fatalf("composerConsentLinesFor: %v", err)
+			}
+			joined := strings.Join(lines, "\n")
+			// AGAINST THE COPY FUNCTION, NOT A LITERAL. This assertion used to
+			// search for "duplicate public keys", and trimming that parenthetical
+			// out of the sentence to make it fit the Inspect screen's page broke
+			// it -- the third time in this cycle a copy edit broke a test that
+			// had hardcoded the words rather than asking for them.
+			got := strings.Contains(joined, composerCopyDuplicateKeys(slot, tc.want))
+			if got != (tc.want == md.DuplicateRefusedByCore) {
+				if tc.want == md.DuplicateRefusedByCore {
+					t.Errorf("the consent screen shows addresses for a descriptor Core "+
+						"refuses and says nothing about it.\n%s", joined)
+				} else {
+					t.Errorf("the consent screen warns about duplicate keys on a wallet "+
+						"Core accepts (%s); a warning that cries wolf is one the "+
+						"operator reads past.\n%s", tc.core, joined)
+				}
+			}
+		})
+	}
+}
+
+// TestEveryAddressSurfaceCarriesTheDuplicateWarning is review C-1 and I-2.
+//
+// C-1: the warning was added to two surfaces and there was a THIRD — the
+// Inspect-descriptor route, md1GatherFlow -> gatheredDescriptorFlow ->
+// md1PolicyFlow, which puts a live deriver on Button2 and lists real mainnet
+// addresses. It carried nothing, and it is the screen F-514 was measured on.
+//
+// I-2: deleting the walletPolicyAddressLines block outright left 1302/1302 gui
+// tests green. That call site had no test at all, so the warning could be
+// removed from a screen that shows addresses and nothing would say so.
+//
+// The rule this pins is the one worth having: EVERY line set that carries a
+// derived address carries the warning. Adding a fourth surface without it
+// should fail here.
+//
+// MUTATION: delete the block in any of the three producers and its row fails.
+func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
+	chunks := loadVectorChunks(t, "keyed_wsh_timelock_hashlock")
+	slot, kind, err := md.DuplicateKeySlotChunks(chunks)
+	if err != nil {
+		t.Fatalf("DuplicateKeySlotChunks: %v", err)
+	}
+	if kind != md.DuplicateRefusedByCore {
+		t.Fatalf("the fixture no longer carries a miniscript duplicate (%v); this "+
+			"test needs one, and a re-vendor from the primary would remove it (F-529)", kind)
+	}
+	want := composerCopyDuplicateKeys(slot, kind)
+
+	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+	}
+
+	t.Run("composer consent", func(t *testing.T) {
+		lines, err := composerConsentLinesFor(chunks, nil, 0)
+		if err != nil {
+			t.Fatalf("composerConsentLinesFor: %v", err)
+		}
+		assertCarriesWarning(t, lines, want, "the composer consent screen")
+	})
+
+	t.Run("wallet policy consent", func(t *testing.T) {
+		assertCarriesWarning(t, walletPolicyAddressLines(chunks, tpl, keys), want,
+			"the Engrave Wallet Policy address block")
+	})
+
+	t.Run("inspect descriptor", func(t *testing.T) {
+		// THE REAL ENTRY POINT, not the header and not md1PolicyFlow directly.
+		//
+		// Review I-4 was that this gate asserted policyIDHeader's return value,
+		// so trimming the CONSUMER put the screen back to silent while the test
+		// passed. My first fix for that drove md1PolicyFlow with a header the
+		// test built itself -- which is the same defect one level out, and the
+		// reviewer's own mutation (`h = h[len(h)-1:]` in gatheredDescriptorFlow)
+		// still left it green. Measured, not assumed.
+		//
+		// So it drives gatheredDescriptorFlow, the function the operator's tap
+		// actually reaches, and everything between it and the pixels is inside
+		// the test.
+		synctest.Test(t, func(t *testing.T) {
+			p := newPlatform()
+			p.display = sh2DisplaySize
+			ctx := NewContext(p)
+			frame, quit := runUI(ctx, func() {
+				gatheredDescriptorFlow(ctx, &descriptorTheme, chunks)
+			})
+			defer quit()
+			// The OPENING of the warning, not its tail: this screen pages and
+			// the sentence is longer than one page, so asserting the last
+			// clause would prove the warning exists somewhere, which for a
+			// warning is not the same as being seen.
+			if got, ok := pumpUntil(frame, "repeats in one script", 24); !ok {
+				t.Errorf("the Inspect-descriptor screen lists mainnet addresses for a "+
+					"descriptor Bitcoin Core refuses and never shows the warning.\n"+
+					"Last frame: %q", got)
+			}
+		})
+	})
+}
+
+// assertCarriesWarning fails when a line set that will show an address does not
+// carry the duplicate-key warning.
+func assertCarriesWarning(t *testing.T, lines []string, want, where string) {
+	t.Helper()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, want) {
+		t.Errorf("%s shows addresses for a descriptor Bitcoin Core refuses and "+
+			"carries no warning.\nwant a line: %s\ngot:\n%s", where, want, joined)
+	}
+}
+
+// TestDuplicateWarningNamesTheRightHarm is review I-1.
+//
+// The first version of this warning told the operator Bitcoin Core refuses the
+// descriptor, for ANY repeated slot. That is false for a top-level
+// multi/sortedmulti: Core parses one as a MultisigDescriptor and never runs the
+// miniscript sanity check. Measured on Core 25.0.0, getdescriptorinfo, same key
+// twice:
+//
+//	wsh(sortedmulti(2,A,A,B))  ACCEPTED
+//	wsh(multi(2,A,A,B))        ACCEPTED
+//	wsh(and_v(v:pk(A),pk(A)))  "is not sane: contains duplicate public keys"
+//
+// So the multisig shape keeps a warning — it is the MORE dangerous of the two,
+// since one key filling two seats can meet the threshold alone — but it gets
+// the sentence that is true of it.
+//
+// MUTATION: make kindForRoot always return DuplicateRefusedByCore and the
+// multisig rows fail on the Core claim.
+func TestDuplicateWarningNamesTheRightHarm(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		want    md.DuplicateKind
+		says    string
+		notSays string
+	}{
+		{
+			name: "top-level sortedmulti",
+			want: md.DuplicateFewerKeys,
+			says: "fewer separate keys", notSays: "Bitcoin Core refuses",
+		},
+		{
+			name: "nested miniscript",
+			want: md.DuplicateRefusedByCore,
+			says: "Bitcoin Core refuses", notSays: "fewer separate keys",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := composerCopyDuplicateKeys(0, tc.want)
+			if !strings.Contains(got, tc.says) {
+				t.Errorf("the %s warning does not say %q:\n%s", tc.name, tc.says, got)
+			}
+			if strings.Contains(got, tc.notSays) {
+				t.Errorf("the %s warning says %q, which is not true of it:\n%s",
+					tc.name, tc.notSays, got)
+			}
+		})
+	}
+}
