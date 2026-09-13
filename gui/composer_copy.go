@@ -310,16 +310,6 @@ func composerCopyIdChanged() string {
 		"will not seat here."
 }
 
-// composerCopyOriginsChanged is the §8s line for the case the id line cannot
-// state: the id is UNCHANGED and the per-slot origins this screen told the
-// operator to mint against are not.
-//
-// It needs its own sentence because the two failures happen at different
-// layers, and an operator told the wrong one looks in the wrong place. A card
-// minted against a stale origin passes the stub check -- the stub is the top
-// four bytes of an id that did not move -- and is refused by slotMatchesCard.
-// Saying "this id changed" there would be false, and saying nothing at all was
-// the defect review I-2 constructed.
 // composerCopyDuplicateKeys is the §8s warning for a policy whose script repeats
 // a key, in the words of the harm that repeat actually carries.
 //
@@ -337,14 +327,23 @@ func composerCopyIdChanged() string {
 // worse than no sentence.
 //
 // The multisig case is the MORE dangerous of the two, which is why it keeps a
-// warning rather than losing one: one key filling two seats of a threshold can
-// meet that threshold alone, so a 2-of-3 with one key twice is a 1-of-2 wearing
-// a 2-of-3's label.
+// warning rather than losing one: a slot filling m >= 2 seats drops the
+// distinct keys needed from k to max(1, k-m+1). (An earlier draft of this
+// comment said such a key "can meet the threshold alone", which is false for
+// every k > m and was retracted at review I-5. The sentence the function
+// returns does not make that claim.)
 //
-// A WARNING AND NOT A REFUSAL, in both cases. The device derives a correct,
-// fundable address either way, and refusing here would strand a card that may
-// already be engraved. What was unacceptable was saying nothing at all while
-// showing an address to send to (F-514).
+// NO LONGER ONLY A WARNING: the screens that carry it now also DECLINE to
+// derive an address (F-531). This paragraph used to say the opposite -- "the
+// device derives a correct, fundable address either way" -- and for the
+// top-level multisig shape that was not even true: the flat route derived the
+// address of a DIFFERENT script, one seat short. The refusal follows the
+// operator's standing ruling of 2026-08-30 on BIP-388-forbidden wallets.
+//
+// THE CARD IS STILL NOT STRANDED, which was F-514's reason for preferring a
+// warning. It decodes, displays, verifies and warns; what it no longer does is
+// offer an address to fund. See composerCopyNoAddressesDuplicateKeys, the
+// sentence that says so.
 func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 	// LEADING WITH THE ACTION, because the Inspect screen PAGES and this
 	// sentence was longer than one page: at width 20 it measured 261px against
@@ -366,6 +365,33 @@ func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 		"Bitcoin Core refuses such a descriptor.", slot)
 }
 
+// composerCopyNoAddressesDuplicateKeys is the sentence that turns the F-531
+// refusal into something an operator can act on.
+//
+// IT EXISTS BECAUSE A SILENT REFUSAL IS A WORSE SCREEN THAN A WRONG ADDRESS IS
+// A SCREEN. "This device can't derive addresses for this policy" is true of the
+// shape and useless about it: it reads as a device limitation, and the operator
+// goes looking for a better tool instead of learning that their wallet reuses a
+// key. This names the cause and leaves the card readable.
+//
+// It is a SECOND line, under composerCopyDuplicateKeys rather than folded into
+// it, because that sentence is also shown where addresses ARE derived and must
+// not start claiming a refusal that did not happen.
+func composerCopyNoAddressesDuplicateKeys() string {
+	return "No addresses: this device does not derive them for a wallet that " +
+		"reuses a key."
+}
+
+// composerCopyOriginsChanged is the §8s line for the case the id line cannot
+// state: the id is UNCHANGED and the per-slot origins this screen told the
+// operator to mint against are not.
+//
+// It needs its own sentence because the two failures happen at different
+// layers, and an operator told the wrong one looks in the wrong place. A card
+// minted against a stale origin passes the stub check -- the stub is the top
+// four bytes of an id that did not move -- and is refused by slotMatchesCard.
+// Saying "this id changed" there would be false, and saying nothing at all was
+// the defect review I-2 constructed.
 func composerCopyOriginsChanged() string {
 	return "Same id, but the slot origins below changed. Cards minted for the " +
 		"old origins will not seat here."

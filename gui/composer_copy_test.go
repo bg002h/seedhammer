@@ -103,6 +103,8 @@ func composerCopyTable() []composerCopyRow {
 			"Check before funding: slot @1 repeats in one script, and Bitcoin Core refuses such a descriptor."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(2, md.DuplicateFewerKeys),
 			"Check before funding: slot @2 fills more than one seat, so fewer separate keys can spend this than its k-of-n says."},
+		{"composerCopyNoAddressesDuplicateKeys", "8s", composerCopyNoAddressesDuplicateKeys(),
+			"No addresses: this device does not derive them for a wallet that reuses a key."},
 		{"composerCopyOriginsChanged", "8s", composerCopyOriginsChanged(),
 			"Same id, but the slot origins below changed. Cards minted for the old origins will not seat here."},
 		{"composerCopySeatPrompt", "8s", composerCopySeatPrompt(2, 1, 2, 3),
@@ -355,8 +357,13 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// public keys". The address is correct; what was missing was any way for
 	// the operator to learn before funding it that the coordinator they will
 	// spend from will not import the wallet.
-	if declared != 76 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 76 -- "+
+	// 77 SINCE F-531: the device now DECLINES to derive an address for a policy
+	// that reuses a key slot, and a refusal needs a sentence of its own. The
+	// F-514 body above qualifies an address; this one explains its absence, and
+	// folding them into one string would have made that body claim a refusal on
+	// the screens where addresses are still shown.
+	if declared != 77 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 77 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

@@ -67,6 +67,48 @@ func routeFor(t *testing.T, chunks []string) (route, func(uint32, bool) (string,
 	return routeNone, nil
 }
 
+// assertMatchesRust checks every chain and every index of a vector against the
+// addresses the primary Rust implementation derived, and returns how many it
+// compared.
+//
+// EXTRACTED so the policy-refused vectors keep being checked. A route that
+// derives SOMETHING is worthless; and an exemption that skips the comparison
+// altogether is worth less still, because it reads as coverage.
+func assertMatchesRust(t *testing.T, vec policyAddrVector, at func(uint32, bool) (string, error), r route) int {
+	t.Helper()
+	checked := 0
+	chainNames := make([]string, 0, len(vec.Chains))
+	for c := range vec.Chains {
+		chainNames = append(chainNames, c)
+	}
+	sort.Strings(chainNames)
+	for _, c := range chainNames {
+		var change bool
+		switch c {
+		case "0":
+			change = false
+		case "1":
+			change = true
+		default:
+			t.Fatalf("unknown chain %q in the vector", c)
+		}
+		for i, want := range vec.Chains[c].Addresses {
+			got, err := at(uint32(i), change)
+			if err != nil {
+				t.Fatalf("chain %s index %d via %s: %v", c, i, r, err)
+			}
+			if got != want {
+				t.Fatalf("chain %s index %d via %s:\n got  %s\n want %s (rust)", c, i, r, got, want)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the vector carries no addresses — it proves nothing")
+	}
+	return checked
+}
+
 // TestEveryKeyedVectorReachesAnAddress is the gate on the Stage 4 wiring.
 //
 // The capability landed in Stage 3 as two package-level APIs with their own
@@ -93,6 +135,21 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 	// outlives the reason for it. Adding a name here must be a deliberate act.
 	stillUnsupported := map[string]string{}
 
+	// Shapes this device CAN derive and DECLINES to (F-531). A separate map
+	// from the one above because the two are different facts and collapsing
+	// them loses the one that can be checked: a capability gap is measured by
+	// its absence, a policy refusal has a working deriver underneath it.
+	//
+	// SO THE CONFORMANCE STILL RUNS, against complexAddressDeriver rather than
+	// the gated source. Exempting these outright would have retired the
+	// cross-language address check for every shape the refusal covers -- the
+	// gate would be green because the device shows nothing, which proves
+	// nothing about whether what it declines to show would have been right.
+	refusedByPolicy := map[string]string{
+		"keyed_wsh_timelock_hashlock": "@1 repeats inside one wsh miniscript; the " +
+			"device derives no address for a policy that reuses a key",
+	}
+
 	routes := map[string]route{}
 	unexpected := []string{}
 	for _, p := range paths {
@@ -117,43 +174,31 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 				}
 				return
 			}
+			if why, listed := refusedByPolicy[name]; listed {
+				if r != routeNone {
+					t.Fatalf("%s is listed as refused by policy (%s) but reaches the %s route — "+
+						"either the gate regressed or the entry is stale", name, why, r)
+				}
+				_, keys, err := md.ExpandWalletPolicyChunks(chunks)
+				if err != nil {
+					t.Fatalf("ExpandWalletPolicyChunks: %v", err)
+				}
+				at, ok := complexAddressDeriver(chunks, keys)
+				if !ok {
+					t.Fatalf("%s is listed as refused by POLICY (%s), but there is no deriver "+
+						"beneath the gate — so it is a capability gap, and it belongs in "+
+						"stillUnsupported where nobody will mistake it for a choice", name, why)
+				}
+				assertMatchesRust(t, vec, at, routeComplex)
+				return
+			}
 			if r == routeNone {
 				unexpected = append(unexpected, name+" ("+vec.Template+")")
 				t.Fatalf("%s (%s) reaches NO address route — an operator sees \"display only\"", name, vec.Template)
 			}
 
 			// Every chain, every index, byte-equal to Rust.
-			checked := 0
-			chainNames := make([]string, 0, len(vec.Chains))
-			for c := range vec.Chains {
-				chainNames = append(chainNames, c)
-			}
-			sort.Strings(chainNames)
-			for _, c := range chainNames {
-				var change bool
-				switch c {
-				case "0":
-					change = false
-				case "1":
-					change = true
-				default:
-					t.Fatalf("unknown chain %q in the vector", c)
-				}
-				for i, want := range vec.Chains[c].Addresses {
-					got, err := at(uint32(i), change)
-					if err != nil {
-						t.Fatalf("chain %s index %d via %s: %v", c, i, r, err)
-					}
-					if got != want {
-						t.Fatalf("chain %s index %d via %s:\n got  %s\n want %s (rust)", c, i, r, got, want)
-					}
-					checked++
-				}
-			}
-			if checked == 0 {
-				t.Fatalf("%s carries no addresses — the vector proves nothing", name)
-			}
-			t.Logf("%s: %d addresses via the %s route", name, checked, r)
+			t.Logf("%s: %d addresses via the %s route", name, assertMatchesRust(t, vec, at, r), r)
 		})
 	}
 

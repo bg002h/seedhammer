@@ -53,6 +53,32 @@ func expandedToDescriptor(tpl md.Template, keys []md.ExpandedKey) (*bip380.Descr
 		return nil, expandUnsupported
 	}
 
+	// F-531: ONE KEY PER SEAT, OR REFUSE. bkeys holds one key per @N SLOT;
+	// tpl.M counts the multisig's SEATS. They are equal for every policy this
+	// projection can express faithfully, and where they differ the card seats
+	// one slot more than once -- wsh(sortedmulti(1,@0,@0,@1)) is M=3 over N=2.
+	//
+	// THE OLD CODE BUILT THAT ANYWAY: a two-key sortedmulti carrying K=1, which
+	// is a 1-of-2. A different script, a different hash, a different address --
+	// shown under a screen labelled "P2WSH 1-of-3 multisig (sorted)". Measured
+	// against Bitcoin Core 25.0.0, the projected address is Core's answer for
+	// the two-seat descriptor, exactly; it was not approximately right.
+	//
+	// REFUSING IS THE FAITHFUL-OR-REFUSE CONTRACT (D2) this function opens with,
+	// applied to the one case that had slipped through it. A *bip380.Descriptor
+	// COULD carry the repeat -- Keys is a list, and repeating the entry derives
+	// Core's address for the faithful script; that was measured too. It is
+	// refused rather than repaired because the operator's standing ruling
+	// (2026-08-30) is that md does not support BIP-388-forbidden wallets, and
+	// because a second route that derives the same shape a second way is the
+	// hazard expandedKeysToBip380's own comment was extracted to prevent.
+	//
+	// SCOPED TO THE MULTISIG ARM. Singlesig leaves tpl.M at 0 with exactly one
+	// key, and a single key slot cannot repeat.
+	if repeatsASeat(tpl, keys) {
+		return nil, expandUnsupported
+	}
+
 	desc := &bip380.Descriptor{
 		Script:    script,
 		Type:      msType,
@@ -60,6 +86,29 @@ func expandedToDescriptor(tpl md.Template, keys []md.ExpandedKey) (*bip380.Descr
 		Keys:      bkeys,
 	}
 	return desc, expandOK
+}
+
+// repeatsASeat reports whether a multisig policy seats one key slot more than
+// once -- wsh(sortedmulti(1,@0,@0,@1)) is M=3 seats over N=2 slots.
+//
+// IT COUNTS RATHER THAN WALKING, and it is exact because the decoder demands
+// it: validatePlaceholderUsage (md/md.go:905-921) refuses a payload in which
+// any @i is unreferenced, so for a TOP-LEVEL multi every slot appears at least
+// once among the seats. Seats == slots therefore means each appears exactly
+// once, and seats > slots means one of them repeats. There is no third case.
+//
+// md.DuplicateKeySlot answers the same question over the decoded TREE and is
+// what the screens use. This one exists because the two callers here hold a
+// Template and a key list and no chunks -- multisigRestoreLines is handed an
+// already-decoded policy on purpose (t6b-M2, so the card is not re-expanded
+// per screen) -- and re-decoding to ask a question arithmetic already answers
+// would be the more fragile of the two.
+func repeatsASeat(tpl md.Template, keys []md.ExpandedKey) bool {
+	switch tpl.Policy {
+	case md.PolicySortedMulti, md.PolicyMulti:
+		return tpl.M != len(keys)
+	}
+	return false
 }
 
 // expandedKeysToBip380 translates the per-@N expansion into the `bip380.Key`s
@@ -99,21 +148,30 @@ func expandedKeysToBip380(keys []md.ExpandedKey) ([]bip380.Key, bool) {
 
 // scriptForTemplate maps the renderable Template shape to a bip380 Script +
 // MultisigType, or reports !ok for a non-bip380-expressible shape (D2, R0-C2).
-// THE ARGUMENT F-530 RESTS ON LIVES HERE (review of F-514). The expandOK
-// address route -- descriptorFlow -> DescriptorScreen.Confirm ->
-// descriptorAddressFlow -- carries no duplicate-key warning, and that is
-// tolerable only because this function admits exactly two policies:
+//
+// THE ARGUMENT F-530 RESTS ON LIVES HERE (review of F-514), and F-531 changed
+// it. The expandOK address route -- descriptorFlow -> DescriptorScreen.Confirm
+// -> descriptorAddressFlow -- carries no duplicate-key warning. That used to be
+// tolerable on the narrower ground that this function admits exactly two
+// policies:
 //
 //	PolicySingle       one key slot, which cannot repeat
 //	PolicySortedMulti  a top-level sortedmulti, so any repeat is
-//	                   md.DuplicateFewerKeys and is warned on the consent
-//	                   screen that precedes steel
+//	                   md.DuplicateFewerKeys, never DuplicateRefusedByCore
 //
-// So that route can never carry md.DuplicateRefusedByCore -- it cannot reproduce
-// the Critical -- and F-530 is a gap rather than a hole.
+// It is now tolerable on a stronger one: expandedToDescriptor refuses a
+// repeated seat outright (repeatsASeat), so an md1 reaching expandOK carries NO
+// duplicate of any kind, and descriptorAddressFlow cannot be shown one.
 //
-// THE DAY THIS GROWS AN ARM for plain multi, or for any miniscript shape, that
-// argument dies and F-530 becomes urgent. TestScriptForTemplateAdmitsOnlyTwo
+// WHAT THAT LEAVES OF F-530, exactly: the caller that arrives with a SCANNED
+// descriptor and no md1 behind it. No Template, so repeatsASeat never runs and
+// the rule expressed over chunks cannot reach it either -- which is why F-530's
+// remedy has to be the rule over a *bip380.Descriptor, and why closing the two
+// md1-bearing callers instead would leave the one that matters silent under a
+// suite that looks complete.
+//
+// THE DAY THIS GROWS AN ARM for plain multi, or for any miniscript shape, the
+// duplicate question reopens for every md1 too. TestScriptForTemplateAdmitsOnlyTwo
 // pins the admitted set so the change cannot pass unnoticed.
 func scriptForTemplate(tpl md.Template) (bip380.Script, bip380.MultisigType, bool) {
 	if !tpl.Renderable {

@@ -269,6 +269,45 @@ func walletPolicyConsentLines(md1 []string, keyCards []mk.Card) ([]string, error
 // chain five times.
 const addrProofPerChain = 2
 
+// noAddressLines says, in one place, WHY a screen that would have shown
+// addresses is showing none.
+//
+// ONE PRODUCER FOR EVERY SUCH SCREEN. The composer's consent surface used to
+// carry its own version of this, and that copy had frozen at a single branch:
+// it said "Keyless template - no addresses." for every refusal, including a
+// policy carrying a full set of xpubs. An operator told their keyed card was a
+// keyless template concludes the card was stripped -- a false diagnosis, on a
+// consent screen, about the card in their hand.
+//
+// FOUR CASES, IN THE ORDER THEY BECOME TRUE. Keylessness first because it is
+// the loudest fact about the card; the duplicate-key refusal before the generic
+// one because it is the only one of the four with a cause the operator can act
+// on.
+func noAddressLines(md1 []string, keys []md.ExpandedKey) []string {
+	if len(keys) == 0 {
+		return []string{"", "Keyless template - no addresses.", "Verify off-device."}
+	}
+	for _, k := range keys {
+		if !k.XpubPresent {
+			return []string{"", "Template has no keys - no addresses.", "Verify off-device."}
+		}
+	}
+	// F-531: the refusal keeps the F-514 sentence. The warning lived on the
+	// branch that HAS addresses, so declining to derive would otherwise have
+	// dropped the operator on a screen that says nothing about the one thing
+	// wrong with their wallet -- which is the exact silence F-514 was filed to
+	// end, reintroduced by its own remedy.
+	if slot, kind, err := md.DuplicateKeySlotChunks(md1); err == nil && kind != md.DuplicateNone {
+		return []string{"", composerCopyDuplicateKeys(slot, kind), "",
+			composerCopyNoAddressesDuplicateKeys(), "Verify off-device."}
+	}
+	// Keys are present and it still cannot derive: an unsupported shape
+	// (F-214). Say which of the two it is — "no addresses" for a policy that
+	// HAS keys means something different, and an operator who reads it as
+	// "keyless" would conclude the card was stripped.
+	return []string{"", "This device can't derive", "addresses for this policy."}
+}
+
 // walletPolicyAddressLines derives the consent screen's address proof, or says
 // plainly why there is none.
 //
@@ -279,19 +318,7 @@ const addrProofPerChain = 2
 func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedKey) []string {
 	at, ok := policyAddressAt(md1, tpl, keys)
 	if !ok {
-		if len(keys) == 0 {
-			return []string{"", "Keyless template - no addresses.", "Verify off-device."}
-		}
-		for _, k := range keys {
-			if !k.XpubPresent {
-				return []string{"", "Template has no keys - no addresses.", "Verify off-device."}
-			}
-		}
-		// Keys are present and it still cannot derive: an unsupported shape
-		// (F-214). Say which of the two it is — "no addresses" for a policy that
-		// HAS keys means something different, and an operator who reads it as
-		// "keyless" would conclude the card was stripped.
-		return []string{"", "This device can't derive", "addresses for this policy."}
+		return noAddressLines(md1, keys)
 	}
 	lines := []string{""}
 	// THE WARNING SITS WITH THE ADDRESSES IT QUALIFIES (F-514). The device

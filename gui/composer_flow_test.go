@@ -41,7 +41,13 @@ func TestComposerConsentLinesDescribeEveryPathFromTheDecodedMd1(t *testing.T) {
 		"abcd",         // the digest's first bytes
 		"Template-ID:", // the id, NAMED by kind (§7c)
 		"mk1 stub (template):",
-		"Keyless template - no addresses.", // D4
+		// D4, and it is the SECOND of noAddressLines' four cases, not the
+		// first. This policy declares three key slots and carries an xpub for
+		// none of them, so "Keyless template" -- which the composer's own copy
+		// used to print for every refusal -- was the wrong sentence: it names a
+		// template with no slots at all. Fixed with F-531, which routed this
+		// branch through the shared producer.
+		"Template has no keys - no addresses.",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the consent surface does not say %q:\n%s", want, joined)
@@ -272,7 +278,14 @@ func TestComposerNoPayloadWalkEngravesAKeylessTemplate(t *testing.T) {
 		}
 
 		// CONSENT, STATING NO ADDRESSES (D4).
-		if got, ok = composerPageUntil(t, ctx, frame, "Keyless template - no addresses", 12); !ok {
+		//
+		// "Template has no keys", not "Keyless template": this walk builds a
+		// template that DECLARES key slots and carries an xpub for none of
+		// them, which is noAddressLines' second case. The composer's consent
+		// printed the first case for every refusal until F-531 routed it
+		// through the shared producer, so the sentence it used to show here was
+		// describing a different card.
+		if got, ok = composerPageUntil(t, ctx, frame, "Template has no keys - no addresses", 12); !ok {
 			t.Fatalf("the consent never says there are no addresses.\nLast frame: %q", got)
 		}
 		composerPageToEnd(t, ctx, frame)
@@ -547,13 +560,19 @@ func TestConsentNamesTheScript(t *testing.T) {
 // receive address, in silence, for a policy whose descriptor Bitcoin Core
 // refuses as "is not sane: contains duplicate public keys".
 //
-// The addresses are CORRECT — they match the vector's own conformance data, and
-// that is why this is a warning rather than a refusal. What was missing was any
-// way for the operator to learn, before funding the address they are being
-// shown, that the coordinator they will try to spend from will not import the
-// wallet. Refusing on-device would strand a card that may already be engraved,
-// which is worse than telling them nothing; saying nothing while showing them
-// an address to send to was worse still.
+// THE ADDRESSES ARE GONE NOW (F-531), and this test outlived that change
+// because it never asserted them -- it asserts the SENTENCE, on the surface an
+// operator passes on the way to steel, and that sentence is still owed whether
+// an address follows it or not. What F-514 established and F-531 did not
+// disturb: silence is the failure. Under the refusal it is if anything the
+// likelier failure, because the code path that carries the warning is no longer
+// the code path that has something to warn ABOUT.
+//
+// (The comment here used to argue the opposite -- "the addresses are CORRECT
+// ... that is why this is a warning rather than a refusal". That reasoning was
+// sound for this wsh vector and did not survive contact with the top-level
+// multisig one, where the flat route's address was not correct at all. See
+// gui/duplicate_seat_address_test.go.)
 //
 // The positive and negative cases are both here, against vectors whose Core
 // verdicts were measured on a throwaway regtest datadir. A warning that fired
@@ -619,11 +638,20 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 // tests green. That call site had no test at all, so the warning could be
 // removed from a screen that shows addresses and nothing would say so.
 //
-// The rule this pins is the one worth having: EVERY line set that carries a
-// derived address carries the warning. Adding a fourth surface without it
-// should fail here.
+// The rule this pins is the one worth having: every surface that WOULD have
+// carried a derived address carries the warning. Adding a fourth surface
+// without it should fail here.
 //
-// MUTATION: delete the block in any of the three producers and its row fails.
+// BOTH HALVES, SINCE F-531. The device no longer derives an address for a
+// duplicate-key policy at all, which would have left this test passing for a
+// reason it was not written to check -- a warning trivially present because
+// nothing else is. So each row now asserts the warning IS there and an address
+// is NOT, and the deriver is asserted absent directly. A gate that survives the
+// removal of its own subject is not a gate.
+//
+// MUTATION: delete the block in any of the three producers and its row fails;
+// remove either gate (gui/md1_expand.go's repeatsASeat arm, or
+// complexAddressSource's) and the address half fails.
 func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	chunks := loadVectorChunks(t, "keyed_wsh_timelock_hashlock")
 	slot, kind, err := md.DuplicateKeySlotChunks(chunks)
@@ -641,17 +669,28 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 		t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 	}
 
+	t.Run("no deriver at all", func(t *testing.T) {
+		if at, ok := policyAddressAt(chunks, tpl, keys); ok {
+			a, _ := at(0, false)
+			t.Errorf("policyAddressAt derives %s for a policy whose descriptor Bitcoin "+
+				"Core refuses as \"not sane: contains duplicate public keys\"; want no "+
+				"deriver (F-531)", a)
+		}
+	})
+
 	t.Run("composer consent", func(t *testing.T) {
 		lines, err := composerConsentLinesFor(chunks, nil, 0)
 		if err != nil {
 			t.Fatalf("composerConsentLinesFor: %v", err)
 		}
 		assertCarriesWarning(t, lines, want, "the composer consent screen")
+		assertShowsNoAddress(t, lines, "the composer consent screen")
 	})
 
 	t.Run("wallet policy consent", func(t *testing.T) {
-		assertCarriesWarning(t, walletPolicyAddressLines(chunks, tpl, keys), want,
-			"the Engrave Wallet Policy address block")
+		lines := walletPolicyAddressLines(chunks, tpl, keys)
+		assertCarriesWarning(t, lines, want, "the Engrave Wallet Policy address block")
+		assertShowsNoAddress(t, lines, "the Engrave Wallet Policy address block")
 	})
 
 	t.Run("inspect descriptor", func(t *testing.T) {
@@ -688,14 +727,34 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	})
 }
 
-// assertCarriesWarning fails when a line set that will show an address does not
-// carry the duplicate-key warning.
+// assertCarriesWarning fails when a line set for a duplicate-key policy does
+// not carry the duplicate-key warning.
 func assertCarriesWarning(t *testing.T, lines []string, want, where string) {
 	t.Helper()
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, want) {
-		t.Errorf("%s shows addresses for a descriptor Bitcoin Core refuses and "+
-			"carries no warning.\nwant a line: %s\ngot:\n%s", where, want, joined)
+		t.Errorf("%s says nothing about a policy that reuses a key.\n"+
+			"want a line: %s\ngot:\n%s", where, want, joined)
+	}
+}
+
+// assertShowsNoAddress fails when a line set offers an address for a policy the
+// device has refused to derive.
+//
+// IT LOOKS FOR THE ADDRESS AND FOR ITS LABEL. A bech32 mainnet string is the
+// thing that must not be there, and "Receive 0:" is the row that would carry
+// one -- checking both means a future address encoding, or a label with an
+// empty value under it, still fails here.
+func assertShowsNoAddress(t *testing.T, lines []string, where string) {
+	t.Helper()
+	joined := strings.Join(lines, "\n")
+	for _, forbidden := range []string{"bc1", "Receive 0:", "Change 0:"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("%s offers an address (%q) for a policy that reuses a key. The "+
+				"device does not derive for this shape (F-531), so anything address-shaped "+
+				"here is either stale or from a route that skipped the gate.\ngot:\n%s",
+				where, forbidden, joined)
+		}
 	}
 }
 

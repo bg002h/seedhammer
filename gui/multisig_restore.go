@@ -27,6 +27,17 @@ func multisigRestoreLines(tpl md.Template, keys []md.ExpandedKey) (lines []strin
 			"Wallet policy (read-only):",
 		}
 		lines = append(lines, chunkString(desc4Display(tpl), 20)...)
+		// F-531: NAME THE CAUSE WHEN THERE IS ONE. "this policy shape" is the
+		// honest answer for a taptree or a miniscript this device cannot
+		// project, and the wrong one for a sorted multisig that seats a slot
+		// twice -- the shape is ordinary, the REUSE is why there is no address.
+		// This is the document a reader holds in five years, so the sentence it
+		// carries should be the one that explains the gap.
+		if repeatsASeat(tpl, keys) {
+			lines = append(lines, "Addresses unavailable: this policy seats one key",
+				"slot more than once.")
+			return lines, false, nil
+		}
 		lines = append(lines, "Addresses unavailable for this policy shape.")
 		return lines, false, nil
 	}

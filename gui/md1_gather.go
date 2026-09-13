@@ -190,6 +190,23 @@ func gatheredDescriptorFlow(ctx *Context, th *Colors, collected []string) {
 			md1PolicyFlow(ctx, th, tpl, policyIDHeader(collected), at)
 			return
 		}
+		// F-531: A REFUSAL WITH A REASON. Both address routes now decline a
+		// policy that reuses a key slot, and this branch is where such a card
+		// lands. "Complex policy - display only" would be the wrong sentence
+		// for it twice over: the policy is not complex -- a sorted multisig is
+		// the simplest shape this device renders -- and the operator would read
+		// a device limitation where there is a fact about their wallet.
+		//
+		// The warning FIRST and the consequence second, in that order, because
+		// the error screen is what stops them; policyIDHeader, which carries
+		// the same sentence on the screen this card no longer reaches, is not
+		// on this path at all.
+		if slot, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
+			showError(ctx, th, "Inspect descriptor",
+				composerCopyDuplicateKeys(slot, kind)+" "+composerCopyNoAddressesDuplicateKeys())
+			md1DisplayFlow(ctx, th, tpl)
+			return
+		}
 		showError(ctx, th, "Inspect descriptor", "Complex policy - display only.")
 		md1DisplayFlow(ctx, th, tpl)
 	}

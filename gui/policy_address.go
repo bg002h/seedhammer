@@ -42,6 +42,38 @@ import (
 // contract as address.Supported, which is `Receive(desc, 0)` without an error,
 // and it cannot drift from what the emitters actually accept.
 func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint32, bool) (string, error), bool) {
+	// F-531: NO ADDRESS FOR A POLICY THAT REUSES A KEY SLOT, on either route.
+	//
+	// The gate sits ABOVE the deriver, and above it rather than inside it, so
+	// that the deriver stays callable by the test carrying the Bitcoin Core
+	// measurement that decided F-531. A refusal that also deletes the evidence
+	// for itself leaves the next reader nothing to check.
+	//
+	// THE EMITTER IS NOT WRONG HERE -- it matches Core exactly for the shapes
+	// Core accepts, and that is what makes the refusal a policy decision rather
+	// than a bug fix. The operator's standing ruling (2026-08-30) is that a
+	// BIP-388-forbidden wallet is not one this constellation supports, and BIP
+	// 388's pairwise-distinctness rule cites miniscript pubkey-reuse
+	// insecurity: a key that fills two seats signs two messages, which is a
+	// key-recovery hazard and not merely the redundancy the k-of-n label
+	// overstates.
+	//
+	// SAME LINE AS THE WARNING, DELIBERATELY. md.DuplicateKeySlot is the one
+	// predicate, and it now carries two consequences instead of one -- the
+	// F-514 sentence on screen and this refusal. Two predicates would drift,
+	// and the drift would show up as a screen that warns and derives, or one
+	// that refuses in silence.
+	if _, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
+		return nil, false
+	}
+	return complexAddressDeriver(collected, keys)
+}
+
+// complexAddressDeriver is complexAddressSource's body, below the F-531 gate.
+//
+// Call it directly ONLY to measure what the emitter derives. Every screen goes
+// through complexAddressSource, because the gate is the point.
+func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint32, bool) (string, error), bool) {
 	if len(keys) == 0 {
 		return nil, false // template-only (D3): nothing to derive from.
 	}

@@ -209,7 +209,10 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 
 	at, ok := policyAddressAt(chunks, tpl, keys)
 	if !ok {
-		return append(lines, "", "Keyless template - no addresses.", "Verify off-device."), nil
+		// THROUGH noAddressLines, NOT ITS OWN COPY. This branch said "Keyless
+		// template - no addresses." unconditionally, which is false of every
+		// refusal except one, and F-531 made a second of them reachable here.
+		return append(lines, noAddressLines(chunks, keys)...), nil
 	}
 	lines = append(lines, "")
 	// Same warning, same reason, on the composer's own consent surface (F-514).
