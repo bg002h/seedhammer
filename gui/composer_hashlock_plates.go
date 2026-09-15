@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"seedhammer.com/codex32"
-	"seedhammer.com/hashlock"
 	"seedhammer.com/md"
 	"seedhammer.com/sysw"
 )
@@ -39,7 +38,10 @@ type hashlockPlatesRecord struct {
 	phrase   []byte
 	method   hashlockMethod
 	preimage [32]byte
-	digest   [32]byte
+	// digest is the LOCK, nil until this flow has derived one. A phrase record
+	// arrives with no digest at all, and nil says so exactly where a zero
+	// [32]byte used to say it only alongside derived.
+	digest *md.HashLock
 	// derived is false for a phrase record nothing has picked yet. A preimage
 	// record arrives derived: DecodeMS1Preimage gave X at list time.
 	derived bool
@@ -69,7 +71,9 @@ func hashlockPlatesRecords(s *syswSession) []hashlockPlatesRecord {
 			}
 			pre++
 			out = append(out, hashlockPlatesRecord{
-				pos: pre, preimage: x, digest: hashlock.Digest(&x), derived: true,
+				// sha256: an ms1 preimage plate record carries X and no kind,
+				// so this is the only digest computable from it.
+				pos: pre, preimage: x, digest: hashlockLockOf(md.KindSha256, &x), derived: true,
 			})
 		case sysw.ClassPhrase:
 			rec, err := sysw.ParsePhraseRecord(r.body)
@@ -96,8 +100,7 @@ func hashlockPlatesRows(recs []hashlockPlatesRecord) []string {
 			continue
 		}
 		if r.derived {
-			d := r.digest
-			out = append(out, composerHashPhraseRow(r.pos, &d))
+			out = append(out, composerHashPhraseRow(r.pos, r.digest))
 			continue
 		}
 		out = append(out, composerHashPhraseRow(r.pos, nil))
@@ -114,6 +117,7 @@ func hashlockPlatesScrub(recs []hashlockPlatesRecord) {
 		wipeBytes(recs[i].phrase)
 		recs[i].phrase = nil
 		recs[i].preimage = [32]byte{}
+		recs[i].digest = nil
 		recs[i].derived = false
 	}
 }
@@ -133,7 +137,9 @@ func hashlockPlatesDerive(ctx *Context, th *Colors, recs []hashlockPlatesRecord,
 		return false
 	}
 	recs[i].preimage = x
-	recs[i].digest = hashlock.Digest(&x)
+	// sha256: this flow derives from a phrase: record, whose grammar carries a
+	// METHOD (how X was derived) and no hash kind at all.
+	recs[i].digest = hashlockLockOf(md.KindSha256, &x)
 	recs[i].derived = true
 	return true
 }
@@ -186,9 +192,9 @@ func hashlockPlatesStub(s *syswSession) (stub string, isPolicy bool) {
 
 // hashlockPlatesMatch is §6.3's `matches hash <i> in the payload` row: the
 // 0-based index of the payload hash: record this digest equals, or -1.
-func hashlockPlatesMatch(s *syswSession, digest [32]byte) int {
+func hashlockPlatesMatch(s *syswSession, digest *md.HashLock) int {
 	for i, d := range composerPayloadDigests(s) {
-		if d == digest {
+		if d.Equal(digest) {
 			return i
 		}
 	}
@@ -250,7 +256,7 @@ func composerHashlockPlatesFlow(ctx *Context, th *Colors) {
 			continue
 		}
 		plate, err := composerHashlockPlateFor(ctx.Platform,
-			hashlockPlate{digest: r.digest, material: m, choice: choice},
+			hashlockPlate{lock: r.digest, material: m, choice: choice},
 			hashlockPlatesLocator(ctx.sysw, r))
 		if err != nil {
 			showError(ctx, th, "Hashlock plates", composerCopyPreimagePlateRefusal())

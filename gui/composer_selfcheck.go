@@ -135,8 +135,20 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 			return fmt.Errorf("self-check: path %d has %d hash locks in the shape and %d decoded",
 				i+1, wantHash, len(b.Sha256Digests))
 		}
-		if p.Hash != nil && b.Sha256Digests[0] != *p.Hash {
-			return fmt.Errorf("self-check: path %d's digest differs from the shape's", i+1)
+		if p.Hash != nil {
+			// THE DECODE'S SIDE IS sha256 BY ITS FIELD NAME, so the comparison
+			// is made through a sha256 lock rather than on bytes alone: a path
+			// carrying some other kind is a MISMATCH here, not a digest to
+			// compare, and md.HashLock.Equal is what says so (its kind check is
+			// the half `bytes.Equal` would drop). The wantHash count above
+			// would already have refused such a path, since the decoder puts
+			// nothing but sha256 in Sha256Digests -- this is the second lock on
+			// the same door.
+			got := b.Sha256Digests[0]
+			want, ok := md.NewHashLock(md.KindSha256, got[:])
+			if !ok || !p.Hash.Equal(want) {
+				return fmt.Errorf("self-check: path %d's digest differs from the shape's", i+1)
+			}
 		}
 	}
 

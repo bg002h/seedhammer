@@ -111,8 +111,19 @@ func composerEditCanRenumber(list md.PathList, idx int, field composerShapeField
 		for i := range probe {
 			probe[i] = 0x01
 		}
+		// sha256, because the probe stands in for the hash this path could be
+		// given and no screen offers another kind. It is compared only through
+		// composerShapeSignature, so its VALUE is arbitrary and its presence is
+		// the whole point; md.NewHashLock still checks the width rather than
+		// letting a mis-sized probe through -- 32 is sha256's, so the refusal
+		// arm is unreachable and panics rather than silently probing with nil,
+		// which would make the two signatures equal and the answer wrong.
+		h, ok := md.NewHashLock(md.KindSha256, probe[:])
+		if !ok {
+			panic("gui: composerEditCanRenumber: 32 bytes is sha256's width")
+		}
 		cleared.Paths[idx].Hash = nil
-		set.Paths[idx].Hash = &probe
+		set.Paths[idx].Hash = h
 	}
 	return composerShapeSignature(cleared) != composerShapeSignature(set)
 }

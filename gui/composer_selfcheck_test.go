@@ -121,9 +121,7 @@ func TestComposerSelfCheckRefusesAFaultInjectedBuilderOutput(t *testing.T) {
 		// The digest is the other §7c template-id input, and the one an
 		// operator cannot check by eye.
 		{"a path's sha256 digest moves", composerLockedDigestFixture, func(st *composerState, c []string) []string {
-			d := *st.list.Paths[1].Hash
-			d[0] ^= 0xff
-			st.list.Paths[1].Hash = &d
+			st.list.Paths[1].Hash = composerTestFlipDigest(st.list.Paths[1].Hash)
 			return c
 		}, "path 2's digest differs from the shape's"},
 
@@ -220,14 +218,14 @@ func TestComposerSelfCheckFaultHookIsNilInProduction(t *testing.T) {
 // the seated 2-of-3 cannot exercise either.
 func composerLockedDigestFixture(t *testing.T) (*composerState, []string) {
 	t.Helper()
-	var digest [32]byte
-	for i := range digest {
-		digest[i] = 0x5a
+	var raw [32]byte
+	for i := range raw {
+		raw[i] = 0x5a
 	}
 	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true},
 			Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 1000}},
-		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Hash: &digest},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Hash: composerTestLock(raw)},
 	}}
 	st := &composerState{list: list, reg: &seedRegistry{}}
 	n := composerSlotCount(list)

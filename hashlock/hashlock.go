@@ -12,6 +12,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/ripemd160"
+	"seedhammer.com/md"
 	"strings"
 
 	"seedhammer.com/seal"
@@ -82,9 +84,71 @@ func PreimageSHA256(phrase []byte) [32]byte {
 	return sha256.Sum256(phrase)
 }
 
-// Digest is digest: H = SHA-256(X).
-func Digest(x *[32]byte) [32]byte {
+// DigestSHA256 is H = SHA-256(X): what a sha256 policy carries and the plate
+// shows.
+//
+// RENAMED FROM Digest by SPEC_hashlock_kinds phase 4. The bare name could only
+// ever mean one of four hashes, and every caller of it was silently the sha256
+// caller.
+func DigestSHA256(x *[32]byte) [32]byte {
 	return sha256.Sum256(x[:])
+}
+
+// DigestHash256 is H = SHA-256(SHA-256(X)) -- sha256d.
+//
+// THE DANGEROUS ONE: written one round short it is still 32 bytes, still
+// type-checks, still lowers, and Core still agrees with the address. Only the
+// KAT catches it, which is why hashlock_test.go measures all four against the
+// vendored corpus rather than against this file.
+func DigestHash256(x *[32]byte) [32]byte {
+	first := sha256.Sum256(x[:])
+	return sha256.Sum256(first[:])
+}
+
+// DigestRIPEMD160 is H = RIPEMD-160(X) -- the BARE primitive, not hash160.
+func DigestRIPEMD160(x *[32]byte) [20]byte {
+	h := ripemd160.New()
+	h.Write(x[:])
+	var out [20]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// DigestHash160 is H = RIPEMD-160(SHA-256(X)) -- hash160. Same width as
+// ripemd160 and a different preimage relation (spec §3 F4).
+func DigestHash160(x *[32]byte) [20]byte {
+	inner := sha256.Sum256(x[:])
+	h := ripemd160.New()
+	h.Write(inner[:])
+	var out [20]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// DigestOf is THE ONE NAMED DISPATCH: kind to function. Callers do not write
+// their own switch -- four correct functions behind one mis-wired arm is the
+// same lost-funds outcome with a different cause, which is why the KAT
+// exercises this and not only the four.
+//
+// Returns the digest at the kind's own width.
+func DigestOf(k md.HashKind, x *[32]byte) []byte {
+	switch k {
+	case md.KindHash256:
+		d := DigestHash256(x)
+		return d[:]
+	case md.KindRipemd160:
+		d := DigestRIPEMD160(x)
+		return d[:]
+	case md.KindHash160:
+		d := DigestHash160(x)
+		return d[:]
+	case md.KindSha256:
+		d := DigestSHA256(x)
+		return d[:]
+	}
+	// NOT a sha256 default: a fifth kind would silently get sha256's digest,
+	// which is the exact funds-loss the per-kind KAT exists to catch.
+	panic("hashlock: unknown HashKind -- a kind was added without updating DigestOf")
 }
 
 // ValidatePhrase applies SPEC_ms_hashlock §4.3 to the typed BYTES, in the host's
@@ -185,6 +249,19 @@ func MethodLine(hardened bool) string {
 //
 // NEVER THE ms1 STRING (§6.4, decision 1): a QR on a phrase plate carries the
 // phrase and its method, and the string form's plate carries no QR at all.
-func QRText(hardened bool, phrase string) string {
-	return "hashlock v1\n" + MethodLine(hardened) + "\nphrase: " + phrase
+func QRText(hardened bool, kind md.HashKind, phrase string) string {
+	// The `hash:` line is ITS OWN LINE, never appended to `method:`
+	// (SPEC_hashlock_H6 §6.5 pins that line at 73 characters and the plate
+	// refuses an eleventh row at every font rung), and it is UNCONDITIONAL --
+	// a sha256 plate cut now differs from one cut before this cycle, which is
+	// deliberate: a plate read years later must name the hash it commits to
+	// rather than leaving it to the md1 card the operator was told to store
+	// SEPARATELY (SPEC_hashlock_kinds §13.1).
+	//
+	// Measured: worst case 194 -> 210 bytes (hardened + ripemd160, the longest
+	// token) and the QR version does NOT move -- dim 53 for all four kinds, the
+	// envelope already reserved. ACCEPTANCE item 8's scan gate is unaffected.
+	return "hashlock v1\n" + MethodLine(hardened) +
+		"\nhash: " + kind.Token() +
+		"\nphrase: " + phrase
 }

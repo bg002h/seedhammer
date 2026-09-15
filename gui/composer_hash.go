@@ -11,7 +11,7 @@ import (
 	"seedhammer.com/gui/layout"
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
-	"seedhammer.com/hashlock"
+	"seedhammer.com/md"
 	"seedhammer.com/sysw"
 )
 
@@ -45,20 +45,23 @@ const composerHexKeys = "0123456789\nabcdef"
 // host's pack order. A full 64-hex row would be CUT rather than wrapped at
 // the 436 px label budget, and a cut digest is worse than an elided one --
 // the operator cannot tell which end is missing.
-func composerHashRow(i int, digest [32]byte) string {
-	h := hex.EncodeToString(digest[:])
-	return fmt.Sprintf("hash %d  %s..%s", i, h[:8], h[56:])
+//
+// THE ELISION IS hashlockFirst8Last8's, not a second copy of it: this used to
+// slice h[:8] and h[56:], which is the same string for a 64-hex sha256 digest
+// and reads twelve bytes of alloc-gate padding for a 40-hex one.
+func composerHashRow(i int, digest *md.HashLock) string {
+	return fmt.Sprintf("hash %d  %s", i, hashlockFirst8Last8(digest))
 }
 
 // composerPayloadDigests returns every well-formed hash: record, in payload
 // order. A malformed one is ClassUnknown and INERT under the shipped contract
 // (sysw/descriptor.go:46-48): it reaches no screen, and its only device-side
 // signal is the door's not-understood count (§6a).
-func composerPayloadDigests(s *syswSession) [][32]byte {
+func composerPayloadDigests(s *syswSession) []*md.HashLock {
 	if s == nil || !s.loaded {
 		return nil
 	}
-	var out [][32]byte
+	var out []*md.HashLock
 	for _, r := range s.records {
 		if r.class != sysw.ClassHash {
 			continue
@@ -76,8 +79,12 @@ func composerPayloadDigests(s *syswSession) [][32]byte {
 
 // composerHexEntry is the fallback: 64 hex characters, accepted only when
 // exactly 64 are present (§6c).
-func composerHexEntry(ctx *Context, th *Colors) ([32]byte, bool) {
-	var out [32]byte
+//
+// IT RETURNS A sha256 LOCK, and the pad's fixed 64-character bound is what says
+// so: `Which hash?` offers no kind, so the digest an operator types here is the
+// sha256 one this screen has always meant. A kind pick would come with its own
+// character bound, since the rule is md.HashKind.DigestLen()*2 and not 64.
+func composerHexEntry(ctx *Context, th *Colors) (*md.HashLock, bool) {
 	kbd := NewKeyboard(ctx, composerHexKeys)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
@@ -90,21 +97,31 @@ func composerHexEntry(ctx *Context, th *Colors) ([32]byte, bool) {
 		frag := kbd.Fragment
 		valid := len(frag) == 64
 		if backBtn.Clicked(ctx) {
-			return out, false
+			return nil, false
 		}
 		clicked := okBtn.Clicked(ctx)
 		if valid && clicked {
 			raw, err := hex.DecodeString(frag)
-			if err != nil || len(raw) != 32 {
-				// The pad offers hex alone, so this is unreachable; it refuses
-				// rather than returning a zero digest, because a silently zero
-				// hashlock is spendable by anyone who knows the preimage of
-				// zero.
+			// md.NewHashLock re-checks the width against the KIND rather than
+			// against a literal 32, and its false arm joins the decode's:
+			// both mean "these are not the bytes of a sha256 digest", and
+			// neither pads, truncates, nor returns a zero digest -- a silently
+			// zero hashlock is spendable by anyone who knows the preimage of
+			// zero. The pad offers hex alone and clamps at 64, so both arms
+			// are unreachable from this screen.
+			var lock *md.HashLock
+			if err == nil {
+				var ok bool
+				lock, ok = md.NewHashLock(md.KindSha256, raw)
+				if !ok {
+					lock = nil
+				}
+			}
+			if lock == nil {
 				showError(ctx, th, "Hash lock", "That is not a 32-byte digest.")
 				continue
 			}
-			copy(out[:], raw)
-			return out, true
+			return lock, true
 		}
 
 		dims := ctx.Platform.DisplaySize()
@@ -143,7 +160,7 @@ func composerHexEntry(ctx *Context, th *Colors) ([32]byte, bool) {
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Hash lock")
 		ctx.Frame(op.Layer(kbdOp, word, countOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
-	return out, false
+	return nil, false
 }
 
 const composerHashRowPhrase = "Type a hashlock phrase"
@@ -162,15 +179,14 @@ const composerHashRowPhrase = "Type a hashlock phrase"
 // the longer wording is 50 characters and wraps to two lines in
 // composerPageLines' band, which a picker row cannot spend
 // (TestWhichHashRowsDrawOnOneLine).
-func composerHashInPayloadRow(i int, digest [32]byte) string {
+func composerHashInPayloadRow(i int, digest *md.HashLock) string {
 	return composerHashRow(i, digest) + "  (in payload)"
 }
 
 // composerHashPreimageRow is band 2: a preimage PLATE record in the payload,
 // whose digest is computed directly from the record -- no KDF, no countdown.
-func composerHashPreimageRow(i int, digest [32]byte) string {
-	h := hex.EncodeToString(digest[:])
-	return fmt.Sprintf("preimage %d  %s..%s", i, h[:8], h[56:])
+func composerHashPreimageRow(i int, digest *md.HashLock) string {
+	return fmt.Sprintf("preimage %d  %s", i, hashlockFirst8Last8(digest))
 }
 
 // composerHashPhraseRow is band 3, in its two forms (§5.1 Step 1).
@@ -180,12 +196,11 @@ func composerHashPreimageRow(i int, digest [32]byte) string {
 // list is the "three records would be a 30 s stall before a list could be
 // drawn" §5.1 rejects. Once the record has been derived in this composition the
 // row carries the digest, read back out of hashlockHeld.
-func composerHashPhraseRow(i int, d *[32]byte) string {
+func composerHashPhraseRow(i int, d *md.HashLock) string {
 	if d == nil {
 		return fmt.Sprintf("phrase record %d (derive to see the digest)", i)
 	}
-	h := hex.EncodeToString(d[:])
-	return fmt.Sprintf("phrase %d  %s..%s", i, h[:8], h[56:])
+	return fmt.Sprintf("phrase %d  %s", i, hashlockFirst8Last8(d))
 }
 
 // hashlockPayloadPreimage is one ClassPreimage record of the loaded payload,
@@ -194,7 +209,10 @@ func composerHashPhraseRow(i int, d *[32]byte) string {
 // outlives the row set.
 type hashlockPayloadPreimage struct {
 	preimage [32]byte
-	digest   [32]byte
+	// digest is the LOCK the record's X hashes to, not a bare digest: a row
+	// built from it is compared against the payload's own hash: records, whose
+	// kind is part of what they say (SPEC_hashlock_kinds §5).
+	digest *md.HashLock
 }
 
 // composerPayloadPreimages returns every well-formed preimage PLATE record, in
@@ -221,7 +239,10 @@ func composerPayloadPreimages(s *syswSession) []hashlockPayloadPreimage {
 		if err != nil {
 			continue
 		}
-		out = append(out, hashlockPayloadPreimage{preimage: x, digest: hashlock.Digest(&x)})
+		// sha256: a preimage PLATE record is an ms1 string carrying X and no
+		// kind, so the only digest that can be computed from it is the one this
+		// band has always drawn.
+		out = append(out, hashlockPayloadPreimage{preimage: x, digest: hashlockLockOf(md.KindSha256, &x)})
 	}
 	return out
 }
@@ -267,20 +288,22 @@ func hashlockMethodOf(m sysw.HashlockMethod) hashlockMethod {
 // drift composerHashRowSet's own label-keying exists to prevent. It also
 // survives a Back out to `Which hash?` and back in, so the KDF runs once per
 // record per composition.
-func hashlockDerivedDigest(st *composerState, rec sysw.PhraseRecord) *[32]byte {
+func hashlockDerivedDigest(st *composerState, rec sysw.PhraseRecord) *md.HashLock {
 	if st == nil {
 		return nil
 	}
 	want := hashlockMethodOf(rec.Method)
-	for h, m := range st.hashlockHeld {
+	// Ranged over the VALUES: hashlockHeld is keyed by md.HashLock.MapKey()
+	// because a HashLock cannot be a Go map key, and the value carries the lock
+	// itself so a loop like this one still has the kind (composer_state.go).
+	for _, m := range st.hashlockHeld {
 		if m.provenance != hashlockFromPayload || m.method != want {
 			continue
 		}
 		if string(m.phrase) != rec.Phrase {
 			continue
 		}
-		d := h
-		return &d
+		return m.lock
 	}
 	return nil
 }
@@ -295,7 +318,7 @@ func hashlockDerivedDigest(st *composerState, rec sysw.PhraseRecord) *[32]byte {
 type composerHashRowSet struct {
 	labels    []string
 	lead      string
-	digests   [][32]byte
+	digests   []*md.HashLock
 	preimages []hashlockPayloadPreimage
 	phrases   []sysw.PhraseRecord
 	// The first row index of each band. A band with no records still records
@@ -365,14 +388,14 @@ func composerHashRows(s *syswSession, st *composerState) composerHashRowSet {
 // KDF, which is exactly what Step 3 forbids at row-build time. Its hash: row
 // gains the annotation the moment the record is derived, because the row set is
 // rebuilt on every pass of composerHashEdit's loop.
-func composerHashInPayload(r composerHashRowSet, st *composerState, d [32]byte) bool {
+func composerHashInPayload(r composerHashRowSet, st *composerState, d *md.HashLock) bool {
 	for _, p := range r.preimages {
-		if p.digest == d {
+		if p.digest.Equal(d) {
 			return true
 		}
 	}
 	for _, rec := range r.phrases {
-		if h := hashlockDerivedDigest(st, rec); h != nil && *h == d {
+		if h := hashlockDerivedDigest(st, rec); h.Equal(d) {
 			return true
 		}
 	}
@@ -410,8 +433,7 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 		}
 		switch {
 		case sel < len(rows.digests):
-			d := rows.digests[sel]
-			st.list.Paths[idx].Hash = &d
+			st.list.Paths[idx].Hash = rows.digests[sel]
 			return true
 		case sel >= rows.preimageRow && sel < rows.preimageRow+len(rows.preimages):
 			// §5.1: a preimage RECORD takes the phrase route's shape without
@@ -445,7 +467,7 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			if !ok {
 				continue // Back from hex entry returns to `Which hash?`, path intact
 			}
-			st.list.Paths[idx].Hash = &d
+			st.list.Paths[idx].Hash = d
 			return true
 		case sel == rows.noneRow:
 			st.list.Paths[idx].Hash = nil

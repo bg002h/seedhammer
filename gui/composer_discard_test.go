@@ -10,7 +10,7 @@ import (
 // stated as an equivalence: the signature changes for the wrapper, the path
 // count and a key count, and for NOTHING ELSE.
 func TestComposerShapeSignatureMovesExactlyWithSlotNumbering(t *testing.T) {
-	digest := [32]byte{0x55}
+	digest := composerTestLock([32]byte{0x55})
 	base := composerTwoPathList()
 	sig := composerShapeSignature(base)
 
@@ -39,7 +39,7 @@ func TestComposerShapeSignatureMovesExactlyWithSlotNumbering(t *testing.T) {
 			"for an edit that renumbers nothing (§7d rules them KEPT)")
 	}
 	hashed := composerTwoPathList()
-	hashed.Paths[1].Hash = &digest
+	hashed.Paths[1].Hash = digest
 	if composerShapeSignature(hashed) != sig {
 		t.Error("adding a hash moved the signature; §7d keeps assignments across it")
 	}

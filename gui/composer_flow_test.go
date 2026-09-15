@@ -15,11 +15,12 @@ import (
 // what the device is about to engrave, or §8q's self-check has nothing to
 // compare against.
 func TestComposerConsentLinesDescribeEveryPathFromTheDecodedMd1(t *testing.T) {
-	digest := [32]byte{0xab, 0xcd}
-	digest[31] = 0xef
+	raw := [32]byte{0xab, 0xcd}
+	raw[31] = 0xef
+	digest := composerTestLock(raw)
 	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
-		{Keys: &md.KeySet{K: 1, N: 1}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 1000}, Hash: &digest},
+		{Keys: &md.KeySet{K: 1, N: 1}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 1000}, Hash: digest},
 	}}
 	c, err := md.Compose(list)
 	if err != nil {
@@ -66,10 +67,10 @@ func TestComposerConsentLinesDescribeEveryPathFromTheDecodedMd1(t *testing.T) {
 // TestComposerConsentMarksTheExperimentalForms is §7e's "EXPERIMENTAL marks",
 // derived from the decoded shape rather than from the operator's answers.
 func TestComposerConsentMarksTheExperimentalForms(t *testing.T) {
-	digest := [32]byte{0x01}
+	digest := composerTestLock([32]byte{0x01})
 	keyless := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 		{Keys: &md.KeySet{K: 1, N: 1}},
-		{Hash: &digest},
+		{Hash: digest},
 	}}
 	c, err := md.Compose(keyless)
 	if err != nil {
@@ -122,12 +123,12 @@ func TestComposerConsentMarksTheExperimentalForms(t *testing.T) {
 
 // TestComposerNUMSNoteFiresOnlyForATaprootFallback is §8f's condition test.
 func TestComposerNUMSNoteFiresOnlyForATaprootFallback(t *testing.T) {
-	digest := [32]byte{0x02}
+	digest := composerTestLock([32]byte{0x02})
 	// tr with no unlocked single-key path: §5 extracts no internal key, so
 	// the policy falls back to NUMS.
 	nums := md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
 		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},
-		{Keys: &md.KeySet{K: 1, N: 1}, Hash: &digest},
+		{Keys: &md.KeySet{K: 1, N: 1}, Hash: digest},
 	}}
 	c, err := md.Compose(nums)
 	if err != nil {

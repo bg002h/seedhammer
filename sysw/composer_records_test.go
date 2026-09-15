@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"seedhammer.com/md"
 )
 
 const (
@@ -121,7 +123,16 @@ func TestComposerRecordParsersReturnTheHostsValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, b := range h {
+	// The BARE form is sha256 (SPEC_hashlock_kinds §6), and the kind is asserted
+	// alongside the bytes because it is half of what the record means: the same
+	// 32 bytes read as another kind compose a wallet nobody can spend.
+	if h.Kind() != md.KindSha256 {
+		t.Fatalf("hash-valid parsed as kind %s, want sha256", h.Kind().Token())
+	}
+	if len(h.Digest()) != 32 {
+		t.Fatalf("digest is %d bytes, want 32", len(h.Digest()))
+	}
+	for i, b := range h.Digest() {
 		if b != 0xa8 {
 			t.Fatalf("digest[%d] = %x", i, b)
 		}

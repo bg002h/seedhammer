@@ -16,12 +16,20 @@ import (
 // by the chunk-set literals below, because the primary's exporter refuses a
 // signature-free path and cannot write them to MANIFEST.
 
-var composeH = func() *[32]byte {
+// composeH is the fixture digest every compose vector carries, as a sha256
+// LOCK: the corpus rows were generated against `sha256(H)` fragments, so
+// KindSha256 is what the 32 bytes have always meant here, and it is what keeps
+// the expected chunk strings below byte-identical.
+var composeH = func() *HashLock {
 	var h [32]byte
 	for i := range h {
 		h[i] = 0xa8
 	}
-	return &h
+	lock, ok := NewHashLock(KindSha256, h[:])
+	if !ok {
+		panic("md: composeH: 32 bytes is sha256's width")
+	}
+	return lock
 }()
 
 func ck(k, n uint8) SpendPath                           { return SpendPath{Keys: &KeySet{K: k, N: n, Sorted: true}} }

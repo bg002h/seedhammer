@@ -66,8 +66,8 @@ func TestComposerPhraseRouteHoldsOnTheZeroValueState(t *testing.T) {
 	h.holdConfirm()
 	h.mustReach("run ms hashlock with this phrase")
 
-	want := hashlockMustHex(t, hashlockAnchorSHA_H)
-	if _, ok := st.phraseDigests[want]; !ok {
+	want := hashlockMustLock(t, hashlockAnchorSHA_H)
+	if _, ok := st.phraseDigests[want.MapKey()]; !ok {
 		t.Fatalf("the anchor's digest is not in the phrase set (%d entries)", len(st.phraseDigests))
 	}
 	if !composerAnyPathByPhrase(st) {
@@ -84,28 +84,30 @@ func TestComposerPhraseRouteHoldsOnTheZeroValueState(t *testing.T) {
 // MUTATION: compare p.Hash pointers instead of the digest VALUE (`for d := range
 // st.phraseDigests { if p.Hash == &d }`) -> every positive row fails.
 func TestComposerAnyPathByPhraseIsPerDigest(t *testing.T) {
-	phrase := hashlockMustHex(t, hashlockAnchorSHA_H)
-	other := hashlockMustHex(t, strings.Repeat("5a", 32))
-	// A DIFFERENT POINTER holding the SAME 32 bytes: what every re-entry arm of
+	phrase := hashlockMustLock(t, hashlockAnchorSHA_H)
+	other := hashlockMustLock(t, strings.Repeat("5a", 32))
+	// A DIFFERENT POINTER holding the SAME digest: what every re-entry arm of
 	// composerHashEdit writes (the hex pad, a payload row), never the pointer the
-	// set was built from. The row below would otherwise be byte-identical to
-	// "one phrase path" and exercise nothing (r0 fidelity M-1).
-	retyped := phrase
+	// set was built from. hashlockMustLock allocates a fresh md.HashLock on each
+	// call, so this is a distinct pointer for the same bytes -- without it the
+	// row below would be byte-identical to "one phrase path" and exercise
+	// nothing (r0 fidelity M-1).
+	retyped := hashlockMustLock(t, hashlockAnchorSHA_H)
 
 	for _, tc := range []struct {
 		name string
-		set  [][32]byte
-		hash []*[32]byte // one entry per path; nil means no hash
+		set  []*md.HashLock
+		hash []*md.HashLock // one entry per path; nil means no hash
 		want bool
 	}{
 		{"no paths at all", nil, nil, false},
-		{"a nil set is read, not written", nil, []*[32]byte{&phrase}, false},
-		{"one phrase path", [][32]byte{phrase}, []*[32]byte{&phrase}, true},
-		{"the phrase path was edited to a payload row", [][32]byte{phrase}, []*[32]byte{&other}, false},
-		{"the phrase path was removed", [][32]byte{phrase}, []*[32]byte{nil}, false},
-		{"a mixed wallet: one phrase path, one other", [][32]byte{phrase}, []*[32]byte{&phrase, &other}, true},
-		{"two paths share one phrase digest", [][32]byte{phrase}, []*[32]byte{&phrase, &phrase}, true},
-		{"the same digest re-typed as 64 hex is still by phrase", [][32]byte{phrase}, []*[32]byte{&retyped}, true},
+		{"a nil set is read, not written", nil, []*md.HashLock{phrase}, false},
+		{"one phrase path", []*md.HashLock{phrase}, []*md.HashLock{phrase}, true},
+		{"the phrase path was edited to a payload row", []*md.HashLock{phrase}, []*md.HashLock{other}, false},
+		{"the phrase path was removed", []*md.HashLock{phrase}, []*md.HashLock{nil}, false},
+		{"a mixed wallet: one phrase path, one other", []*md.HashLock{phrase}, []*md.HashLock{phrase, other}, true},
+		{"two paths share one phrase digest", []*md.HashLock{phrase}, []*md.HashLock{phrase, phrase}, true},
+		{"the same digest re-typed as 64 hex is still by phrase", []*md.HashLock{phrase}, []*md.HashLock{retyped}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := composerFlowShapedState(t, len(tc.hash))
@@ -128,8 +130,8 @@ func TestComposerAnyPathByPhraseIsPerDigest(t *testing.T) {
 //
 // The hex pad is the route §2 item 4 names, and typing 64 characters on it has
 // no harness helper; the payload row is the same arm of composerHashEdit
-// (composer_hash.go writes a fresh *[32]byte either way) carrying the same 32
-// bytes, so it exercises the property the pad would: the pointer in p.Hash is
+// (composer_hash.go writes a fresh *md.HashLock either way) carrying the same
+// 32 bytes, so it exercises the property the pad would: the pointer in p.Hash is
 // NOT the one composerNotePhraseDigest was given, and the predicate compares
 // VALUES.
 //
@@ -138,8 +140,8 @@ func TestComposerAnyPathByPhraseIsPerDigest(t *testing.T) {
 // TestComposerAnyPathByPhraseIsPerDigest.
 func TestReassigningTheSameDigestStaysByPhrase(t *testing.T) {
 	st := composerFlowShapedState(t, 1)
-	phrase := hashlockMustHex(t, hashlockAnchorSHA_H)
-	st.list.Paths[0].Hash = &phrase
+	phrase := hashlockMustLock(t, hashlockAnchorSHA_H)
+	st.list.Paths[0].Hash = phrase
 	composerNotePhraseDigest(st, phrase)
 
 	var ret bool
@@ -152,7 +154,7 @@ func TestReassigningTheSameDigestStaysByPhrase(t *testing.T) {
 	if !ret {
 		t.Fatal("composerHashEdit returned false after a payload row")
 	}
-	if got := st.list.Paths[0].Hash; got == &phrase {
+	if got := st.list.Paths[0].Hash; got == phrase {
 		t.Fatal("the payload row reused the ORIGINAL pointer, so this test proves nothing " +
 			"a pointer comparison would not also pass")
 	}
@@ -178,11 +180,11 @@ func TestReassigningTheSameDigestStaysByPhrase(t *testing.T) {
 func TestComposerHashEditToAPayloadRowDropsThePhraseForm(t *testing.T) {
 	payloadDigest := strings.Repeat("ab", 32)
 	st := composerFlowShapedState(t, 2)
-	phrase := hashlockMustHex(t, hashlockAnchorSHA_H)
-	hexed := hashlockMustHex(t, strings.Repeat("5a", 32))
-	st.list.Paths[0].Hash = &phrase
+	phrase := hashlockMustLock(t, hashlockAnchorSHA_H)
+	hexed := hashlockMustLock(t, strings.Repeat("5a", 32))
+	st.list.Paths[0].Hash = phrase
 	composerNotePhraseDigest(st, phrase)
-	st.list.Paths[1].Hash = &hexed
+	st.list.Paths[1].Hash = hexed
 	if !composerAnyPathByPhrase(st) {
 		t.Fatal("the fixture must START in the phrase form for this test to mean anything")
 	}
@@ -222,11 +224,11 @@ func TestComposerHashEditToAPayloadRowDropsThePhraseForm(t *testing.T) {
 // separately." -> both assertions fail.
 func TestComposerMixedWalletBannerNamesEveryPhraseAndEveryPlate(t *testing.T) {
 	st := composerFlowShapedState(t, 2)
-	phrase := hashlockMustHex(t, hashlockAnchorSHA_H)
-	fromPlate := hashlockMustHex(t, strings.Repeat("ab", 32))
-	st.list.Paths[0].Hash = &phrase
+	phrase := hashlockMustLock(t, hashlockAnchorSHA_H)
+	fromPlate := hashlockMustLock(t, strings.Repeat("ab", 32))
+	st.list.Paths[0].Hash = phrase
 	composerNotePhraseDigest(st, phrase)
-	st.list.Paths[1].Hash = &fromPlate
+	st.list.Paths[1].Hash = fromPlate
 
 	if !composerEveryPathHashed(st.list) || !composerAnyPathByPhrase(st) {
 		t.Fatal("this test needs a MIXED wallet that §8h's guard accepts")
@@ -257,10 +259,10 @@ func TestComposerMixedWalletBannerNamesEveryPhraseAndEveryPlate(t *testing.T) {
 // MUTATION: restore "Back the preimage up separately." -> both assertions fail.
 func TestTwoPlateWalletBannerCountsEveryPreimage(t *testing.T) {
 	st := composerFlowShapedState(t, 2)
-	first := hashlockMustHex(t, strings.Repeat("ab", 32))
-	second := hashlockMustHex(t, strings.Repeat("5a", 32))
-	st.list.Paths[0].Hash = &first
-	st.list.Paths[1].Hash = &second
+	first := hashlockMustLock(t, strings.Repeat("ab", 32))
+	second := hashlockMustLock(t, strings.Repeat("5a", 32))
+	st.list.Paths[0].Hash = first
+	st.list.Paths[1].Hash = second
 
 	if !composerEveryPathHashed(st.list) {
 		t.Fatal("this test needs a composition §8h's guard ACCEPTS")

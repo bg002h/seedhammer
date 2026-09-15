@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"seedhammer.com/md"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"seedhammer.com/bspline"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/constant"
+	"seedhammer.com/hashlock"
 	"seedhammer.com/internal/golden"
 	"seedhammer.com/internal/sh2"
 )
@@ -32,8 +34,14 @@ const (
 	h6CorpusMS1 = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
 )
 
-func h6QRText(method, phrase string) string {
-	return "hashlock v1\n" + method + "\nphrase: " + phrase
+// h6QRText delegates to hashlock.QRText rather than re-spelling the format.
+// It WAS a second copy -- "hashlock v1\n" + method + "\nphrase: " -- and when
+// SPEC_hashlock_kinds §13.1 added the `hash:` line, the copy silently kept
+// emitting the old three-line form while the corpus moved. One implementation
+// is the point; a test helper that re-spells the thing under test cannot
+// disagree with it usefully.
+func h6QRText(hardened bool, kind md.HashKind, phrase string) string {
+	return hashlock.QRText(hardened, kind, phrase)
 }
 
 // h6WorstLocator is §6.3's widest header: the template stub (29 characters, the
@@ -47,7 +55,7 @@ func h6WorstPhrasePlate(qr bool) Hashlock {
 		Method:  h6HardenedMethodLine,
 		Locator: h6WorstLocator,
 		QR:      qr,
-		QRText:  h6QRText(h6HardenedMethodLine, h6WorstPhrase),
+		QRText:  h6QRText(true, md.KindSha256, h6WorstPhrase),
 		Font:    constant.Font,
 	}
 }
@@ -347,13 +355,13 @@ func TestHashlockQREncodesTheTextNotTheString(t *testing.T) {
 	plate := h6WorstPhrasePlate(true)
 	plate.MS1 = h6CorpusMS1
 	plate.Phrase = "correct horse battery staple"
-	plate.QRText = h6QRText(h6HardenedMethodLine, plate.Phrase)
+	plate.QRText = h6QRText(true, md.KindSha256, plate.Phrase)
 
 	got, err := HashlockQRCode(plate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := qrpkg.Encode(h6QRText(h6HardenedMethodLine, "correct horse battery staple"), qrpkg.L)
+	want, err := qrpkg.Encode(h6QRText(true, md.KindSha256, "correct horse battery staple"), qrpkg.L)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +374,7 @@ func TestHashlockQREncodesTheTextNotTheString(t *testing.T) {
 	if h6CodesEqual(got, notWant) {
 		t.Error("the QR encodes the ms1 string; decision 1 declines a QR of the string form entirely")
 	}
-	marked, err := qrpkg.Encode(h6QRText(h6HardenedMethodLine, passphraseGlyphs(plate.Phrase)), qrpkg.L)
+	marked, err := qrpkg.Encode(h6QRText(true, md.KindSha256, passphraseGlyphs(plate.Phrase)), qrpkg.L)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,6 +452,7 @@ func TestHashlockQRTextMatchesTheMSCorpus(t *testing.T) {
 		QRText []struct {
 			Name   string `json:"name"`
 			Method string `json:"method"`
+			Kind   string `json:"kind"`
 			Phrase string `json:"phrase"`
 			Text   string `json:"qr_text"`
 			Bytes  int    `json:"bytes"`
@@ -456,11 +465,11 @@ func TestHashlockQRTextMatchesTheMSCorpus(t *testing.T) {
 		t.Fatalf("the corpus carries %d qr_text rows; H6 §11.2 pins seven", len(corpus.QRText))
 	}
 	for _, row := range corpus.QRText {
-		method := h6HardenedMethodLine
-		if row.Method == "sha256" {
-			method = h6SHA256MethodLine
+		kind, ok := md.HashKindFromToken(row.Kind)
+		if !ok {
+			t.Fatalf("row %s: corpus kind %q is not a §6 token", row.Name, row.Kind)
 		}
-		got := h6QRText(method, row.Phrase)
+		got := h6QRText(row.Method != "sha256", kind, row.Phrase)
 		if got != row.Text {
 			t.Errorf("row %s:\n got %q\nwant %q", row.Name, got, row.Text)
 		}

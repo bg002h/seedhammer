@@ -84,12 +84,13 @@ func TestComposerStateHookIsInstalledOnlyWhileAFlowRuns(t *testing.T) {
 // instead of leaving a hole) -> the index alignment assertion fails, and the
 // walk's "path 0 holds nothing yet" read would silently become "some path".
 func TestComposerStateHookReportsEachPathAndHandsOutCopies(t *testing.T) {
-	var d [32]byte
-	for i := range d {
-		d[i] = byte(i)
+	var raw [32]byte
+	for i := range raw {
+		raw[i] = byte(i)
 	}
+	d := composerTestLock(raw)
 	st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-		{}, {Hash: &d},
+		{}, {Hash: d},
 	}}}
 	setComposerStateHook(st)
 	t.Cleanup(clearComposerStateHook)
@@ -99,22 +100,25 @@ func TestComposerStateHookReportsEachPathAndHandsOutCopies(t *testing.T) {
 		t.Fatalf("the hook reports %d entries for a 2-path composition", len(got))
 	}
 	if got[0] != nil {
-		t.Errorf("path 1 carries no hash and the hook reports %x", *got[0])
+		t.Errorf("path 1 carries no hash and the hook reports %s", hashlockHashHex(got[0]))
 	}
-	if got[1] == nil || *got[1] != d {
-		t.Fatalf("path 2's hash is %v, want %x", got[1], d)
+	if !got[1].Equal(d) {
+		t.Fatalf("path 2's hash is %v, want %s", got[1], hashlockHashHex(d))
 	}
-	// Write through the reported pointer; the policy must not move.
+	// THE WRITE-THROUGH IS NOW A COMPILE ERROR RATHER THAN AN ASSERTION, and
+	// that is the stronger form of the same guarantee. This block used to do
+	// `got[1][0] ^= 0xff` and check the policy had not moved; a digest now
+	// lives in md.HashLock's unexported field, with no setter, so no caller
+	// outside package md can write one at all and that statement does not
+	// build. What the named mutation (`out[i] = p.Hash`) actually changes is
+	// the pointer IDENTITY, and that is still observable here.
 	//
-	// `want` is a SNAPSHOT, and it is load-bearing: st.list.Paths[1].Hash is
-	// &d, so a hook that handed out st's own pointer would have this write
-	// change `d` as well, and comparing the policy against `d` would compare a
-	// variable with itself and pass. Measured -- the mutation below was GREEN
-	// against `!= d` and is RED against `!= want`.
-	want := d
-	got[1][0] ^= 0xff
-	if *st.list.Paths[1].Hash != want {
-		t.Errorf("writing through the hook's pointer changed the POLICY: %x, want %x",
-			*st.list.Paths[1].Hash, want)
+	// MUTATION: `out[i] = p.Hash` in setComposerStateHook -> this fails.
+	if got[1] == st.list.Paths[1].Hash {
+		t.Error("the hook handed out the POLICY's own pointer rather than a copy of the lock")
+	}
+	if !st.list.Paths[1].Hash.Equal(d) {
+		t.Errorf("the policy's digest moved: %s, want %s",
+			hashlockHashHex(st.list.Paths[1].Hash), hashlockHashHex(d))
 	}
 }

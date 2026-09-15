@@ -11,6 +11,7 @@ import (
 	"seedhammer.com/gui/op"
 	"seedhammer.com/gui/widget"
 	"seedhammer.com/hashlock"
+	"seedhammer.com/md"
 	"seedhammer.com/sysw"
 )
 
@@ -50,7 +51,7 @@ func (m hashlockMethod) String() string {
 	return "hardened"
 }
 
-func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload [][32]byte) hashlockOutcome {
+func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload []*md.HashLock) hashlockOutcome {
 	var phrase []byte
 	for {
 		p, ok := hashlockPhraseFlow(ctx, th, phrase)
@@ -71,18 +72,17 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			if !ok {
 				continue // Back during derivation -> method pick
 			}
-			h := hashlock.Digest(&x)
+			h := hashlockLockOf(md.KindSha256, &x)
 			body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
 				hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h))
 			if composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
-				d := h
-				st.list.Paths[idx].Hash = &d
-				composerNotePhraseDigest(st, d)
+				st.list.Paths[idx].Hash = h
+				composerNotePhraseDigest(st, h)
 				// H6 §2.2: the phrase TYPED HERE is held for this composition,
 				// so §5.3 can offer a preimage plate for it at Done. L7's
 				// "never stores" is the verb H6 reverses; the flow-exit defer
 				// is what keeps the reversal bounded to one composition.
-				composerHoldHashlockMaterial(st, d, hashlockMaterial{
+				composerHoldHashlockMaterial(st, h, hashlockMaterial{
 					phrase: phrase, method: m, preimage: x, provenance: hashlockFromPhrase,
 				})
 				// The reconciliation line, on its own screen and reachable for
@@ -133,21 +133,20 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 // confirm is the derivation countdown's, which returns to `Which hash?` with
 // nothing assigned -- the same contract the phrase route's own phrase screen
 // has (§4.6).
-func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, rec sysw.PhraseRecord, payload [][32]byte) hashlockOutcome {
+func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, rec sysw.PhraseRecord, payload []*md.HashLock) hashlockOutcome {
 	phrase := []byte(rec.Phrase)
 	m := hashlockMethodOf(rec.Method)
 	x, ok := hashlockDeriveFlow(ctx, th, phrase, m)
 	if !ok {
 		return hashlockBackToWhichHash
 	}
-	h := hashlock.Digest(&x)
+	h := hashlockLockOf(md.KindSha256, &x)
 	body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
 		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h))
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 		return hashlockBackToWhichHash
 	}
-	d := h
-	st.list.Paths[idx].Hash = &d
+	st.list.Paths[idx].Hash = h
 	// H6 §2.2: the material is HELD, so §5.3 can offer a plate for it at Done.
 	// composerNotePhraseDigest is deliberately NOT called: that map is H5's
 	// record of a phrase TYPED HERE, which drives the §8h banner that says the
@@ -171,9 +170,9 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 // equal to h -- the same question hashlockRelationLine asks in order to word
 // the confirm modal's relation line, asked here as a plain fact so the two
 // screens cannot disagree about it (F-496).
-func payloadStatesDigest(payload [][32]byte, h [32]byte) bool {
+func payloadStatesDigest(payload []*md.HashLock, h *md.HashLock) bool {
 	for _, d := range payload {
-		if d == h {
+		if d.Equal(h) {
 			return true
 		}
 	}
@@ -189,14 +188,13 @@ func payloadStatesDigest(payload [][32]byte, h [32]byte) bool {
 // phrase and the method -- and for a preimage record every one of those is
 // false: there is no phrase, no method, and `chars: 0` would be a measurement
 // of nothing on the screen that gates funds.
-func hashlockPreimageRecordRoute(ctx *Context, th *Colors, st *composerState, idx int, p hashlockPayloadPreimage, payload [][32]byte) hashlockOutcome {
+func hashlockPreimageRecordRoute(ctx *Context, th *Colors, st *composerState, idx int, p hashlockPayloadPreimage, payload []*md.HashLock) hashlockOutcome {
 	body := composerCopyHashlockPreimageConfirm(hashlockFirst8Last8(p.digest),
 		hashlockRelationLine(payload, p.digest), hashlockOtherPathLine(st, idx, p.digest))
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 		return hashlockBackToWhichHash
 	}
-	d := p.digest
-	st.list.Paths[idx].Hash = &d
+	st.list.Paths[idx].Hash = p.digest
 	composerHoldHashlockMaterial(st, p.digest, hashlockMaterial{
 		preimage: p.preimage, provenance: hashlockFromPayload,
 	})
@@ -209,13 +207,13 @@ func hashlockPreimageRecordRoute(ctx *Context, th *Colors, st *composerState, id
 // match starts at -1 so the "no record matches" arm is reachable at all.
 // MUTATION: `match := 0` -> TestHashlockConfirmRelationLine's no-match case
 // reports `matches hash 1 in the payload`.
-func hashlockRelationLine(payload [][32]byte, h [32]byte) string {
+func hashlockRelationLine(payload []*md.HashLock, h *md.HashLock) string {
 	if len(payload) == 0 {
 		return ""
 	}
 	match := -1
 	for i, d := range payload {
-		if d == h {
+		if d.Equal(h) {
 			match = i
 			break
 		}
@@ -232,20 +230,53 @@ func hashlockRelationLine(payload [][32]byte, h [32]byte) string {
 // It reads *p.Hash directly rather than the phrase set, so it is unaffected by
 // that set's own history, and it skips idx because the path being edited may
 // already hold the hash it is about to replace.
-func hashlockOtherPathLine(st *composerState, idx int, h [32]byte) string {
+func hashlockOtherPathLine(st *composerState, idx int, h *md.HashLock) string {
 	for i, p := range st.list.Paths {
 		if i == idx || p.Hash == nil {
 			continue
 		}
-		if *p.Hash != h {
+		if !p.Hash.Equal(h) {
 			return composerCopyHashlockOtherPath()
 		}
 	}
 	return ""
 }
 
-func hashlockFirst8Last8(h [32]byte) string {
-	s := hex.EncodeToString(h[:])
+// hashlockLockOf is THE ONE PLACE this package turns a preimage into the lock a
+// path carries: hashlock.DigestOf picks the kind's hash, md.NewHashLock checks
+// it against the kind's own width. No caller writes a hash or a width by hand,
+// which is what SPEC_hashlock_kinds §5 asks for -- four correct digest
+// functions behind one mis-wired call site is the same lost-funds outcome with
+// a different cause.
+//
+// EVERY CALL SITE PASSES md.KindSha256 TODAY, and that is a statement about the
+// screens rather than about this function: `Which hash?` offers no kind, so
+// sha256 is what every route has always meant. The parameter is here so the
+// kind arrives from the flow when a flow finally has one, instead of this
+// function having to grow a second name.
+//
+// IT PANICS RATHER THAN RETURNING ok, because false is unreachable by
+// construction: DigestOf and DigestLen switch on the same kind and agree by
+// construction, so the only way here is a fifth kind added to one switch and
+// not the other. Silently seating a wrong-width digest composes a wallet nobody
+// can spend; composerHashEdit's own default arm panics on the same grounds.
+func hashlockLockOf(k md.HashKind, x *[32]byte) *md.HashLock {
+	h, ok := md.NewHashLock(k, hashlock.DigestOf(k, x))
+	if !ok {
+		panic("gui: hashlockLockOf: " + k.Token() + " digest is not that kind's width")
+	}
+	return h
+}
+
+// hashlockFirst8Last8 is the elided form every screen and every locator row
+// draws: the first eight and last eight hex characters of the digest.
+//
+// AT THE KIND'S OWN WIDTH (md.HashLock.Digest), never the stored array: the
+// digest lives in a fixed [32]byte for the alloc gate, so a 20-byte kind
+// carries twelve bytes of padding, and hexing the array would print eight
+// zeroes as the operator's last eight.
+func hashlockFirst8Last8(h *md.HashLock) string {
+	s := hex.EncodeToString(h.Digest())
 	return s[:8] + ".." + s[len(s)-8:]
 }
 

@@ -35,6 +35,11 @@ import (
 // FULL 64 HEX, not the first8..last8 the screens draw: the point of the call is
 // to compare what is stored against what was shown, and comparing an
 // abbreviation against an abbreviation would accept 2^192 wrong digests.
+//
+// AT THE LOCK'S OWN WIDTH (md.HashLock.Digest), which is 64 hex for every kind
+// the composer can produce today and would be 40 for a ripemd160 one. Hexing
+// the stored array instead would append twelve bytes of alloc-gate padding and
+// hand a walk a digest that matches nothing.
 func installComposerAPI() {
 	js.Global().Set("shComposerPathHashes", js.FuncOf(func(js.Value, []js.Value) any {
 		hashes := gui.ComposerPathHashes()
@@ -51,7 +56,7 @@ func installComposerAPI() {
 				out = append(out, nil)
 				continue
 			}
-			out = append(out, hex.EncodeToString(h[:]))
+			out = append(out, hex.EncodeToString(h.Digest()))
 		}
 		return out
 	}))

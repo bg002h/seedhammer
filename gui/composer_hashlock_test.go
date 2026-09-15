@@ -272,7 +272,43 @@ func typeOnPassphraseKeyboard(t *testing.T, h *sessionHarness, s string) {
 	}
 }
 
-func hashlockHashHex(h *[32]byte) string { return hex.EncodeToString(h[:]) }
+// composerTestLock is the fixture form of a hashlock: 32 bytes as the sha256
+// lock an md.SpendPath now carries.
+//
+// EVERY COMPOSER FIXTURE IS sha256 BECAUSE EVERY COMPOSER FLOW IS -- `Which
+// hash?` offers no kind, so sha256 is what these fixtures have always meant and
+// what keeps their expected strings byte-identical. A test that wants another
+// kind calls md.NewHashLock itself and says so at the call site.
+//
+// It panics rather than taking a *testing.T: 32 is sha256's width, so the refusal
+// arm is unreachable, and threading t into the table fixtures below would cost
+// every one of them a parameter for a branch that cannot be taken.
+func composerTestLock(d [32]byte) *md.HashLock {
+	h, ok := md.NewHashLock(md.KindSha256, d[:])
+	if !ok {
+		panic("gui: composerTestLock: 32 bytes is sha256's width")
+	}
+	return h
+}
+
+// composerTestFlipDigest is a lock with its FIRST DIGEST BYTE flipped, at the
+// same kind -- the perturbation a self-check mutation row applies. Rebuilt
+// through md.NewHashLock rather than written into the struct, because the
+// digest is unexported and a HashLock has no setter by design.
+func composerTestFlipDigest(h *md.HashLock) *md.HashLock {
+	d := append([]byte(nil), h.Digest()...)
+	d[0] ^= 0xff
+	out, ok := md.NewHashLock(h.Kind(), d)
+	if !ok {
+		panic("gui: composerTestFlipDigest: a lock's own digest is its kind's width")
+	}
+	return out
+}
+
+// hashlockHashHex is the full digest in hex, AT THE KIND'S OWN WIDTH -- hexing
+// the stored array would print twelve bytes of alloc-gate padding for a 20-byte
+// kind.
+func hashlockHashHex(h *md.HashLock) string { return hex.EncodeToString(h.Digest()) }
 
 // groupBy inserts a space every n runes -- the corpus's own "grouped" refusal
 // shape (hashlock.IsMS1Shaped strips it right back out).
@@ -633,7 +669,7 @@ func TestHashlockConfirmRelationLine(t *testing.T) {
 
 	// With NO hash: records loaded, neither line is drawn at all -- the arm the
 	// two cases above cannot reach.
-	if got := hashlockRelationLine(nil, hashlockMustHex(t, hashlockAnchorSHA_H)); got != "" {
+	if got := hashlockRelationLine(nil, hashlockMustLock(t, hashlockAnchorSHA_H)); got != "" {
 		t.Errorf("no payload records drew the relation line %q", got)
 	}
 }
@@ -707,9 +743,8 @@ func TestComposerHashEditDispatchesByRowLabel(t *testing.T) {
 
 	t.Run("none row clears without the rule modal", func(t *testing.T) {
 		st := composerStateWithPaths(t, 1)
-		var preset [32]byte
-		preset[0] = 0x11
-		st.list.Paths[0].Hash = &preset
+		preset := composerTestLock([32]byte{0x11})
+		st.list.Paths[0].Hash = preset
 		composerNotePhraseDigest(st, preset)
 		var ret bool
 		h := runComposerHashEdit(t, st, sessionOf(), 0, &ret)
@@ -893,9 +928,8 @@ func TestHashlockDeriveKeepsAwakeUnderTheScreensaver(t *testing.T) {
 // hashlockPhraseRoute -> `never reached "run ms hashlock with this phrase"`.
 func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	st := composerStateWithPaths(t, 2)
-	var other [32]byte
-	other[0] = 0x11
-	st.list.Paths[0].Hash = &other
+	other := composerTestLock([32]byte{0x11})
+	st.list.Paths[0].Hash = other
 	st.list.Paths[1].Hash = nil
 	if composerEveryPathHashed(st.list) {
 		t.Fatal("this test needs a policy §8h's guard REJECTS; it no longer is one")
@@ -1007,17 +1041,16 @@ func TestHashlockReconcileHeaderIsSpelledLikeTheConfirmModal(t *testing.T) {
 // MUTATION: drop the `*p.Hash != h` comparison from hashlockOtherPathLine (warn
 // whenever any other path has any hash) -> this fails at the unwanted-text check.
 func TestHashlockOtherPathLineIsSilentOnAnEqualHash(t *testing.T) {
-	same := hashlockMustHex(t, hashlockAnchorSHA_H)
+	same := hashlockMustLock(t, hashlockAnchorSHA_H)
 	st := composerStateWithPaths(t, 2)
-	st.list.Paths[0].Hash = &same
+	st.list.Paths[0].Hash = same
 	if got := hashlockOtherPathLine(st, 1, same); got != "" {
 		t.Errorf("an EQUAL hash on another path drew %q, want silence", got)
 	}
 	if got := hashlockOtherPathLine(st, 0, same); got != "" {
 		t.Errorf("the path being edited must not warn about itself: %q", got)
 	}
-	var different [32]byte
-	different[0] = 0x11
+	different := composerTestLock([32]byte{0x11})
 	if got := hashlockOtherPathLine(st, 1, different); got != composerCopyHashlockOtherPath() {
 		t.Errorf("a DIFFERENT hash on another path drew %q, want the warning", got)
 	}
@@ -1030,9 +1063,7 @@ func TestHashlockOtherPathLineIsSilentOnAnEqualHash(t *testing.T) {
 	// MUTATION: put a number back into composerCopyHashlockOtherPath -> fails.
 	many := composerStateWithPaths(t, 4)
 	for i := 0; i < 3; i++ {
-		var d [32]byte
-		d[0] = byte(0x20 + i)
-		many.list.Paths[i].Hash = &d
+		many.list.Paths[i].Hash = composerTestLock([32]byte{byte(0x20 + i)})
 	}
 	if got := hashlockOtherPathLine(many, 3, different); got != composerCopyHashlockOtherPath() {
 		t.Errorf("three other differing hashes drew %q, want the warning", got)
@@ -1040,6 +1071,13 @@ func TestHashlockOtherPathLineIsSilentOnAnEqualHash(t *testing.T) {
 	if strings.ContainsAny(composerCopyHashlockOtherPath(), "0123456789") || strings.Contains(composerCopyHashlockOtherPath(), "two") {
 		t.Errorf("the other-path line carries a count: %q", composerCopyHashlockOtherPath())
 	}
+}
+
+// hashlockMustLock is hashlockMustHex as the sha256 lock the corpus rows mean:
+// hashlock/testdata's derivation columns are sha256 digests of a preimage.
+func hashlockMustLock(t *testing.T, s string) *md.HashLock {
+	t.Helper()
+	return composerTestLock(hashlockMustHex(t, s))
 }
 
 func hashlockMustHex(t *testing.T, s string) [32]byte {
@@ -1112,8 +1150,8 @@ func TestRemovePathThenAHexHashDrawsThePlainBanner(t *testing.T) {
 		ctx := NewContext(p)
 		st := &composerState{list: composerTwoPathList(), reg: &seedRegistry{}}
 		composerSizeAssignments(st) // nothing seated: the shape guard stays silent
-		d := hashlockMustHex(t, hashlockAnchorSHA_H)
-		st.list.Paths[0].Hash = &d
+		d := hashlockMustLock(t, hashlockAnchorSHA_H)
+		st.list.Paths[0].Hash = d
 		composerNotePhraseDigest(st, d) // path 1's hash came from a phrase; path 2 has none
 		frame, quit := runUI(ctx, func() { composerPathEdit(ctx, &descriptorTheme, st, 0) })
 		defer quit()
@@ -1132,8 +1170,8 @@ func TestRemovePathThenAHexHashDrawsThePlainBanner(t *testing.T) {
 		// The survivor gets a hash the operator typed as 64 hex -- a DIFFERENT
 		// digest, so nothing in the set matches it. Every path is hashed again,
 		// so §8h fires, and it must be the plain form.
-		hexed := hashlockMustHex(t, strings.Repeat("5a", 32))
-		st.list.Paths[0].Hash = &hexed
+		hexed := hashlockMustLock(t, strings.Repeat("5a", 32))
+		st.list.Paths[0].Hash = hexed
 		if !composerEveryPathHashed(st.list) {
 			t.Fatal("this test needs a composition §8h's guard ACCEPTS")
 		}
@@ -1154,7 +1192,7 @@ func TestRemovePathThenAHexHashDrawsThePlainBanner(t *testing.T) {
 // digest assertion fails.
 func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 	x := composerTestPreimageX()
-	xh := hashlock.Digest(&x)
+	xh := composerTestLock(hashlock.DigestSHA256(&x))
 	sessionOf := func(t *testing.T) *syswSession {
 		return composerSessionWith(nil, []string{
 			composerTestPreimageRecord(t, x),
@@ -1189,7 +1227,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		if got := st.list.Paths[0].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
 			t.Fatalf("hash = %v, want the preimage record's digest %s", got, hashlockAnchorSHA_H)
 		}
-		m, ok := st.hashlockHeld[xh]
+		m, ok := st.hashlockHeld[xh.MapKey()]
 		if !ok {
 			t.Fatalf("the preimage was not held (%d entries)", len(st.hashlockHeld))
 		}
@@ -1246,7 +1284,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		if got := st.list.Paths[0].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
 			t.Fatalf("hash = %v, want %s", got, hashlockAnchorSHA_H)
 		}
-		m, ok := st.hashlockHeld[xh]
+		m, ok := st.hashlockHeld[xh.MapKey()]
 		if !ok {
 			t.Fatalf("the derived material was not held (%d entries)", len(st.hashlockHeld))
 		}
@@ -1317,9 +1355,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 
 	t.Run("No hash lock still clears without the rule modal", func(t *testing.T) {
 		st := composerStateWithPaths(t, 1)
-		var preset [32]byte
-		preset[0] = 0x11
-		st.list.Paths[0].Hash = &preset
+		st.list.Paths[0].Hash = composerTestLock([32]byte{0x11})
 		var ret bool
 		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
 		h.mustReach("Which hash?")
@@ -1375,7 +1411,7 @@ func TestWhichHashPhraseRowShowsTheDigestOnceDerived(t *testing.T) {
 		t.Fatalf("before derivation the row reads %q", got)
 	}
 	x := hashlock.PreimageSHA256([]byte(hashlockAnchorPhrase))
-	h := hashlock.Digest(&x)
+	h := composerTestLock(hashlock.DigestSHA256(&x))
 	composerHoldHashlockMaterial(st, h, hashlockMaterial{
 		phrase: []byte(hashlockAnchorPhrase), method: hashlockSHA256,
 		preimage: x, provenance: hashlockFromPayload,

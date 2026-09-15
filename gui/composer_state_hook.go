@@ -37,6 +37,8 @@
 // WHAT IT COSTS, MEASURED: see composer_state_hook_tinygo.go.
 package gui
 
+import "seedhammer.com/md"
+
 // composerStateHook reports each spend path's hash for the composition that is
 // running NOW, in path order, nil where a path carries none.
 //
@@ -45,7 +47,7 @@ package gui
 // start screen gets nil rather than the last composition's digests. A stale
 // answer is worse than no answer here -- a walk asserting "path 1 holds no hash
 // yet" would pass on a previous run's cleared state.
-var composerStateHook func() []*[32]byte
+var composerStateHook func() []*md.HashLock
 
 // setComposerStateHook installs read access to st for the composition's
 // lifetime. Paired with clearComposerStateHook by composerFlow's defer, on the
@@ -53,11 +55,14 @@ var composerStateHook func() []*[32]byte
 // refusal, a ctx.Done unwind, a panic -- clears it.
 //
 // The closure COPIES each digest rather than handing out st's pointers: the
-// caller is JavaScript, the state is live, and a *[32]byte into an md.SpendPath
-// would let a consumer write the policy this hook exists to observe.
+// caller is JavaScript, the state is live, and a pointer into an md.SpendPath
+// would let a consumer write the policy this hook exists to observe. A
+// *md.HashLock is opaque outside package md -- unexported fields, no setters --
+// so the copy is belt and braces, and it is kept because the reason for it is
+// the aliasing and not the type.
 func setComposerStateHook(st *composerState) {
-	composerStateHook = func() []*[32]byte {
-		out := make([]*[32]byte, len(st.list.Paths))
+	composerStateHook = func() []*md.HashLock {
+		out := make([]*md.HashLock, len(st.list.Paths))
 		for i, p := range st.list.Paths {
 			if p.Hash == nil {
 				continue
@@ -78,7 +83,7 @@ func clearComposerStateHook() {
 //
 // Exported because cmd/emu is a different package; it exists only in this
 // build-tagged file, so the firmware has nothing to export.
-func ComposerPathHashes() []*[32]byte {
+func ComposerPathHashes() []*md.HashLock {
 	if composerStateHook == nil {
 		return nil
 	}

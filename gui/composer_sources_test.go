@@ -119,7 +119,7 @@ func TestComposerPickListPagesAPayloadLargerThanAFrame(t *testing.T) {
 // a silent mis-seat, which is exactly the failure gui/key_card_seating.go
 // :24-27 refuses to allow anywhere else.
 func TestComposerSlotOrderAgreesWithTheCodec(t *testing.T) {
-	digest := [32]byte{0x44}
+	digest := composerTestLock([32]byte{0x44})
 	for _, list := range []md.PathList{
 		composerTwoPathList(),
 		{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
@@ -127,7 +127,7 @@ func TestComposerSlotOrderAgreesWithTheCodec(t *testing.T) {
 		{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
 			{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}}, {Keys: &md.KeySet{K: 1, N: 1}}}},
 		{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-			{Keys: &md.KeySet{K: 1, N: 2}, Hash: &digest},
+			{Keys: &md.KeySet{K: 1, N: 2}, Hash: digest},
 			{Keys: &md.KeySet{K: 2, N: 2}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 7}}}},
 	} {
 		c, err := md.Compose(list)

@@ -21,6 +21,7 @@ package md
 // (PolicyShape) and the ids, and the md1 chunks are the artifact.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 )
@@ -160,11 +161,160 @@ type KeySet struct {
 	Sorted bool
 }
 
-// SpendPath is one alternative way to spend: optional keys, optional sha256
-// preimage, optional lock. A path with neither keys nor a hash is refused.
+// HashKind is which hash the SCRIPT commits to (SPEC_hashlock_kinds §5).
+//
+// Deliberately NOT the wire tag set: a hashlock field typed as a tag can hold
+// tagWpkh. tag() is the total function into it.
+//
+// NOT the same axis as a phrase record's METHOD, which is how a preimage was
+// derived. They share the token "sha256" and mean different things.
+type HashKind uint8
+
+const (
+	// KindSha256 is sha256(X) -- the bare form on the wire.
+	KindSha256 HashKind = iota
+	// KindHash256 is hash256(X) = sha256(sha256(X)).
+	KindHash256
+	// KindRipemd160 is ripemd160(X), the bare primitive.
+	KindRipemd160
+	// KindHash160 is hash160(X) = ripemd160(sha256(X)).
+	KindHash160
+)
+
+// DigestLen is THE ONLY PLACE A DIGEST LENGTH IS WRITTEN (spec §5). The hex
+// rule is DigestLen()*2, which is what makes the parser, the validator and the
+// formatter agree by construction rather than by review.
+func (k HashKind) DigestLen() int {
+	switch k {
+	case KindSha256, KindHash256:
+		return 32
+	case KindRipemd160, KindHash160:
+		return 20
+	}
+	// NOT `default: return 32`. Go does not check switch exhaustiveness, so a
+	// fifth kind added without touching this function would silently be read
+	// at sha256's width -- 32 bytes of a 20-byte digest, or twelve bytes of
+	// alloc-gate padding committed into a script. An unknown kind is a
+	// PROGRAMMING error and never operator input: the only constructor is
+	// sysw's hashKindFromToken, which returns a known kind or refuses. So this
+	// fails loudly rather than guessing.
+	panic("md: unknown HashKind -- a kind was added without updating DigestLen")
+}
+
+// Token is the lowercase miniscript fragment name, which is also the §6 record
+// token and md compose's option name.
+func (k HashKind) Token() string {
+	switch k {
+	case KindSha256:
+		return "sha256"
+	case KindHash256:
+		return "hash256"
+	case KindRipemd160:
+		return "ripemd160"
+	case KindHash160:
+		return "hash160"
+	}
+	panic("md: unknown HashKind -- a kind was added without updating Token")
+}
+
+// tag is the wire tag. Total by construction -- every kind has exactly one.
+func (k HashKind) tag() tag {
+	switch k {
+	case KindSha256:
+		return tagSha256
+	case KindHash256:
+		return tagHash256
+	case KindRipemd160:
+		return tagRipemd160
+	case KindHash160:
+		return tagHash160
+	}
+	// A silent tagSha256 here is the worst of the four: the wallet lowers to a
+	// hash fragment the operator's preimage does not satisfy.
+	panic("md: unknown HashKind -- a kind was added without updating tag")
+}
+
+// HashKindFromToken maps a §6 record token to a kind. CASE IS REJECTED, NEVER
+// FOLDED -- no strings.ToLower here, by rule, because that is how two parsers
+// come to disagree about what a record means.
+//
+// THE ONLY MAPPING IN THE TREE. sysw had its own and two tests were about to
+// grow theirs; three copies of a rule whose whole point is that no two readers
+// of a record disagree is the defect the rule exists to prevent.
+func HashKindFromToken(t string) (HashKind, bool) {
+	switch t {
+	case "sha256":
+		return KindSha256, true
+	case "hash256":
+		return KindHash256, true
+	case "ripemd160":
+		return KindRipemd160, true
+	case "hash160":
+		return KindHash160, true
+	}
+	return 0, false
+}
+
+// HashLock is a hashlock: which hash, and the digest it commits to (spec §5).
+//
+// THE DIGEST IS A FIXED [32]byte FOR THE ALLOC GATE, so a 20-byte kind carries
+// twelve bytes of zero padding. Digest() hides that padding and is the only
+// correct way to read it.
+//
+// == ON THIS TYPE IS A COMPILE ERROR, ON PURPOSE. Rust hit exactly this trap in
+// phase 1: deriving equality over the fixed array made the padding OBSERVABLE,
+// so two ripemd160 locks with identical 20-byte digests differing in the
+// padding compared unequal and hashed differently. Rust could fix it by
+// hand-writing the impls; Go's == on a struct holding a [32]byte compares all
+// 32 bytes and CANNOT be overridden. So the zero-size func field below makes
+// the struct non-comparable: a caller who writes a == b, or uses a HashLock as
+// a map key, gets a compile error instead of a silent wrong answer. Use Equal
+// and MapKey. Spec §5 puts eleven map/set/equality sites on this type.
+type HashLock struct {
+	_      [0]func()
+	kind   HashKind
+	digest [32]byte
+}
+
+// NewHashLock builds one, refusing a digest that is not this kind's width.
+// A wrong-width digest is an error at the boundary, never truncated or padded.
+func NewHashLock(kind HashKind, digest []byte) (*HashLock, bool) {
+	if len(digest) != kind.DigestLen() {
+		return nil, false
+	}
+	h := &HashLock{kind: kind}
+	copy(h.digest[:], digest)
+	return h, true
+}
+
+// Kind is which hash the script commits to.
+func (h *HashLock) Kind() HashKind { return h.kind }
+
+// Digest is the digest AT ITS KIND'S WIDTH -- 20 bytes or 32, never the
+// alloc-gate padding.
+func (h *HashLock) Digest() []byte { return h.digest[:h.kind.DigestLen()] }
+
+// Equal compares two locks by kind and visible digest. Use this, not ==, which
+// does not compile on this type and would compare the padding if it did.
+func (h *HashLock) Equal(o *HashLock) bool {
+	if h == nil || o == nil {
+		return h == o
+	}
+	return h.kind == o.kind && bytes.Equal(h.Digest(), o.Digest())
+}
+
+// MapKey is a stable key for map and set use, since the struct itself cannot be
+// one. It carries the kind so that the same bytes under different kinds are
+// different keys -- §5's point that the kind is part of identity.
+func (h *HashLock) MapKey() string {
+	return h.kind.Token() + ":" + string(h.Digest())
+}
+
+// SpendPath is one alternative way to spend: optional keys, optional hashlock,
+// optional lock. A path with neither keys nor a hash is refused.
 type SpendPath struct {
 	Keys *KeySet
-	Hash *[32]byte
+	Hash *HashLock
 	Lock *Lock
 }
 
@@ -400,7 +550,23 @@ func pathBody(p numberedPath, tap, sortedLegal bool) node {
 		}
 	}
 	if h := p.path.Hash; h != nil {
-		parts = append(parts, node{tag: tagSha256, body: hash256Body(*h)})
+		// THE BODY'S WIDTH IS THE KIND'S, never 32 by default. The digest is
+		// stored in a fixed [32]byte for the alloc gate, so writing the whole
+		// array here would commit twelve bytes of padding into the script --
+		// which compiles, round-trips, and cannot be spent. Switched on the
+		// KIND so a fifth kind is a compile error rather than a fall-through.
+		var b body
+		switch h.Kind() {
+		case KindSha256, KindHash256:
+			var d hash256Body
+			copy(d[:], h.Digest())
+			b = d
+		case KindRipemd160, KindHash160:
+			var d hash160Body
+			copy(d[:], h.Digest())
+			b = d
+		}
+		parts = append(parts, node{tag: h.Kind().tag(), body: b})
 	}
 	if l := p.path.Lock; l != nil {
 		t, v, err := l.operand()

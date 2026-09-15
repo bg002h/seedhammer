@@ -13,9 +13,10 @@ import (
 )
 
 func TestComposerHashRowIsShortEnoughToDraw(t *testing.T) {
-	var d [32]byte
+	var raw32 [32]byte
 	raw, _ := hex.DecodeString("0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210")
-	copy(d[:], raw)
+	copy(raw32[:], raw)
+	d := composerTestLock(raw32)
 	got := composerHashRow(1, d)
 	if !strings.HasPrefix(got, "hash 1  0123456789abcdef"[:8]) {
 		t.Errorf("the row does not lead with the index and the digest head: %q", got)
@@ -217,7 +218,7 @@ func TestWhichHashRowsCarryTheTwoNewBands(t *testing.T) {
 // their leading word and this test fails on the `(in payload)` assertion.
 func TestWhichHashAnnotatesAHashRowThePayloadAlsoCarries(t *testing.T) {
 	x := composerTestPreimageX()
-	h := hashlock.Digest(&x)
+	h := hashlock.DigestSHA256(&x)
 	s := composerSessionWith(
 		[]string{"hash:" + hex.EncodeToString(h[:]), composerTestHashRecord},
 		[]string{composerTestPreimageRecord(t, x)},
@@ -246,14 +247,15 @@ func TestWhichHashRowsDrawOnOneLine(t *testing.T) {
 	if one.Y <= 0 {
 		t.Fatalf("a one-line body row measured %v; this test cannot count lines", one)
 	}
-	var d [32]byte
-	copy(d[:], mustHexBytes(t, hashlockAnchorSHA_H))
+	var raw [32]byte
+	copy(raw[:], mustHexBytes(t, hashlockAnchorSHA_H))
+	d := composerTestLock(raw)
 	for _, row := range []string{
 		composerHashRow(10, d),
 		composerHashInPayloadRow(10, d),
 		composerHashPreimageRow(10, d),
 		composerHashPhraseRow(10, nil),
-		composerHashPhraseRow(10, &d),
+		composerHashPhraseRow(10, d),
 		composerHashRowPhrase, "Type 64 hex", "No hash lock",
 	} {
 		_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, width, descriptorTheme.Text, row)

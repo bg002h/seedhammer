@@ -14,7 +14,7 @@ func composerKeyedPath(k, n uint8, sorted bool) md.SpendPath {
 }
 
 func TestComposerPathLineNamesTheShapeAnOperatorSees(t *testing.T) {
-	digest := [32]byte{0xab}
+	digest := composerTestLock([32]byte{0xab})
 	for _, tc := range []struct {
 		name string
 		p    md.SpendPath
@@ -28,8 +28,8 @@ func TestComposerPathLineNamesTheShapeAnOperatorSees(t *testing.T) {
 		{"with a block height", md.SpendPath{
 			Keys: &md.KeySet{K: 1, N: 1}, Lock: &md.Lock{Kind: md.LockAfterHeight, Value: 905000},
 		}, "Path 1: 1 key + block 905000"},
-		{"key-less hash path", md.SpendPath{Hash: &digest}, "Path 1: hash only"},
-		{"keys and a hash", md.SpendPath{Keys: &md.KeySet{K: 2, N: 2}, Hash: &digest},
+		{"key-less hash path", md.SpendPath{Hash: digest}, "Path 1: hash only"},
+		{"keys and a hash", md.SpendPath{Keys: &md.KeySet{K: 2, N: 2}, Hash: digest},
 			"Path 1: 2-of-2 + hash"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,20 +78,20 @@ func TestComposerRefusalBodyMapsEverySentinelToItsSection8mLine(t *testing.T) {
 // four shapes §4e names, so the mapping above is pinned to the codec's real
 // answers rather than to this test's idea of them.
 func TestComposerShapeRefusalsActuallyRefuse(t *testing.T) {
-	digest := [32]byte{0x11}
+	digest := composerTestLock([32]byte{0x11})
 	for _, tc := range []struct {
 		name string
 		list md.PathList
 		want string
 	}{
-		{"no path with keys", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: &digest}}},
+		{"no path with keys", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: digest}}},
 			composerCopyRefuseNoKeyedPath()},
 		{"a path with neither keys nor hash", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 			composerKeyedPath(1, 1, false),
 			{Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 100}},
 		}}, composerCopyRefuseLockOnly()},
 		{"key-less path under tr", md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
-			composerKeyedPath(1, 1, false), {Hash: &digest},
+			composerKeyedPath(1, 1, false), {Hash: digest},
 		}}, composerCopyRefuseKeylessTr()},
 		{"legacy wrapper, two paths", md.PathList{Wrapper: md.ComposeSh, Paths: []md.SpendPath{
 			composerKeyedPath(2, 3, true), composerKeyedPath(1, 2, true),
@@ -146,7 +146,7 @@ func TestComposerPickerBoundsNeverOfferAnIllegalValue(t *testing.T) {
 // confirm honest: §5a rules it fires ONLY where sorted was legal and
 // declined, never on a lowering-forced multi.
 func TestComposerSortedIsLegalOnlyWhereSection5SaysSo(t *testing.T) {
-	digest := [32]byte{0x22}
+	digest := composerTestLock([32]byte{0x22})
 	sole := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{composerKeyedPath(2, 3, true)}}
 	if !composerSortedIsLegal(sole, 0) {
 		t.Error("a sole unlocked, unhashed 2-of-3 is exactly where sortedmulti is legal")
@@ -159,7 +159,7 @@ func TestComposerSortedIsLegalOnlyWhereSection5SaysSo(t *testing.T) {
 			"and by BIP-383/388), so the §8b confirm must not be offered for it")
 	}
 	hashed := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{
-		Keys: &md.KeySet{K: 2, N: 3}, Hash: &digest,
+		Keys: &md.KeySet{K: 2, N: 3}, Hash: digest,
 	}}}
 	if composerSortedIsLegal(hashed, 0) {
 		t.Error("a hashed path is not a sole sortedmulti child either")
@@ -219,16 +219,16 @@ func TestComposerExperimentalConfirmsDrawInFullAndFireOnCondition(t *testing.T) 
 // TestComposerEveryPathHashedWarns is §8h, fired at the transition out of the
 // shape, and §12 item 5's condition test for it.
 func TestComposerEveryPathHashedWarns(t *testing.T) {
-	digest := [32]byte{0x33}
+	digest := composerTestLock([32]byte{0x33})
 	all := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-		{Keys: &md.KeySet{K: 1, N: 1}, Hash: &digest},
-		{Keys: &md.KeySet{K: 2, N: 3}, Hash: &digest},
+		{Keys: &md.KeySet{K: 1, N: 1}, Hash: digest},
+		{Keys: &md.KeySet{K: 2, N: 3}, Hash: digest},
 	}}
 	if !composerEveryPathHashed(all) {
 		t.Error("a list whose every path carries a hash does not trip §8h")
 	}
 	some := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-		{Keys: &md.KeySet{K: 1, N: 1}, Hash: &digest},
+		{Keys: &md.KeySet{K: 1, N: 1}, Hash: digest},
 		composerKeyedPath(2, 3, false),
 	}}
 	if composerEveryPathHashed(some) {

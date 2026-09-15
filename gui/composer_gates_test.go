@@ -59,9 +59,9 @@ func TestComposerSection8mRefusalsAllFitAndDraw(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
-		digest := [32]byte{0x11}
+		digest := composerTestLock([32]byte{0x11})
 		list := md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
-			{Keys: &md.KeySet{K: 1, N: 1}}, {Hash: &digest},
+			{Keys: &md.KeySet{K: 1, N: 1}}, {Hash: digest},
 		}}
 		_, err := md.ValidatePathList(list)
 		if err == nil {
@@ -398,11 +398,11 @@ func TestComposerShapeRefusalGateIsReachedFromTheScreen(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
-		digest := [32]byte{0x77}
+		digest := composerTestLock([32]byte{0x77})
 		// One key-less path under wsh: legal to BUILD, refused at Done because
 		// §4e's first row needs a path with keys.
 		st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-			{Hash: &digest},
+			{Hash: digest},
 		}}, reg: &seedRegistry{}}
 		done := false
 		frame, quit := runUI(ctx, func() {
@@ -836,9 +836,9 @@ func TestComposerChangeTheScriptRowRewrapsAndDiscards(t *testing.T) {
 // whole purpose is to prevent an unspendable wallet was stated once, several
 // screens earlier, on a policy that may have gained its hashlock afterwards.
 func TestComposerConsentRestatesTheHashRule(t *testing.T) {
-	digest := [32]byte{0xab}
+	digest := composerTestLock([32]byte{0xab})
 	hashed := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}, Hash: &digest},
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}, Hash: digest},
 	}}
 	c, err := md.Compose(hashed)
 	if err != nil {
@@ -958,7 +958,7 @@ func TestComposerHexEntryItselfRefusesAnythingButSixtyFourCharacters(t *testing.
 		p := newPlatform()
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
-		var got [32]byte
+		var got *md.HashLock
 		var ok bool
 		frame, quit := runUI(ctx, func() { got, ok = composerHexEntry(ctx, &descriptorTheme) })
 		defer quit()
@@ -977,7 +977,13 @@ func TestComposerHexEntryItselfRefusesAnythingButSixtyFourCharacters(t *testing.
 			t.Fatal("INCONCLUSIVE: 64 valid hex characters were not accepted, so the two " +
 				"refusals above prove nothing about the bound")
 		}
-		if got == [32]byte{} {
+		if got == nil {
+			t.Fatal("a 64-hex entry reported ok and returned no lock at all")
+		}
+		// Equal, not ==: md.HashLock is deliberately non-comparable, and the
+		// zero it is compared against is a zero sha256 lock rather than a zero
+		// struct, so the assertion still names the same digest it always did.
+		if got.Equal(composerTestLock([32]byte{})) {
 			t.Error("a 64-hex entry returned the zero digest, which is spendable by anyone " +
 				"who knows the preimage of zero")
 		}
@@ -1134,20 +1140,20 @@ func TestComposerMintCardsMintsOneCardPerSeatedSlot(t *testing.T) {
 // screen-level fires-on-condition test.
 // MUTATION: remove any one showError call in composerShowRefusal's arms.
 func TestComposerSection8mRefusalsAllDrawThroughTheRealPath(t *testing.T) {
-	digest := [32]byte{0x11}
+	digest := composerTestLock([32]byte{0x11})
 	for _, tc := range []struct {
 		name string
 		list md.PathList
 		want string
 	}{
-		{"no keyed path", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: &digest}}},
+		{"no keyed path", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: digest}}},
 			"at least one path with a key"},
 		{"lock-only path", md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 			{Keys: &md.KeySet{K: 1, N: 1}},
 			{Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 100}},
 		}}, "anyone can spend after it"},
 		{"key-less under tr", md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
-			{Keys: &md.KeySet{K: 1, N: 1}}, {Hash: &digest},
+			{Keys: &md.KeySet{K: 1, N: 1}}, {Hash: digest},
 		}}, "key-less path in taproot"},
 		{"legacy wrapper shape", md.PathList{Wrapper: md.ComposeSh, Paths: []md.SpendPath{
 			{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}},

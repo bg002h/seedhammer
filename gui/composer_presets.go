@@ -51,12 +51,18 @@ func composerPresetAfter(height uint32) *md.Lock {
 // carries. It is READ OFF THE VECTOR, never typed from memory: a hashlock
 // whose preimage nobody holds is a path that can never be spent, so the one
 // value here that an operator cannot check by eye is the one pinned hardest.
-func composerPresetDigest() *[32]byte {
+func composerPresetDigest() *md.HashLock {
 	var d [32]byte
 	for i := range d {
 		d[i] = 0xa8
 	}
-	return &d
+	// sha256: the preset's fixture has always meant that, and §6's producer
+	// rule keeps the sha256 form byte-identical to what shipped.
+	h, ok := md.NewHashLock(md.KindSha256, d[:])
+	if !ok {
+		panic("gui: composerPresetDigest: 32 bytes is sha256's width")
+	}
+	return h
 }
 
 // composerPresets returns the archetypes offered under w (§4d).

@@ -50,7 +50,9 @@ type composerState struct {
 	// once and the backup burden is unchanged.
 	//
 	// It is nil until the first HOLD; composerNotePhraseDigest allocates.
-	phraseDigests map[[32]byte]struct{}
+	// Keyed by HashLock.MapKey() for the same reason hashlockHeld is: the same
+	// 32 bytes mean different things under different kinds (spec §5).
+	phraseDigests map[string]struct{}
 
 	// hashlockHeld is the material THIS COMPOSITION may cut onto a preimage
 	// plate, keyed by digest exactly as phraseDigests is (H6 §2.2). H5 §2's
@@ -78,7 +80,12 @@ type composerState struct {
 	// defer, composerFlowExit, and it goes IN that defer rather than beside it:
 	// a second defer costs 96 B of firmware flash because TinyGo removes the
 	// empty stub's CALL and not the defer bookkeeping around it.
-	hashlockHeld map[[32]byte]hashlockMaterial
+	// KEYED ON THE WHOLE HASHLOCK (spec §5), via MapKey because a HashLock is
+	// deliberately non-comparable and cannot be a Go map key. Keyed on the bare
+	// digest it said "I hold material for these 32 bytes", which does not say
+	// WHICH wallet -- the same bytes mean different things under different
+	// kinds. The value carries the lock so a range loop still has it.
+	hashlockHeld map[string]hashlockMaterial
 
 	// NO CONFIRM MEMO LIVES HERE, and its absence is the fix rather than an
 	// omission. §8a and §8b were memoised by the operator's path INDEX, and an
@@ -305,11 +312,11 @@ func composerEveryPathHashed(list md.PathList) bool {
 // package, so phraseDigests arrives nil -- and an assignment into a nil map
 // panics. The panic would be on the machine, in the GUI goroutine, at the
 // moment the operator holds to confirm a hash that gates funds.
-func composerNotePhraseDigest(st *composerState, h [32]byte) {
+func composerNotePhraseDigest(st *composerState, h *md.HashLock) {
 	if st.phraseDigests == nil {
-		st.phraseDigests = make(map[[32]byte]struct{})
+		st.phraseDigests = make(map[string]struct{})
 	}
-	st.phraseDigests[h] = struct{}{}
+	st.phraseDigests[h.MapKey()] = struct{}{}
 }
 
 // hashlockProvenance records WHICH PATH RAN, not a runtime test: a phrase
@@ -332,6 +339,9 @@ const (
 // carrier holds X and H and no phrase at all, which is why §5.3's pick step
 // offers the phrase forms only when Phrase is non-empty.
 type hashlockMaterial struct {
+	// lock is the key's own HashLock, carried in the value because the map is
+	// keyed by MapKey() and a range loop would otherwise lose the kind.
+	lock       *md.HashLock
 	phrase     []byte
 	method     hashlockMethod
 	preimage   [32]byte
@@ -343,11 +353,15 @@ type hashlockMaterial struct {
 // MUTATION-RELEVANT: assigning straight into st.hashlockHeld panics on the
 // zero-value state composerFlow builds, which is every production run's first
 // HOLD.
-func composerHoldHashlockMaterial(st *composerState, h [32]byte, m hashlockMaterial) {
+func composerHoldHashlockMaterial(st *composerState, h *md.HashLock, m hashlockMaterial) {
 	if st.hashlockHeld == nil {
-		st.hashlockHeld = make(map[[32]byte]hashlockMaterial)
+		st.hashlockHeld = make(map[string]hashlockMaterial)
 	}
-	st.hashlockHeld[h] = m
+	// The value carries its own lock: the map is keyed by MapKey() because a
+	// HashLock cannot be a Go map key, and a range loop would otherwise have
+	// the key string and no kind.
+	m.lock = h
+	st.hashlockHeld[h.MapKey()] = m
 }
 
 // composerScrubHashlockHeld wipes every held phrase and zeroes every preimage.
@@ -386,7 +400,7 @@ func composerAnyPathByPhrase(st *composerState) bool {
 		if p.Hash == nil {
 			continue
 		}
-		if _, ok := st.phraseDigests[*p.Hash]; ok {
+		if _, ok := st.phraseDigests[p.Hash.MapKey()]; ok {
 			return true
 		}
 	}

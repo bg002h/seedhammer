@@ -20,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip32"
 	"seedhammer.com/hashlock"
+	"seedhammer.com/md"
 )
 
 const (
@@ -39,9 +40,20 @@ const (
 )
 
 var (
-	ErrKeyRecord  = errors.New("sysw: key: needs [fingerprint/path]xpub with an origin")
-	ErrHashRecord = errors.New("sysw: hash: must be exactly 64 lowercase hex characters")
-	ErrNowRecord  = errors.New("sysw: now: must be <seconds>[,<height>] in range")
+	ErrKeyRecord = errors.New("sysw: key: needs [fingerprint/path]xpub with an origin")
+	// ErrHashRecord is the body failing its rule under a KNOWN kind. The §8n
+	// line names that kind's own width -- told "must be exactly 64 hex
+	// characters", a ripemd160 record given 64 hex learns nothing.
+	//
+	// It carries the kind, unlike ErrPhraseRecord which is deliberately one
+	// error: a digest is PUBLIC and a phrase is not.
+	ErrHashRecord = errors.New("sysw: hash: body is not that kind's width in lowercase hex")
+	// ErrHashKind is the TOKEN itself being unknown or wrongly cased. Its own
+	// error, never a fallback to sha256: reading hash:sha512:<hex> AS sha256
+	// composes a wallet nobody can spend, silently, which is what §6's
+	// fail-closed paragraph rules out.
+	ErrHashKind  = errors.New("sysw: hash: unknown hash kind")
+	ErrNowRecord = errors.New("sysw: now: must be <seconds>[,<height>] in range")
 	// ErrPhraseRecord covers every failure of the phrase: body -- not hex, not
 	// UTF-8, no comma, an unknown method selector, or a phrase the rule
 	// refuses. One error, one §8n line, exactly as the other three have.
@@ -188,19 +200,55 @@ func unhexLower(s string) ([]byte, bool) {
 	return b, true
 }
 
-// ParseHashRecord: exactly 64 lowercase hex characters.
-func ParseHashRecord(record string) ([32]byte, error) {
+// ParseHashRecord parses `hash: [<kind>:] <hex>` (SPEC_hashlock_kinds §6), with
+// the hex at kind.DigestLen()*2 -- 64 for sha256 and hash256, 40 for ripemd160
+// and hash160. An ABSENT kind means sha256, which is what keeps every payload
+// packed before this cycle byte-identical and is the only form firmware without
+// kind support understands.
+func ParseHashRecord(record string) (*md.HashLock, error) {
 	body, ok := strings.CutPrefix(record, HashPrefix)
-	if !ok || len(body) != 64 {
-		return [32]byte{}, ErrHashRecord
-	}
-	b, ok := unhexLower(body)
 	if !ok {
-		return [32]byte{}, ErrHashRecord
+		return nil, ErrHashRecord
 	}
-	var h [32]byte
-	copy(h[:], b)
-	return h, nil
+	// SPEC_hashlock_kinds §6: `hash: [<kind>:] <hex>`. An ABSENT kind means
+	// sha256 -- that is what keeps every payload packed before this cycle
+	// byte-identical, and it is the only form firmware without kind support
+	// understands.
+	//
+	// Split on the LAST colon: the body is either <hex> or <kind>:<hex>, and
+	// hex contains no colon, so the tail after a colon is always the digest.
+	kind := md.KindSha256
+	hexBody := body
+	if i := strings.LastIndex(body, ":"); i >= 0 {
+		k, ok := md.HashKindFromToken(body[:i])
+		if !ok {
+			return nil, ErrHashKind
+		}
+		kind, hexBody = k, body[i+1:]
+	}
+	if len(hexBody) != kind.DigestLen()*2 {
+		return nil, ErrHashRecord
+	}
+	b, ok := unhexLower(hexBody)
+	if !ok {
+		return nil, ErrHashRecord
+	}
+	lock, ok := md.NewHashLock(kind, b)
+	if !ok {
+		return nil, ErrHashRecord
+	}
+	return lock, nil
+}
+
+// HashRecord renders a lock as its §6 record: BARE for sha256, tagged for the
+// other three. "Input is liberal, output is conservative" -- an explicit
+// hash:sha256: is accepted on input and never emitted, so every payload that
+// exists today stays byte-identical.
+func HashRecord(h *md.HashLock) string {
+	if h.Kind() == md.KindSha256 {
+		return HashPrefix + hex.EncodeToString(h.Digest())
+	}
+	return HashPrefix + h.Kind().Token() + ":" + hex.EncodeToString(h.Digest())
 }
 
 // digitsInRange is the host's digits_in_range: ASCII digits only (no sign, no

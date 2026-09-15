@@ -3,8 +3,11 @@ package hashlock
 import (
 	"encoding/json"
 	"os"
+	"seedhammer.com/md"
 	"strings"
 	"testing"
+
+	qr "github.com/seedhammer/kortschak-qr"
 )
 
 // TestH6MethodLineAndQRTextMatchTheMSCorpus pins MethodLine and QRText against
@@ -35,6 +38,7 @@ func TestH6MethodLineAndQRTextMatchTheMSCorpus(t *testing.T) {
 		QRText []struct {
 			Name   string `json:"name"`
 			Method string `json:"method"`
+			Kind   string `json:"kind"`
 			Phrase string `json:"phrase"`
 			Text   string `json:"qr_text"`
 			Bytes  int    `json:"bytes"`
@@ -50,16 +54,28 @@ func TestH6MethodLineAndQRTextMatchTheMSCorpus(t *testing.T) {
 	for _, row := range corpus.QRText {
 		hardened := row.Method == "hardened"
 		seen[row.Method]++
-		if got := QRText(hardened, row.Phrase); got != row.Text {
+		kind, ok := md.HashKindFromToken(row.Kind)
+		if !ok {
+			t.Fatalf("row %s: corpus kind %q is not a §6 token", row.Name, row.Kind)
+		}
+		if got := QRText(hardened, kind, row.Phrase); got != row.Text {
 			t.Errorf("row %s: QRText = %q, want the corpus row %q", row.Name, got, row.Text)
 		} else if len(got) != row.Bytes {
 			t.Errorf("row %s: QRText is %d bytes, the corpus says %d", row.Name, len(got), row.Bytes)
 		}
 		// The method line is the corpus row's SECOND line, so MethodLine is
 		// pinned by the same rows rather than by a transcription of them.
+		// FOUR lines since SPEC_hashlock_kinds §13.1 added the `hash:` line
+		// between `method:` and `phrase:`. MethodLine is still the SECOND, so
+		// it stays pinned by the rows rather than by a transcription of them.
 		lines := strings.Split(row.Text, "\n")
-		if len(lines) != 3 {
-			t.Fatalf("row %s: the corpus text is %d LF-separated lines, want 3", row.Name, len(lines))
+		if len(lines) != 4 {
+			t.Fatalf("row %s: the corpus text is %d LF-separated lines, want 4", row.Name, len(lines))
+		}
+		// ...and the third line names the kind, which is the whole point of
+		// the row: a plate read years later says which hash it commits to.
+		if got, want := lines[2], "hash: "+row.Kind; got != want {
+			t.Errorf("row %s: third line %q, want %q", row.Name, got, want)
 		}
 		if got := MethodLine(hardened); got != lines[1] {
 			t.Errorf("row %s: MethodLine(%v) = %q, want the corpus line %q",
@@ -77,5 +93,34 @@ func TestH6MethodLineAndQRTextMatchTheMSCorpus(t *testing.T) {
 	// the QR'd phrase plate over the 416000-unit budget at 11 rows.
 	if n := len(MethodLine(true)); n != 73 {
 		t.Errorf("the hardened method line is %d characters; H6 §6.5 pins the plate's worst case on 73", n)
+	}
+}
+
+// TestQRStaysAtFiftyThreeModules pins the invariant SPEC_hashlock_kinds §13.1
+// rests on and ACCEPTANCE item 8 (the operator's ~43-minute QR-scan gate)
+// depends on: adding the `hash:` line does NOT move the QR version.
+//
+// §13.1 measured it and nothing pinned it. A version bump would change the
+// plate's reserved envelope and silently invalidate a scan gate an operator
+// spends most of an hour on, so it is a gate here rather than a note in a
+// document.
+//
+// The worst case is hardened + ripemd160: the longest method line and the
+// longest kind token.
+func TestQRStaysAtFiftyThreeModules(t *testing.T) {
+	worst := strings.Repeat("0", 100) // the phrase cap
+	for _, k := range []md.HashKind{
+		md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160,
+	} {
+		txt := QRText(true, k, worst)
+		c, err := qr.Encode(txt, qr.L)
+		if err != nil {
+			t.Fatalf("%s: %v", k.Token(), err)
+		}
+		if c.Size != 53 {
+			t.Errorf("%s: %d bytes encodes to %d modules, want 53 -- the plate's "+
+				"reserved envelope and ACCEPTANCE item 8's scan gate assume it",
+				k.Token(), len(txt), c.Size)
+		}
 	}
 }

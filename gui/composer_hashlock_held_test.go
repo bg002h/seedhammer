@@ -37,15 +37,16 @@ func composerH6ZeroState(t *testing.T, paths int) *composerState {
 // `panic: assignment to entry in nil map`.
 func TestComposerHoldsHashlockMaterialOnTheZeroValueState(t *testing.T) {
 	st := composerH6ZeroState(t, 1)
-	var h [32]byte
-	h[0], h[31] = 0xb8, 0xcb
+	var raw [32]byte
+	raw[0], raw[31] = 0xb8, 0xcb
+	h := composerTestLock(raw)
 	composerHoldHashlockMaterial(st, h, hashlockMaterial{
 		phrase:     []byte("correct horse battery staple"),
 		method:     hashlockSHA256,
 		preimage:   [32]byte{1, 2, 3},
 		provenance: hashlockFromPhrase,
 	})
-	m, ok := st.hashlockHeld[h]
+	m, ok := st.hashlockHeld[h.MapKey()]
 	if !ok {
 		t.Fatalf("the digest is not held (%d entries)", len(st.hashlockHeld))
 	}
@@ -67,8 +68,7 @@ func TestComposerHoldsHashlockMaterialOnTheZeroValueState(t *testing.T) {
 // is why both are asserted.
 func TestComposerFlowExitScrubsHeldHashlockMaterial(t *testing.T) {
 	st := composerH6ZeroState(t, 1)
-	var h [32]byte
-	h[0] = 0x7f
+	h := composerTestLock([32]byte{0x7f})
 	phrase := []byte("correct horse battery staple")
 	composerHoldHashlockMaterial(st, h, hashlockMaterial{
 		phrase:     phrase,
@@ -82,7 +82,7 @@ func TestComposerFlowExitScrubsHeldHashlockMaterial(t *testing.T) {
 	if !bytes.Equal(phrase, make([]byte, len(phrase))) {
 		t.Errorf("the phrase survived the flow-exit defer: %q", phrase)
 	}
-	m := st.hashlockHeld[h]
+	m := st.hashlockHeld[h.MapKey()]
 	if m.preimage != ([32]byte{}) {
 		t.Errorf("the preimage survived the flow-exit defer: %x", m.preimage)
 	}

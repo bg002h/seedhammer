@@ -53,7 +53,10 @@ const (
 // is LISTED, never cut (§5.3 item 6), and NOTHING is deleted from hashlockHeld
 // to achieve that (§2.2 item 2) -- the zero is what carries the difference.
 type hashlockPlate struct {
-	digest   [32]byte
+	// The LOCK, not a bare digest: the same 32 bytes mean different things
+	// under different kinds (spec §5), and the plate's locator row names the
+	// kind (§13.1).
+	lock     *md.HashLock
 	material hashlockMaterial
 	path     int
 	choice   hashlockPlateChoice
@@ -75,19 +78,23 @@ func composerPreimagePlates(st *composerState) []hashlockPlate {
 		return nil
 	}
 	var out []hashlockPlate
-	seen := map[[32]byte]bool{}
+	// KEYED BY md.HashLock.MapKey(), as hashlockHeld itself is: a HashLock is
+	// deliberately non-comparable, so neither the set nor the map can be keyed
+	// on the lock, and the key carries the KIND so the same bytes under two
+	// kinds are two plates.
+	seen := map[string]bool{}
 	for i, p := range st.list.Paths {
-		if p.Hash == nil || seen[*p.Hash] {
+		if p.Hash == nil || seen[p.Hash.MapKey()] {
 			continue
 		}
-		m, held := st.hashlockHeld[*p.Hash]
+		m, held := st.hashlockHeld[p.Hash.MapKey()]
 		if !held {
 			continue
 		}
-		seen[*p.Hash] = true
-		out = append(out, hashlockPlate{digest: *p.Hash, material: m, path: i + 1})
+		seen[p.Hash.MapKey()] = true
+		out = append(out, hashlockPlate{lock: p.Hash, material: m, path: i + 1})
 	}
-	var rest [][32]byte
+	var rest []string
 	for h := range st.hashlockHeld {
 		if !seen[h] {
 			rest = append(rest, h)
@@ -98,11 +105,15 @@ func composerPreimagePlates(st *composerState) []hashlockPlate {
 	// sort.Slice would be the expensive one; it measured 1,644,120 B of flash
 	// against 1,643,580 for this line, i.e. 540 B WORSE. The reflect machinery
 	// is already resident, so the call is free and the loop was not.
+	// SORTED ON THE MAP KEY, which is `<kind token>:<digest at its own width>`
+	// -- so within one kind the order is still the digest order this list has
+	// always had, and two kinds sort into blocks instead of interleaving.
 	sort.Slice(rest, func(i, j int) bool {
-		return string(rest[i][:]) < string(rest[j][:])
+		return rest[i] < rest[j]
 	})
 	for _, h := range rest {
-		out = append(out, hashlockPlate{digest: h, material: st.hashlockHeld[h]})
+		m := st.hashlockHeld[h]
+		out = append(out, hashlockPlate{lock: m.lock, material: m})
 	}
 	return out
 }
@@ -142,14 +153,14 @@ func composerPreimagePlateRows(m hashlockMaterial) ([]string, []hashlockPlateCho
 // keeps the composition intact through composerFlow's own loop, and a Back that
 // unwound the whole step would leave the operator no way to answer the question
 // for the remaining digests.
-func composerPreimagePlatePick(ctx *Context, th *Colors, st *composerState, h [32]byte) hashlockPlateChoice {
-	m, held := st.hashlockHeld[h]
+func composerPreimagePlatePick(ctx *Context, th *Colors, st *composerState, h *md.HashLock) hashlockPlateChoice {
+	m, held := st.hashlockHeld[h.MapKey()]
 	if !held {
 		return hashlockPlateDecline
 	}
 	path := 0
 	for i, p := range st.list.Paths {
-		if p.Hash != nil && *p.Hash == h {
+		if p.Hash.Equal(h) {
 			path = i + 1
 			break
 		}
@@ -185,7 +196,7 @@ func composerPreimagePlateStep(ctx *Context, th *Colors, st *composerState) []ha
 		if plates[i].path == 0 {
 			continue
 		}
-		plates[i].choice = composerPreimagePlatePick(ctx, th, st, plates[i].digest)
+		plates[i].choice = composerPreimagePlatePick(ctx, th, st, plates[i].lock)
 	}
 	return plates
 }
@@ -229,7 +240,7 @@ func hashlockPlateFormWords(p hashlockPlate) string {
 // literals, so the plate and the screen the operator copied into their notebook
 // use the same words. payloadMatch is the 0-based index of the payload hash:
 // record this digest equals, or -1.
-func hashlockPlateLocator(path int, digest [32]byte, stub string, stubIsPolicy bool, payloadMatch int) []string {
+func hashlockPlateLocator(path int, digest *md.HashLock, stub string, stubIsPolicy bool, payloadMatch int) []string {
 	var out []string
 	if path > 0 {
 		out = append(out, fmt.Sprintf("path %d", path))
@@ -264,7 +275,7 @@ func composerHashlockLocator(p hashlockPlate, template, keyed []string) []string
 			stub = fmt.Sprintf("%x", s)
 		}
 	}
-	return hashlockPlateLocator(p.path, p.digest, stub, isPolicy, -1)
+	return hashlockPlateLocator(p.path, p.lock, stub, isPolicy, -1)
 }
 
 // composerBuildHashlockPlate turns one decision into the plate backup engraves.
@@ -289,7 +300,7 @@ func composerBuildHashlockPlate(p hashlockPlate, locator []string) (backup.Hashl
 		plate.Phrase = string(p.material.phrase)
 		plate.Method = hashlock.MethodLine(hardened)
 		plate.QR = p.choice == hashlockPlatePhraseQR
-		plate.QRText = hashlock.QRText(hardened, plate.Phrase)
+		plate.QRText = hashlock.QRText(hardened, p.lock.Kind(), plate.Phrase)
 	default:
 		return backup.Hashlock{}, errHashlockPlateDeclined
 	}
@@ -398,7 +409,7 @@ func composerPreimageCensusLines(plates []hashlockPlate) []string {
 		out = append(out, composerCopyPreimagePlateHeading(len(accepted)))
 		for _, p := range accepted {
 			out = append(out, composerCopyPreimagePlateRow(p.path,
-				hashlockFirst8Last8(p.digest), hashlockPlateFormWords(p)))
+				hashlockFirst8Last8(p.lock), hashlockPlateFormWords(p)))
 		}
 		// F-497: the rows say what will be cut, and this says that is ALL they
 		// say. Only where rows exist -- see the copy's own comment.
@@ -407,9 +418,9 @@ func composerPreimageCensusLines(plates []hashlockPlate) []string {
 	for _, p := range plates {
 		switch {
 		case p.path == 0:
-			out = append(out, composerCopyPreimageNotOnAnyPath(hashlockFirst8Last8(p.digest)))
+			out = append(out, composerCopyPreimageNotOnAnyPath(hashlockFirst8Last8(p.lock)))
 		case p.choice == hashlockPlateDecline:
-			out = append(out, composerCopyPreimageDeclined(hashlockFirst8Last8(p.digest)))
+			out = append(out, composerCopyPreimageDeclined(hashlockFirst8Last8(p.lock)))
 		}
 	}
 	if len(accepted) > 0 {
@@ -436,7 +447,7 @@ func composerEveryHashedPathHeld(st *composerState) bool {
 			continue
 		}
 		any = true
-		if _, held := st.hashlockHeld[*p.Hash]; !held {
+		if _, held := st.hashlockHeld[p.Hash.MapKey()]; !held {
 			return false
 		}
 	}
@@ -459,7 +470,7 @@ func composerEveryHeldPathHasAPhrase(st *composerState) bool {
 		if p.Hash == nil {
 			continue
 		}
-		if len(st.hashlockHeld[*p.Hash].phrase) == 0 {
+		if len(st.hashlockHeld[p.Hash.MapKey()].phrase) == 0 {
 			return false
 		}
 	}
@@ -496,4 +507,6 @@ func composerPreimageMarkTitle(st *composerState) string {
 
 // hashlockDigestHex is the census's own spelling of a digest, for tests and for
 // the locator alike.
-func hashlockDigestHex(h [32]byte) string { return hex.EncodeToString(h[:]) }
+// AT THE KIND'S OWN WIDTH, never the stored array: hexing the [32]byte would
+// append twelve zero bytes of alloc-gate padding for a 20-byte kind.
+func hashlockDigestHex(h *md.HashLock) string { return hex.EncodeToString(h.Digest()) }

@@ -238,11 +238,12 @@ func composerCopyTable() []composerCopyRow {
 // plus a predicate over the CURRENT paths, so the table's row can no longer be
 // driven by a struct literal. Building it here keeps composerCopyTable a table.
 func composerStateByPhraseForCopyTable() *composerState {
-	var d [32]byte
-	for i := range d {
-		d[i] = byte(i)
+	var raw [32]byte
+	for i := range raw {
+		raw[i] = byte(i)
 	}
-	st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: &d}}}}
+	d := composerTestLock(raw)
+	st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: d}}}}
 	composerNotePhraseDigest(st, d)
 	return st
 }

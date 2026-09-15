@@ -167,7 +167,7 @@ func TestHashlockPlatesDerivesOncePerPick(t *testing.T) {
 		t.Fatal("the derivation did not reach the flow's own slice")
 	}
 	want := hashlock.PreimageHardened([]byte(hashlockAnchorPhrase))
-	if recs[0].preimage != want || recs[0].digest != hashlock.Digest(&want) {
+	if recs[0].preimage != want || !recs[0].digest.Equal(composerTestLock(hashlock.DigestSHA256(&want))) {
 		t.Error("the derived preimage is not the record's")
 	}
 	// The SECOND call must not re-run the KDF: it returns immediately, without
@@ -202,7 +202,7 @@ func TestHashlockPlatesDerivesOncePerPick(t *testing.T) {
 // number would name a path that does not exist.
 func TestHashlockPlatesLocatorAlwaysCarriesTheHashRow(t *testing.T) {
 	x := hashlock.PreimageSHA256([]byte(hashlockAnchorPhrase))
-	h := hashlock.Digest(&x)
+	h := composerTestLock(hashlock.DigestSHA256(&x))
 	digestRow := "hash  " + hashlockFirst8Last8(h)
 
 	t.Run("no md1 and no matching hash: record", func(t *testing.T) {
@@ -231,7 +231,7 @@ func TestHashlockPlatesLocatorAlwaysCarriesTheHashRow(t *testing.T) {
 		// locator test built only from one cannot see the phrase branch at all.
 		const phrase = "a hardened payload hashlock phrase"
 		px := hashlock.PreimageHardened([]byte(phrase))
-		ph := hashlock.Digest(&px)
+		ph := composerTestLock(hashlock.DigestSHA256(&px))
 		s := composerSessionWith(nil,
 			[]string{composerTestPhraseRecord(sysw.HashlockHardened, phrase)})
 		r := hashlockPlatesRecords(s)[0]
@@ -299,12 +299,15 @@ func TestHashlockPlatesLocatorAlwaysCarriesTheHashRow(t *testing.T) {
 // row assertion fails, which is the row standing between the operator and a
 // bearer plate with no locator at all.
 // MUTATION: build the locator one statement earlier, before hashlockPlatesDerive
-// -> the row reads `hash  00000000..00000000` and the digest assertion fails.
+// -> the record's digest is still nil at that point and hashlockFirst8Last8
+// panics on the nil lock. It used to read `hash  00000000..00000000` and fail
+// the digest assertion instead; a nil *md.HashLock is what replaced the zero
+// [32]byte, and it makes the same mutation LOUDER rather than quieter.
 func TestHashlockPlatesFlowLocatorCarriesTheDerivedDigest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const phrase = "a payload hashlock phrase"
 		x := hashlock.PreimageSHA256([]byte(phrase))
-		want := "hash  " + hashlockFirst8Last8(hashlock.Digest(&x))
+		want := "hash  " + hashlockFirst8Last8(composerTestLock(hashlock.DigestSHA256(&x)))
 		s := composerSessionWith(nil,
 			[]string{composerTestPhraseRecord(sysw.HashlockSHA256, phrase)})
 

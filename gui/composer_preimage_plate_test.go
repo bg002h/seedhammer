@@ -25,9 +25,9 @@ import (
 // digest is a real SHA-256 of a real preimage rather than a byte pattern -- the
 // plate builder encodes it as an ms1 kind-0x03 string and a pattern would not
 // round-trip.
-func composerH6Material(phrase string, held bool) ([32]byte, hashlockMaterial) {
+func composerH6Material(phrase string, held bool) (*md.HashLock, hashlockMaterial) {
 	x := hashlock.PreimageSHA256([]byte(phrase))
-	h := hashlock.Digest(&x)
+	h := composerTestLock(hashlock.DigestSHA256(&x))
 	m := hashlockMaterial{preimage: x, method: hashlockSHA256, provenance: hashlockFromPhrase}
 	if held {
 		m.phrase = []byte(phrase)
@@ -46,8 +46,7 @@ func composerH6PlateState(t *testing.T, phrases ...string) *composerState {
 	st.list.Paths = append(st.list.Paths, md.SpendPath{Keys: &md.KeySet{K: 2, N: 2}})
 	for _, p := range phrases {
 		h, m := composerH6Material(p, true)
-		hh := h
-		st.list.Paths = append(st.list.Paths, md.SpendPath{Hash: &hh})
+		st.list.Paths = append(st.list.Paths, md.SpendPath{Hash: h})
 		composerHoldHashlockMaterial(st, h, m)
 	}
 	// The shape's slots, sized exactly as composerFlow sizes them before it
@@ -71,7 +70,7 @@ func TestComposerPreimagePlatesAreOrderedByPathNotByMap(t *testing.T) {
 
 	want := []string{}
 	for _, p := range composerPreimagePlates(st) {
-		want = append(want, hashlockDigestHex(p.digest))
+		want = append(want, hashlockDigestHex(p.lock))
 	}
 	if len(want) != 4 {
 		t.Fatalf("%d plates, want 4", len(want))
@@ -79,7 +78,7 @@ func TestComposerPreimagePlatesAreOrderedByPathNotByMap(t *testing.T) {
 	for i := 0; i < 32; i++ {
 		var got []string
 		for _, p := range composerPreimagePlates(st) {
-			got = append(got, hashlockDigestHex(p.digest))
+			got = append(got, hashlockDigestHex(p.lock))
 		}
 		for j := range got {
 			if got[j] != want[j] {
@@ -179,7 +178,7 @@ func TestComposerPreimagePlateRowsDrawOnOneLine(t *testing.T) {
 func TestComposerPreimagePlatePickIsMaskedAndNeverRevealsThePhrase(t *testing.T) {
 	const phrase = "correct horse battery staple"
 	st := composerH6PlateState(t, phrase)
-	h := *st.list.Paths[1].Hash
+	h := st.list.Paths[1].Hash
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -210,7 +209,7 @@ func TestComposerPreimagePlatePickIsMaskedAndNeverRevealsThePhrase(t *testing.T)
 // composerPickScreen's shipped decline arm.
 func TestComposerPreimagePlatePickBackDeclinesTheHighlightedPlate(t *testing.T) {
 	st := composerH6PlateState(t, "anchor a")
-	h := *st.list.Paths[1].Hash
+	h := st.list.Paths[1].Hash
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -240,7 +239,7 @@ func TestComposerPreimagePlatePickBackDeclinesTheHighlightedPlate(t *testing.T) 
 // and the operator would get a QR they explicitly refused.
 func TestComposerPreimageQRWarningFiresOnTheQRRowAndCanBeDeclined(t *testing.T) {
 	st := composerH6PlateState(t, "anchor a")
-	h := *st.list.Paths[1].Hash
+	h := st.list.Paths[1].Hash
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -295,8 +294,8 @@ func TestComposerCensusReportsEveryDecisionAndCutsNothingItself(t *testing.T) {
 
 	for _, want := range []string{
 		"Plus 1 preimage plate(s), cut first and NOT part of this backup:",
-		"path 2  " + hashlockFirst8Last8(plates[0].digest) + "  phrase, sha256, QR",
-		"preimage " + hashlockFirst8Last8(plates[1].digest) + ": declined, will not be cut",
+		"path 2  " + hashlockFirst8Last8(plates[0].lock) + "  phrase, sha256, QR",
+		"preimage " + hashlockFirst8Last8(plates[1].lock) + ": declined, will not be cut",
 		"preimage " + hashlockFirst8Last8(hd) + ": not on any path, will not be cut",
 		"Keep each preimage plate apart from the policy plates and from the others.",
 	} {
@@ -564,9 +563,8 @@ func TestComposerPreimageMarkTitleMarksMd1AndMk1ButNeverMs1(t *testing.T) {
 func TestComposerHashEveryPathArmsAreInThePresentTenseOfWhatIsHeld(t *testing.T) {
 	// Nothing held: the two shipped arms are unchanged.
 	plain := &composerState{list: md.PathList{Wrapper: md.ComposeWsh}}
-	var d [32]byte
-	d[0] = 0x11
-	plain.list.Paths = []md.SpendPath{{Hash: &d}}
+	d := composerTestLock([32]byte{0x11})
+	plain.list.Paths = []md.SpendPath{{Hash: d}}
 	if got := composerCopyHashEveryPathFor(plain); got != composerCopyHashEveryPath() {
 		t.Errorf("a composition holding nothing does not draw the shipped plain arm:\n%q", got)
 	}
@@ -579,8 +577,7 @@ func TestComposerHashEveryPathArmsAreInThePresentTenseOfWhatIsHeld(t *testing.T)
 	all := &composerState{list: md.PathList{Wrapper: md.ComposeWsh}}
 	for _, p := range []string{"anchor a", "anchor b"} {
 		h, m := composerH6Material(p, true)
-		hh := h
-		all.list.Paths = append(all.list.Paths, md.SpendPath{Hash: &hh})
+		all.list.Paths = append(all.list.Paths, md.SpendPath{Hash: h})
 		composerHoldHashlockMaterial(all, h, m)
 	}
 	if got := composerCopyHashEveryPathFor(all); got != composerCopyHashEveryPathHeldPhrase() {
@@ -591,8 +588,7 @@ func TestComposerHashEveryPathArmsAreInThePresentTenseOfWhatIsHeld(t *testing.T)
 	mixed := &composerState{list: md.PathList{Wrapper: md.ComposeWsh}}
 	h1, m1 := composerH6Material("anchor a", true)
 	h2, m2 := composerH6Material("anchor b", false)
-	hh1, hh2 := h1, h2
-	mixed.list.Paths = []md.SpendPath{{Hash: &hh1}, {Hash: &hh2}}
+	mixed.list.Paths = []md.SpendPath{{Hash: h1}, {Hash: h2}}
 	composerHoldHashlockMaterial(mixed, h1, m1)
 	composerHoldHashlockMaterial(mixed, h2, m2)
 	if got := composerCopyHashEveryPathFor(mixed); got != composerCopyHashEveryPathHeld() {
@@ -602,10 +598,8 @@ func TestComposerHashEveryPathArmsAreInThePresentTenseOfWhatIsHeld(t *testing.T)
 	// One hashed path held and one NOT: the held arms may not fire at all.
 	partial := &composerState{list: md.PathList{Wrapper: md.ComposeWsh}}
 	h3, m3 := composerH6Material("anchor c", true)
-	hh3 := h3
-	var other [32]byte
-	other[0] = 0x22
-	partial.list.Paths = []md.SpendPath{{Hash: &hh3}, {Hash: &other}}
+	other := composerTestLock([32]byte{0x22})
+	partial.list.Paths = []md.SpendPath{{Hash: h3}, {Hash: other}}
 	composerHoldHashlockMaterial(partial, h3, m3)
 	got := composerCopyHashEveryPathFor(partial)
 	if got == composerCopyHashEveryPathHeld() || got == composerCopyHashEveryPathHeldPhrase() {
@@ -654,7 +648,7 @@ func TestComposerBuildHashlockPlateCarriesTheLocatorAndTheRightForm(t *testing.T
 	for _, r := range loc {
 		if strings.HasPrefix(r, "hash  ") {
 			foundHash = true
-			if !strings.Contains(r, hashlockFirst8Last8(plates[0].digest)) {
+			if !strings.Contains(r, hashlockFirst8Last8(plates[0].lock)) {
 				t.Errorf("the locator's hash row is %q", r)
 			}
 		}
@@ -704,7 +698,7 @@ func TestComposerBuildHashlockPlateCarriesTheLocatorAndTheRightForm(t *testing.T
 			if desc.MS1 != "" {
 				t.Errorf("the phrase form carries the ms1 string %q", desc.MS1)
 			}
-			if tc.qr && desc.QRText != hashlock.QRText(false, phrase) {
+			if tc.qr && desc.QRText != hashlock.QRText(false, md.KindSha256, phrase) {
 				t.Errorf("the QR text is %q", desc.QRText)
 			}
 			if tc.qr && strings.Contains(desc.QRText, "ms10hash") {
@@ -778,7 +772,7 @@ func runComposerEngraveStep(t *testing.T, st *composerState, template []string, 
 // on page 2.
 func TestComposerPreimagePlatePickDrawsAllFourRows(t *testing.T) {
 	st := composerH6PlateState(t, "correct horse battery staple")
-	h := *st.list.Paths[1].Hash
+	h := st.list.Paths[1].Hash
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -880,7 +874,7 @@ func TestComposerCutsPreimagePlatesBeforeThePolicySet(t *testing.T) {
 		if !uiContains(content, "dies with this composition") {
 			t.Errorf("§8.4a does not say the phrase dies with the COMPOSITION.\nFrame: %q", content)
 		}
-		if _, held := st.hashlockHeld[*st.list.Paths[1].Hash]; !held {
+		if _, held := st.hashlockHeld[st.list.Paths[1].Hash.MapKey()]; !held {
 			t.Error("the abort dropped the held material, which would make §8.4a's own wording false")
 		}
 		click(&ctx.Router, Button3)

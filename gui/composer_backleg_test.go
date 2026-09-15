@@ -595,11 +595,12 @@ func TestComposerBackAtTheWrapperPickerLeavesTheComposer(t *testing.T) {
 // ANY of them moves the signature away from where it is now. The probe
 // compares two points; the oracle sweeps the arm's range.
 func TestComposerEditCanRenumberIsExactOverEveryReachableShape(t *testing.T) {
-	digestA, digestB := new([32]byte), new([32]byte)
-	for i := range digestA {
-		digestA[i] = 0xab
-		digestB[i] = 0x7f
+	var rawA, rawB [32]byte
+	for i := range rawA {
+		rawA[i] = 0xab
+		rawB[i] = 0x7f
 	}
+	digestA, digestB := composerTestLock(rawA), composerTestLock(rawB)
 	variants := []md.SpendPath{
 		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
 		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 26280}},
@@ -615,7 +616,7 @@ func TestComposerEditCanRenumberIsExactOverEveryReachableShape(t *testing.T) {
 		{Kind: md.LockOlderBlocks, Value: 26280},
 		{Kind: md.LockAfterHeight, Value: 1000000},
 	}
-	hashValues := []*[32]byte{nil, digestA, digestB}
+	hashValues := []*md.HashLock{nil, digestA, digestB}
 
 	var lists []md.PathList
 	for _, w := range []md.ComposeWrapper{md.ComposeWsh, md.ComposeTr} {
@@ -714,10 +715,11 @@ func TestComposerHashEditOnAKeylessPathAsksBeforeItDiscards(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
 		ctx := NewContext(p)
-		digest := new([32]byte)
-		for i := range digest {
-			digest[i] = 0xab
+		var raw [32]byte
+		for i := range raw {
+			raw[i] = 0xab
 		}
+		digest := composerTestLock(raw)
 		st := &composerState{reg: &seedRegistry{}, list: md.PathList{
 			Wrapper: md.ComposeWsh,
 			Paths: []md.SpendPath{
