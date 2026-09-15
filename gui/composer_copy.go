@@ -554,8 +554,11 @@ func composerCopyHashlockDerivingLead() string {
 // every run, which is why no literal is asserted here -- headroom is a LINE
 // budget, not a character budget (modal_fits_test.go), so H5 §1's longer
 // write-down sentence adds no line and does not move it.
-func composerCopyHashlockConfirm(first8last8, method string, chars int, relation, otherPath string) string {
-	b := "hash  " + first8last8 + "\n" +
+func composerCopyHashlockConfirm(first8last8, method string, chars int, relation, otherPath string, kind md.HashKind) string {
+	// The kind sits with the digest, because §6's binding rule is that where
+	// both axes could be read, BOTH are named or neither is -- and the line
+	// below names the method.
+	b := "hash  " + kind.Token() + " " + first8last8 + "\n" +
 		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n"
 	if relation != "" {
 		b += relation + "\n"
@@ -564,10 +567,18 @@ func composerCopyHashlockConfirm(first8last8, method string, chars int, relation
 		b += otherPath + "\n"
 	}
 	return b +
-		"Write down this phrase, the method and this digest now. This composition " +
-		"holds them until it ends. Without both, this path can never be spent.\n" +
-		"One phrase per policy. Never use this phrase as a passphrase or a password " +
-		"anywhere else."
+		// SHORTENED, not margin-lowered. Adding the kind here and on the hash
+		// row took the longest variant to 64 characters of headroom under an
+		// 80-character margin, and modal_fits' own message says why that is
+		// not good enough: F-185's fix failed exactly here, because a
+		// +65-character edit still FIT and so could re-break the screen
+		// without turning a test red.
+		//
+		// "Without BOTH" was also wrong the moment this listed three things.
+		"Write down the phrase, method, hash kind and digest now. " +
+		"This composition holds them until it ends. " +
+		"Without them, this path can never be spent.\n" +
+		"One phrase per policy. Never use it as a passphrase or password anywhere else."
 }
 
 // composerCopyHashlockPreimageConfirm is §5.1's confirm body for a PREIMAGE
@@ -582,8 +593,18 @@ func composerCopyHashlockConfirm(first8last8, method string, chars int, relation
 //
 // WHAT REPLACES THE WRITE-DOWN LINE is the thing that IS true here: the
 // preimage is in the payload, in flash, and a plate is the way it leaves.
-func composerCopyHashlockPreimageConfirm(first8last8, relation, otherPath string) string {
-	b := "hash  " + first8last8 + "\n" +
+func composerCopyHashlockPreimageConfirm(first8last8, relation, otherPath string, kind md.HashKind) string {
+	// §6's "both axes or neither" is satisfied here either way -- this screen
+	// prints no `method:` line, so there is no collision to resolve. The kind
+	// is named anyway for a simpler reason: the three sibling hashlock screens
+	// now read `hash  <kind> <digest>`, and four screens showing a digest in
+	// two different shapes is its own hazard when the operator is comparing
+	// one against a card.
+	//
+	// Route 5 (§7.1): a payload preimage-plate record carries no kind in its
+	// grammar, so this is sha256 in practice -- but it is passed rather than
+	// assumed here, so the screen cannot drift from the lock it describes.
+	b := "hash  " + kind.Token() + " " + first8last8 + "\n" +
 		"from a preimage record in this payload\n"
 	if relation != "" {
 		b += relation + "\n"
@@ -638,12 +659,22 @@ func composerCopyHashlockRelation(i int) string {
 //
 // Measured on errorScreenBody at sh2DisplaySize, longest variant (`hardened`,
 // `chars: 100`): see the row in TestModalsThisBlockTouchesAreDrawnInFull.
-func composerCopyHashlockReconcile(first8last8, method string, chars int) string {
-	return "hash  " + first8last8 + "\n" +
+func composerCopyHashlockReconcile(first8last8, method string, chars int, kind md.HashKind) string {
+	// §13.2, THE CYCLE'S OPERATOR-FACING CRITICAL. This screen tells the
+	// operator to check a digest and discard the wallet if it differs -- and it
+	// used to supply only `method:`, the OTHER axis (§5). `ms hashlock` with no
+	// kind returns the sha256 digest, both values are 64 hex, and nothing but a
+	// label distinguished them. On a correct hash256 wallet the check FAILED
+	// and an operator complying exactly discarded a good wallet and re-cut five
+	// plates.
+	//
+	// So the body names the kind AND the sentence names the flag: an operator
+	// who runs the command as written now gets the digest this screen shows.
+	return "hash  " + kind.Token() + " " + first8last8 + "\n" +
 		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n" +
-		"Before you cut plates, run ms hashlock with this phrase and method on " +
-		"the host and check the digest matches. If they differ, do not fund this " +
-		"wallet: build it again."
+		"Before you cut plates, run ms hashlock --kind " + kind.Token() +
+		" with this phrase and method on the host and check the digest matches. " +
+		"If they differ, do not fund this wallet: build it again."
 }
 
 // composerCopyHashlockOtherPath is the confirm modal's second relation line
@@ -714,8 +745,11 @@ func composerCopyHashEveryPathFor(st *composerState) string {
 // screen's 4 rows on the first page, and `do not cut this preimage` is the row
 // an operator reaches for to UNDO. Two lines leave all four
 // (TestComposerPreimagePlatePickDrawsAllFourRows).
-func composerCopyPreimagePlateLead(first8last8 string, path, chars int, method string) string {
-	head := "hash  " + first8last8
+func composerCopyPreimagePlateLead(first8last8 string, path, chars int, method string, kind md.HashKind) string {
+	// THE THIRD SCREEN. §13.2: "the fold that wrote that rule missed the screen
+	// it condemned" -- this one prints `method:` and no kind, which §5's rule
+	// condemns as directly as the other two.
+	head := "hash  " + kind.Token() + " " + first8last8
 	if path > 0 {
 		head += fmt.Sprintf("   path %d", path)
 	}

@@ -210,7 +210,7 @@ func composerPagedScreens(t *testing.T) map[string][]string {
 	_, pm := composerH6Material("anchor a", true)
 	prows, _ := composerPreimagePlateRows(pm)
 	out["preimage plate pick"] = append([]string{
-		composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened"), ""}, prows...)
+		composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened", md.KindRipemd160), ""}, prows...)
 
 	return out
 }

@@ -280,7 +280,7 @@ func composerHashlockPlatesFlow(ctx *Context, th *Colors) {
 // digest: the same rows, the same masking, the same §8.5 warning.
 func hashlockPlatesFormPick(ctx *Context, th *Colors, r hashlockPlatesRecord, m hashlockMaterial) hashlockPlateChoice {
 	rows, choices := composerPreimagePlateRows(m)
-	lead := composerCopyPreimagePlateLead(hashlockFirst8Last8(r.digest), 0, len(m.phrase), m.method.String())
+	lead := composerCopyPreimagePlateLead(hashlockFirst8Last8(r.digest), 0, len(m.phrase), m.method.String(), r.digest.Kind())
 	for !ctx.Done {
 		sel, ok := composerPickScreen(ctx, th, "Preimage plate", lead, rows)
 		if !ok {

@@ -166,7 +166,7 @@ func composerPreimagePlatePick(ctx *Context, th *Colors, st *composerState, h *m
 		}
 	}
 	rows, choices := composerPreimagePlateRows(m)
-	lead := composerCopyPreimagePlateLead(hashlockFirst8Last8(h), path, len(m.phrase), m.method.String())
+	lead := composerCopyPreimagePlateLead(hashlockFirst8Last8(h), path, len(m.phrase), m.method.String(), h.Kind())
 	for !ctx.Done {
 		sel, ok := composerPickScreen(ctx, th, "Preimage plate", lead, rows)
 		if !ok {
@@ -245,7 +245,11 @@ func hashlockPlateLocator(path int, digest *md.HashLock, stub string, stubIsPoli
 	if path > 0 {
 		out = append(out, fmt.Sprintf("path %d", path))
 	}
-	out = append(out, "hash  "+hashlockFirst8Last8(digest))
+	// §13.1: the kind goes HERE and in the QR, and explicitly NOT on the
+	// `method:` line (H6 §6.5 pins that at 73 characters) and NOT as a new row
+	// -- either adds an eleventh row and blows the budget at every font rung.
+	// Measured at 35 characters: fits at 3.0 mm, 10 rows, 1.20 mm spare.
+	out = append(out, "hash  "+digest.Kind().Token()+" "+hashlockFirst8Last8(digest))
 	if stub != "" {
 		label := "mk1 stub (template): "
 		if stubIsPolicy {

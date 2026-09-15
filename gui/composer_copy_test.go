@@ -139,23 +139,23 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyHashlockDerivingLead", "H2-4.4", composerCopyHashlockDerivingLead(),
 			"Deriving. This takes about 10 seconds."},
 		{"composerCopyHashlockConfirm", "H2-4.5", composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
-			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
-			"hash  b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
+			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath(), md.KindSha256),
+			"hash  sha256 b867db87..edbc96cb method: hardened   chars: 100 no hash: record in the payload has this digest " +
 				"another path has a different hash: back up every phrase " +
 				// H6 R0 round 0 (journey I-2): the middle sentence used to read
 				// "The phrase and method are not on this device", which §2.2's
 				// retention and §6's plate make FALSE. SPEC_hashlock_H2_device
 				// §4.5's blockquote is rewritten with it by Task 13, and H6 §0
 				// lists it as the FIFTH record this stage falsifies.
-				"Write down this phrase, the method and this digest now. This composition holds them until it ends. Without both, this path can never be spent. " +
-				"One phrase per policy. Never use this phrase as a passphrase or a password anywhere else."},
+				"Write down the phrase, method, hash kind and digest now. This composition holds them until it ends. Without them, this path can never be spent. " +
+				"One phrase per policy. Never use it as a passphrase or password anywhere else."},
 		{"composerCopyHashlockRelation", "H2-4.5", composerCopyHashlockRelation(0),
 			"matches hash 1 in the payload"},
 		{"composerCopyHashlockOtherPath", "H2-4.5", composerCopyHashlockOtherPath(),
 			"another path has a different hash: back up every phrase"},
-		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100),
-			"hash  b867db87..edbc96cb method: hardened   chars: 100 " +
-				"Before you cut plates, run ms hashlock with this phrase and method on the host and check the digest matches. " +
+		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100, md.KindSha256),
+			"hash  sha256 b867db87..edbc96cb method: hardened   chars: 100 " +
+				"Before you cut plates, run ms hashlock --kind sha256 with this phrase and method on the host and check the digest matches. " +
 				"If they differ, do not fund this wallet: build it again."},
 		{"composerCopyHashEveryPathPhrase", "H2-4.7", composerCopyHashEveryPathPhrase(),
 			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
@@ -172,8 +172,8 @@ func composerCopyTable() []composerCopyRow {
 		// spec addition; the `verbatim` column is this build's own text, which
 		// is what §11's "a quoted string in its table" admits.
 		{"composerCopyHashlockPreimageConfirm", "H6-5.1", composerCopyHashlockPreimageConfirm("b867db87..edbc96cb",
-			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath()),
-			"hash  b867db87..edbc96cb from a preimage record in this payload " +
+			composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath(), md.KindSha256),
+			"hash  sha256 b867db87..edbc96cb from a preimage record in this payload " +
 				"no hash: record in the payload has this digest " +
 				"another path has a different hash: back up every phrase " +
 				"Spending this path needs that preimage. It is in the payload and not on these plates. " +
@@ -182,8 +182,8 @@ func composerCopyTable() []composerCopyRow {
 		// own text for the §8.3 rows and the two §8.4 arms; the pick lead, the
 		// plate refusal and §8.5's warning are quoted strings in this table for
 		// §11's reason.
-		{"composerCopyPreimagePlateLead", "H6-5.3", composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened"),
-			"hash  b867db87..edbc96cb   path 2 phrase: 100 characters   method: hardened"},
+		{"composerCopyPreimagePlateLead", "H6-5.3", composerCopyPreimagePlateLead("b867db87..edbc96cb", 2, 100, "hardened", md.KindSha256),
+			"hash  sha256 b867db87..edbc96cb   path 2 phrase: 100 characters   method: hardened"},
 		{"composerCopyPreimageQRWarning", "H6-8.5", composerCopyPreimageQRWarning(),
 			"The QR makes the phrase readable by any camera. A photograph of the plate is a copy of the phrase, and the phrase spends this path."},
 		{"composerCopyPreimagePlateHeading", "H6-8.3", composerCopyPreimagePlateHeading(2),

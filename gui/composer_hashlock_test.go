@@ -397,13 +397,16 @@ func TestHashlockPhraseRouteSetsTheCorpusDigest(t *testing.T) {
 				// 28 characters: no hardened warning.
 				h.mustReach("Deriving")
 			}
-			body := h.mustReach("Write down this phrase")
+			body := h.mustReach("Write down the phrase")
 			// Post-impl I-1: the two spec 4.5-normative tokens are produced by
 			// production code (hashlockFirst8Last8 and len(phrase)) and were
 			// asserted by nothing -- both survived mutation of the whole suite.
 			// MUTATION: hashlockFirst8Last8 returning s[:8]+".."+s[:8] -> the
 			// first assertion fails; len(phrase)+1 at the call site -> the second.
-			wantTok := "hash " + tc.want[:8] + ".." + tc.want[56:]
+			// The row names the KIND before the digest (§13.2), so the token
+			// under test is "hash <kind> <first8>..<last8>". Asserting the
+			// digest alone would still pass if the kind vanished.
+			wantTok := "hash " + md.KindSha256.Token() + " " + tc.want[:8] + ".." + tc.want[56:]
 			if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantTok)) {
 				t.Errorf("the confirm modal drew %q, want it to contain %q", normalizeDrawn(body), wantTok)
 			}
@@ -416,7 +419,9 @@ func TestHashlockPhraseRouteSetsTheCorpusDigest(t *testing.T) {
 			// against the host, and until now nothing told them to record it.
 			// MUTATION: restore "Write down this phrase and the method now." ->
 			// this fails.
-			if !strings.Contains(normalizeDrawn(body), normalizeDrawn("phrase, the method and this digest")) {
+			// ...and the write-down line names the HASH KIND too, which is the
+			// third thing an operator must record to reproduce this digest.
+			if !strings.Contains(normalizeDrawn(body), normalizeDrawn("phrase, method, hash kind and digest")) {
 				t.Errorf("the confirm modal's write-down line does not name the digest: %q", normalizeDrawn(body))
 			}
 			h.holdConfirm()
@@ -450,7 +455,7 @@ func TestHashlockPhraseRouteDoesNotNormalise(t *testing.T) {
 		h.tapRow(1, 2) // sha256: instant
 		h.mustReach("brainwallet")
 		h.holdConfirm()
-		h.mustReach("Write down this phrase")
+		h.mustReach("Write down the phrase")
 		h.holdConfirm()
 		if got := st.list.Paths[len(st.list.Paths)-1].Hash; got == nil || hashlockHashHex(got) != row.SHA256H {
 			t.Fatalf("%q: path hash = %v, want %s", phrase, got, row.SHA256H)
@@ -491,7 +496,7 @@ func TestHashlockBackContractKeepsThePath(t *testing.T) {
 	h.tapRow(1, 2)
 	h.mustReach("brainwallet")
 	h.holdConfirm()
-	h.mustReach("Write down this phrase")
+	h.mustReach("Write down the phrase")
 	h.tapNav(Button1) // Back on the confirm -> method pick, nothing assigned
 	h.mustReach("Which method?")
 	if n := len(st.list.Paths); n != 1 {
@@ -536,7 +541,7 @@ func TestHashlockDeclineThenHardenedTypesOnce(t *testing.T) {
 	h.mustReach("Which method?")
 	h.tapRow(0, 2)
 	h.mustReach("Deriving")
-	h.mustReach("Write down this phrase")
+	h.mustReach("Write down the phrase")
 	h.holdConfirm()
 	if got := st.list.Paths[0].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorHardH {
 		t.Fatalf("hash = %v, want hardened anchor", got)
@@ -925,7 +930,7 @@ func TestHashlockDeriveKeepsAwakeUnderTheScreensaver(t *testing.T) {
 // guard true here and the case stops being the one it was written for.
 //
 // MUTATION: delete the showError(..., composerCopyHashlockReconcile()) call from
-// hashlockPhraseRoute -> `never reached "run ms hashlock with this phrase"`.
+// hashlockPhraseRoute -> `never reached "run ms hashlock --kind <kind> with this phrase"`.
 func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	st := composerStateWithPaths(t, 2)
 	other := composerTestLock([32]byte{0x11})
@@ -952,7 +957,7 @@ func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	// `never reached "back up every phrase"`.
 	h.mustReach("back up every phrase")
 	h.holdConfirm()
-	h.mustReach("run ms hashlock with this phrase")
+	h.mustReach("run ms hashlock --kind sha256 with this phrase")
 	if got := st.list.Paths[1].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
 		t.Fatalf("path 2 hash = %v, want the anchor's sha256 digest", got)
 	}
@@ -996,11 +1001,11 @@ func TestHashlockReconcileScreenCarriesTheDigestMethodAndChars(t *testing.T) {
 	h.tapNav(Button3)
 	h.mustReach("Which method?")
 	h.tapRow(0, 2) // Hardened: 28 characters, so no §4.3a warning
-	h.mustReach("Write down this phrase")
+	h.mustReach("Write down the phrase")
 	h.holdConfirm()
-	frame := h.mustReach("run ms hashlock with this phrase")
+	frame := h.mustReach("run ms hashlock --kind sha256 with this phrase")
 	for _, want := range []string{
-		"hash  3cf5d421..b70a4c12",
+		"hash  sha256 3cf5d421..b70a4c12",
 		"method: hardened   chars: 28",
 		"If they differ, do not fund this wallet: build it again.",
 	} {
@@ -1024,9 +1029,12 @@ func TestHashlockReconcileScreenCarriesTheDigestMethodAndChars(t *testing.T) {
 // ("method: %s chars: %d") -> this fails.
 func TestHashlockReconcileHeaderIsSpelledLikeTheConfirmModal(t *testing.T) {
 	const tok, method, chars = "b867db87..edbc96cb", "sha256", 28
-	rec := composerCopyHashlockReconcile(tok, method, chars)
-	con := composerCopyHashlockConfirm(tok, method, chars, "", "")
-	head := "hash  " + tok + "\nmethod: " + method + "   chars: 28\n"
+	rec := composerCopyHashlockReconcile(tok, method, chars, md.KindSha256)
+	con := composerCopyHashlockConfirm(tok, method, chars, "", "", md.KindSha256)
+	// The header carries the KIND since SPEC_hashlock_kinds §13.2. The
+	// invariant under test is unchanged: reconcile and confirm open the SAME
+	// way, so an operator reading one recognises the other.
+	head := "hash  " + md.KindSha256.Token() + " " + tok + "\nmethod: " + method + "   chars: 28\n"
 	if !strings.HasPrefix(rec, head) {
 		t.Errorf("the reconcile body does not open with the shared header:\n got: %q\nwant prefix: %q", rec, head)
 	}
@@ -1252,11 +1260,11 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		h.tapNav(Button3)
 		// STRAIGHT to the confirm: no phrase screen, no method pick, no
 		// reconcile screen. The method is the RECORD's.
-		body := h.mustReach("Write down this phrase")
+		body := h.mustReach("Write down the phrase")
 		if strings.Contains(normalizeDrawn(body), normalizeDrawn("Which method?")) {
 			t.Error("a payload phrase reached the method pick; the record names its own method")
 		}
-		wantTok := "hash " + hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
+		wantTok := "hash " + md.KindSha256.Token() + " " + hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
 		if !strings.Contains(normalizeDrawn(body), normalizeDrawn(wantTok)) {
 			t.Errorf("the confirm modal drew %q, want %q", normalizeDrawn(body), wantTok)
 		}
@@ -1275,7 +1283,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		// MUTATION: drop the !payloadStatesDigest guard -> the subtest below
 		// fails; invert it -> `never reached "run ms hashlock with this
 		// phrase"` here. Neither direction passes both.
-		h.mustReach("run ms hashlock with this phrase")
+		h.mustReach("run ms hashlock --kind sha256 with this phrase")
 		h.tapNav(Button3) // dismiss it, as the phrase route's own test does
 		h.waitDone()
 		if !ret {
@@ -1317,7 +1325,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		h.tapRow(1, 5) // band 3's first row: the phrase: record
 		h.mustReach("32-byte value")
 		h.tapNav(Button3)
-		body := h.mustReach("Write down this phrase")
+		body := h.mustReach("Write down the phrase")
 		// The confirm modal says the payload states this digest...
 		if !strings.Contains(normalizeDrawn(body), normalizeDrawn("matches hash 1 in the payload")) {
 			t.Fatalf("the fixture's hash: record does not match the derived digest: %q",
@@ -1333,7 +1341,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		if !ret {
 			t.Fatal("composerHashEdit returned false after the phrase-record row was taken")
 		}
-		if strings.Contains(normalizeDrawn(h.content), normalizeDrawn("run ms hashlock with this phrase")) {
+		if strings.Contains(normalizeDrawn(h.content), normalizeDrawn("run ms hashlock --kind sha256 with this phrase")) {
 			t.Errorf("a payload phrase the payload already states drew the reconciliation screen: %q",
 				normalizeDrawn(h.content))
 		}

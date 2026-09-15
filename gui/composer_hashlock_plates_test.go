@@ -203,7 +203,8 @@ func TestHashlockPlatesDerivesOncePerPick(t *testing.T) {
 func TestHashlockPlatesLocatorAlwaysCarriesTheHashRow(t *testing.T) {
 	x := hashlock.PreimageSHA256([]byte(hashlockAnchorPhrase))
 	h := composerTestLock(hashlock.DigestSHA256(&x))
-	digestRow := "hash  " + hashlockFirst8Last8(h)
+	// §13.1: the locator row names the KIND before the digest.
+	digestRow := "hash  " + h.Kind().Token() + " " + hashlockFirst8Last8(h)
 
 	t.Run("no md1 and no matching hash: record", func(t *testing.T) {
 		s := composerSessionWith(nil, []string{composerTestPreimageRecord(t, x)})
@@ -243,7 +244,7 @@ func TestHashlockPlatesLocatorAlwaysCarriesTheHashRow(t *testing.T) {
 		// is under test and not the countdown.
 		r.preimage, r.digest, r.derived = px, ph, true
 		loc := hashlockPlatesLocator(s, r)
-		want := "hash  " + hashlockFirst8Last8(ph)
+		want := "hash  " + ph.Kind().Token() + " " + hashlockFirst8Last8(ph)
 		if !containsLine(loc, want) {
 			t.Fatalf("locator = %q, want a %q row: a phrase-form plate with no locator "+
 				"at all is the worst artifact this stage can cut", loc, want)
@@ -307,7 +308,8 @@ func TestHashlockPlatesFlowLocatorCarriesTheDerivedDigest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const phrase = "a payload hashlock phrase"
 		x := hashlock.PreimageSHA256([]byte(phrase))
-		want := "hash  " + hashlockFirst8Last8(composerTestLock(hashlock.DigestSHA256(&x)))
+		l := composerTestLock(hashlock.DigestSHA256(&x))
+		want := "hash  " + l.Kind().Token() + " " + hashlockFirst8Last8(l)
 		s := composerSessionWith(nil,
 			[]string{composerTestPhraseRecord(sysw.HashlockSHA256, phrase)})
 

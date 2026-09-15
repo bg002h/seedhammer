@@ -74,7 +74,7 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			}
 			h := hashlockLockOf(md.KindSha256, &x)
 			body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
-				hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h))
+				hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h), h.Kind())
 			if composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 				st.list.Paths[idx].Hash = h
 				composerNotePhraseDigest(st, h)
@@ -97,7 +97,7 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 				// spend time into a five-minute check") is met here instead, at
 				// the one moment every phrase-set hash passes through.
 				showError(ctx, th, "Hash lock",
-					composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase)))
+					composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase), h.Kind()))
 				return hashlockAssigned
 			}
 			// Back on the confirm -> method pick, nothing assigned
@@ -142,7 +142,7 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	}
 	h := hashlockLockOf(md.KindSha256, &x)
 	body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
-		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h))
+		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h), h.Kind())
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 		return hashlockBackToWhichHash
 	}
@@ -161,7 +161,7 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	// reconcile and no phrase for the host command to take.
 	if !payloadStatesDigest(payload, h) {
 		showError(ctx, th, "Hash lock",
-			composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase)))
+			composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase), h.Kind()))
 	}
 	return hashlockAssigned
 }
@@ -190,7 +190,7 @@ func payloadStatesDigest(payload []*md.HashLock, h *md.HashLock) bool {
 // of nothing on the screen that gates funds.
 func hashlockPreimageRecordRoute(ctx *Context, th *Colors, st *composerState, idx int, p hashlockPayloadPreimage, payload []*md.HashLock) hashlockOutcome {
 	body := composerCopyHashlockPreimageConfirm(hashlockFirst8Last8(p.digest),
-		hashlockRelationLine(payload, p.digest), hashlockOtherPathLine(st, idx, p.digest))
+		hashlockRelationLine(payload, p.digest), hashlockOtherPathLine(st, idx, p.digest), p.digest.Kind())
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
 		return hashlockBackToWhichHash
 	}

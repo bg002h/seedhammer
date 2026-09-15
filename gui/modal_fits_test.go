@@ -363,7 +363,7 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			// The LONGEST variant: `hardened` is the longer method name and
 			// `chars: 100` the widest count hashlock.PhraseMaxChars permits.
 			"the hashlock reconciliation screen (H2 §4.5, H5 §1)",
-			composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100),
+			composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100, md.KindRipemd160),
 		},
 		{
 			"HASH ON EVERY PATH, phrase-route form (H2 §4.7)",
@@ -422,7 +422,7 @@ func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
 		{
 			"the hashlock confirm modal, longest variant (H2 §4.5)",
 			composerConfirmBody(composerCopyHashlockConfirm("b867db87..edbc96cb", "hardened", 100,
-				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath(), md.KindRipemd160)),
 		},
 		{
 			// H6 §9: the ms1-shaped warning as BOTH programs draw it -- through
@@ -442,7 +442,7 @@ func TestConfirmScreensThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			// gets.
 			"the payload preimage-record confirm, longest variant (H6 §5.1)",
 			composerConfirmBody(composerCopyHashlockPreimageConfirm("b867db87..edbc96cb",
-				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath())),
+				composerCopyHashlockRelation(-1), composerCopyHashlockOtherPath(), md.KindRipemd160)),
 		},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
