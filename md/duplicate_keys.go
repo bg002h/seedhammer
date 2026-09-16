@@ -324,5 +324,26 @@ func countKeySlots(n node, counts *[256]int) {
 		for _, c := range b.children {
 			countKeySlots(c, counts)
 		}
+	case trBody:
+		// F-612: a `tr` NESTED INSIDE A TAPLEAF hid its internal key and its
+		// whole subtree here -- this switch had no trBody arm, so such a policy
+		// reported DuplicateNone however many times a slot repeated inside it.
+		//
+		// It is unreachable today, and that is the uncomfortable part: it is
+		// unreachable only because `emitFragment` has no `tagTr` case, which is
+		// a property of a DIFFERENT function in a different file. Nothing
+		// connected the two, so teaching emitFragment taproot would have made
+		// this live silently. TestEmitFragmentHasNoTaprootCase is the wire that
+		// now connects them.
+		//
+		// !isNums for the same reason as DuplicateKeySlot's own arm (SPEC §7):
+		// a NUMS internal key is the H-point, not a reference to a slot, and
+		// keyIndex is a meaningless zero there.
+		if !b.isNums {
+			counts[b.keyIndex]++
+		}
+		if b.tree != nil {
+			countKeySlots(*b.tree, counts)
+		}
 	}
 }
