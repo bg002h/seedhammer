@@ -25,10 +25,12 @@ import (
 // reds.
 
 // h6HardenedMethodLine and h6SHA256MethodLine are §8.6's two method lines.
-// They are literals HERE because this package cannot import hashlock (which
-// imports nothing of engrave, but the plate builder in backup does the
-// composition); backup/hashlock_test.go asserts the same text against
-// hashlock's own constants, so a parameter change cannot leave both lying.
+//
+// THEY WERE LITERALS because this comment said "this package cannot import
+// hashlock". IT COULD: hashlock imports nothing of engrave, and this file now
+// imports and calls it four lines down. The claimed cycle was never there, and
+// the literals it justified are exactly what drifted -- so the false constraint
+// and the defect it licensed arrived together, which is the usual shape.
 // DERIVED FROM PRODUCTION, NOT COPIED. These were three literals transcribed
 // from the spec, and they DRIFTED: SPEC_hashlock_kinds §13.1 added an
 // unconditional `hash: <kind>` line to hashlock.QRText, taking the worst case

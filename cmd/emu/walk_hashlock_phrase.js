@@ -136,6 +136,11 @@ const ANCHOR_HARD_H = "3cf5d421..b70a4c12";           // derivation[0].hardened_
 // Copied from the corpus, never recomputed here.
 const ANCHOR_HARD_FULL =
   "3cf5d421caf2a9c8eb9de1d400866ea7d475e6ba978861bb0167a37cb70a4c12";
+// derivation[0].hardened_h_ripemd160 -- the SAME phrase and method at a
+// different KIND, which is what SPEC_hashlock_kinds §12 item 2 asks the walk to
+// assert. 40 hex, not 64: the width is the kind's.
+const ANCHOR_HARD_RIPEMD160 = "09e7bb5051d89788fb4e4b374126721dbcc2946b";
+const KIND_ROW_RIPEMD160 = 2;   // composerHashKinds order: sha256, hash256, ripemd160, hash160
 const MIXED = "Correct Horse Battery Staple";         // the mixed-case derivation row's phrase
 const MIXED_SHA_H = "95d44470..2297a7ff";             // that row's sha256_h, first8..last8
 const CONTROL = "correct horse battery stapl";        // NOT a corpus row: one character short
@@ -289,11 +294,11 @@ async function typePhrase(s) {
  * behavioural one. `TestHashlockDeriveKeepsAwakeUnderTheScreensaver` is what
  * gates that screen, in CI, on a clock the test controls.
  */
-async function trial(phrase, method) {
+async function trial(phrase, method, kindRow = 0) {
   await waitFor("Type a hashlock phrase");
   await chooseRow(0, "32-byte value", "Type a hashlock phrase");   // the §8i rule modal
   await tap(CONFIRM, 500);
-  await pickKind(0);                                               // §7.1's kind screen
+  await pickKind(kindRow);                                         // §7.1's kind screen
   await waitFor("Hashlock phrase");
   await typePhrase(phrase);
   await tap(CONFIRM, 500);                                          // OK
@@ -589,7 +594,7 @@ export async function run() {
   }
   out.stored = after[0];
 
-  const reconcile = await waitFor("run ms hashlock with this phrase", 20000);
+  const reconcile = await waitFor("run ms hashlock --kind", 20000);
   must(reconcile, "check the digest matches", "the reconciliation screen (§4.5)");
   // §1.5: the screen that asks for the comparison carries the operands.
   if (drawnToken(reconcile, "the reconciliation screen") !== displayed) {
@@ -605,6 +610,53 @@ export async function run() {
   const list = await waitFor("Spend paths", 20000);
   must(list, "hash", "the path row after the hash was assigned");
   out.pathRow = squash(list).slice(0, 200);
+
+  // ══ SPEC_hashlock_kinds §12 ITEM 2: A NON-sha256 HASHLOCK, ON THE DEVICE ═══
+  //
+  // "An emulator walk composes a non-sha256 hashlock on the device AND ASSERTS,
+  // THROUGH THE KIND-AWARE HOOK, that the composition stores that kind and the
+  // §10 KAT row's digest for that kind."
+  //
+  // BOTH CLAUSES, AND THE SECOND IS THE ONE THAT WAS MISSING. Until the seam
+  // returned {kind, digest} this acceptance was not merely unrun, it was
+  // UNBUILDABLE: sha256 and hash256 are both 64 hex, so no walk could tell one
+  // stored kind from another through it. And until this trial, the seam was
+  // capable and every trial still composed sha256 -- a kind-aware hook that
+  // only ever sees one kind is a gate with no failing input, which is the
+  // thing §12 spends a paragraph warning about.
+  //
+  // THE DIGEST IS THE CORPUS'S, NOT THE DEVICE'S. Same phrase, same method, a
+  // different kind -- so if the device derived ripemd160 of the wrong preimage,
+  // or ripemd160 where hash160 was asked for, this fails. Comparing against a
+  // value the device supplied would be the tautology this file already warns
+  // about for the sha256 case.
+  const { modal: rmd } = await trial(ANCHOR, "hardened", KIND_ROW_RIPEMD160);
+  must(rmd, "ripemd160", "the confirm modal names the kind it derived (§13.2)");
+  await hold(CONFIRM);
+  const stored = pathHashes("after the hold, ripemd160 trial");
+  const last = stored[stored.length - 1];
+  if (last === null || typeof last !== "object") {
+    throw new Error("the ripemd160 path holds no hash after the hold.\n" +
+      `  stored: ${JSON.stringify(stored)}`);
+  }
+  if (last.kind !== "ripemd160") {
+    throw new Error("the composition stored kind " + JSON.stringify(last.kind) +
+      " for a path composed at ripemd160. The policy commits to a DIFFERENT HASH " +
+      "FUNCTION than the operator chose, and the script it lowers to is not the " +
+      "one the confirm modal described.");
+  }
+  if (last.digest !== ANCHOR_HARD_RIPEMD160) {
+    throw new Error("the stored ripemd160 digest is not the corpus's value for this " +
+      "phrase and method.\n" +
+      `  stored: ${last.digest}\n  corpus: ${ANCHOR_HARD_RIPEMD160}`);
+  }
+  if (last.digest.length !== 40) {
+    throw new Error(`a ripemd160 digest reached the seam as ${last.digest.length} hex ` +
+      "characters, not 40 -- the alloc-gate padding is observable (§7.3).");
+  }
+  out.ripemd160 = { kind: last.kind, digest: last.digest };
+  await tap(CONFIRM, 500);   // past the reconciliation screen
+  await waitFor("Spend paths", 20000);
 
   // ══ H6 §11.7: THE PREIMAGE PLATE ARM ═══════════════════════════════════════
   //
