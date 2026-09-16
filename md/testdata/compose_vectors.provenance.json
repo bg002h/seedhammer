@@ -8,7 +8,7 @@
   ],
   "repo": "descriptor-mnemonic",
   "remote": "git@github.com:bg002h/descriptor-mnemonic.git",
-  "commit": "9f637cf1142e7fcbe7f0a656429a78ad93f99496",
+  "commit": "745e0fd0b8b714564e762fc4fbfd7cb2e5d3cdef",
   "repo_clean_when_recorded": true,
   "path": "crates/md-codec/tests/vectors",
   "files": [
@@ -109,8 +109,68 @@
       "sha256": "484b61d50d058429527c086ec4202a3ed8b35c854d6fa595e48f4846af3fc072"
     },
     {
+      "name": "keyed_compose_preset_hashlock_gated_hash160.bytes.hex",
+      "sha256": "1bbd92e248a19ded6e104e2859d2fdd7a0d8fdf0f2015078663c6b3fd68d8b12"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash160.conformance.json",
+      "sha256": "1c97c427243b0583bcd249a0e319deff27656baad504569e54a95f3622951498"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash160.descriptor.json",
+      "sha256": "947a300cf7fad37e9c0cd0b80a27aed37628cd6f93d614152c94af9dcc115837"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash160.phrase.txt",
+      "sha256": "f274c4ec2aec79de97aac2d5e531358e0fbca2ae813f181c7586554157d8b5a8"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash160.template",
+      "sha256": "98a74eb43dad5f6d71f0c3eda49bb5cfd9ddd2cd50a66f8997bc2293ffe3dc2f"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash256.bytes.hex",
+      "sha256": "8e657bce5720a270a32e355995cd79ad4caf6382f1c71f4f80e3e74ab1e9d497"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash256.conformance.json",
+      "sha256": "4a7411c9f2d3b1c784824dc94a51b5bd488ba9d2aa451a464671cd9ad2ca492e"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash256.descriptor.json",
+      "sha256": "62f4fe0eb8cfadbfdf239f64ea7fe5d1fb93137112322d831300f2fd0d6c7e48"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash256.phrase.txt",
+      "sha256": "5f068f03a5a81b9aa1f1a5c380fccf786247841df51bdfe728d49498a3c45b8d"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_hash256.template",
+      "sha256": "5199e636e3726b2b6d4328cf557492a291cf6c9858851ab88db524f7ff2edb1c"
+    },
+    {
       "name": "keyed_compose_preset_hashlock_gated.phrase.txt",
       "sha256": "a8179160e9210ef7e71858d8bfdf9426fe54eeda2acc71cda4162539496c23c5"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_ripemd160.bytes.hex",
+      "sha256": "e677984ffc4480924152dc57cbb00b0bac3afc70da2f9e033584c3756f08e33e"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_ripemd160.conformance.json",
+      "sha256": "143a92d5462498b42d3f4254546c572c6ec634c3be3a520f475422071e575c02"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_ripemd160.descriptor.json",
+      "sha256": "e0cf9335c3f3f81c02a294bf6b80e78f0441aee72a21b7e2bde5673cfa43f160"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_ripemd160.phrase.txt",
+      "sha256": "68aeae7b9fbe443b14f92f4c9056fe3808f7875263293eac7626e7ced6d501e4"
+    },
+    {
+      "name": "keyed_compose_preset_hashlock_gated_ripemd160.template",
+      "sha256": "20fdf14d5960b7177f75ba448b19d8e495f6d265f8ad3612cd61c9507fac2984"
     },
     {
       "name": "keyed_compose_preset_hashlock_gated.template",
@@ -657,6 +717,6 @@
       "sha256": "d341f99cb5dc30ebefb8720e148f71a3a384c372f46b2af7bab018ac693c0185"
     }
   ],
-  "vectors": 33,
-  "recorded_at": "2026-09-13"
+  "vectors": 36,
+  "recorded_at": "2026-09-15"
 }

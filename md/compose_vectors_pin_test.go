@@ -56,6 +56,14 @@ var composeVectorNames = []string{
 	"keyed_compose_preset_plain_multisig", "keyed_compose_preset_simple_timelocked_inheritance",
 	"keyed_compose_preset_kofn_recovery", "keyed_compose_preset_tiered_recovery",
 	"keyed_compose_preset_hashlock_gated", "keyed_compose_preset_decaying_multisig",
+	// ONE PER HASH KIND (SPEC_hashlock_kinds §10). The corpus was pinned to a
+	// primary commit that PREDATED these three, so the pin matched its own
+	// stale corpus and passed -- while covering nothing at all for the three
+	// kinds this cycle added. A green pin over a corpus missing the feature
+	// under test is the exact shape of "a stale pin hides the next defect".
+	"keyed_compose_preset_hashlock_gated_hash256",
+	"keyed_compose_preset_hashlock_gated_ripemd160",
+	"keyed_compose_preset_hashlock_gated_hash160",
 }
 
 // isComposeVectorFile: the corpus's file names, and nothing else in the
@@ -85,11 +93,12 @@ func TestComposeVectorsMatchTheirProvenancePin(t *testing.T) {
 	if p.Vectors != len(composeVectorNames) {
 		t.Fatalf("pin says %d vectors, this test knows %d", p.Vectors, len(composeVectorNames))
 	}
-	// 29 keyed vectors carry five files, 4 unkeyed carry four: 161.
+	// 32 keyed vectors carry five files, 4 unkeyed carry four: 176.
 	// The 29th is keyed_compose_wsh_timelock_hashlock, the composer's own
-	// three-path wsh policy with both timelock kinds and a hashlock.
-	if len(p.Files) != 161 {
-		t.Fatalf("pin lists %d files, want 161", len(p.Files))
+	// three-path wsh policy with both timelock kinds and a hashlock; 30-32 are
+	// the per-kind hashlock presets added by SPEC_hashlock_kinds §10.
+	if len(p.Files) != 176 {
+		t.Fatalf("pin lists %d files, want 176", len(p.Files))
 	}
 	pinned := map[string]bool{}
 	seen := map[string]bool{}

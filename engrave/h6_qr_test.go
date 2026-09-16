@@ -10,7 +10,9 @@ import (
 	qr "github.com/seedhammer/kortschak-qr"
 	"seedhammer.com/bezier"
 	"seedhammer.com/bspline"
+	"seedhammer.com/hashlock"
 	"seedhammer.com/internal/golden"
+	"seedhammer.com/md"
 )
 
 // H6 §7: raising the constant-time QR encoder from v5 to v9, and giving its
@@ -27,13 +29,54 @@ import (
 // imports nothing of engrave, but the plate builder in backup does the
 // composition); backup/hashlock_test.go asserts the same text against
 // hashlock's own constants, so a parameter change cannot leave both lying.
-const (
-	h6HardenedMethodLine = "method: pbkdf2-hmac-sha256 iterations=100000 salt=ms-hashlock-v1 dklen=32"
-	h6SHA256MethodLine   = "method: sha256"
+// DERIVED FROM PRODUCTION, NOT COPIED. These were three literals transcribed
+// from the spec, and they DRIFTED: SPEC_hashlock_kinds §13.1 added an
+// unconditional `hash: <kind>` line to hashlock.QRText, taking the worst case
+// from 194 to 210 bytes, and this file kept emitting the three-line pre-cycle
+// shape. So the module-budget fuzz below -- the gate that exists to prove a
+// plate's QR fits its reserved envelope -- was sampling payloads 16 bytes
+// shorter than the firmware actually engraves, and stayed green while doing it.
+//
+// A second copy of a rule is the defect. There is one copy now, in
+// hashlock.QRText, and this file asks it.
+var (
+	h6HardenedMethodLine = hashlock.MethodLine(true)
+	h6SHA256MethodLine   = hashlock.MethodLine(false)
 )
 
+// h6QRTextKind is the plate's QR payload at a given kind.
+//
+// THE FUZZ SAMPLES EVERY KIND because the token is part of the payload and the
+// kinds differ in length -- `ripemd160` is the longest at 9 characters, which is
+// what makes it the worst case §13.1 measured (210 bytes, dim 53).
+func h6QRTextKind(hardened bool, kind md.HashKind, phrase string) string {
+	return hashlock.QRText(hardened, kind, phrase)
+}
+
+// h6QRTextFrozen is the GOLDENS' payload, and it is deliberately NOT
+// hashlock.QRText.
+//
+// TestH6ConstantQRGoldens says of itself: "The payload is FIXED (not fuzzed) so
+// the golden is a golden." Those goldens pin the constant-time ENCODER at each
+// admitted version -- what they are about is the rendering, and the text is
+// only a way to reach a given module count. Wiring them to production copy
+// makes every wording change move a binary fixture, which is churn that teaches
+// reviewers to regenerate goldens without reading them.
+//
+// So the two uses split: the goldens freeze their input here, and the module
+// BUDGET paths below ask production, because those gate whether a real plate's
+// QR fits its reserved envelope and must track what the firmware emits.
+// Do not "fix" this by pointing it at hashlock.QRText.
+const h6GoldenMethodLine = "method: pbkdf2-hmac-sha256 iterations=100000 salt=ms-hashlock-v1 dklen=32"
+
+func h6QRTextFrozen(phrase string) string {
+	return "hashlock v1\n" + h6GoldenMethodLine + "\nphrase: " + phrase
+}
+
+// h6QRText keeps the two-argument shape the callers below use, at the widest
+// kind, so every budget they compute is the worst case rather than the default.
 func h6QRText(method, phrase string) string {
-	return "hashlock v1\n" + method + "\nphrase: " + phrase
+	return h6QRTextKind(method == h6HardenedMethodLine, md.KindRipemd160, phrase)
 }
 
 // h6AlignCentresFromBitmap DERIVES the alignment-pattern centres of a code by
@@ -498,7 +541,7 @@ func TestH6ConstantQRGoldens(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			phrase := strings.Repeat("hashlock plate ", 10)[:tc.phraseLen]
-			c, err := qr.Encode(h6QRText(tc.method, phrase), qr.L)
+			c, err := qr.Encode(h6QRTextFrozen(phrase), qr.L)
 			if err != nil {
 				t.Fatal(err)
 			}

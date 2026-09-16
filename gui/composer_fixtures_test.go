@@ -1,8 +1,8 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/hex"
-	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -31,10 +31,32 @@ func composerRecord(prefix, text string) string {
 	return prefix + hex.EncodeToString([]byte(text))
 }
 
+// composerTestLockOf is a lock of `kind` whose digest is `b` repeated to that
+// kind's own width -- so a fixture cannot accidentally be the wrong length.
+func composerTestLockOf(kind md.HashKind, b byte) *md.HashLock {
+	d := bytes.Repeat([]byte{b}, kind.DigestLen())
+	h, ok := md.NewHashLock(kind, d)
+	if !ok {
+		panic("gui: composerTestLockOf: " + kind.Token() + " rejected its own width")
+	}
+	return h
+}
+
 var (
 	composerTestKeyRecord  = composerRecord("key:", "[73c5da0a/48'/0'/0'/2']"+composerTestXpubA)
 	composerTestKeyRecord2 = composerRecord("key:", "[73c5da0a/48'/0'/1'/2']"+composerTestXpubB)
-	composerTestHashRecord = "hash:" + strings.Repeat("ab", 32)
+	// BUILT BY THE ENCODER, NOT PASTED -- the convention this file already
+	// states for the preimage and phrase fixtures, applied to the one class
+	// that was still a literal.
+	//
+	// It also gives sysw.HashRecord its only callers. The claim-check lens
+	// found it with ZERO -- not production, not test, not a walk -- which is
+	// the same shape phase 3 shipped and then fixed: an encoder whose test was
+	// green because it tested dead code. The fork is a reader and never emits
+	// records on device, so wiring it to the fixtures (as PhraseRecordString
+	// already is) is what a caller can honestly be, and it makes every hash
+	// fixture kind-correct by construction rather than by transcription.
+	composerTestHashRecord = sysw.HashRecord(composerTestLockOf(md.KindSha256, 0xab))
 	// 1788220800 is 2026-09-01 00:00:00 UTC, measured, not transcribed.
 	composerTestNowRecord = composerRecord("now:", "1788220800,905000")
 	// A seed record is the mnemonic itself: ClassMnemonic is SNIFFED, not
