@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -85,6 +86,28 @@ func TestEmulatorWalksQuoteCopyThatStillExists(t *testing.T) {
 	for n := 1; n <= 3; n++ {
 		corpus = append(corpus, normalizeDrawn(composerCopyPreimagePlateHeading(n)))
 	}
+	// ROW BUILDERS, WHICH ARE NOT composerCopy* BODIES AND WERE THE GATE'S HOLE.
+	// The whole-diff review found two walk assertions this gate could not see --
+	// `hash 1` (the picker row, now `sha256 1 ...`) and `hash <digest>` (the
+	// consent line, now `hash sha256 <digest>`) -- because both come from row
+	// builders and the gate only consulted composerCopyTable(). Operator-facing
+	// text is not only what lives in composer_copy.go, and a gate scoped to one
+	// file is scoped to the wrong thing.
+	digest := composerTestLock([32]byte{0xab})
+	for _, k := range composerHashKinds {
+		lock, ok := md.NewHashLock(k, bytes.Repeat([]byte{0xab}, k.DigestLen()))
+		if !ok {
+			t.Fatalf("%s rejected its own width", k.Token())
+		}
+		corpus = append(corpus,
+			normalizeDrawn(composerHashRow(1, lock)),
+			normalizeDrawn(composerHashInPayloadRow(1, lock)),
+			normalizeDrawn(composerHashPreimageRow(1, lock)),
+			normalizeDrawn(composerHashPhraseRow(1, lock)),
+			normalizeDrawn(composerConsentHashLine(lock)))
+	}
+	corpus = append(corpus, normalizeDrawn(composerHashPhraseRow(1, nil)),
+		normalizeDrawn(composerConsentHashLine(digest)))
 
 	for _, walk := range []string{"walk_hashlock_phrase.js", "shots_composer.js"} {
 		raw, err := os.ReadFile(filepath.Join("..", "cmd", "emu", walk))

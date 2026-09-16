@@ -662,7 +662,10 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   // (12) Path 2's hash lock, from the payload's own `hash:` record.
   await chooseRow(2, "Which hash?", "Hash lock");
   const hashRows = window.shScreen();
-  must(hashRows, "hash 1", "the payload's hash row");
+  // `sha256 1`, not `hash 1`: SPEC_hashlock_kinds §7.5 made the KIND the row's
+  // leading noun, because `hash 1  ripemd160 <elision>  (in payload)` wraps to
+  // two lines at the shipped band.
+  must(hashRows, "sha256 1", "the payload's hash row");
   must(hashRows, "abababab..abababab", "the hash row's digest");
   must(hashRows, "Type a digest", "the type-it row");
   must(hashRows, "No hash lock", "the clear row");
@@ -782,7 +785,9 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   must(consent.joined, "Path 1: 2-of-2", "the consent's path 1");
   must(consent.joined, "Path 2: 1 key", "the consent's path 2");
   must(consent.joined, "12960 blocks (about 90.0 days)", "the consent's lock");
-  must(consent.joined, "hash abababab..abababab", "the consent's hash");
+  // `hash sha256 <digest>`: §6's both-or-neither rule -- the consent screen is
+  // the one an operator reads before agreeing, so it names the kind too.
+  must(consent.joined, "hash sha256 abababab..abababab", "the consent's hash");
   const missing = [];
   if (!consent.joined.includes(squash(`Policy-ID: ${expect.policyId}`))) {
     missing.push(`policy id ${expect.policyId}`);

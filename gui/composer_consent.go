@@ -69,6 +69,21 @@ func composerDigestShort(l *md.HashLock) string {
 	return h[:8] + ".." + h[len(h)-8:]
 }
 
+// composerConsentHashLine is the consent screen's digest row.
+//
+// A NAMED FUNCTION so a gate can reach it. It was an inline concatenation, and
+// cmd/emu/shots_composer.js asserted its pre-cycle text -- the walk-vs-copy
+// anchors gate could not see the drift, because that gate checks
+// composerCopyTable() and this is a ROW BUILDER, not a composerCopy* body.
+// Anything a walk waits for has to be callable from a test, or the gate has a
+// hole exactly where the screens are most likely to change.
+func composerConsentHashLine(d *md.HashLock) string {
+	// The consent screen NAMES THE KIND, like every other surface that shows a
+	// digest (§6's both-or-neither rule): this is the screen an operator reads
+	// before agreeing to a policy.
+	return "  hash " + d.Kind().Token() + " " + composerDigestShort(d)
+}
+
 // composerBranchLines describes one spend path from its decoded Branch.
 //
 // `sole` is len(shape.Branches) == 1, which is what makes the UNSORTED mark
@@ -101,7 +116,7 @@ func composerBranchLines(b md.Branch, pathNo int, sole bool) []string {
 		// The consent screen NAMES THE KIND, like every other surface that
 		// shows a digest (§6's both-or-neither rule): this is the screen an
 		// operator reads before agreeing to a policy.
-		out = append(out, "  hash "+d.Kind().Token()+" "+composerDigestShort(d))
+		out = append(out, composerConsentHashLine(d))
 	}
 	// `len(b.Hashlocks)`, AND THE CHANGE OF MEANING IS DELIBERATE (§7.4). This
 	// read `len(b.Sha256Digests)`, which was zero for a ripemd160 or hash160
