@@ -3,23 +3,29 @@ package md
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
+// vectorChunksFor loads a corpus vector, PREFERRING a fork-side pin.
+//
+// The pin comes first because F-529 says a re-vendor would delete the three
+// key-reuse vectors, and two of them are the only witnesses F-533's refusal
+// has (f533_pinned_vectors_test.go). While both copies exist they are asserted
+// byte-identical there, so reading the pin changes nothing today and keeps
+// every caller working the day the vendored file goes.
 func vectorChunksFor(t *testing.T, name string) []string {
 	t.Helper()
+	if pin, ok := pinnedChunks(name); ok {
+		if len(pin) == 0 {
+			t.Fatalf("the pin for %s carries no md1 strings", name)
+		}
+		return pin
+	}
 	raw, err := os.ReadFile(filepath.Join("testdata", "vectors", name+".phrase.txt"))
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
-	var out []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.ReplaceAll(strings.TrimSpace(line), " ", "")
-		if strings.HasPrefix(line, "md1") {
-			out = append(out, line)
-		}
-	}
+	out := md1Lines(string(raw))
 	if len(out) == 0 {
 		t.Fatalf("%s carries no md1 strings", name)
 	}

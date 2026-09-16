@@ -125,11 +125,24 @@ func TestTaprootScriptPathMatchesRust(t *testing.T) {
 	t.Logf("cross-checked %d taproot script-path addresses against Rust (%d vectors skipped)", checked, skipped)
 }
 
+// loadVectorChunks loads a corpus vector, PREFERRING a fork-side pin in
+// md/testdata/forkbuilt/.
+//
+// Same reason as md's vectorChunksFor: F-529 says a re-vendor would delete the
+// key-reuse vectors, and `keyed_tr_multi_a` / `keyed_tr_sortedmulti_a` are
+// F-533's only witnesses. md/f533_pinned_vectors_test.go asserts the pin is
+// byte-identical to the vendored file while both exist, so this changes nothing
+// today and survives the re-vendor.
 func loadVectorChunks(t *testing.T, name string) []string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", name+".phrase.txt"))
+	path := filepath.Join("..", "md", "testdata", "forkbuilt", name+".md1.txt")
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read %s.phrase.txt: %v", name, err)
+		path = filepath.Join("..", "md", "testdata", "vectors", name+".phrase.txt")
+		raw, err = os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
 	}
 	var out []string
 	for _, l := range strings.Split(string(raw), "\n") {
