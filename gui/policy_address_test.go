@@ -148,6 +148,14 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 	refusedByPolicy := map[string]string{
 		"keyed_wsh_timelock_hashlock": "@1 repeats inside one wsh miniscript; the " +
 			"device derives no address for a policy that reuses a key",
+		// F-533. NOT a capability gap: the taproot script-path deriver handles
+		// both of these and its addresses still match Rust, which is why they
+		// are here and not in stillUnsupported -- the check below proves that
+		// rather than taking it on trust.
+		"keyed_tr_multi_a": "@0 is both the taproot key path and a key in the " +
+			"leaf; BIP 388 forbids it and the Rust primary refuses it",
+		"keyed_tr_sortedmulti_a": "@0 is both the taproot key path and a key in " +
+			"the leaf; BIP 388 forbids it and the Rust primary refuses it",
 	}
 
 	routes := map[string]route{}
