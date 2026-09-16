@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -1768,6 +1769,13 @@ func TestComposerCanBuildARipemd160HashlockOnTheDevice(t *testing.T) {
 		h.next("typing the digest")
 	}
 	h.tapNav(Button3)
+	// SPEC §8 NOW STANDS BETWEEN THE PAD AND THE ASSIGNMENT, and this journey is
+	// exactly its firing condition: a 20-byte kind whose preimage this device
+	// never derived. Holding it is part of the journey, not noise -- an operator
+	// typing a ripemd160 digest off paper MUST be told nothing here has seen a
+	// preimage for it.
+	h.mustReach("20-BYTE HASH")
+	h.holdConfirm()
 	h.waitDone()
 
 	if !ret {
@@ -1874,5 +1882,92 @@ func TestReconcileScreenInstructionReproducesTheDigestItShows(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestTwentyByteWarningFiresExactlyWhereSpecEightSaysIt is SPEC_hashlock_kinds
+// §8, which was a normative section of a GREEN spec with no implementation at
+// all -- no code, no copy, no test -- until the journey walk and the
+// adversarial lens each found it missing.
+//
+// §8: "Fires for ripemd160/hash160 when the digest was NOT device-derived:
+// payload-supplied and typed digests warn; the phrase route stays silent."
+//
+// THE SILENT CASES ARE THE HALF WORTH TESTING. A warning that fires everywhere
+// is a warning operators learn to hold through, which costs more than it buys
+// -- so this asserts the 32-byte kinds and the held-material routes draw
+// NOTHING, not merely that the 20-byte ones draw something.
+//
+// MUTATION: drop the DigestLen() != 20 guard -> the sha256/hash256 rows fail.
+// MUTATION: drop the hashlockHeld lookup -> the "held" row fails.
+func TestTwentyByteWarningFiresExactlyWhereSpecEightSaysIt(t *testing.T) {
+	lockOf := func(t *testing.T, k md.HashKind) *md.HashLock {
+		t.Helper()
+		raw := bytes.Repeat([]byte{0xc7}, k.DigestLen())
+		h, ok := md.NewHashLock(k, raw)
+		if !ok {
+			t.Fatalf("%s: %d bytes is its own width", k.Token(), k.DigestLen())
+		}
+		return h
+	}
+	for _, tc := range []struct {
+		name string
+		kind md.HashKind
+		held bool
+		want bool // does §8 fire?
+	}{
+		{"sha256 is 32 bytes", md.KindSha256, false, false},
+		{"hash256 is 32 bytes", md.KindHash256, false, false},
+		{"ripemd160, not derived here", md.KindRipemd160, false, true},
+		{"hash160, not derived here", md.KindHash160, false, true},
+		{"ripemd160 whose preimage this composition holds", md.KindRipemd160, true, false},
+		{"hash160 whose preimage this composition holds", md.KindHash160, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := newPlatform()
+				p.display = sh2DisplaySize
+				ctx := NewContext(p)
+				st := composerStateWithPaths(t, 1)
+				h := lockOf(t, tc.kind)
+				if tc.held {
+					composerHoldHashlockMaterial(st, h, hashlockMaterial{
+						phrase: []byte("x"), method: hashlockSHA256,
+						provenance: hashlockFromPhrase,
+					})
+				}
+				var got bool
+				var returned bool
+				frame, quit := runUI(ctx, func() {
+					got = composerWarnTwentyByteUnseen(ctx, &descriptorTheme, st, h)
+					returned = true
+				})
+				defer quit()
+				drew := ""
+				for i := 0; i < 24 && !returned; i++ {
+					c, more := frame()
+					if !more {
+						break
+					}
+					drew = c
+				}
+				fired := uiContains(drew, "20-BYTE HASH")
+				if fired != tc.want {
+					if tc.want {
+						t.Errorf("§8 did not fire for a %s digest the device never derived. "+
+							"The operator commits a path to a digest nothing here has seen a "+
+							"preimage for, and is told nothing.\nFrame: %q", tc.kind.Token(), drew)
+					} else {
+						t.Errorf("§8 fired where the spec says it is silent (%s, held=%v). A "+
+							"warning that fires everywhere is one operators hold through.\n"+
+							"Frame: %q", tc.kind.Token(), tc.held, drew)
+					}
+				}
+				if !tc.want && (!returned || !got) {
+					t.Errorf("the silent path did not pass through cleanly: returned=%v got=%v",
+						returned, got)
+				}
+			})
+		})
 	}
 }

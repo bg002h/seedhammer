@@ -198,8 +198,12 @@ func composerCopyTable() []composerCopyRow {
 			"The QR makes the phrase readable by any camera. A photograph of the plate is a copy of the phrase, and the phrase spends this path."},
 		{"composerCopyPreimagePlateHeading", "H6-8.3", composerCopyPreimagePlateHeading(2),
 			"Plus 2 preimage plate(s), cut first and NOT part of this backup:"},
-		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, "b867db87..edbc96cb", "phrase, hardened, QR"),
-			"path 2  b867db87..edbc96cb  phrase, hardened, QR"},
+		// hash160 + the longest form words: the widest this row gets, which is
+		// the one the glyph/raster/fits gates should be measuring.
+		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, md.KindHash160, "b867db87..689b8338", "phrase, hardened, QR"),
+			"path 2  hash160 b867db87..689b8338  phrase, hardened, QR"},
+		{"composerCopyTwentyByteUnseen", "8", composerCopyTwentyByteUnseen(md.KindRipemd160),
+			"20-BYTE HASH, NOT DERIVED HERE This is a ripemd160 digest and nothing on this device has seen a preimage for it. Whoever supplied it can spend this path. A 20-byte hash also leaves far less collision margin than sha256. Check you hold the preimage before you fund this wallet."},
 		{"composerCopyPreimageCensusScope", "H6-8.3", composerCopyPreimageCensusScope(),
 			"This is what this composition will cut. Plates cut in earlier runs are not known to " +
 				"this device and are not listed."},
@@ -390,8 +394,12 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// lead as the first body row and pages the rest, so a long one pushes kind
 	// rows off the first page. The first draft did exactly that and hid
 	// hash160 behind Button2 (TestComposerHashKindScreenDrawsAllFourRows).
-	if declared != 80 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 80 -- "+
+	// 81 SINCE SPEC_hashlock_kinds §8 WAS FINALLY IMPLEMENTED. It was a
+	// normative section of a GREEN spec with no code, no copy and no test
+	// behind it, found missing independently by the journey walk and the
+	// adversarial lens after the rest of phase 4 had shipped.
+	if declared != 81 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 81 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

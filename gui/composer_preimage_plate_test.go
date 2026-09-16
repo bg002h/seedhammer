@@ -294,7 +294,7 @@ func TestComposerCensusReportsEveryDecisionAndCutsNothingItself(t *testing.T) {
 
 	for _, want := range []string{
 		"Plus 1 preimage plate(s), cut first and NOT part of this backup:",
-		"path 2  " + hashlockFirst8Last8(plates[0].lock) + "  phrase, sha256, QR",
+		"path 2  " + plates[0].lock.Kind().Token() + " " + hashlockFirst8Last8(plates[0].lock) + "  phrase, sha256, QR",
 		"preimage " + hashlockFirst8Last8(plates[1].lock) + ": declined, will not be cut",
 		"preimage " + hashlockFirst8Last8(hd) + ": not on any path, will not be cut",
 		"Keep each preimage plate apart from the policy plates and from the others.",

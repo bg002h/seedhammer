@@ -91,6 +91,29 @@ func composerPayloadDigests(s *syswSession) []*md.HashLock {
 	return out
 }
 
+// composerWarnTwentyByteUnseen is SPEC_hashlock_kinds §8's gate: it draws the
+// 20-byte warning and reports whether the operator accepted it.
+//
+// SILENT FOR EVERYTHING §8 SAYS IS SILENT -- the 32-byte kinds, and any digest
+// whose preimage this composition holds (composerState.hashlockHeld, which only
+// the deriving routes populate). So the phrase route, the payload preimage-plate
+// route and the payload phrase-record route all pass through untouched, because
+// by the time they assign, the material is held.
+//
+// IT IS A CONFIRM, NOT A NOTICE. §8 calls it a warning and the operator is about
+// to commit a path to a digest nothing here can check; a modal they cannot
+// decline would be a notice dressed as a gate. Declining assigns nothing.
+func composerWarnTwentyByteUnseen(ctx *Context, th *Colors, st *composerState, h *md.HashLock) bool {
+	if h == nil || h.Kind().DigestLen() != 20 {
+		return true
+	}
+	if _, held := st.hashlockHeld[h.MapKey()]; held {
+		return true
+	}
+	return composerConfirmScreen(ctx, th, "Hash lock",
+		composerConfirmBody(composerCopyTwentyByteUnseen(h.Kind())))
+}
+
 // composerHashKinds is the kind screen's row order.
 //
 // THE DEFAULT IS THE CALLER'S SEED, NOT ROW 0 -- corrected after a mutation run
@@ -560,6 +583,11 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 		}
 		switch {
 		case sel < len(rows.digests):
+			// SPEC §8, band 1: a payload-supplied digest. The device did not
+			// derive it, so a 20-byte kind warns here.
+			if !composerWarnTwentyByteUnseen(ctx, th, st, rows.digests[sel]) {
+				continue // declined -> `Which hash?`, nothing assigned
+			}
 			st.list.Paths[idx].Hash = rows.digests[sel]
 			return true
 		case sel >= rows.preimageRow && sel < rows.preimageRow+len(rows.preimages):
@@ -632,6 +660,10 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 				d, ok := composerHexEntry(ctx, th, kind)
 				if !ok {
 					continue // Back from the pad -> the kind screen, kind still selected
+				}
+				// SPEC §8: a TYPED digest is never device-derived.
+				if !composerWarnTwentyByteUnseen(ctx, th, st, d) {
+					continue // declined -> the kind screen, nothing assigned
 				}
 				st.list.Paths[idx].Hash = d
 				return true

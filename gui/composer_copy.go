@@ -897,8 +897,46 @@ func composerCopyPreimageCensusScope() string {
 }
 
 // composerCopyPreimagePlateRow is §8.3's per-plate row.
-func composerCopyPreimagePlateRow(path int, first8last8, form string) string {
-	return fmt.Sprintf("path %d  %s  %s", path, first8last8, form)
+// THE KIND IS NAMED HERE BECAUSE THE METHOD ALREADY IS (§13.3, §6's
+// both-or-neither rule). `form` ends in the preimage METHOD -- "phrase,
+// sha256, QR" -- so on a hash160 wallet this row printed the bare token
+// `sha256` and meant the other axis by it. The census is the operator's only
+// inventory of what they must store apart, and it described all four
+// constructions identically: two plates for one preimage under two kinds
+// differ by sixteen hex characters and nothing else.
+func composerCopyPreimagePlateRow(path int, kind md.HashKind, first8last8, form string) string {
+	return fmt.Sprintf("path %d  %s %s  %s", path, kind.Token(), first8last8, form)
+}
+
+// composerCopyTwentyByteUnseen is SPEC_hashlock_kinds §8, which this cycle
+// specified as normative and then implemented nowhere -- no code, no copy, no
+// test -- until two review lenses found it missing independently.
+//
+// IT FIRES FOR ripemd160 AND hash160 ONLY WHEN THE DEVICE DID NOT DERIVE THE
+// PREIMAGE (§2 decision 3): a payload-supplied or typed digest warns, the
+// phrase route stays silent. Provenance is composerState.hashlockHeld, which
+// only the deriving routes populate, so there is no new plumbing -- exactly as
+// §8 says.
+//
+// WHAT IT SAYS AND WHY EACH CLAUSE IS TRUE. The first sentence is the funds
+// fact and it holds for any supplied digest: nothing on this device has seen a
+// preimage for it, so whoever did supply it is who can spend that path. The
+// second is what makes the 20-byte kinds the ones that warn -- half the width
+// is far less collision margin, and a digest chosen by someone else is exactly
+// the case where that margin is load-bearing. It does NOT claim the wallet is
+// unsafe: a ripemd160 hashlock whose preimage you hold is fine, and saying
+// otherwise would teach operators to skip the warning that matters.
+//
+// §8's own stated residual, accepted there and repeated here so it is not
+// rediscovered as a bug: hashlockHeld is per-digest-ever-seen rather than
+// per-assignment, so a digest derived here earlier in the SAME composition and
+// later arriving from a payload suppresses a warning it should show.
+func composerCopyTwentyByteUnseen(kind md.HashKind) string {
+	return "20-BYTE HASH, NOT DERIVED HERE\n" +
+		"This is a " + kind.Token() + " digest and nothing on this device has " +
+		"seen a preimage for it. Whoever supplied it can spend this path. A " +
+		"20-byte hash also leaves far less collision margin than sha256. Check " +
+		"you hold the preimage before you fund this wallet."
 }
 
 // composerCopyPreimageNotOnAnyPath is §8.3's row for a retained preimage no

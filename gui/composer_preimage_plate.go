@@ -412,7 +412,7 @@ func composerPreimageCensusLines(plates []hashlockPlate) []string {
 	if len(accepted) > 0 {
 		out = append(out, composerCopyPreimagePlateHeading(len(accepted)))
 		for _, p := range accepted {
-			out = append(out, composerCopyPreimagePlateRow(p.path,
+			out = append(out, composerCopyPreimagePlateRow(p.path, p.lock.Kind(),
 				hashlockFirst8Last8(p.lock), hashlockPlateFormWords(p)))
 		}
 		// F-497: the rows say what will be cut, and this says that is ALL they
