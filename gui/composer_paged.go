@@ -276,6 +276,23 @@ const composerPickScreenMaxRows = 24
 // and no arrows are added: the Clickables are zero-value, so Clickable.Next's
 // repeat arm -- which fires only for Up/Down/Left/Right -- cannot reach them.
 func composerPickScreen(ctx *Context, th *Colors, title, lead string, rows []string) (int, bool) {
+	return composerPickScreenFrom(ctx, th, title, lead, rows, 0)
+}
+
+// composerPickScreenFrom is composerPickScreen opening on a given row.
+//
+// FOR A BACK LEG THAT MUST NOT FORGET (SPEC_hashlock_kinds §7.1: "Back from the
+// hex pad -> the kind screen, KIND STILL SELECTED"). A screen that reopened on
+// row 0 would silently re-propose sha256 to an operator who had chosen
+// ripemd160 and stepped back to check something.
+//
+// `initial` is read ONCE, here, and never again inside the frame loop -- this
+// tree has already shipped a picker that re-seeded its cursor every frame, so
+// looking at the setting changed it and the operator could not move off row
+// zero. Out-of-range values are clamped rather than panicking: the cursor is a
+// view, and no caller should be able to crash a composition by asking for a row
+// that is not there.
+func composerPickScreenFrom(ctx *Context, th *Colors, title, lead string, rows []string, initial int) (int, bool) {
 	backBtn := &Clickable{Button: Button1}
 	takeBtn := &Clickable{Button: Button3, AltButton: Center}
 	pageBtn := &Clickable{Button: Button2}
@@ -294,8 +311,11 @@ func composerPickScreen(ctx *Context, th *Colors, title, lead string, rows []str
 	// and paging is forward-only with wrap, so recovering it cost a full
 	// cycle. Prepending it to every page costs the same measurement loop.
 	lines := rows
-	sel := 0
-	start := 0
+	sel := initial
+	if sel < 0 || sel >= len(lines) {
+		sel = 0
+	}
+	start := sel
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			return 0, false

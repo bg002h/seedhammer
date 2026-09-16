@@ -66,6 +66,8 @@ func composerCopyTable() []composerCopyRow {
 		// and the longest body is the one that can overflow. A policy with four
 		// paths carrying one kind each reaches it. The one- and two-kind
 		// wordings are asserted in TestComposerConsentHashRuleNamesTheKinds.
+		{"composerCopyHashKindLead", "7.1", composerCopyHashKindLead(),
+			"All four take a 32-byte preimage. sha256 is the usual choice."},
 		{"composerCopyHashRuleForKinds", "8i", composerCopyHashRuleForKinds(
 			[]md.HashKind{md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160}),
 			"This wallet's hashes are sha256, hash256, ripemd160 and hash160. Each must be of a 32-byte value. A passphrase must be hashed to 32 bytes first, then hashed again. A hash of the passphrase itself can never be spent."},
@@ -383,8 +385,13 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// kind must be named. One string could not do both jobs once four kinds
 	// existed -- it asserted SHA-256 at a moment when the answer might be
 	// ripemd160.
-	if declared != 79 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 79 -- "+
+	// 80 SINCE SPEC_hashlock_kinds §7.1 gave the hash KIND its own pick screen,
+	// which needs a lead. It is SHORT on purpose: composerPickScreen draws the
+	// lead as the first body row and pages the rest, so a long one pushes kind
+	// rows off the first page. The first draft did exactly that and hid
+	// hash160 behind Button2 (TestComposerHashKindScreenDrawsAllFourRows).
+	if declared != 80 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 80 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

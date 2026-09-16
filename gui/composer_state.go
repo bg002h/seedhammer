@@ -387,7 +387,7 @@ func composerScrubHashlockHeld(st *composerState) {
 // path CURRENTLY in this composition carries a digest derived from a phrase.
 //
 // IT WALKS THE PATHS, which is the whole design. Every edit that changes a hash
-// -- "Remove path", `No hash lock`, `Type 64 hex`, a payload row -- changes
+// -- "Remove path", `No hash lock`, `Type a digest`, a payload row -- changes
 // p.Hash, and this reads p.Hash, so none of them needs bookkeeping and the
 // composerHashByPhraseSync that used to keep the old flag honest is gone with
 // both of its call sites. A predicate that only asked whether the SET is

@@ -233,6 +233,30 @@ func composerCopyHashRuleForKinds(kinds []md.HashKind) string {
 		". Each must be of a 32-byte value." + tail
 }
 
+// composerCopyHashKindLead is SPEC_hashlock_kinds §7.1's kind screen.
+//
+// TWO SENTENCES, AND THE LENGTH IS A HARD CONSTRAINT RATHER THAN A STYLE
+// PREFERENCE. composerPickScreen draws the lead as the first body row and pages
+// the rest, so a long lead pushes rows off the FIRST PAGE -- silently, with no
+// gate of its own. The first draft of this body ran three sentences and
+// measured (emulator frame, sh2DisplaySize) at THREE kind rows visible:
+// `hash160` was reachable only by pressing Button2, on a four-row screen where
+// nothing suggests a second page exists.
+// TestComposerHashKindScreenDrawsAllFourRows is the gate that keeps it honest.
+//
+// WHAT IT SAYS, AND WHY THOSE TWO THINGS. The preimage is 32 bytes under all
+// four kinds, and an operator who reads a `40 hex` row as "type a 40-character
+// secret" has misread the one thing that would make their wallet unspendable.
+// And the default is named, because this screen HAS one -- row 0 is taken by an
+// operator who presses straight through, so saying so is honest rather than
+// leading.
+//
+// The per-kind widths are NOT here: they are on the rows, where they belong,
+// stated in the hex characters the next screen will actually demand.
+func composerCopyHashKindLead() string {
+	return "All four take a 32-byte preimage. sha256 is the usual choice."
+}
+
 // composerKindList joins kind tokens the way composerSlotList joins slots.
 func composerKindList(kinds []md.HashKind) string {
 	out := ""
@@ -554,7 +578,8 @@ func composerCopyHashlockRefusal(err error) string {
 	case hashlock.ErrTooLong:
 		return "A hashlock phrase is at most 100 characters."
 	case hashlock.ErrHex64:
-		return "That is a preimage in hex, not a phrase. Use the Type 64 hex row."
+		return "That is a preimage in hex, not a phrase. Use the " +
+			composerHashRowHex + " row."
 	}
 	return err.Error()
 }

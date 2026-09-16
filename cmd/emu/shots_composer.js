@@ -667,7 +667,11 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   must(hashRows, "Type 64 hex", "the type-it row");
   must(hashRows, "No hash lock", "the clear row");
   // §8i draws only once the operator is actually TAKING a hash (r0 I-8).
-  await chooseRow(0, "The hash must be SHA-256", "hash 1");
+  // "The preimage must be", not "The hash must be SHA-256": SPEC_hashlock_kinds
+  // §7.2 split §8i, and the ENTRY body fires before a kind exists, so it names
+  // no function. This row is a payload `hash:` record, which carries its own
+  // kind (§7.1 route 1) and reaches no kind screen.
+  await chooseRow(0, "The preimage must be", "hash 1");
   const rule = window.shScreen();
   must(rule, "A hash of the passphrase itself can never be spent.", "the §8i preimage rule");
   taken.push(await screenShot(shotURL, "c05-hash-rule.png"));

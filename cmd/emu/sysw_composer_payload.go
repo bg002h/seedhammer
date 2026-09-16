@@ -12,7 +12,7 @@
 // ClassFreeText; sysw_cards_payload.bin holds mk1 cosigner cards and a
 // ClassMnemonic. NEITHER holds a ClassKey, a ClassHash or a ClassNow, so in the
 // emulator the composer's key sources are empty, its hash-lock picker has
-// nothing to offer but `Type 64 hex`, and a time lock has no pack-time bound to
+// nothing to offer but `Type a digest`, and a time lock has no pack-time bound to
 // echo. Spec §12 item 2 makes the C8 journey an emulator walk over exactly
 // those screens, and before this blob no walk could reach them.
 //

@@ -51,7 +51,11 @@ func (m hashlockMethod) String() string {
 	return "hardened"
 }
 
-func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload []*md.HashLock) hashlockOutcome {
+// `kind` is the hash kind chosen on the screen BEFORE the phrase screen
+// (SPEC_hashlock_kinds §7.1). It reaches the digest through hashlockLockOf and
+// the confirm and reconcile bodies through h.Kind(), so every screen on this
+// route names the same kind the script will commit to.
+func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload []*md.HashLock, kind md.HashKind) hashlockOutcome {
 	var phrase []byte
 	for {
 		p, ok := hashlockPhraseFlow(ctx, th, phrase)
@@ -72,7 +76,7 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 			if !ok {
 				continue // Back during derivation -> method pick
 			}
-			h := hashlockLockOf(md.KindSha256, &x)
+			h := hashlockLockOf(kind, &x)
 			body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
 				hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h), h.Kind())
 			if composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {

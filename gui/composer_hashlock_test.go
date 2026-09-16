@@ -145,6 +145,24 @@ func (h *sessionHarness) tapRow(i, n int) {
 	h.tapNav(Button3)
 }
 
+// pickKind walks SPEC_hashlock_kinds §7.1's kind screen, which sits between the
+// §8i rule modal and the material entry on BOTH typed arms.
+//
+// It asserts the screen is actually there before tapping, so a flow that
+// stopped drawing it fails here rather than silently tapping whatever screen
+// took its place -- which, on a four-row pick, would have landed somewhere
+// plausible.
+//
+// `row` is an index into composerHashKinds (0 = sha256, the default). Passing 0
+// still TAPS row 0 rather than pressing straight through, so the helper proves
+// the row is reachable by touch; the default-without-a-tap path is asserted
+// once, on its own, by TestComposerHashKindDefaultsToSha256WithoutATap.
+func (h *sessionHarness) pickKind(row int) {
+	h.t.Helper()
+	h.mustReach("32-byte preimage")
+	h.tapRow(row, len(composerHashKinds))
+}
+
 // holdConfirm holds Button3 (the ConfirmWarningScreen hold gesture) past
 // confirmDelay, then RELEASES.
 //
@@ -385,6 +403,7 @@ func TestHashlockPhraseRouteSetsTheCorpusDigest(t *testing.T) {
 			h.tapRow(0, 3)               // Type a hashlock phrase (no payload digests)
 			h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 			h.tapNav(Button3)
+			h.pickKind(0) // §7.1's kind screen, sha256
 			h.mustReach("Hashlock phrase")
 			typeOnPassphraseKeyboard(t, h, tc.phrase)
 			h.tapNav(Button3) // OK
@@ -448,6 +467,7 @@ func TestHashlockPhraseRouteDoesNotNormalise(t *testing.T) {
 		h.tapRow(0, 3)
 		h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 		h.tapNav(Button3)
+		h.pickKind(0) // §7.1's kind screen, sha256
 		h.mustReach("Hashlock phrase")
 		typeOnPassphraseKeyboard(t, h, phrase)
 		h.tapNav(Button3)
@@ -476,6 +496,7 @@ func TestHashlockBackContractKeepsThePath(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 	h.tapNav(Button3)
@@ -507,11 +528,37 @@ func TestHashlockBackContractKeepsThePath(t *testing.T) {
 	}
 	h.tapNav(Button1) // Back at method pick -> phrase screen
 	h.mustReach("Hashlock phrase")
-	h.tapNav(Button1) // Back at phrase screen -> Which hash?, phrase dropped
+	// SPEC_hashlock_kinds §7.1 MOVED THIS LEG ONE SCREEN EARLIER. H2 §4.6 had
+	// "Back from the phrase screen -> `Which hash?` (phrase dropped)"; the kind
+	// screen now sits in front of it, so Back stops there -- AND THE PHRASE IS
+	// STILL DROPPED. That second clause is the one worth a test: a Back that
+	// stopped earlier while quietly keeping the phrase would leave typed
+	// material alive on a screen the operator thinks they have left.
+	h.tapNav(Button1) // Back at phrase screen -> the kind screen, phrase dropped
+	h.mustReach("32-byte preimage")
+	if n := len(st.list.Paths); n != 1 {
+		t.Fatalf("path deleted by Back to the kind screen: %d paths", n)
+	}
+	h.tapNav(Button1) // Back at the kind screen -> Which hash?; nothing was held
 	h.mustReach("Type a hashlock phrase")
 	if n := len(st.list.Paths); n != 1 {
 		t.Fatalf("path deleted by Back to Which hash?: %d paths", n)
 	}
+	// AND THE PHRASE IS GONE: re-entering the arm draws an EMPTY phrase screen.
+	// The readout is the phrase's own, so a retained phrase would show up in it.
+	h.tapRow(0, 3)
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.pickKind(0)
+	if body := h.mustReach("Hashlock phrase"); uiContains(body, hashlockAnchorPhrase[:8]) {
+		t.Errorf("the dropped phrase survived the Back to the kind screen: %q", body)
+	}
+	// Back out of the re-entry so the final leg below starts where it always
+	// did: on `Which hash?`, at creation, with the path still present.
+	h.tapNav(Button1) // -> the kind screen
+	h.mustReach("32-byte preimage")
+	h.tapNav(Button1) // -> `Which hash?`
+	h.mustReach("Type a hashlock phrase")
 	h.tapNav(Button1) // Back at Which hash? -> false -> creation deletes the path
 	h.waitDone()
 	if n := len(st.list.Paths); n != 0 {
@@ -531,6 +578,7 @@ func TestHashlockDeclineThenHardenedTypesOnce(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 	h.tapNav(Button3)
@@ -554,7 +602,7 @@ func TestHashlockPhraseRefusalsOnScreen(t *testing.T) {
 	const plate = "ms10hashsqw46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46h2at4w46kzv2ncy60u7z9c"
 	for _, tc := range []struct{ name, typed, needle string }{
 		{"101 characters", strings.Repeat("k", 101), "at most 100 characters"},
-		{"64 hex", hashlockAnchorHardH, "Use the Type 64 hex row"},
+		{"64 hex", hashlockAnchorHardH, "Use the Type a digest row"},
 		{"plate ungrouped", plate, "preimage plate, not a phrase"},
 		{"plate grouped by 5", groupBy(plate, 5), "preimage plate, not a phrase"},
 	} {
@@ -569,6 +617,7 @@ func TestHashlockPhraseRefusalsOnScreen(t *testing.T) {
 			h.tapRow(0, 3)
 			h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 			h.tapNav(Button3)
+			h.pickKind(0) // §7.1's kind screen, sha256
 			h.mustReach("Hashlock phrase")
 			typeOnPassphraseKeyboard(t, h, tc.typed)
 			if tc.name == "101 characters" {
@@ -602,6 +651,7 @@ func TestHashlockMethodModalsFireOnCondition(t *testing.T) {
 		h.tapRow(0, 3)
 		h.mustReach("32-byte value") // the §8i rule modal (composerCopyHashRule)
 		h.tapNav(Button3)
+		h.pickKind(0) // §7.1's kind screen, sha256
 		h.mustReach("Hashlock phrase")
 		typeOnPassphraseKeyboard(t, h, tc.phrase)
 		h.tapNav(Button3)
@@ -658,6 +708,7 @@ func TestHashlockConfirmRelationLine(t *testing.T) {
 			h.tapRow(len(tc.records), len(tc.records)+3) // the phrase row sits after the payload rows
 			h.mustReach("32-byte value")                 // the §8i rule modal (composerCopyHashRule)
 			h.tapNav(Button3)
+			h.pickKind(0) // §7.1's kind screen, sha256
 			h.mustReach("Hashlock phrase")
 			typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 			h.tapNav(Button3)
@@ -723,15 +774,28 @@ func TestComposerHashEditDispatchesByRowLabel(t *testing.T) {
 		h.tapRow(3, 5)
 		h.mustReach("32-byte value")
 		h.tapNav(Button3)
+		h.pickKind(0)
 		// The hex pad, NOT a cleared lock and a returned composerHashEdit.
 		h.mustReach("0 of 64 hex")
 		if *h.done {
 			t.Fatal("composerHashEdit returned instead of opening hex entry")
 		}
-		h.tapNav(Button1) // Back at the pad -> `Which hash?`, nothing assigned
-		h.mustReach("Which hash?")
+		// BACK FROM THE PAD LANDS ON THE KIND SCREEN, NOT `Which hash?`
+		// (SPEC_hashlock_kinds §7.1's Back table). The kind screen is upstream
+		// of the material, so stepping back off the pad costs nothing and the
+		// kind stays chosen -- an operator checking the width does not have to
+		// re-answer the question.
+		h.tapNav(Button1)
+		h.mustReach("32-byte preimage")
 		if st.list.Paths[0].Hash != nil {
 			t.Fatal("Back at the hex pad assigned a hash")
+		}
+		// And one more Back leaves the kind screen for `Which hash?`, with
+		// nothing held and nothing discarded.
+		h.tapNav(Button1)
+		h.mustReach("Which hash?")
+		if st.list.Paths[0].Hash != nil {
+			t.Fatal("Back at the kind screen assigned a hash")
 		}
 	})
 
@@ -743,6 +807,7 @@ func TestComposerHashEditDispatchesByRowLabel(t *testing.T) {
 		h.tapRow(2, 5)
 		h.mustReach("32-byte value")
 		h.tapNav(Button3)
+		h.pickKind(0)
 		h.mustReach("Hashlock phrase")
 	})
 
@@ -775,7 +840,7 @@ func TestComposerHashEditDispatchesByRowLabel(t *testing.T) {
 }
 
 // Spec §4.6 through the CREATION entry point for the row this plan CHANGED:
-// `Type 64 hex`'s Back used to propagate out of composerHashEdit and delete the
+// `Type a digest`'s Back used to propagate out of composerHashEdit and delete the
 // path (composer_shape.go:269-272 at the fork baseline c4a64fc); under §4.6 it
 // returns to `Which hash?` with
 // the path intact. Round 0 claimed "Task 4's harness tests do" cover this and
@@ -795,14 +860,25 @@ func TestHashlockHexRowBackKeepsThePath(t *testing.T) {
 	h.mustReach("EXPERIMENTAL")
 	h.holdConfirm()
 	h.mustReach("Type a hashlock phrase")
-	h.tapRow(1, 3) // Type 64 hex (no payload digests: phrase 0, hex 1, none 2)
+	h.tapRow(1, 3) // Type a digest (no payload digests: phrase 0, hex 1, none 2)
 	h.mustReach("32-byte value")
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("0 of 64 hex")
-	h.tapNav(Button1) // Back at the pad
-	h.mustReach("Type a hashlock phrase")
+	// TWO BACKS NOW, AND C-4's PROPERTY MUST HOLD AT BOTH. §7.1 puts the kind
+	// screen between the pad and `Which hash?`, so the leg this test was
+	// written for -- a Back that propagated out of composerHashEdit and deleted
+	// the path -- has a new place to happen. Asserting the path survives only
+	// the outer one would leave the new level ungated.
+	h.tapNav(Button1) // Back at the pad -> the kind screen
+	h.mustReach("32-byte preimage")
 	if n := len(st.list.Paths); n != 1 {
 		t.Fatalf("Back at the hex pad deleted the path: %d paths", n)
+	}
+	h.tapNav(Button1) // Back at the kind screen -> `Which hash?`
+	h.mustReach("Type a hashlock phrase")
+	if n := len(st.list.Paths); n != 1 {
+		t.Fatalf("Back at the kind screen deleted the path: %d paths", n)
 	}
 	if st.list.Paths[0].Hash != nil {
 		t.Fatal("Back at the hex pad assigned a hash")
@@ -945,6 +1021,7 @@ func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value")
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 	h.tapNav(Button3)
@@ -996,6 +1073,7 @@ func TestHashlockReconcileScreenCarriesTheDigestMethodAndChars(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value")
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 	h.tapNav(Button3)
@@ -1117,6 +1195,7 @@ func TestHashlockPhraseScreenDrawsTheMaskedReadout(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value")
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, "abcdefghij")
 	frame := h.mustReach("10/100")
@@ -1209,7 +1288,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 	}
 
 	// Rows, in §5.1's order: preimage 1, phrase record 1, Type a hashlock
-	// phrase, Type 64 hex, No hash lock.
+	// phrase, Type a digest, No hash lock.
 	//
 	// NO hash: RECORD IN THIS FIXTURE, and that is a MEASUREMENT rather than a
 	// convenience: the first page of this pick screen holds FIVE rows after the
@@ -1308,7 +1387,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 	// a `hash:` record would be a SIXTH row and the first page holds five
 	// (TestWhichHashPageHoldsFiveRows), so the preimage record is dropped to
 	// make room. Rows here: payload hash 1, phrase record 1, Type a hashlock
-	// phrase, Type 64 hex, No hash lock.
+	// phrase, Type a digest, No hash lock.
 	//
 	// MUTATION: drop the `!payloadStatesDigest(...)` guard -> the screen is
 	// drawn here too and this subtest fails; invert it -> the subtest above
@@ -1352,12 +1431,13 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		var ret bool
 		h := runComposerHashEdit(t, st, sessionOf(t), 0, &ret)
 		h.mustReach("Which hash?")
-		h.tapRow(3, rowCount) // Type 64 hex
+		h.tapRow(3, rowCount) // Type a digest
 		h.mustReach("32-byte value")
 		h.tapNav(Button3)
+		h.pickKind(0)
 		h.mustReach("0 of 64 hex")
 		if *h.done {
-			t.Fatal("`Type 64 hex` returned instead of opening the pad: C-4's regression")
+			t.Fatal("`Type a digest` returned instead of opening the pad: C-4's regression")
 		}
 	})
 
@@ -1502,5 +1582,167 @@ func TestWhichHashPageHoldsFiveRows(t *testing.T) {
 	content = h.mustReach("No hash lock")
 	if !uiContains(content, "No hash lock") {
 		t.Fatalf("`No hash lock` is not reachable by paging.\nFrame: %q", content)
+	}
+}
+
+// ─── SPEC_hashlock_kinds §7.1: the kind screen ───────────────────────────────
+
+// TestComposerHashKindScreenDrawsAllFourRows is the gate the lead's length owes
+// its shortness to.
+//
+// composerPickScreen draws the lead as the first body row and pages the rest,
+// SILENTLY. A lead one sentence longer pushed `hash160` onto a second page --
+// measured, not hypothesised: the first draft of composerCopyHashKindLead ran
+// three sentences and this screen drew sha256, hash256 and ripemd160, with the
+// fourth kind reachable only by pressing Button2 on a screen that gives no hint
+// a second page exists. Every other kind gate in this tree would still have
+// passed: the kind was authorable, lowered, engraved and decoded correctly, and
+// simply could not be CHOSEN.
+//
+// MUTATION: add a sentence to composerCopyHashKindLead -> the count drops to 3.
+//
+// MEASURED MARGIN (sh2DisplaySize, this harness, 2026-09-15). The lead is 61
+// characters and draws four rows. Padding it: +20 -> 4 rows, +40 -> 4 rows,
+// +60 -> 3 ROWS. So there are between 40 and 60 characters of headroom, which
+// is the same order as the modal margin F-185 was re-broken inside -- close
+// enough that ANY new sentence here needs this test re-run, not reasoned about.
+func TestComposerHashKindScreenDrawsAllFourRows(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(1, 3) // Type a digest
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	body := h.mustReach("32-byte preimage")
+
+	pts := plateHitPoints(h.ctx, h.drawer())
+	if len(pts) != len(composerHashKinds) {
+		t.Errorf("the kind screen drew %d tappable rows on its FIRST page, want %d. "+
+			"The surplus is behind Button2, on a screen nothing marks as paged.\nFrame: %q",
+			len(pts), len(composerHashKinds), body)
+	}
+	for _, k := range composerHashKinds {
+		if !uiContains(body, k.Token()) {
+			t.Errorf("the kind screen's first page does not name %s:\n%q", k.Token(), body)
+		}
+		if !uiContains(body, fmt.Sprintf("%d hex", k.DigestLen()*2)) {
+			t.Errorf("%s's row does not state its digest width, which is the bound the "+
+				"pad will enforce on the next screen:\n%q", k.Token(), body)
+		}
+	}
+}
+
+// TestComposerHashKindDefaultsToSha256WithoutATap is §7.1's "rows default to
+// sha256, seeded once per screen".
+//
+// NO ROW IS TAPPED HERE. An operator who presses straight through takes row 0,
+// and row 0 must be sha256 -- the kind every wallet this device could build
+// before this cycle used, and the kind the three record grammars carrying no
+// kind field still mean. Getting this backwards would silently re-key every
+// press-through wallet to whichever kind happened to sit first.
+//
+// MUTATION: `kind := md.KindSha256` -> `md.KindHash256` in composerHashEdit's
+// hex arm. That is the seed composerHashKindPick opens on, and it is what
+// actually decides the press-through kind.
+//
+// NOT "reorder composerHashKinds": that was this comment's first named
+// mutation, and running it showed the test passing. The reorder is a SEMANTIC
+// NO-OP for the default -- the pick opens on the row holding `initial`, so
+// sha256 stays selected wherever it sits in the list. A mutation that applies
+// cleanly and changes nothing reads exactly like a test that cannot fail.
+func TestComposerHashKindDefaultsToSha256WithoutATap(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(1, 3)
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.mustReach("32-byte preimage")
+	h.tapNav(Button3) // take the highlighted row WITHOUT tapping one
+	h.mustReach("0 of 64 hex")
+	// THE PAD'S WIDTH CANNOT ANSWER THIS, and the first version of this test
+	// asserted exactly that and passed under its own named mutation. hash256 is
+	// ALSO 64 hex, so "the pad says 64" is true for two of the four kinds --
+	// reordering composerHashKinds to put hash256 first left the screen looking
+	// identical. Only the LOCK knows which function it committed to, so the
+	// entry is completed and the kind read off the policy.
+	for _, r := range strings.Repeat("a", 64) {
+		h.ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
+		h.next("typing the digest")
+	}
+	h.tapNav(Button3)
+	h.waitDone()
+	got := st.list.Paths[0].Hash
+	if got == nil {
+		t.Fatal("the path holds no hash after a press-through entry")
+	}
+	if got.Kind() != md.KindSha256 {
+		t.Errorf("pressing straight through the kind screen produced a %s lock. The "+
+			"seed composerHashEdit opens the pick on is the proposal an operator "+
+			"accepts without choosing, and it must be the kind every pre-cycle wallet "+
+			"and every kind-less record grammar means", got.Kind().Token())
+	}
+}
+
+// TestComposerCanBuildARipemd160HashlockOnTheDevice is the question the whole
+// cycle exists to answer, asked of the device: CAN AN OPERATOR ACTUALLY DO IT?
+//
+// Every other gate here checks a part -- the codec lowers four kinds, the record
+// grammar parses four tags, the screens name the kind, the pad takes the kind's
+// width. All of them passed while `composerHashEdit` still called a pad that
+// hardcoded sha256, because no test walked the whole route by touch and looked
+// at what the policy ended up holding. This one does, at a kind that did not
+// exist on this device before, and it fails if ANY link is still sha256-only.
+//
+// MUTATION: `md.NewHashLock(md.KindSha256, raw)` in composerHexEntry -> the pad
+// refuses 40 bytes at sha256's width, the entry never returns, and this test
+// reports that the path holds no hash at all.
+func TestComposerCanBuildARipemd160HashlockOnTheDevice(t *testing.T) {
+	const digest40 = "98a20fc25dbcdf236fb0307e3f82cad47fca2e80"
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(1, 3) // Type a digest
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.pickKind(2) // ripemd160
+	// THE PAD'S OWN BOUND MOVED WITH THE KIND. A screen still saying "of 64 hex"
+	// here would mean the kind reached the label and not the logic.
+	if body := h.mustReach("of 40 hex"); !uiContains(body, "0 of 40 hex") {
+		t.Fatalf("the pad after a ripemd160 pick is not at 40 hex:\n%q", body)
+	}
+	for _, r := range digest40 {
+		h.ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
+		h.next("typing the digest")
+	}
+	h.tapNav(Button3)
+	h.waitDone()
+
+	if !ret {
+		t.Fatal("composerHashEdit returned false after a complete ripemd160 entry")
+	}
+	got := st.list.Paths[0].Hash
+	if got == nil {
+		t.Fatal("the path holds no hash after a complete ripemd160 entry")
+	}
+	if got.Kind() != md.KindRipemd160 {
+		t.Errorf("the path holds a %s lock; the kind chosen on screen did not reach "+
+			"the policy", got.Kind().Token())
+	}
+	if hashlockHashHex(got) != digest40 {
+		t.Errorf("the path holds %s, want %s", hashlockHashHex(got), digest40)
+	}
+	// AND IT LOWERS. A lock the composer accepts but md.Compose cannot encode
+	// would be a wallet an operator could build and never engrave.
+	st.list.Paths[0].Keys = &md.KeySet{K: 1, N: 1, Sorted: true}
+	c, err := md.Compose(st.list)
+	if err != nil {
+		t.Fatalf("a device-built ripemd160 policy does not compose: %v", err)
+	}
+	if _, err := c.Chunks(); err != nil {
+		t.Fatalf("a device-built ripemd160 policy does not chunk: %v", err)
 	}
 }

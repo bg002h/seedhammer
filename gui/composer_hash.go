@@ -77,25 +77,94 @@ func composerPayloadDigests(s *syswSession) []*md.HashLock {
 	return out
 }
 
-// composerHexEntry is the fallback: 64 hex characters, accepted only when
-// exactly 64 are present (§6c).
+// composerHashKinds is the kind screen's row order.
+//
+// THE DEFAULT IS THE CALLER'S SEED, NOT ROW 0 -- corrected after a mutation run
+// showed this comment's first version was wrong about its own code.
+// composerHashKindPick opens on whichever row holds `initial`, so reordering
+// this list does NOT change what an operator who presses straight through gets;
+// composerHashEdit's `kind := md.KindSha256` is what does. Row order is a
+// reading-order choice, and sha256 leads because it is the kind every wallet
+// this device could build before this cycle used, and the kind the three record
+// grammars carrying no kind field still mean (§7.1 routes 4, 5).
+//
+// Order is fixed in a list rather than derived by ranging over the constants so
+// that adding a fifth kind is a deliberate edit here -- with a decision about
+// where it sits -- and not a silent reshuffle of a screen an operator has
+// muscle memory for.
+var composerHashKinds = [...]md.HashKind{
+	md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160,
+}
+
+// composerHashKindRow is one row: the token, then the digest width in hex
+// characters, which is what the pad on the next screen will demand.
+func composerHashKindRow(k md.HashKind) string {
+	return fmt.Sprintf("%-10s %d hex", k.Token(), k.DigestLen()*2)
+}
+
+// composerHashKindPick is SPEC_hashlock_kinds §7.1's own screen: the hash KIND,
+// which is a different axis from `Which hash?`'s SOURCE and from the phrase
+// route's derivation METHOD.
+//
+// ITS OWN SCREEN, NOT A BAND ON `Which hash?`. Three hand-maintained gates are
+// wired to that screen's row counts, and a fifth band would disturb all three
+// for no design benefit (§7.1).
+//
+// IT COMES BEFORE THE MATERIAL ON BOTH ARMS, which is what keeps the KDF out of
+// the Back path: nothing is held when the kind is chosen, so Back from here
+// costs an operator nothing. It does NOT make the correction free -- an
+// operator who reaches the phrase screen, realises the kind is wrong and steps
+// back must retype the dropped phrase and pay the KDF again. Only the
+// navigation is free.
+//
+// `initial` is the kind already chosen, so a Back from the pad or the phrase
+// screen reopens here on it rather than re-proposing sha256.
+func composerHashKindPick(ctx *Context, th *Colors, initial md.HashKind) (md.HashKind, bool) {
+	rows := make([]string, 0, len(composerHashKinds))
+	sel := 0
+	for i, k := range composerHashKinds {
+		rows = append(rows, composerHashKindRow(k))
+		if k == initial {
+			sel = i
+		}
+	}
+	i, ok := composerPickScreenFrom(ctx, th, "Hash function",
+		composerCopyHashKindLead(), rows, sel)
+	if !ok {
+		return initial, false
+	}
+	return composerHashKinds[i], true
+}
+
+// composerHexEntry is the fallback pad: the kind's digest as hex, accepted only
+// at exactly md.HashKind.DigestLen()*2 characters (§6c, SPEC_hashlock_kinds
+// §7.1).
+//
+// THE KIND ARRIVES FROM THE SCREEN BEFORE IT, and the bound follows the kind
+// rather than a literal 64. That is what preserves the shipped property this
+// pad was built on -- "an entry N characters long is N VALID characters by
+// construction" -- at a second width: the alphabet is hex alone, and the clamp
+// is the kind's own, so a full entry is always a well-formed digest OF THAT
+// KIND. A fixed 64 would have refused every ripemd160 digest as too short while
+// telling the operator nothing about which of the two numbers was wrong.
 //
 // IT RETURNS A sha256 LOCK, and the pad's fixed 64-character bound is what says
 // so: `Which hash?` offers no kind, so the digest an operator types here is the
 // sha256 one this screen has always meant. A kind pick would come with its own
 // character bound, since the rule is md.HashKind.DigestLen()*2 and not 64.
-func composerHexEntry(ctx *Context, th *Colors) (*md.HashLock, bool) {
+func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock, bool) {
+	want := kind.DigestLen() * 2
 	kbd := NewKeyboard(ctx, composerHexKeys)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
-		if len(kbd.Fragment) > 64 {
-			kbd.Fragment = kbd.Fragment[:64]
+		if len(kbd.Fragment) > want {
+			kbd.Fragment = kbd.Fragment[:want]
 		}
 		frag := kbd.Fragment
-		valid := len(frag) == 64
+		valid := len(frag) == want
 		if backBtn.Clicked(ctx) {
 			return nil, false
 		}
@@ -112,13 +181,19 @@ func composerHexEntry(ctx *Context, th *Colors) (*md.HashLock, bool) {
 			var lock *md.HashLock
 			if err == nil {
 				var ok bool
-				lock, ok = md.NewHashLock(md.KindSha256, raw)
+				lock, ok = md.NewHashLock(kind, raw)
 				if !ok {
 					lock = nil
 				}
 			}
 			if lock == nil {
-				showError(ctx, th, "Hash lock", "That is not a 32-byte digest.")
+				// Unreachable, as it was before the kind screen: the alphabet
+				// is hex and the clamp is the kind's own width, so `valid`
+				// cannot be true for bytes NewHashLock rejects. It names the
+				// kind anyway -- an unreachable message that hardcodes sha256
+				// is a lie waiting for the day it becomes reachable.
+				showError(ctx, th, "Hash lock",
+					fmt.Sprintf("That is not a %s digest.", kind.Token()))
 				continue
 			}
 			return lock, true
@@ -149,7 +224,7 @@ func composerHexEntry(ctx *Context, th *Colors) (*md.HashLock, bool) {
 		)).Offset(wordOff)
 
 		count, csz := widget.Label(&ctx.B, ctx.Styles.body, th.Text,
-			fmt.Sprintf("%d of 64 hex", len(frag)))
+			fmt.Sprintf("%d of %d hex", len(frag), want))
 		countOp := count.Offset(image.Pt((dims.X-csz.X)/2, wordOff.Y+frgSize.Y+8))
 
 		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
@@ -164,6 +239,11 @@ func composerHexEntry(ctx *Context, th *Colors) (*md.HashLock, bool) {
 }
 
 const composerHashRowPhrase = "Type a hashlock phrase"
+
+// composerHashRowHex is the typed-digest row. Named rather than inline because
+// composerCopyHashlockPhraseRule points the operator at it BY LABEL, and the
+// two drifting apart would send them looking for a row that is not there.
+const composerHashRowHex = "Type a digest"
 
 // composerHashInPayloadRow is §5.1 Step 2's annotated form of the band-1 row.
 //
@@ -369,7 +449,13 @@ func composerHashRows(s *syswSession, st *composerState) composerHashRowSet {
 	r.phraseRow = len(labels)
 	labels = append(labels, composerHashRowPhrase)
 	r.hexRow = len(labels)
-	labels = append(labels, "Type 64 hex")
+	// `Type a digest`, NOT `Type 64 hex` (SPEC_hashlock_kinds §7.1). The row
+	// used to name the width because the width was fixed; the kind screen now
+	// sits between this row and the pad, and a ripemd160 entry is 40. A label
+	// promising 64 to an operator who is about to be asked for 40 is the same
+	// defect class as §13.2's reconcile screen: a screen stating the axis it
+	// does not control. The pad states the real bound, once the kind is known.
+	labels = append(labels, composerHashRowHex)
 	r.noneRow = len(labels)
 	labels = append(labels, "No hash lock")
 	r.labels = labels
@@ -455,20 +541,60 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			case hashlockBackToWhichHash:
 				continue
 			}
+		// ─── THE TWO TYPED ARMS, AND THE ONLY TWO THAT ASK FOR A KIND ────────
+		//
+		// SPEC_hashlock_kinds §7.1. Four of the six entry routes never reach the
+		// kind screen and that is not an oversight: a payload `hash:` record
+		// carries its kind in the record (§6), a `phrase:` record and a
+		// preimage-plate record carry no kind field at all (so sha256), and the
+		// preset archetype takes its kind from the preset's own grammar on the
+		// host. Only material typed HERE has no other source for the answer.
+		//
+		// THE KIND SCREEN IS UPSTREAM OF THE MATERIAL on both arms, so `kind`
+		// lives outside the inner loop and a Back from the pad or the phrase
+		// screen reopens the kind screen ON THE KIND ALREADY CHOSEN. Back from
+		// the kind screen itself leaves the inner loop, which lands on `Which
+		// hash?` -- nothing was held, so nothing is discarded.
+		//
+		// `kind` is re-seeded to sha256 on each fresh entry from `Which hash?`,
+		// not carried across, so an operator returning to this row later gets
+		// the usual proposal rather than a stale one from an abandoned attempt.
 		case sel == rows.phraseRow:
-			switch hashlockPhraseRoute(ctx, th, st, idx, rows.digests) {
-			case hashlockAssigned:
-				return true
-			case hashlockBackToWhichHash:
-				continue
+			kind := md.KindSha256
+			for {
+				k, ok := composerHashKindPick(ctx, th, kind)
+				if !ok {
+					break // -> `Which hash?`; nothing held, nothing discarded
+				}
+				kind = k
+				switch hashlockPhraseRoute(ctx, th, st, idx, rows.digests, kind) {
+				case hashlockAssigned:
+					return true
+				case hashlockBackToWhichHash:
+					// ONE SCREEN EARLIER THAN THE NAME SAYS. H2 §4.6's leg is
+					// "Back from the phrase screen -> `Which hash?` (phrase
+					// dropped)"; with the kind screen inserted in front it stops
+					// here instead, and THE PHRASE IS STILL DROPPED. Back itself
+					// costs no derivation because the kind screen is upstream of
+					// the KDF -- but retyping the phrase does.
+					continue
+				}
 			}
 		case sel == rows.hexRow:
-			d, ok := composerHexEntry(ctx, th)
-			if !ok {
-				continue // Back from hex entry returns to `Which hash?`, path intact
+			kind := md.KindSha256
+			for {
+				k, ok := composerHashKindPick(ctx, th, kind)
+				if !ok {
+					break // -> `Which hash?`, path intact
+				}
+				kind = k
+				d, ok := composerHexEntry(ctx, th, kind)
+				if !ok {
+					continue // Back from the pad -> the kind screen, kind still selected
+				}
+				st.list.Paths[idx].Hash = d
+				return true
 			}
-			st.list.Paths[idx].Hash = d
-			return true
 		case sel == rows.noneRow:
 			st.list.Paths[idx].Hash = nil
 			return true

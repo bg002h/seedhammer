@@ -55,6 +55,7 @@ func TestComposerPhraseRouteHoldsOnTheZeroValueState(t *testing.T) {
 	h.tapRow(0, 3)
 	h.mustReach("32-byte value")
 	h.tapNav(Button3)
+	h.pickKind(0) // §7.1's kind screen, sha256
 	h.mustReach("Hashlock phrase")
 	typeOnPassphraseKeyboard(t, h, hashlockAnchorPhrase)
 	h.tapNav(Button3)

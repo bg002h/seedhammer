@@ -97,7 +97,7 @@ func TestWhichHashRowsAreLabelKeyed(t *testing.T) {
 			t.Fatalf("n=%d: %d rows, want %d", n, got, n+3)
 		}
 		if rows.labels[rows.phraseRow] != composerHashRowPhrase ||
-			rows.labels[rows.hexRow] != "Type 64 hex" ||
+			rows.labels[rows.hexRow] != composerHashRowHex ||
 			rows.labels[rows.noneRow] != "No hash lock" {
 			t.Fatalf("n=%d: labels misplaced: %v", n, rows.labels)
 		}
@@ -197,7 +197,7 @@ func TestWhichHashRowsCarryTheTwoNewBands(t *testing.T) {
 				}
 			}
 			if rows.labels[rows.phraseRow] != composerHashRowPhrase ||
-				rows.labels[rows.hexRow] != "Type 64 hex" ||
+				rows.labels[rows.hexRow] != composerHashRowHex ||
 				rows.labels[rows.noneRow] != "No hash lock" {
 				t.Fatalf("the three shipped rows moved: %v", rows.labels)
 			}
@@ -256,7 +256,7 @@ func TestWhichHashRowsDrawOnOneLine(t *testing.T) {
 		composerHashPreimageRow(10, d),
 		composerHashPhraseRow(10, nil),
 		composerHashPhraseRow(10, d),
-		composerHashRowPhrase, "Type 64 hex", "No hash lock",
+		composerHashRowPhrase, composerHashRowHex, "No hash lock",
 	} {
 		_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, width, descriptorTheme.Text, row)
 		lines := (sz.Y + one.Y - 1) / one.Y

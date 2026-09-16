@@ -884,11 +884,15 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 	}
 }
 
-// TestComposerHexEntryItselfRefusesAnythingButSixtyFourCharacters is the
-// tests lens's I-1, on the REAL function, with a boundary the DECODER cannot
-// refuse for it.
+// TestComposerHexEntryItselfRefusesAnythingButTheKindsWidth is the tests
+// lens's I-1, on the REAL function, with a boundary the DECODER cannot refuse
+// for it -- now at BOTH widths (SPEC_hashlock_kinds §7.1).
 //
-// MUTATION: `valid := len(frag) >= 63` in composerHexEntry.
+// MUTATION: `valid := len(frag) >= want-1` in composerHexEntry.
+// MUTATION: `want := 64` in composerHexEntry -> every ripemd160 case fails,
+// and NONE of the sha256 cases do. That asymmetry is the point of running the
+// table over two kinds: a bound hardcoded to 64 is invisible to a sha256-only
+// test, and sha256 is the only kind this pad could produce before this cycle.
 //
 // WHY THE RETURN VALUE CANNOT BE THE ASSERTION, measured in round 2: on a
 // rejected fragment the entry loop `continue`s and the function never
@@ -898,105 +902,127 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 // round-1 version of this test passed under its own named mutation for
 // exactly that reason.
 //
-// WHAT IS OBSERVABLE INSTEAD: under the mutation a 63-character fragment is
-// `valid`, so Button3 enters the accept branch, `hex.DecodeString` fails on
-// the odd length, and the function draws "That is not a 32-byte digest." --
-// a screen that does not exist when the bound is correct. The 62-character
-// case is the even twin: `hex.DecodeString` SUCCEEDS on it, so with
-// `valid := true` the `len(raw) != 32` guard draws the same error. Between
-// them the two cases catch a loosened bound in either direction, and neither
-// leans on the decoder to do the refusing.
-func TestComposerHexEntryItselfRefusesAnythingButSixtyFourCharacters(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		typed string
-		why   string
-	}{
-		{"sixty-two hex characters", strings.Repeat("a", 62),
-			"even, so hex.DecodeString accepts it and only the length bound can refuse it"},
-		{"sixty-three hex characters", strings.Repeat("a", 63),
-			"the exact length the named mutation would admit"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+// WHAT IS OBSERVABLE INSTEAD: under the mutation a want-1 character fragment
+// is `valid`, so Button3 enters the accept branch, `hex.DecodeString` fails on
+// the odd length, and the function draws "That is not a <kind> digest." -- a
+// screen that does not exist when the bound is correct. The want-2 case is the
+// even twin: `hex.DecodeString` SUCCEEDS on it, so with `valid := true` the
+// NewHashLock width guard draws the same error. Between them the two cases
+// catch a loosened bound in either direction, and neither leans on the decoder
+// to do the refusing.
+func TestComposerHexEntryItselfRefusesAnythingButTheKindsWidth(t *testing.T) {
+	for _, kind := range []md.HashKind{md.KindSha256, md.KindRipemd160} {
+		want := kind.DigestLen() * 2
+		for _, tc := range []struct {
+			name  string
+			typed string
+			why   string
+		}{
+			{fmt.Sprintf("%d hex characters", want-2), strings.Repeat("a", want-2),
+				"even, so hex.DecodeString accepts it and only the length bound can refuse it"},
+			{fmt.Sprintf("%d hex characters", want-1), strings.Repeat("a", want-1),
+				"the exact length the named mutation would admit"},
+		} {
+			t.Run(kind.Token()+"/"+tc.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					p := newPlatform()
+					p.display = sh2DisplaySize
+					ctx := NewContext(p)
+					returned := false
+					frame, quit := runUI(ctx, func() {
+						composerHexEntry(ctx, &descriptorTheme, kind)
+						returned = true
+					})
+					defer quit()
+					frame()
+					// Typed through the ROUTER, so the real Keyboard consumes
+					// the runes and the real bound sees the real fragment.
+					for _, r := range tc.typed {
+						ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
+						frame()
+					}
+					click(&ctx.Router, Button3)
+					last := ""
+					for i := 0; i < 8; i++ {
+						c, more := frame()
+						if !more {
+							break
+						}
+						last = c
+						if uiContains(c, "not a "+kind.Token()+" digest") {
+							t.Fatalf("composerHexEntry ACCEPTED %d characters (%s): it reached "+
+								"the decode branch, which only a valid-length fragment does.\n"+
+								"Frame: %q", len(tc.typed), tc.why, c)
+						}
+					}
+					if returned {
+						t.Fatalf("composerHexEntry RETURNED for %d characters; §6c accepts a "+
+							"digest only when exactly %d valid hex characters are present",
+							len(tc.typed), want)
+					}
+					if !uiContains(last, fmt.Sprintf("of %d hex", want)) {
+						t.Errorf("the entry screen is not showing %s's count line, so this "+
+							"test is not measuring the entry any more.\nFrame: %q",
+							kind.Token(), last)
+					}
+				})
+			})
+		}
+
+		// AND THE ACCEPTING CASE, so the two refusals above are the bound and
+		// not a function that refuses everything.
+		t.Run(kind.Token()+"/accepts its own width", func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				p := newPlatform()
 				p.display = sh2DisplaySize
 				ctx := NewContext(p)
-				returned := false
+				var got *md.HashLock
+				var ok bool
 				frame, quit := runUI(ctx, func() {
-					composerHexEntry(ctx, &descriptorTheme)
-					returned = true
+					got, ok = composerHexEntry(ctx, &descriptorTheme, kind)
 				})
 				defer quit()
 				frame()
-				// Typed through the ROUTER, so the real Keyboard consumes the
-				// runes and the real bound sees the real fragment.
-				for _, r := range tc.typed {
+				// TYPED PAST THE BOUND ON PURPOSE: 64 runes at every kind. The
+				// pad clamps to the kind's width, so this also proves the clamp
+				// moved with it -- under `want := 64` a ripemd160 entry would
+				// accept all 64 and NewHashLock would refuse them.
+				for _, r := range strings.Repeat("a", 64) {
 					ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
 					frame()
 				}
 				click(&ctx.Router, Button3)
-				last := ""
-				for i := 0; i < 8; i++ {
-					c, more := frame()
-					if !more {
+				for i := 0; i < 8 && !ok; i++ {
+					if _, more := frame(); !more {
 						break
 					}
-					last = c
-					if uiContains(c, "not a 32-byte digest") {
-						t.Fatalf("composerHexEntry ACCEPTED %d characters (%s): it reached "+
-							"the decode branch, which only a valid-length fragment does.\n"+
-							"Frame: %q", len(tc.typed), tc.why, c)
-					}
 				}
-				if returned {
-					t.Fatalf("composerHexEntry RETURNED for %d characters; §6c accepts a "+
-						"digest only when exactly 64 valid hex characters are present",
-						len(tc.typed))
+				if !ok {
+					t.Fatalf("INCONCLUSIVE: %d valid hex characters were not accepted at %s, "+
+						"so the two refusals above prove nothing about the bound",
+						want, kind.Token())
 				}
-				if !uiContains(last, "of 64 hex") {
-					t.Errorf("the entry screen is no longer showing its count line, so this "+
-						"test is not measuring the entry any more.\nFrame: %q", last)
+				if got == nil {
+					t.Fatal("the entry reported ok and returned no lock at all")
+				}
+				if got.Kind() != kind {
+					t.Errorf("the pad returned a %s lock for a %s entry -- the kind chosen on "+
+						"the screen before it did not reach the digest",
+						got.Kind().Token(), kind.Token())
+				}
+				if len(got.Digest()) != kind.DigestLen() {
+					t.Errorf("the pad returned %d digest bytes at %s, want %d",
+						len(got.Digest()), kind.Token(), kind.DigestLen())
+				}
+				// Equal, not ==: md.HashLock is deliberately non-comparable.
+				zero, _ := md.NewHashLock(kind, make([]byte, kind.DigestLen()))
+				if got.Equal(zero) {
+					t.Error("the entry returned the zero digest, which is spendable by anyone " +
+						"who knows the preimage of zero")
 				}
 			})
 		})
 	}
-	// AND THE ACCEPTING CASE, so the two refusals above are the bound and not
-	// a function that refuses everything.
-	synctest.Test(t, func(t *testing.T) {
-		p := newPlatform()
-		p.display = sh2DisplaySize
-		ctx := NewContext(p)
-		var got *md.HashLock
-		var ok bool
-		frame, quit := runUI(ctx, func() { got, ok = composerHexEntry(ctx, &descriptorTheme) })
-		defer quit()
-		frame()
-		for _, r := range strings.Repeat("a", 64) {
-			ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
-			frame()
-		}
-		click(&ctx.Router, Button3)
-		for i := 0; i < 8 && !ok; i++ {
-			if _, more := frame(); !more {
-				break
-			}
-		}
-		if !ok {
-			t.Fatal("INCONCLUSIVE: 64 valid hex characters were not accepted, so the two " +
-				"refusals above prove nothing about the bound")
-		}
-		if got == nil {
-			t.Fatal("a 64-hex entry reported ok and returned no lock at all")
-		}
-		// Equal, not ==: md.HashLock is deliberately non-comparable, and the
-		// zero it is compared against is a zero sha256 lock rather than a zero
-		// struct, so the assertion still names the same digest it always did.
-		if got.Equal(composerTestLock([32]byte{})) {
-			t.Error("a 64-hex entry returned the zero digest, which is spendable by anyone " +
-				"who knows the preimage of zero")
-		}
-	})
 }
 
 // TestComposerLockEditTellsAnImpossibleDateFromThePastCeilingDate is journey

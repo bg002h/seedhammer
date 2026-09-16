@@ -293,6 +293,7 @@ async function trial(phrase, method) {
   await waitFor("Type a hashlock phrase");
   await chooseRow(0, "32-byte value", "Type a hashlock phrase");   // the §8i rule modal
   await tap(CONFIRM, 500);
+  await pickKind(0);                                               // §7.1's kind screen
   await waitFor("Hashlock phrase");
   await typePhrase(phrase);
   await tap(CONFIRM, 500);                                          // OK
@@ -433,13 +434,38 @@ function censusPlateToken(joined, pathNo, form, where) {
   return m[1];
 }
 
-/** Back out of the confirm modal to `Which hash?`, dropping the phrase (§4.6). */
+/**
+ * The kind screen (SPEC_hashlock_kinds §7.1), which sits between the §8i rule
+ * modal and the material entry on both typed arms.
+ *
+ * `i` indexes gui.composerHashKinds -- 0 is sha256, the default. Row 0 is TAPPED
+ * rather than pressed straight through, so the walk proves the row is reachable
+ * by touch on the real panel; the SH2 has no directional buttons, and a row that
+ * only a synthetic Down event can reach is a row no hand can reach (W-2).
+ */
+async function pickKind(i) {
+  await waitFor("32-byte preimage");
+  await chooseRow(i, null, "the hash kind");
+}
+
+/**
+ * Back out of the confirm modal to `Which hash?`, dropping the phrase (§4.6).
+ *
+ * ONE LEG LONGER SINCE §7.1. H2 §4.6 had the phrase screen's Back going
+ * straight to `Which hash?`; the kind screen is now in front of it, so Back
+ * stops there first -- and the phrase is still dropped at that step, not this
+ * one. Walking it as two taps is what proves the intermediate screen is real:
+ * a single tap that happened to land on `Which hash?` would mean the kind
+ * screen had been skipped.
+ */
 async function backToWhichHash() {
   await tap(BACK, 400);                       // confirm  -> method pick
   await waitFor("Which method?");
   await tap(BACK, 400);                       // method   -> phrase screen
   await waitFor("Hashlock phrase");
-  await tap(BACK, 400);                       // phrase   -> Which hash?
+  await tap(BACK, 400);                       // phrase   -> the kind screen
+  await waitFor("32-byte preimage");
+  await tap(BACK, 400);                       // kind     -> Which hash?
   await waitFor("Type a hashlock phrase");
 }
 
