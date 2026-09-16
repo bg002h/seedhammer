@@ -55,12 +55,26 @@ func (m hashlockMethod) String() string {
 // (SPEC_hashlock_kinds §7.1). It reaches the digest through hashlockLockOf and
 // the confirm and reconcile bodies through h.Kind(), so every screen on this
 // route names the same kind the script will commit to.
-func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload []*md.HashLock, kind md.HashKind) hashlockOutcome {
-	var phrase []byte
+// `draft` is what was typed on a previous visit to this arm, and the phrase the
+// operator leaves on screen comes back through `kept` (F-571).
+//
+// BACK USED TO COST THE WHOLE PHRASE. §7.1 put the kind screen behind this
+// Back, so checking which kind was tapped -- the one axis this cycle exists to
+// make unambiguous -- threw away a minute of tapping on a 100-character
+// keyboard. That makes operators check LESS, which is the failure the kind
+// screen was built to prevent. The pad arm already hoists its draft out of the
+// kind loop; this makes the two arms agree about what Back means.
+func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, payload []*md.HashLock, kind md.HashKind, draft []byte) (hashlockOutcome, []byte) {
+	phrase := draft
 	for {
-		p, ok := hashlockPhraseFlow(ctx, th, phrase)
+		p, ok := hashlockPhraseFlow(ctx, th, phrase, kind)
 		if !ok {
-			return hashlockBackToWhichHash // phrase dropped
+			// Back at the phrase screen -> the kind screen. The phrase is
+			// HANDED BACK rather than dropped; §7.1's Back table says the
+			// phrase is dropped THERE, and it still is if the operator leaves
+			// the arm -- what changes is that a round trip to look at the kind
+			// no longer costs it.
+			return hashlockBackToWhichHash, p
 		}
 		phrase = p
 	pick:
@@ -102,7 +116,7 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 				// the one moment every phrase-set hash passes through.
 				showError(ctx, th, "Hash lock",
 					composerCopyHashlockReconcile(hashlockFirst8Last8(h), m.String(), len(phrase), h.Kind()))
-				return hashlockAssigned
+				return hashlockAssigned, nil
 			}
 			// Back on the confirm -> method pick, nothing assigned
 		}
@@ -288,7 +302,7 @@ func hashlockFirst8Last8(h *md.HashLock) string {
 // restores what was typed before a Back from the method pick. NOT
 // passphraseEntryFlow (its title, pass-proof trigger and over-length message are
 // the passphrase's -- r2 M-4), and NOTHING normalises the bytes.
-func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool) {
+func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte, kind md.HashKind) ([]byte, bool) {
 	kbd := NewPassphraseKeyboard(ctx)
 	kbd.Fragment = string(initial)
 	backBtn := &Clickable{Button: Button1}
@@ -300,7 +314,12 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		for kbd.Update(ctx) {
 		}
 		if backBtn.Clicked(ctx) {
-			return nil, false
+			// The typed phrase goes BACK TO THE CALLER, not to the GC (F-571).
+			// §7.1's Back table still drops it when the operator leaves the
+			// arm -- composerHashEdit re-declares nothing on the way out -- but
+			// a round trip to the kind screen to CHECK the kind no longer costs
+			// a minute of tapping. The pad arm already worked this way.
+			return []byte(kbd.Fragment), false
 		}
 		if okBtn.Clicked(ctx) {
 			phrase := []byte(kbd.Fragment)
@@ -345,7 +364,24 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 		leadOp, leadSz := hashlockPhraseLead(ctx, th, dims, content.Min.Y)
 		_, content = content.CutTop(leadSz.Y)
 		cntOp, cntsz := widget.Labelf(&ctx.B, ctx.Styles.subtitle, th.Text,
-			"%d/%d", len(kbd.Fragment), hashlock.PhraseMaxChars)
+			// THE KIND RIDES THE COUNTER (F-571). Three screens used to sit
+			// between §7.1's kind screen and the first screen naming the kind,
+			// and the only way to look was Back -- which dropped every
+			// character typed.
+			//
+			// NOT THE TITLE, and not `<kind> phrase`: the phrase is hashed by
+			// the METHOD to make a preimage, and the KIND hashes that preimage.
+			// A title reading `sha256 phrase` asserts the collapse of the two
+			// axes this cycle exists to separate. `for sha256` says which
+			// hashlock the phrase is FOR, which is true.
+			//
+			// NOT THE LEAD either: measured, adding a sentence there wrapped it
+			// to 3 lines over §3.2(c)'s two and drove the masked readout's
+			// budget to -2 px, so the asterisks stopped drawing entirely.
+			//
+			// The counter is where the operator is already looking while they
+			// type, and it has room.
+			"%d/%d  for %s", len(kbd.Fragment), hashlock.PhraseMaxChars, kind.Token())
 		counterBand, content := content.CutTop(cntsz.Y)
 		cntOp = cntOp.Offset(counterBand.N(cntsz))
 		kbd.MaxHeight = content.Dy()

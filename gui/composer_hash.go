@@ -1,9 +1,11 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"image"
+	"seedhammer.com/hashlock"
 	"strings"
 
 	"seedhammer.com/codex32"
@@ -110,6 +112,32 @@ func composerWarnTwentyByteUnseen(ctx *Context, th *Colors, st *composerState, h
 	if _, held := st.hashlockHeld[h.MapKey()]; held {
 		return true
 	}
+	// THE PAYLOAD COUNTS AS HAVING SEEN IT (F-572). The warning asserts
+	// "nothing on this device has seen a preimage for it", and `hashlockHeld`
+	// alone made that a statement about the COMPOSER'S BOOKKEEPING dressed as a
+	// statement about the payload: a payload carrying both a `hash160:` record
+	// and the preimage plate for it drew the warning while
+	// composerPayloadPreimages had already decoded that very preimage to build
+	// the screen behind the modal.
+	//
+	// A warning that is demonstrably false in a payload the host built
+	// correctly teaches operators to hold through warnings -- which is the
+	// exact hazard this copy's own comment names as the reason not to overstate.
+	//
+	// IT RE-DERIVES AT THIS LOCK'S KIND rather than comparing the band's stored
+	// digest. A preimage PLATE record carries X and no kind, so
+	// composerPayloadPreimages builds its digest at sha256 -- the only one that
+	// record can claim. Comparing those locks against a hash160 lock would
+	// never match, and the suppressor would be dead code that looked like a fix.
+	//
+	// The question the warning actually asks is "has this device seen a
+	// preimage FOR THIS DIGEST", so that is what is computed: X hashed at h's
+	// kind, compared to h's bytes.
+	for _, p := range composerPayloadPreimages(ctx.sysw) {
+		if bytes.Equal(hashlock.DigestOf(h.Kind(), &p.preimage), h.Digest()) {
+			return true
+		}
+	}
 	return composerConfirmScreen(ctx, th, "Hash lock",
 		composerConfirmBody(composerCopyTwentyByteUnseen(h.Kind())))
 }
@@ -211,8 +239,21 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind, draft string) 
 	// The draft may have been typed at a WIDER kind: re-entering at ripemd160
 	// after typing 64 hex keeps the first 40 rather than discarding them, which
 	// is the same clamp the live entry applies and for the same reason.
+	//
+	// AND IT SPEAKS, exactly as the live clamp does (F-570). This truncation was
+	// silent, so a 64-hex sha256 digest re-entered at ripemd160 drew
+	// `40 of 40 hex` with the checkmark lit -- the two strongest "you are done"
+	// signals the screen has -- over the first 40 characters of the WRONG
+	// digest. The lock that produces is one nobody can open.
+	//
+	// This screen's own shipped promise is "THE CLAMP IS SILENT NO LONGER", and
+	// it was silent on exactly the path §7.1 created by putting a kind screen
+	// behind Back. `over` is seeded HERE rather than left to the live clamp,
+	// which only ever sees keystrokes.
+	over := false
 	if len(draft) > want {
 		draft = draft[:want]
+		over = true
 	}
 	kbd.Fragment = draft
 	backBtn := &Clickable{Button: Button1}
@@ -228,8 +269,8 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind, draft string) 
 	// The clamp stays -- it is what keeps "an entry N characters long is N
 	// VALID characters by construction" true -- but it now says so. `over`
 	// clears as soon as the entry is short again, so it describes the entry in
-	// hand rather than accusing the operator of a mistake they have corrected.
-	over := false
+	// hand rather than accusing the operator of a mistake they have corrected --
+	// including a truncation carried in from the re-entry clamp above.
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
@@ -653,13 +694,19 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 		// the usual proposal rather than a stale one from an abandoned attempt.
 		case sel == rows.phraseRow:
 			kind := md.KindSha256
+			// THE PHRASE LIVES OUT HERE, with the kind, because both survive the
+			// same Back (F-571) -- the pad arm below does the same with its
+			// draft, for the same reason.
+			var phrase []byte
 			for {
 				k, ok := composerHashKindPick(ctx, th, kind)
 				if !ok {
 					break // -> `Which hash?`; nothing held, nothing discarded
 				}
 				kind = k
-				switch hashlockPhraseRoute(ctx, th, st, idx, rows.digests, kind) {
+				outcome, kept := hashlockPhraseRoute(ctx, th, st, idx, rows.digests, kind, phrase)
+				phrase = kept
+				switch outcome {
 				case hashlockAssigned:
 					return true
 				case hashlockBackToWhichHash:

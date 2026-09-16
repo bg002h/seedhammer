@@ -2053,4 +2053,127 @@ func TestBackFromThePadClampsADraftToANarrowerKind(t *testing.T) {
 		t.Errorf("a 50-character draft re-entered at ripemd160 should clamp to 40, the same "+
 			"clamp live entry applies:\n%q", body)
 	}
+	// AND IT SAYS SO (F-570). The first version of this test asserted the count
+	// and nothing else, so it PINNED THE DEFECT: `40 of 40 hex` with a lit
+	// checkmark over the first 40 characters of a 64-hex digest, silently. A
+	// journey walk found it by re-entering at a narrower kind and reading the
+	// screen, which is what this assertion now does.
+	if !uiContains(body, "extra ignored") {
+		t.Errorf("the re-entry clamp dropped 10 characters and said nothing, while drawing "+
+			"the two strongest 'you are done' signals the screen has:\n%q", body)
+	}
+}
+
+// TestThePhraseArmNamesTheKindAndKeepsThePhrase is F-571.
+//
+// Three screens sat between §7.1's kind screen and the first screen that names
+// the kind -- the phrase screen, the method pick, Deriving -- and the only way
+// to check which kind was tapped was Back, which dropped every character typed.
+// On a 100-character keyboard a six-word diceware phrase is a minute of
+// tapping, so the operator was penalised for checking the ONE AXIS this cycle
+// exists to disambiguate. That makes them check less, which is the failure the
+// kind screen was built to prevent.
+//
+// MUTATION: drop `for %s` from the counter -> the naming row fails.
+// MUTATION: re-declare `phrase` inside composerHashEdit's kind loop -> the
+// retention row fails, the screen reopening at 0/100.
+func TestThePhraseArmNamesTheKindAndKeepsThePhrase(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(0, 3) // Type a hashlock phrase
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.pickKind(2) // ripemd160 -- NOT the default, so a wrong kind is visible
+	body := h.mustReach("Hashlock phrase")
+	if !uiContains(body, "ripemd160") {
+		t.Errorf("the phrase screen does not say which kind the phrase is for, and the only "+
+			"way to look is Back:\n%q", body)
+	}
+
+	const typed = "correct horse battery staple"
+	typeOnPassphraseKeyboard(t, h, typed)
+	h.mustReach("28/100")
+
+	// Back to the kind screen -- the move this test exists for.
+	h.tapNav(Button1)
+	h.mustReach("32-byte preimage")
+	h.tapRow(2, len(composerHashKinds)) // same kind, forward again
+	body = h.mustReach("Hashlock phrase")
+	if !uiContains(body, "28/100") {
+		t.Errorf("checking the kind cost the whole phrase: the screen reopened without the "+
+			"28 characters already typed:\n%q", body)
+	}
+}
+
+// TestTwentyByteWarningIsSilentWhenThePayloadCarriesThePreimage is F-572.
+//
+// The warning asserts "nothing on this device has seen a preimage for it". Its
+// condition was `hashlockHeld` alone -- the COMPOSER'S bookkeeping -- so a
+// payload carrying both a hash160 record and the preimage plate for it drew the
+// warning while composerPayloadPreimages had already decoded that very preimage
+// to build the screen behind the modal. The device was holding the preimage
+// while saying it had never seen one.
+//
+// A warning that is false in a payload the host built correctly teaches
+// operators to hold through warnings, which is the hazard the copy's own
+// comment names as the reason not to overstate.
+//
+// MUTATION: delete the composerPayloadPreimages loop in
+// composerWarnTwentyByteUnseen -> the first row fails.
+// MUTATION: compare the band's stored lock instead of re-deriving at h.Kind()
+// -> also fails, because a preimage record's digest is built at sha256 and
+// would never match a hash160 lock. That was the first version of this fix and
+// it was dead code that looked like a fix.
+func TestTwentyByteWarningIsSilentWhenThePayloadCarriesThePreimage(t *testing.T) {
+	var x [32]byte
+	for i := range x {
+		x[i] = byte(0x11 + i)
+	}
+	h160 := hashlockLockOf(md.KindHash160, &x)
+
+	for _, tc := range []struct {
+		name    string
+		records []string
+		want    bool // does §8 fire?
+	}{
+		{"the payload carries the preimage", []string{composerTestPreimageRecord(t, x)}, false},
+		{"no payload at all", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := newPlatform()
+				p.display = sh2DisplaySize
+				ctx := NewContext(p)
+				ctx.sysw = composerSessionWith(nil, tc.records)
+				st := composerStateWithPaths(t, 1)
+				var got, returned bool
+				frame, quit := runUI(ctx, func() {
+					got = composerWarnTwentyByteUnseen(ctx, &descriptorTheme, st, h160)
+					returned = true
+				})
+				defer quit()
+				drew := ""
+				for i := 0; i < 24 && !returned; i++ {
+					c, more := frame()
+					if !more {
+						break
+					}
+					drew = c
+				}
+				if fired := uiContains(drew, "20-BYTE HASH"); fired != tc.want {
+					if tc.want {
+						t.Errorf("§8 did not fire for a hash160 digest nothing here has seen:\n%q", drew)
+					} else {
+						t.Errorf("§8 says nothing here has seen a preimage for this digest, and "+
+							"the payload it is reading CONTAINS that preimage:\n%q", drew)
+					}
+				}
+				if !tc.want && (!returned || !got) {
+					t.Errorf("the silent path did not pass through: returned=%v got=%v", returned, got)
+				}
+			})
+		})
+	}
 }

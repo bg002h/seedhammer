@@ -561,6 +561,26 @@ func composerCopyHashlockNoPayloadLead() string {
 // modal fires on the phrase row too, immediately in front of the one route that
 // does the hashing itself, and read cold it says this route cannot work
 // (r0 journey I-5). Stating it here costs no new gate row and no new screen.
+// IT NAMES THE KIND (F-571). Three screens used to sit between §7.1's kind
+// screen and the first screen that names the kind -- the phrase screen, the
+// method pick and Deriving -- and the only way to check which kind was tapped
+// was Back, which dropped every character typed.
+//
+// The pad, the sibling arm, has named its kind since the journey walk found the
+// same gap there: "an off-by-one tap on the kind screen lands on a same-width
+// sibling and nothing here would differ." On this arm the reasoning is stronger,
+// because there is no width to read at all -- a phrase looks identical under all
+// four kinds.
+//
+// IT GOES IN THE TITLE, NOT HERE, and geometry settled that. This lead has a
+// TWO-LINE budget (§3.2(c)) and the masked readout takes the space below it:
+// adding the kind as a sentence measured 3 lines of 23 px and drove the readout
+// budget to -2 px, so the asterisks stopped being drawn at all. Measured, not
+// predicted -- TestHashlockPhraseLeadIsDrawnInsideTheBand and the readout-budget
+// test both went red.
+//
+// So the phrase screen names its kind in the title, as `<kind> phrase`, exactly
+// as the pad draws `<kind> hash`. The lead is unchanged.
 func composerCopyHashlockPhraseLead() string {
 	return "This screen does that hashing for you. Use a phrase you have never " +
 		"used anywhere else."
