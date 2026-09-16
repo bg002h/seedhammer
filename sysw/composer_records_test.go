@@ -58,8 +58,15 @@ func loadRecordClassRows(t *testing.T) []recordClassRow {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatalf("parsing fixture: %v", err)
 	}
-	if len(rows) != pin.Vectors || len(rows) != 68 {
-		t.Fatalf("fixture has %d rows, pin says %d, plan says 68", len(rows), pin.Vectors)
+	// 81 since SPEC_hashlock_kinds phase 3 added the §6 `hash: [<kind>:] <hex>`
+	// grammar: 13 rows for the three new kinds -- each valid, an explicit
+	// sha256:, wrong width per kind twice, and three unknown/miscased tokens.
+	//
+	// THREE NUMBERS, CHECKED AGAINST EACH OTHER: the fixture's own length, the
+	// provenance pin, and this literal. A re-vendor that updated two of the
+	// three would otherwise pass.
+	if len(rows) != pin.Vectors || len(rows) != 81 {
+		t.Fatalf("fixture has %d rows, pin says %d, plan says 81", len(rows), pin.Vectors)
 	}
 	return rows
 }

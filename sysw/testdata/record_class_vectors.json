@@ -129,31 +129,109 @@
     "name": "hash-63-chars",
     "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a",
     "class": "Unknown",
-    "host_line": "record 0: hash: must be exactly 64 hex characters"
+    "host_line": "record 0: hash: sha256 needs exactly 64 lowercase hex characters"
   },
   {
     "name": "hash-66-chars",
     "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
     "class": "Unknown",
-    "host_line": "record 0: hash: must be exactly 64 hex characters"
+    "host_line": "record 0: hash: sha256 needs exactly 64 lowercase hex characters"
   },
   {
     "name": "hash-uppercase",
     "record": "hash:A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8A8",
     "class": "Unknown",
-    "host_line": "record 0: hash: must be exactly 64 hex characters"
+    "host_line": "record 0: hash: sha256 needs exactly 64 lowercase hex characters"
+  },
+  {
+    "name": "hash-hash256-valid",
+    "record": "hash:hash256:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-ripemd160-valid",
+    "record": "hash:ripemd160:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-hash160-valid",
+    "record": "hash:hash160:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-sha256-explicit",
+    "record": "hash:sha256:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Hash",
+    "host_line": null
+  },
+  {
+    "name": "hash-ripemd160-wrong-width",
+    "record": "hash:ripemd160:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: ripemd160 needs exactly 40 lowercase hex characters"
+  },
+  {
+    "name": "hash-hash160-wrong-width",
+    "record": "hash:hash160:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: hash160 needs exactly 40 lowercase hex characters"
+  },
+  {
+    "name": "hash-hash256-wrong-width",
+    "record": "hash:hash256:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Unknown",
+    "host_line": "record 0: hash: hash256 needs exactly 64 lowercase hex characters"
+  },
+  {
+    "name": "hash-unknown-token",
+    "record": "hash:sha512:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+    "class": "Unknown",
+    "host_line": "record 0: hash: unknown hash kind; expected `hash:<hex>` (sha256) or `hash:<kind>:<hex>` with kind hash256, ripemd160 or hash160, lowercase"
+  },
+  {
+    "name": "hash-kind-uppercase",
+    "record": "hash:RIPEMD160:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Unknown",
+    "host_line": "record 0: hash: unknown hash kind; expected `hash:<hex>` (sha256) or `hash:<kind>:<hex>` with kind hash256, ripemd160 or hash160, lowercase"
+  },
+  {
+    "name": "hash-kind-mixedcase",
+    "record": "hash:Hash160:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Unknown",
+    "host_line": "record 0: hash: unknown hash kind; expected `hash:<hex>` (sha256) or `hash:<kind>:<hex>` with kind hash256, ripemd160 or hash160, lowercase"
+  },
+  {
+    "name": "hash-ripemd160-short",
+    "record": "hash:ripemd160:5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c",
+    "class": "Unknown",
+    "host_line": "record 0: hash: ripemd160 needs exactly 40 lowercase hex characters"
+  },
+  {
+    "name": "hash-hash160-uppercase",
+    "record": "hash:hash160:5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C5C",
+    "class": "Unknown",
+    "host_line": "record 0: hash: hash160 needs exactly 40 lowercase hex characters"
+  },
+  {
+    "name": "hash-hash256-non-hex",
+    "record": "hash:hash256:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8ag",
+    "class": "Unknown",
+    "host_line": "record 0: hash: hash256 needs exactly 64 lowercase hex characters"
   },
   {
     "name": "hash-empty",
     "record": "hash:",
     "class": "Unknown",
-    "host_line": "record 0: hash: must be exactly 64 hex characters"
+    "host_line": "record 0: hash: sha256 needs exactly 64 lowercase hex characters"
   },
   {
     "name": "hash-31-bytes",
     "record": "hash:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
     "class": "Unknown",
-    "host_line": "record 0: hash: must be exactly 64 hex characters"
+    "host_line": "record 0: hash: sha256 needs exactly 64 lowercase hex characters"
   },
   {
     "name": "now-seconds-only",
