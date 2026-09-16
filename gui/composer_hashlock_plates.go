@@ -53,6 +53,9 @@ func hashlockPlatesRecords(s *syswSession) []hashlockPlatesRecord {
 	if s == nil || !s.loaded {
 		return nil
 	}
+	// F-573: computed ONCE for the loop -- the payload's own hash: records are
+	// what say which kind a kind-agnostic preimage is for.
+	digests := composerPayloadDigests(s)
 	var out []hashlockPlatesRecord
 	pre, ph := 0, 0
 	for _, r := range s.records {
@@ -71,9 +74,12 @@ func hashlockPlatesRecords(s *syswSession) []hashlockPlatesRecord {
 			}
 			pre++
 			out = append(out, hashlockPlatesRecord{
-				// sha256: an ms1 preimage plate record carries X and no kind,
-				// so this is the only digest computable from it.
-				pos: pre, preimage: x, digest: hashlockLockOf(md.KindSha256, &x), derived: true,
+				// F-573: an ms1 preimage plate record carries X and no kind --
+				// and it does not need to, because a preimage is kind-agnostic.
+				// The payload's own `hash:` records say which kind this one is
+				// for; assuming sha256 assigned the WRONG kind to three of four.
+				pos: pre, preimage: x, derived: true,
+				digest: hashlockLockOf(hashlockKindFromPayload(&x, digests), &x),
 			})
 		case sysw.ClassPhrase:
 			rec, err := sysw.ParsePhraseRecord(r.body)
@@ -137,9 +143,12 @@ func hashlockPlatesDerive(ctx *Context, th *Colors, recs []hashlockPlatesRecord,
 		return false
 	}
 	recs[i].preimage = x
-	// sha256: this flow derives from a phrase: record, whose grammar carries a
-	// METHOD (how X was derived) and no hash kind at all.
-	recs[i].digest = hashlockLockOf(md.KindSha256, &x)
+	// F-535: this flow derives from a phrase: record, whose grammar carries a
+	// METHOD (how X was derived) and no hash kind at all. The kind therefore
+	// comes from the payload's own `hash:` records, not from an assumption --
+	// see hashlockKindFromPayload.
+	recs[i].digest = hashlockLockOf(
+		hashlockKindFromPayload(&x, composerPayloadDigests(ctx.sysw)), &x)
 	recs[i].derived = true
 	return true
 }

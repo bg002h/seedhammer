@@ -158,7 +158,9 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	if !ok {
 		return hashlockBackToWhichHash
 	}
-	h := hashlockLockOf(md.KindSha256, &x)
+	// F-535: the record names the method and not the kind, so the kind comes
+	// from the payload's own `hash:` records rather than from an assumption.
+	h := hashlockLockOf(hashlockKindFromPayload(&x, payload), &x)
 	body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
 		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h), h.Kind())
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
@@ -258,6 +260,40 @@ func hashlockOtherPathLine(st *composerState, idx int, h *md.HashLock) string {
 		}
 	}
 	return ""
+}
+
+// hashlockKindFromPayload picks the kind a payload's own material commits to
+// (F-535, and F-573's first bullet).
+//
+// A `phrase:` record carries the METHOD axis and NOT the kind axis -- that is
+// F-535, and it is a wire-format fact, not an oversight: adding a field is a
+// change in the primary. A preimage is kind-agnostic by construction; the same
+// 32 bytes hash under all four kinds, which is exactly why the record does not
+// need to name one.
+//
+// So the payload's own `hash:` records are what disambiguate. Derive under each
+// kind and take the one the payload ALREADY STATES. That needs no wire change
+// and no new screen: the pairing data is in scope at every call site.
+//
+// THE SWEEP IS ORDER-INDEPENDENT. Two kinds cannot both match: the 32- and
+// 20-byte kinds differ in width, and two same-width digests of one preimage
+// colliding is the collision the hash is chosen to prevent. `composerHashKinds`
+// is reused as the list of all four rather than a second copy -- its row ORDER
+// is a UI concern and does not reach this answer.
+//
+// Falls back to sha256 when nothing matches, which is the prior behaviour and
+// the honest answer: the payload states no kind for this material, and the
+// confirm modal's relation line already says so.
+func hashlockKindFromPayload(x *[32]byte, payload []*md.HashLock) md.HashKind {
+	for _, k := range composerHashKinds {
+		h := hashlockLockOf(k, x)
+		for _, d := range payload {
+			if d.Equal(h) {
+				return k
+			}
+		}
+	}
+	return md.KindSha256
 }
 
 // hashlockLockOf is THE ONE PLACE this package turns a preimage into the lock a

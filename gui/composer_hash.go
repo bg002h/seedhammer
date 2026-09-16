@@ -434,6 +434,9 @@ func composerPayloadPreimages(s *syswSession) []hashlockPayloadPreimage {
 	if s == nil || !s.loaded {
 		return nil
 	}
+	// F-573: computed once; the payload's hash: records are what name the kind
+	// a kind-agnostic preimage belongs to.
+	digests := composerPayloadDigests(s)
 	var out []hashlockPayloadPreimage
 	for _, r := range s.records {
 		if r.class != sysw.ClassPreimage {
@@ -447,10 +450,14 @@ func composerPayloadPreimages(s *syswSession) []hashlockPayloadPreimage {
 		if err != nil {
 			continue
 		}
-		// sha256: a preimage PLATE record is an ms1 string carrying X and no
-		// kind, so the only digest that can be computed from it is the one this
-		// band has always drawn.
-		out = append(out, hashlockPayloadPreimage{preimage: x, digest: hashlockLockOf(md.KindSha256, &x)})
+		// F-573: a preimage PLATE record is an ms1 string carrying X and no
+		// kind -- and it needs none, a preimage being kind-agnostic. The
+		// payload's own `hash:` records say which kind it is for, so this band
+		// no longer draws three of the four kinds as sha256.
+		out = append(out, hashlockPayloadPreimage{
+			preimage: x,
+			digest:   hashlockLockOf(hashlockKindFromPayload(&x, digests), &x),
+		})
 	}
 	return out
 }
