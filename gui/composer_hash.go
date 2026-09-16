@@ -185,10 +185,11 @@ func composerHashKindPick(ctx *Context, th *Colors, initial md.HashKind) (md.Has
 // KIND. A fixed 64 would have refused every ripemd160 digest as too short while
 // telling the operator nothing about which of the two numbers was wrong.
 //
-// IT RETURNS A sha256 LOCK, and the pad's fixed 64-character bound is what says
-// so: `Which hash?` offers no kind, so the digest an operator types here is the
-// sha256 one this screen has always meant. A kind pick would come with its own
-// character bound, since the rule is md.HashKind.DigestLen()*2 and not 64.
+// IT RETURNS A LOCK OF THE KIND IT WAS GIVEN. This comment used to say it
+// returned a sha256 lock "because `Which hash?` offers no kind" -- true until
+// §7.1 put a kind screen in front of this pad, in the same commit that added
+// the parameter above it. Left as it was, it described the screen it had just
+// stopped describing, directly over the signature that contradicts it.
 func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock, bool) {
 	want := kind.DigestLen() * 2
 	kbd := NewKeyboard(ctx, composerHexKeys)

@@ -12,15 +12,24 @@ import (
 // installComposerAPI exposes the running composition's stored path hashes to the
 // page as window.shComposerPathHashes.
 //
-//	shComposerPathHashes()   [ "<hex>" | null, ... ]  one entry per spend path,
-//	                         in path order, null where a path carries no hash;
-//	                         null (not an array) when no composition is running.
+//	shComposerPathHashes()   [ {kind, digest} | null, ... ]  one entry per spend
+//	                         path, in path order, null where a path carries no
+//	                         hash; null (not an array) when no composition is
+//	                         running.
 //
-// THE HEX IS THE KIND'S WIDTH, NOT ALWAYS 64: 64 characters for sha256 and
-// hash256, 40 for ripemd160 and hash160 (SPEC_hashlock_kinds §7.3). This
-// contract said "<64 hex>" while the composer could build only sha256 locks,
-// and a consumer that hardcoded 64 would silently read twelve bytes of
-// alloc-gate padding as digest. Compare by the string you are given.
+// IT REPORTS THE KIND, and that is SPEC_hashlock_kinds §12 acceptance item 2:
+// "an emulator walk composes a non-sha256 hashlock on the device AND ASSERTS,
+// THROUGH THE KIND-AWARE HOOK, that the composition stores that kind". While
+// this returned bare hex, that acceptance was not merely unrun -- it was
+// UNBUILDABLE for sha256 and hash256, because the two are both 64 hex and no
+// walk could tell them apart through this seam at all. §12's own words: "a gate
+// which cannot fail is not a gate."
+//
+// `digest` IS THE KIND'S WIDTH, NOT ALWAYS 64: 64 characters for sha256 and
+// hash256, 40 for ripemd160 and hash160 (§7.3). This contract said "<64 hex>"
+// while the composer could build only sha256 locks, and a consumer that
+// hardcoded 64 would silently read twelve bytes of alloc-gate padding as
+// digest. Compare by the string you are given.
 //
 // WHY A WALK NEEDS IT (H5 §4, F-485). Every other reading primitive here reports
 // what was DRAWN. That is the right default -- a walk is evidence about the
@@ -41,10 +50,12 @@ import (
 // to compare what is stored against what was shown, and comparing an
 // abbreviation against an abbreviation would accept 2^192 wrong digests.
 //
-// AT THE LOCK'S OWN WIDTH (md.HashLock.Digest), which is 64 hex for every kind
-// the composer can produce today and would be 40 for a ripemd160 one. Hexing
-// the stored array instead would append twelve bytes of alloc-gate padding and
-// hand a walk a digest that matches nothing.
+// AT THE LOCK'S OWN WIDTH (md.HashLock.Digest): 64 hex for sha256 and hash256,
+// 40 for ripemd160 and hash160 -- all four of which the composer can produce
+// since §7.1, so the "64 for every kind the composer can produce today" this
+// comment used to carry is now simply false. Hexing the stored array instead
+// would append twelve bytes of alloc-gate padding and hand a walk a digest that
+// matches nothing.
 func installComposerAPI() {
 	js.Global().Set("shComposerPathHashes", js.FuncOf(func(js.Value, []js.Value) any {
 		hashes := gui.ComposerPathHashes()
@@ -61,7 +72,10 @@ func installComposerAPI() {
 				out = append(out, nil)
 				continue
 			}
-			out = append(out, hex.EncodeToString(h.Digest()))
+			out = append(out, map[string]any{
+				"kind":   h.Kind().Token(),
+				"digest": hex.EncodeToString(h.Digest()),
+			})
 		}
 		return out
 	}))

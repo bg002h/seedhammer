@@ -253,11 +253,10 @@ func hashlockOtherPathLine(st *composerState, idx int, h *md.HashLock) string {
 // functions behind one mis-wired call site is the same lost-funds outcome with
 // a different cause.
 //
-// EVERY CALL SITE PASSES md.KindSha256 TODAY, and that is a statement about the
-// screens rather than about this function: `Which hash?` offers no kind, so
-// sha256 is what every route has always meant. The parameter is here so the
-// kind arrives from the flow when a flow finally has one, instead of this
-// function having to grow a second name.
+// THE CALL SITES NOW PASS A CHOSEN KIND. This comment used to say every one of
+// them passed md.KindSha256, and explained that the parameter was here "so the
+// kind arrives from the flow when a flow finally has one". §7.1's kind screen
+// is that flow; the anticipation outlived the condition it was written under.
 //
 // IT PANICS RATHER THAN RETURNING ok, because false is unreachable by
 // construction: DigestOf and DigestLen switch on the same kind and agree by

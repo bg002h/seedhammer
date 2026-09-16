@@ -172,7 +172,9 @@ func TestComposerStateHookHandsOutNoPadding(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("the hook reports %d entries for a 1-path composition", len(got))
 	}
-	// This is the exact expression cmd/emu/composer_js.go hands to JavaScript.
+	// This is the exact expression cmd/emu/composer_js.go puts in the entry's
+	// `digest` field. The bridge reports {kind, digest} since §12 item 2; the
+	// digest half is still built exactly here.
 	h := hex.EncodeToString(got[0].Digest())
 	if len(h) != 40 {
 		t.Errorf("the seam reports %d hex characters for a ripemd160 lock, want 40. "+

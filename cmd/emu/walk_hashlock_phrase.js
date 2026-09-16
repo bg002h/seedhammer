@@ -312,12 +312,18 @@ async function trial(phrase, method) {
 }
 
 /**
- * The composition's STORED path hashes, as hex or null, in path order.
+ * The composition's STORED path hashes, as {kind, digest} or null, in path
+ * order.
  *
- * THE WIDTH IS THE KIND'S (SPEC_hashlock_kinds §7.3): 64 hex for sha256 and
- * hash256, 40 for ripemd160 and hash160. Never assume 64 -- the seam used to
- * hand out the padded 32-byte array, which returned 64 for every kind and made
- * the stored-versus-displayed assertion unfalsifiable for the 20-byte ones.
+ * THE ENTRY CARRIES THE KIND (SPEC_hashlock_kinds §12 item 2), because a walk
+ * that asserts only the digest cannot tell sha256 from hash256 -- both are 64
+ * hex -- so the acceptance that a non-sha256 composition "stores that kind" was
+ * not merely unrun through the old seam, it was unbuildable.
+ *
+ * THE DIGEST WIDTH IS THE KIND'S (§7.3): 64 hex for sha256 and hash256, 40 for
+ * ripemd160 and hash160. Never assume 64 -- the seam used to hand out the
+ * padded 32-byte array, which returned 64 for every kind and made the
+ * stored-versus-displayed assertion unfalsifiable for the 20-byte ones.
  *
  * Throws rather than returning undefined when the seam is missing: an emulator
  * built before H5 has no shComposerPathHashes, and a walk that silently skipped
@@ -541,7 +547,7 @@ export async function run() {
     throw new Error(`the composition has ${before.length} path(s), want exactly 1 -- the walk built ` +
       `a different policy than it thinks.\nStored: ${JSON.stringify(before)}`);
   }
-  if (before[0] !== null) {
+  if (before[0] !== null && before[0] !== undefined) {
     throw new Error("the path ALREADY holds a hash while the confirm modal is up: the digest is " +
       `assigned before the hold, so Back after reading it would leave it set (F-485).\n` +
       `Stored: ${JSON.stringify(before[0])}`);
@@ -559,18 +565,27 @@ export async function run() {
   // have been. Reversed, or compared against ANCHOR_HARD_H, this assertion has
   // no failing input at all: it would restate the corpus check.
   const after = pathHashes("after the hold");
-  if (typeof after[0] !== "string") {
+  if (after[0] === null || typeof after[0] !== "object" || typeof after[0].digest !== "string") {
     throw new Error("the path holds NO hash after the hold: the digest the confirm modal " +
       `displayed was never assigned.\n  stored: ${JSON.stringify(after[0])}`);
   }
-  if (short8(after[0]) !== displayed) {
+  // THE KIND, FIRST -- SPEC_hashlock_kinds §12 item 2. This journey composes a
+  // sha256 hashlock, so `sha256` is the whole claim; what matters is that the
+  // seam can now be WRONG here, which it could not be while it returned bare
+  // hex (sha256 and hash256 are both 64 characters).
+  if (after[0].kind !== "sha256") {
+    throw new Error("the composition stored a hash of kind " + JSON.stringify(after[0].kind) +
+      ", and this walk composed a sha256 one. The policy commits to a different " +
+      "hash function than the operator chose.");
+  }
+  if (short8(after[0].digest) !== displayed) {
     throw new Error("the stored digest does not abbreviate to the token the confirm modal drew: " +
       "the screen showed one digest and the policy holds another.\n" +
-      `  displayed: ${displayed}\n  stored:    ${after[0]} -> ${short8(after[0])}`);
+      `  displayed: ${displayed}\n  stored:    ${after[0].digest} -> ${short8(after[0].digest)}`);
   }
-  if (after[0] !== ANCHOR_HARD_FULL) {
+  if (after[0].digest !== ANCHOR_HARD_FULL) {
     throw new Error("the STORED digest is not the corpus's hardened digest for this phrase.\n" +
-      `  stored:   ${JSON.stringify(after[0])}\n  corpus:   ${ANCHOR_HARD_FULL}`);
+      `  stored:   ${JSON.stringify(after[0].digest)}\n  corpus:   ${ANCHOR_HARD_FULL}`);
   }
   out.stored = after[0];
 
