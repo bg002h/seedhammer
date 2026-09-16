@@ -182,3 +182,32 @@ carries no vendored Rust addresses, so whoever closes the gap must first generat
 `gap_wsh_andor.conformance.json` from the primary (`md address` at the pinned
 commit) to have ground truth to be right against.
 
+
+## `md/testdata/forkbuilt/` — fixtures that are NOT vendored (F-615)
+
+Everything above is a copy of what the Rust primary ships. This sibling
+directory is the opposite: md1 chunk sets that live here because the vendored
+corpus either does not carry them or is expected to stop carrying them. Two
+different reasons, and they retire on different days:
+
+| file | why it is here | when it can go |
+| --- | --- | --- |
+| `keyed_tr_multi_a.md1.txt`, `keyed_tr_sortedmulti_a.md1.txt` | **Pins (F-533/F-529, fork `476249f`).** These two ARE vendored today and are byte-identical copies. F-529 records that a re-vendor from the primary would DELETE them — and they are the only witnesses F-533's BIP-388 key-path-and-leaf refusal has, so the refusal would become unreproducible the day the corpus catches up. | Never on a schedule. They stay until F-533's refusal is retired or the primary ships the vectors again permanently. |
+| `dup_seat_wsh_sortedmulti_k1.md1.txt`, `dup_seat_wsh_sortedmulti_k2.md1.txt`, `dup_seat_wsh_sortedmulti_k1_keyless.md1.txt` | **Fork-native (F-531).** The repeated-seat shape they carry cannot be produced by any shipped encoder, so there is nothing to vendor. `md/dup_seat_fixture_test.go` rebuilds them from the tree as an anti-decay gate. | Only with F-531's refusal. |
+
+Two gates keep the pins honest, both in `md/f533_pinned_vectors_test.go`:
+
+- `TestPinnedKeyReuseVectorsStillMatchTheVendoredCorpus` — byte-compares each
+  pin against its vendored twin **while the twin exists**, and `t.Skip`s once it
+  is gone. A pin that has quietly diverged is a fixture testing a policy the
+  primary never shipped.
+- `TestPinnedKeyReuseVectorsAreTheShapeTheyClaim` — measures the pin rather than
+  trusting its name: a non-NUMS taproot internal key that reappears inside the
+  taptree. A pin of anything else would leave F-533's refusal untested while
+  looking covered.
+
+**Read a pinned vector through a pin-preferring loader, never by path.**
+`md.vectorChunksFor` and `gui.loadVectorChunks` both try `forkbuilt/` first and
+fall back to `vectors/`. Reading `testdata/vectors/<name>.phrase.txt` directly
+works today and breaks on the re-vendor; that was F-614, and
+`md/policy_shape_test.go` was the last place it survived.

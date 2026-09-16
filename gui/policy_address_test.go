@@ -180,6 +180,26 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 					t.Fatalf("%s is listed as unsupported (%s) but now derives via the %s route — "+
 						"delete the entry rather than leaving a stale exemption", name, why, r)
 				}
+				// F-613: the MIRROR of refusedByPolicy's deriver check, and the
+				// reason both maps can be trusted. `r == routeNone` is equally
+				// true of a shape the device cannot derive and of one it can
+				// derive but was parked here by mistake, so on its own this
+				// branch cannot tell a capability gap from a misfiling.
+				//
+				// A capability gap is measured by its ABSENCE: either the
+				// policy does not expand, or it expands and no deriver beneath
+				// the gate produces an address. If a deriver DOES produce one,
+				// the gap is not a gap and the entry belongs in
+				// refusedByPolicy, where the conformance check still runs
+				// against Rust instead of being silently retired.
+				if _, keys, err := md.ExpandWalletPolicyChunks(chunks); err == nil {
+					if _, ok := complexAddressDeriver(chunks, keys); ok {
+						t.Fatalf("%s is listed as UNSUPPORTED (%s), but complexAddressDeriver "+
+							"derives it — so the device CAN compute this address and is "+
+							"choosing not to. Move it to refusedByPolicy, where its "+
+							"addresses stay cross-checked against Rust", name, why)
+					}
+				}
 				return
 			}
 			if why, listed := refusedByPolicy[name]; listed {

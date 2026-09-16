@@ -1,24 +1,22 @@
 package md
 
 import (
-	"os"
-	"strings"
 	"testing"
 )
 
+// shapeFromVector loads a corpus vector through vectorChunksFor, which PREFERS
+// a fork-side pin.
+//
+// F-614: this used to read testdata/vectors/<name>.phrase.txt directly, and
+// `keyed_tr_sortedmulti_a` below is one of the two vectors F-529 says a
+// re-vendor from the primary would DELETE. Every other consumer of those two
+// names already went through a pin-preferring loader (md's vectorChunksFor,
+// gui's loadVectorChunks); this one did not, so it was the single place where
+// the re-vendor would turn a pinned-fixture test into a "read: no such file"
+// failure instead of reading the pin that exists for exactly that day.
 func shapeFromVector(t *testing.T, name string) PolicyShape {
 	t.Helper()
-	raw, err := os.ReadFile(vectorPath(name, "phrase.txt"))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-	var chunks []string
-	for _, l := range strings.Split(string(raw), "\n") {
-		l = strings.ReplaceAll(strings.TrimSpace(l), " ", "")
-		if strings.HasPrefix(l, "md1") {
-			chunks = append(chunks, l)
-		}
-	}
+	chunks := vectorChunksFor(t, name)
 	s, err := PolicyShapeChunks(chunks)
 	if err != nil {
 		t.Fatalf("%s: PolicyShapeChunks: %v", name, err)
