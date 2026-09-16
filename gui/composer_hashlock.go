@@ -317,6 +317,23 @@ func hashlockPhraseFlow(ctx *Context, th *Colors, initial []byte) ([]byte, bool)
 				showError(ctx, th, "Hashlock phrase", composerCopyHashlockRefusal(err))
 				continue
 			}
+			// F-539: a digest-shaped phrase WARNS and is confirmable. It was a
+			// refusal, and the operator ruled that out (2026-09-16) -- a phrase
+			// that happens to be all hex may be one they really chose, and
+			// turning them away leaves them no way to use it.
+			//
+			// AFTER validation, so the hard refusals still speak first: an
+			// ms1-shaped or over-length entry has a rule to state, and asking
+			// "continue?" about something that will be refused anyway wastes a
+			// screen.
+			if n, ok := hashlock.LooksLikeDigest(phrase); ok {
+				if !composerConfirmScreen(ctx, th, "Hashlock phrase",
+					composerConfirmBody(composerCopyPhraseLooksLikeDigest(n))) {
+					// Declined: keep the phrase on the keyboard so they can
+					// edit it, rather than making them retype.
+					continue
+				}
+			}
 			return phrase, true
 		}
 		dims := ctx.Platform.DisplaySize()

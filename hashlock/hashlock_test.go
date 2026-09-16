@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"seedhammer.com/md"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ const corpusPath = "testdata/hashlock-v0.8.json"
 // 7cdcd711adce95b4ea6aac2de05be6335930485c). It is a SECOND, independently
 // edited witness to the same fact rather than a read of that file: a re-vendor
 // that updated the provenance and not this constant would otherwise be silent.
-const corpusSHA256 = "0a911f78f3cdc867dcc44483b7f4c0c1ac87b6d9b30b79f52094e8979bc3d8ce"
+const corpusSHA256 = "39e7c2ab1c4425909f6baf3bbbdfb076bb6a0bdf8ddd3860fed4b7e5a16b1cc5"
 
 type corpus struct {
 	Derivation []struct {
@@ -65,7 +66,12 @@ func loadCorpus(t *testing.T) corpus {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		t.Fatalf("%s: %v", corpusPath, err)
 	}
-	if len(c.Derivation) != 11 || len(c.Refusals) != 15 || len(c.Kind) < 1 {
+	// 13 refusals, not 15: F-539 moved the two `64-hex` rows into the corpus's
+	// `digest_shaped` array, because a digest-shaped phrase warns and is
+	// confirmable rather than refused (operator ruling 2026-09-16).
+	// TestLooksLikeDigestMatchesTheCorpus gates those rows, and gates that the
+	// retired rule has not been left behind in `refusals` as well.
+	if len(c.Derivation) != 11 || len(c.Refusals) != 13 || len(c.Kind) < 1 {
 		t.Fatalf("corpus shape: %d derivation, %d refusals, %d kind rows", len(c.Derivation), len(c.Refusals), len(c.Kind))
 	}
 	return c
@@ -182,7 +188,11 @@ func TestRefusalRowsMatchTheHost(t *testing.T) {
 			continue
 		}
 		want := map[string]error{
-			"empty": ErrEmpty, "printable-ascii": ErrNotPrintableASCII, "64-hex": ErrHex64,
+			// `64-hex` is GONE from this map because F-539 retired the rule:
+			// a digest-shaped phrase is an advisory now, gated by
+			// TestLooksLikeDigestMatchesTheCorpus below against the corpus's
+			// own `digest_shaped` array.
+			"empty": ErrEmpty, "printable-ascii": ErrNotPrintableASCII,
 			"ms1-shaped": ErrMS1Shaped, "too-long": ErrTooLong,
 		}[*r.Rule]
 		if want == nil {
@@ -439,5 +449,75 @@ func TestHashLockIdentityIgnoresPadding(t *testing.T) {
 	}
 	if _, ok := md.NewHashLock(md.KindSha256, d); ok {
 		t.Error("sha256 must refuse a 20-byte digest")
+	}
+}
+
+// TestLooksLikeDigestMatchesTheCorpus is the Go half of F-539's cross-language
+// contract, against the SAME two arrays ms-codec's
+// `the_corpus_pins_the_digest_shaped_advisory_in_both_directions` reads.
+//
+// The rows used to be `refusals` with rule `64-hex`. They are advisories now
+// (operator ruling 2026-09-16: warn and confirm, never always refuse), and both
+// widths appear because SPEC_hashlock_kinds made 40 hex a digest too -- a
+// contract pinning one width pins one kind pair.
+//
+// IT ASSERTS THE NON-REFUSAL TOO. A port that listed these rows and still
+// walled them off would satisfy a weaker test, and walling them off is exactly
+// what the ruling retired.
+//
+// MUTATION: restore `len(phrase) == 64` in LooksLikeDigest -> the 40-hex rows
+// fail. MUTATION: re-add the ErrHex64 refusal -> the validate assertion fails.
+func TestLooksLikeDigestMatchesTheCorpus(t *testing.T) {
+	var corpus struct {
+		DigestShaped []struct {
+			Input string `json:"input"`
+			Chars int    `json:"chars"`
+		} `json:"digest_shaped"`
+		DigestShapedNegative []struct {
+			Input string `json:"input"`
+		} `json:"digest_shaped_negative"`
+		Refusals []struct {
+			Rule *string `json:"rule"`
+		} `json:"refusals"`
+	}
+	raw, err := os.ReadFile(filepath.Join("testdata", "hashlock-v0.8.json"))
+	if err != nil {
+		t.Fatalf("reading the corpus: %v", err)
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatalf("parsing the corpus: %v", err)
+	}
+	if len(corpus.DigestShaped) < 4 {
+		t.Fatalf("the corpus carries %d digest_shaped rows; want both widths in both "+
+			"cases -- a thin array here would make this gate vacuous",
+			len(corpus.DigestShaped))
+	}
+	widths := map[int]bool{}
+	for _, r := range corpus.DigestShaped {
+		n, ok := LooksLikeDigest([]byte(r.Input))
+		if !ok || n != r.Chars {
+			t.Errorf("corpus says %q is digest-shaped at %d; LooksLikeDigest says (%d, %v)",
+				r.Input, r.Chars, n, ok)
+		}
+		if err := ValidatePhrase([]byte(r.Input)); err != nil {
+			t.Errorf("a digest-shaped phrase must WARN, not be refused (F-539); "+
+				"ValidatePhrase(%q) = %v", r.Input, err)
+		}
+		widths[r.Chars] = true
+	}
+	if !widths[40] || !widths[64] {
+		t.Errorf("the corpus pins widths %v; both 40 and 64 must appear or this gates "+
+			"one kind pair only", widths)
+	}
+	for _, r := range corpus.DigestShapedNegative {
+		if n, ok := LooksLikeDigest([]byte(r.Input)); ok {
+			t.Errorf("%q is not a digest width; LooksLikeDigest says (%d, true)", r.Input, n)
+		}
+	}
+	for _, r := range corpus.Refusals {
+		if r.Rule != nil && *r.Rule == "64-hex" {
+			t.Error("the corpus still carries a `64-hex` REFUSAL row, which contradicts " +
+				"digest_shaped -- the failure mode when a row is copied rather than moved")
+		}
 	}
 }

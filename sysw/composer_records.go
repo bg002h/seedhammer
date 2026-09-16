@@ -171,6 +171,24 @@ func ParsePhraseRecord(record string) (PhraseRecord, error) {
 	if err := hashlock.ValidatePhrase([]byte(phrase)); err != nil {
 		return PhraseRecord{}, ErrPhraseRecord
 	}
+	// THE WIRE STILL REFUSES A DIGEST-SHAPED PHRASE, and this is deliberate
+	// lockstep rather than an oversight (F-539, F-546).
+	//
+	// F-539 made a digest-shaped phrase an ADVISORY for the typed SCREEN --
+	// warn and confirm, never refuse (operator ruling 2026-09-16). That changed
+	// ms-codec's `validate_phrase`, the Rust primary. But `me-cli` PINS
+	// ms-codec to a git rev (crates/me-cli/Cargo.toml), so the host's record
+	// parser still refuses this, and `sysw/testdata/record_class_vectors.json`
+	// -- vendored FROM me-cli -- still says `phrase-64-hex` is Unknown.
+	//
+	// This parser's whole contract is to classify exactly as the host does. So
+	// it keeps refusing until the pin is bumped, at which point this block and
+	// that vector move together. Deleting it early would make the device accept
+	// a record the host calls malformed, which is the divergence the lockstep
+	// fixture exists to prevent.
+	if _, digestShaped := hashlock.LooksLikeDigest([]byte(phrase)); digestShaped {
+		return PhraseRecord{}, ErrPhraseRecord
+	}
 	return PhraseRecord{Method: method, Phrase: phrase}, nil
 }
 

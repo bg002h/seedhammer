@@ -40,7 +40,10 @@ var (
 	ErrNotPrintableASCII = errors.New("hashlock: the phrase has a byte outside 0x20..=0x7E")
 	ErrMS1Shaped         = errors.New("hashlock: that is a preimage plate, not a phrase")
 	ErrTooLong           = errors.New("hashlock: the phrase is longer than 100 characters")
-	ErrHex64             = errors.New("hashlock: that is a preimage in hex, not a phrase")
+	// ErrHex64 IS GONE. A digest-shaped phrase is an ADVISORY now, not a
+	// refusal -- see LooksLikeDigest. Operator ruling 2026-09-16, verbatim:
+	// "we should warn user whenever the hashlock phrase looks like a digest
+	// and force user to confirm but we should not always refuse."
 )
 
 // PreimageHardened is preimage_hardened: PBKDF2-HMAC-SHA256(phrase, Salt,
@@ -169,9 +172,9 @@ func ValidatePhrase(phrase []byte) error {
 	if len(phrase) > PhraseMaxChars {
 		return ErrTooLong
 	}
-	if len(phrase) == 64 && isHex(phrase) {
-		return ErrHex64
-	}
+	// The digest-shaped check used to refuse here. It advises now; see
+	// LooksLikeDigest, which the phrase SCREEN consults so the operator can
+	// confirm rather than be turned away.
 	return nil
 }
 
@@ -264,4 +267,35 @@ func QRText(hardened bool, kind md.HashKind, phrase string) string {
 	return "hashlock v1\n" + MethodLine(hardened) +
 		"\nhash: " + kind.Token() +
 		"\nphrase: " + phrase
+}
+
+// LooksLikeDigest reports whether a phrase looks like a digest in hex, and at
+// what width.
+//
+// THE GO HALF OF F-539, converging on ms-codec's `looks_like_digest` (the
+// Rust-primary rule: the refusal semantics changed there first, with vectors).
+//
+// WHY IT IS WORTH SAYING SOMETHING. An operator holding a digest in hex may
+// type it here, and the KDF then commits the wallet to the ASCII OF THE DIGEST
+// rather than to the digest -- a preimage they do not hold, on a path they
+// cannot open.
+//
+// WHY IT MUST NOT REFUSE. A phrase that happens to be all hex at one of these
+// widths may be one the operator really chose, and refusing outright leaves
+// them no way to use it. A warning costs one confirmation; a refusal costs the
+// phrase. That is the operator's ruling and it reversed shipped behaviour.
+//
+// THE WIDTHS COME FROM THE KINDS, never a literal. This was `len == 64`, which
+// was every digest in the world while sha256 was the only composable kind;
+// SPEC_hashlock_kinds made 40 hex a digest too and the check was blind to it.
+func LooksLikeDigest(phrase []byte) (int, bool) {
+	if len(phrase) == 0 || !isHex(phrase) {
+		return 0, false
+	}
+	for _, k := range []md.HashKind{md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160} {
+		if len(phrase) == 2*k.DigestLen() {
+			return len(phrase), true
+		}
+	}
+	return 0, false
 }

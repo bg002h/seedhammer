@@ -222,18 +222,6 @@
       "note": "0x20 and 0x7E accepted"
     },
     {
-      "input": "c3e97525442520da4cffd5f57aae3f6273990017f2e0fa30c056e32172e22016",
-      "channel": "phrase",
-      "rule": "64-hex",
-      "remedy": "--hex"
-    },
-    {
-      "input": "C3E97525442520DA4CFFD5F57AAE3F6273990017F2E0FA30C056E32172E22016",
-      "channel": "phrase",
-      "rule": "64-hex",
-      "remedy": "--hex"
-    },
-    {
       "input": "beef",
       "channel": "phrase",
       "rule": null,
@@ -421,6 +409,58 @@
       "bytes": 136,
       "note": "the anchor phrase with an explicit hash160 hashlock kind (F-507 / SPEC_hashlock_kinds \u00a713.1)",
       "kind": "hash160"
+    }
+  ],
+  "digest_shaped": [
+    {
+      "input": "c3e97525442520da4cffd5f57aae3f6273990017f2e0fa30c056e32172e22016",
+      "channel": "phrase",
+      "chars": 64,
+      "rule": "digest-shaped",
+      "remedy": "--hex"
+    },
+    {
+      "input": "C3E97525442520DA4CFFD5F57AAE3F6273990017F2E0FA30C056E32172E22016",
+      "channel": "phrase",
+      "chars": 64,
+      "rule": "digest-shaped",
+      "remedy": "--hex"
+    },
+    {
+      "input": "98a20fc25dbcdf236fb0307e3f82cad47fca2e80",
+      "channel": "phrase",
+      "chars": 40,
+      "rule": "digest-shaped",
+      "remedy": "--hex"
+    },
+    {
+      "input": "98A20FC25DBCDF236FB0307E3F82CAD47FCA2E80",
+      "channel": "phrase",
+      "chars": 40,
+      "rule": "digest-shaped",
+      "remedy": "--hex"
+    }
+  ],
+  "digest_shaped_negative": [
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "channel": "phrase",
+      "chars": 39
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "channel": "phrase",
+      "chars": 41
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "channel": "phrase",
+      "chars": 63
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "channel": "phrase",
+      "chars": 65
     }
   ]
 }

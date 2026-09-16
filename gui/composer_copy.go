@@ -577,11 +577,28 @@ func composerCopyHashlockRefusal(err error) string {
 			"with it and load the hash: record it prints."
 	case hashlock.ErrTooLong:
 		return "A hashlock phrase is at most 100 characters."
-	case hashlock.ErrHex64:
-		return "That is a preimage in hex, not a phrase. Use the " +
-			composerHashRowHex + " row."
 	}
 	return err.Error()
+}
+
+// composerCopyPhraseLooksLikeDigest is F-539's warning, and it is a CONFIRM
+// rather than a refusal (operator ruling 2026-09-16): "we should warn user
+// whenever the hashlock phrase looks like a digest and force user to confirm
+// but we should not always refuse."
+//
+// It replaced a refusal that said "That is a preimage in hex, not a phrase" --
+// a claim about the operator's INTENT, which the device cannot know. This says
+// what will happen instead, and leaves the judgement where it belongs.
+//
+// `chars` is named because it is the tell: an operator who meant a phrase
+// rarely typed exactly 40 or 64 hex characters by accident, and one who meant a
+// digest recognises the number immediately.
+func composerCopyPhraseLooksLikeDigest(chars int) string {
+	return fmt.Sprintf("THIS LOOKS LIKE A DIGEST\n"+
+		"You typed %d hex characters, the width of a digest. This device will "+
+		"hash those characters, so the wallet commits to the TEXT you typed and "+
+		"not to the digest it spells. If you meant a digest you already hold, go "+
+		"back and use the %s row. Continue?", chars, composerHashRowHex)
 }
 
 func composerCopyHashlockHardenedWarning() string {

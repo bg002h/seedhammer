@@ -1210,7 +1210,10 @@ func TestHashlockPhraseScreenDrawsTheMaskedReadout(t *testing.T) {
 // arm; the err.Error() fallthrough (a Go error with a package prefix) must be
 // unreachable. MUTATION: delete the ErrHex64 case -> this test names it.
 func TestHashlockRefusalCopyCoversEverySentinel(t *testing.T) {
-	for _, err := range []error{hashlock.ErrEmpty, hashlock.ErrNotPrintableASCII, hashlock.ErrMS1Shaped, hashlock.ErrTooLong, hashlock.ErrHex64} {
+	// ErrHex64 is GONE from this list: F-539 retired that refusal in favour of
+	// a confirmable warning (composerCopyPhraseLooksLikeDigest), so there is no
+	// copy arm for it and there should not be one.
+	for _, err := range []error{hashlock.ErrEmpty, hashlock.ErrNotPrintableASCII, hashlock.ErrMS1Shaped, hashlock.ErrTooLong} {
 		if got := composerCopyHashlockRefusal(err); got == "" || got == err.Error() {
 			t.Errorf("composerCopyHashlockRefusal(%v) = %q: fell through to the Go error", err, got)
 		}

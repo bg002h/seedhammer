@@ -202,6 +202,8 @@ func composerCopyTable() []composerCopyRow {
 		// the one the glyph/raster/fits gates should be measuring.
 		{"composerCopyPreimagePlateRow", "H6-8.3", composerCopyPreimagePlateRow(2, md.KindHash160, "b867db87..689b8338", "phrase, hardened, QR"),
 			"path 2  hash160 b867db87..689b8338  phrase, hardened, QR"},
+		{"composerCopyPhraseLooksLikeDigest", "F-539", composerCopyPhraseLooksLikeDigest(64),
+			"THIS LOOKS LIKE A DIGEST You typed 64 hex characters, the width of a digest. This device will hash those characters, so the wallet commits to the TEXT you typed and not to the digest it spells. If you meant a digest you already hold, go back and use the Type a digest row. Continue?"},
 		{"composerCopyTwentyByteUnseen", "8", composerCopyTwentyByteUnseen(md.KindRipemd160),
 			"20-BYTE HASH, NOT DERIVED HERE This is a ripemd160 digest and nothing on this device has seen a preimage for it. Whoever supplied it can spend this path. A 20-byte hash also leaves far less collision margin than sha256. Check you hold the preimage before you fund this wallet."},
 		{"composerCopyPreimageCensusScope", "H6-8.3", composerCopyPreimageCensusScope(),
@@ -398,8 +400,12 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// normative section of a GREEN spec with no code, no copy and no test
 	// behind it, found missing independently by the journey walk and the
 	// adversarial lens after the rest of phase 4 had shipped.
-	if declared != 81 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 81 -- "+
+	// 82 SINCE F-539 turned the digest-shaped REFUSAL into a confirmable
+	// warning (operator ruling 2026-09-16). The refusal it replaced was not a
+	// composerCopy* body at all -- it was an arm of composerCopyHashlockRefusal
+	// -- so the count moves by one even though one string replaced another.
+	if declared != 82 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 82 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }
