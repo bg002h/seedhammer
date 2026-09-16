@@ -309,8 +309,8 @@ async function trial(phrase, method, kindRow = 0) {
   } else {
     await chooseRow(0, null, "Hardened (about 10 s)");              // 28 chars: no §4.3a modal
   }
-  const firstFrame = await raceFor(["Deriving", "Write down this phrase"], 60000);
-  const modal = await waitFor("Write down this phrase", 60000);     // the countdown is ~10 s on the SH2
+  const firstFrame = await raceFor(["Deriving", "Write down the phrase"], 60000);
+  const modal = await waitFor("Write down the phrase", 60000);     // the countdown is ~10 s on the SH2
   must(modal, "method: " + method, "the confirm modal's method line");
   must(modal, "chars: " + phrase.length, "the confirm modal's char count");
   return { modal, firstFrame };
@@ -375,10 +375,21 @@ const short8 = (hexDigest) => `${hexDigest.slice(0, 8)}..${hexDigest.slice(-8)}`
  * silently skipped this comparison would report the same PASS as one that ran it.
  */
 function drawnToken(frame, where) {
-  const m = squash(frame).match(/hash([0-9a-f]{8}\.\.[0-9a-f]{8})/);
+  // `hash <kind> <first8>..<last8>` since SPEC_hashlock_kinds §13.2 put the
+  // kind between the label and the digest. The kind group is optional so this
+  // still reads a pre-cycle frame, and it is NOT captured -- callers compare
+  // tokens, and returning "sha2563cf5..." here would make every comparison
+  // fail in a way that looks like a digest mismatch.
+  //
+  // squash() strips the spaces, so the kind runs straight into the digest:
+  // "hashsha2563cf5d421..b70a4c12". The token itself is unambiguous ([0-9a-f]
+  // exactly 8, then "..", then 8), which is what lets the kind be skipped
+  // without knowing its length -- `hash256` is hex-shaped and would otherwise
+  // be a real hazard here.
+  const m = squash(frame).match(/hash(?:sha256|hash256|ripemd160|hash160)?([0-9a-f]{8}\.\.[0-9a-f]{8})/);
   if (m === null) {
-    throw new Error(`${where}: no \`hash <first8>..<last8>\` token in the frame, so there is ` +
-      `nothing to compare the STORED digest against.\nScreen: ${JSON.stringify(frame)}`);
+    throw new Error(`${where}: no \`hash [<kind>] <first8>..<last8>\` token in the frame, so ` +
+      `there is nothing to compare the STORED digest against.\nScreen: ${JSON.stringify(frame)}`);
   }
   return m[1];
 }
@@ -427,12 +438,24 @@ async function readPages(where, maxPages = 20) {
  * one "row not found" would report a dropped digest as though §8.3's block had
  * never been drawn at all -- a different defect, in a different function.
  *
- * The row is `path %d  <first8..last8>  <form>` (composerCopyPreimagePlateRow),
- * and squash() removes its two double spaces.
+ * The row is `path %d  <kind> <first8..last8>  <form>`
+ * (composerCopyPreimagePlateRow), and squash() removes its double spaces.
+ *
+ * THE KIND ARRIVED IN SPEC_hashlock_kinds §13.3, between the path number and
+ * the digest, and this pattern did not follow it -- so the row was drawn
+ * correctly and read as missing. Found by RUNNING this walk against the fold
+ * that made the change; no Go test could see it, because the walk is the only
+ * consumer of this row's shape.
+ *
+ * The kind group is optional (a pre-cycle frame still parses) and NOT captured:
+ * callers compare the returned token against one the confirm modal drew, and
+ * returning "sha2563cf5.." would read as a digest mismatch rather than a shape
+ * change -- the exact confusion this function's own doc warns about above.
  */
 function censusPlateToken(joined, pathNo, form, where) {
   const f = squash(form);
-  const m = joined.match(new RegExp(`path${pathNo}([0-9a-f]{8}\\.\\.[0-9a-f]{8})?${f}`));
+  const m = joined.match(new RegExp(
+    `path${pathNo}(?:sha256|hash256|ripemd160|hash160)?([0-9a-f]{8}\\.\\.[0-9a-f]{8})?${f}`));
   if (m === null) {
     throw new Error(`${where}: the census carries no row for path ${pathNo} in the ${form} form, ` +
       `so §8.3's block did not report the plate that was accepted.\nCensus: ${JSON.stringify(joined)}`);
@@ -611,52 +634,6 @@ export async function run() {
   must(list, "hash", "the path row after the hash was assigned");
   out.pathRow = squash(list).slice(0, 200);
 
-  // ══ SPEC_hashlock_kinds §12 ITEM 2: A NON-sha256 HASHLOCK, ON THE DEVICE ═══
-  //
-  // "An emulator walk composes a non-sha256 hashlock on the device AND ASSERTS,
-  // THROUGH THE KIND-AWARE HOOK, that the composition stores that kind and the
-  // §10 KAT row's digest for that kind."
-  //
-  // BOTH CLAUSES, AND THE SECOND IS THE ONE THAT WAS MISSING. Until the seam
-  // returned {kind, digest} this acceptance was not merely unrun, it was
-  // UNBUILDABLE: sha256 and hash256 are both 64 hex, so no walk could tell one
-  // stored kind from another through it. And until this trial, the seam was
-  // capable and every trial still composed sha256 -- a kind-aware hook that
-  // only ever sees one kind is a gate with no failing input, which is the
-  // thing §12 spends a paragraph warning about.
-  //
-  // THE DIGEST IS THE CORPUS'S, NOT THE DEVICE'S. Same phrase, same method, a
-  // different kind -- so if the device derived ripemd160 of the wrong preimage,
-  // or ripemd160 where hash160 was asked for, this fails. Comparing against a
-  // value the device supplied would be the tautology this file already warns
-  // about for the sha256 case.
-  const { modal: rmd } = await trial(ANCHOR, "hardened", KIND_ROW_RIPEMD160);
-  must(rmd, "ripemd160", "the confirm modal names the kind it derived (§13.2)");
-  await hold(CONFIRM);
-  const stored = pathHashes("after the hold, ripemd160 trial");
-  const last = stored[stored.length - 1];
-  if (last === null || typeof last !== "object") {
-    throw new Error("the ripemd160 path holds no hash after the hold.\n" +
-      `  stored: ${JSON.stringify(stored)}`);
-  }
-  if (last.kind !== "ripemd160") {
-    throw new Error("the composition stored kind " + JSON.stringify(last.kind) +
-      " for a path composed at ripemd160. The policy commits to a DIFFERENT HASH " +
-      "FUNCTION than the operator chose, and the script it lowers to is not the " +
-      "one the confirm modal described.");
-  }
-  if (last.digest !== ANCHOR_HARD_RIPEMD160) {
-    throw new Error("the stored ripemd160 digest is not the corpus's value for this " +
-      "phrase and method.\n" +
-      `  stored: ${last.digest}\n  corpus: ${ANCHOR_HARD_RIPEMD160}`);
-  }
-  if (last.digest.length !== 40) {
-    throw new Error(`a ripemd160 digest reached the seam as ${last.digest.length} hex ` +
-      "characters, not 40 -- the alloc-gate padding is observable (§7.3).");
-  }
-  out.ripemd160 = { kind: last.kind, digest: last.digest };
-  await tap(CONFIRM, 500);   // past the reconciliation screen
-  await waitFor("Spend paths", 20000);
 
   // ══ H6 §11.7: THE PREIMAGE PLATE ARM ═══════════════════════════════════════
   //
@@ -778,4 +755,81 @@ export async function run() {
   // silently omits the rest, including both stored-versus-displayed checks.
   out.ok = true;
   return out;
+}
+
+/**
+ * SPEC_hashlock_kinds §12 ITEM 2, as its own entry point:
+ *
+ *   const w = await import("./walk_hashlock_phrase.js");
+ *   await w.runKindTrial();
+ *
+ * "An emulator walk composes a non-sha256 hashlock on the device AND ASSERTS,
+ * THROUGH THE KIND-AWARE HOOK, that the composition stores that kind and the
+ * §10 KAT row's digest for that kind."
+ *
+ * ITS OWN FUNCTION, NOT A TRIAL APPENDED TO run(). Measured, by trying it: a
+ * ripemd160 trial placed mid-run REPLACES path 1's hash, and the H6 arm
+ * downstream compares the consent screen's token against the digest the
+ * hardened trial left there -- so it failed with "confirm modal: 3cf5d421.. /
+ * consent: 09e7bb50..", a mismatch the walk itself caused. Appended after that
+ * arm instead, the flow sits on the Plates To Cut census, which offers no path
+ * rows to tap. An acceptance that has to be threaded through another walk's
+ * state is one nobody will keep running.
+ *
+ * WHY THIS COULD NOT BE ASSERTED BEFORE: until the seam returned
+ * {kind, digest}, sha256 and hash256 were both 64 hex through it and no walk
+ * could tell one stored kind from another. §12's own words: "a gate which
+ * cannot fail is not a gate."
+ */
+export async function runKindTrial() {
+  for (const fn of ["shScreen", "shTargets", "shTap", "shPress", "shRelease", "shSysw",
+                    "shComposerPathHashes"]) {
+    if (typeof window[fn] !== "function") {
+      throw new Error(`${fn} missing -- stale or wrong emu.wasm; serve on a FRESH port`);
+    }
+  }
+  window.shSysw("none");
+  await waitFor("Load it?");
+  await tap(BACK, 500);                                    // SKIP
+  await waitFor("SeedHammer");
+  await goTo("Wallet Policy");
+  await tap(CONFIRM, 500);
+  await waitFor("Build a new policy");
+  await chooseRow(1, "Which script?", "Build a new policy");
+  await chooseRow(1, "Start from?", "Segwit (wsh)");       // a key-less path is wsh-only
+  await chooseRow(0, "Add a spend path", "Build my own paths");
+  await chooseRow(0, "What can spend on this path?", "Add a spend path");
+  await chooseRow(1, "EXPERIMENTAL", "A hash, no keys");
+  await hold(CONFIRM);                                     // §8a key-less consent
+  await waitFor("Type a hashlock phrase");
+
+  const { modal } = await trial(ANCHOR, "hardened", KIND_ROW_RIPEMD160);
+  must(modal, "ripemd160", "the confirm modal names the kind it derived (§13.2)");
+  await hold(CONFIRM);
+
+  const stored = pathHashes("after the hold, ripemd160 trial");
+  const last = stored[stored.length - 1];
+  if (last === null || typeof last !== "object") {
+    throw new Error("the ripemd160 path holds no hash after the hold.\n" +
+      `  stored: ${JSON.stringify(stored)}`);
+  }
+  if (last.kind !== "ripemd160") {
+    throw new Error("the composition stored kind " + JSON.stringify(last.kind) +
+      " for a path composed at ripemd160. The policy commits to a DIFFERENT HASH " +
+      "FUNCTION than the operator chose, and the script it lowers to is not the " +
+      "one the confirm modal described.");
+  }
+  // THE CORPUS'S DIGEST, NOT THE DEVICE'S. Same phrase, same method, a
+  // different kind -- so ripemd160 of the wrong preimage fails here, and so
+  // does hash160 where ripemd160 was asked for. Comparing against a value the
+  // device supplied would be the tautology this file warns about for sha256.
+  if (last.digest !== ANCHOR_HARD_RIPEMD160) {
+    throw new Error("the stored ripemd160 digest is not the corpus's value for this " +
+      `phrase and method.\n  stored: ${last.digest}\n  corpus: ${ANCHOR_HARD_RIPEMD160}`);
+  }
+  if (last.digest.length !== 40) {
+    throw new Error(`a ripemd160 digest reached the seam as ${last.digest.length} hex ` +
+      "characters, not 40 -- the alloc-gate padding is observable again (§7.3).");
+  }
+  return { ok: true, kind: last.kind, digest: last.digest, modal: squash(modal).slice(0, 200) };
 }

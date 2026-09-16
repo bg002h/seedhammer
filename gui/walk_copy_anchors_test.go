@@ -55,6 +55,17 @@ func TestEmulatorWalksQuoteCopyThatStillExists(t *testing.T) {
 			composerCopyHashlockConfirm("09..6b", "hardened", 28, "", "", md.KindRipemd160),
 			"§12 item 2's non-sha256 trial: the confirm modal must name the kind the " +
 				"walk then asserts through the seam"},
+		// THE FOURTH OCCURRENCE, and the one that proves the table has to be
+		// filled by RUNNING the walk rather than by reading it. The confirm
+		// modal was reworded to "Write down the phrase, method, hash kind and
+		// digest now" when §13.2 added the kind to it; the walk still waited
+		// for "Write down this phrase", so it threw on its FIRST trial and had
+		// done since that fold. I built this gate, listed three fragments I
+		// knew about, and missed this one -- it surfaced sixty seconds into
+		// the first actual run of the walk.
+		{"walk_hashlock_phrase.js", "Write down the phrase",
+			composerCopyHashlockConfirm("b8..cb", "sha256", 28, "", "", md.KindSha256),
+			"§4.4's confirm modal, stale in the walk since §13.2 added the kind to it"},
 		{"shots_composer.js", "The preimage must be", composerCopyHashRule(),
 			"§8i's ENTRY body, which names no hash function since §7.2"},
 		{"shots_composer.js", "Type a digest", composerHashRowHex,
