@@ -483,7 +483,59 @@ func composerEngraveStep(ctx *Context, th *Colors, st *composerState, template, 
 	if !done && cut > 0 {
 		return composerAbortPreimageCut(ctx, th)
 	}
+	if done {
+		composerRestoreDoc(ctx, th, keyed,
+			composerCensusLines(ctx.Platform.EngraverParams(), cards, plates))
+	}
 	return done
+}
+
+// composerRestoreDoc shows the restore document at the end of a composer run
+// (F-544).
+//
+// §13.5 named the gap: `restoreDoc` occurred ZERO times in gui/composer*.go, so
+// an operator who BUILT a wallet here walked away with steel and no document,
+// while the same operator coming through Multisig Build got one. That widens
+// F-132's open half -- a backup that omits a required factor without saying so.
+//
+// The screen is not new. multisigRestoreDocFlow already renders Type,
+// Descriptor, first receive/change and an appended inventory, and handles the
+// display-only branch for a policy whose addresses it cannot project. This
+// wires the composer into it.
+//
+// THE STATUS LINE IS verifyStatusNotFullyCheckedLine, REUSED AND NOT INVENTED.
+// The composer has no verify step, so no pass line is constructible -- and
+// multisig_build.go warns beside its own call that an empty status "would render
+// as silence, and silence is what reads as a pass". "These plates were not fully
+// checked" is exactly true here.
+//
+// UNSEATED RUNS GET A DOCUMENT TOO. `keyed` is nil unless every slot is seated
+// (composerArtifactsFor), and without keys there is no descriptor and no
+// address -- but there is still a pile of steel whose inventory is the one fact
+// a reader in five years needs. Returning silently there would reproduce the
+// silence this follow-up is about, one case narrower.
+func composerRestoreDoc(ctx *Context, th *Colors, keyed []string, census []string) {
+	head := append([]string{verifyStatusNotFullyCheckedLine},
+		verifyStatusScopeLines(verifyStatusNotFullyCheckedLine)...)
+	if len(keyed) == 0 {
+		restoreDocScreen(ctx, th, append(append(head,
+			"This backup is a key-less TEMPLATE plus its key cards.",
+			"No descriptor or address can be shown from the template alone:",
+			"restore needs the mk1 key cards listed below.",
+		), census...))
+		return
+	}
+	tpl, keys, err := md.ExpandWalletPolicyChunks(keyed)
+	if err != nil {
+		// The keyed card did not expand. Say so and still give the inventory,
+		// rather than dropping the document.
+		restoreDocScreen(ctx, th, append(append(head,
+			"This device could not read the policy back from the plate it just",
+			"cut. The plates below are what this run engraved.",
+		), census...))
+		return
+	}
+	multisigRestoreDocFlow(ctx, th, tpl, keys, verifyStatusNotFullyCheckedLine, census)
 }
 
 // composerSecretCards is §7f's "a seed that filled several slots is cut ONCE".
