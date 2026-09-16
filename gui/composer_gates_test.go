@@ -1768,3 +1768,91 @@ func TestComposerConsentHashRuleNamesTheKinds(t *testing.T) {
 		t.Errorf("the two-kind consent body is not the one §7.2 specifies:\n%s", got)
 	}
 }
+
+// TestUnsortedMarkIgnoresNoHashlockKind pins SPEC_hashlock_kinds §7.4's
+// announced decode-side flip, which shipped with neither a comment nor a test
+// until the spec-coverage review found it.
+//
+// The mark is honest only for a SOLE path that is unlocked AND unhashed (§5
+// admits sortedmulti only there). Before this cycle the guard read
+// `len(Sha256Digests)`, which was zero for a 20-byte kind because the decoder
+// recorded digests only for tagSha256 -- so a hash160-locked sole unsorted path
+// printed `UNSORTED (EXPERIMENTAL)`, which was false of it.
+//
+// WHAT THIS ACTUALLY GATES, measured, because my first version of this comment
+// claimed more than the test does and the mutation proved it:
+//
+//	composed                        decoded branch        consent row
+//	2-of-3, unsorted, NO hash   ->  N=3  hashlocks=0   ->  "Path 1: 2-of-3"
+//	                                                       + UNSORTED
+//	2-of-3, unsorted, hashed    ->  N=0  hashlocks=1   ->  "Path 1: 3 key(s),
+//	                                                       custom", no UNSORTED
+//
+// So `b.N >= 2` ALREADY excludes every hashed path -- a keyed+hashed path
+// decodes with N=0 -- and the `len(b.Hashlocks) == 0` clause never gets to
+// decide. Mutating that clause to a sha256-only count changes NOTHING, and all
+// four rows below still pass.
+//
+// That makes §7.4's own sentence wrong: "a hash160-locked sole unsorted path
+// today prints UNSORTED (EXPERIMENTAL) and after this change does not". It did
+// not print it before either. Filed as F-542 rather than quietly corrected,
+// because the spec is the artefact under review and a false claim in it is
+// worth the same as a false claim in code.
+//
+// What the rows DO pin is the operator-visible outcome, at every kind: a hashed
+// sole unsorted path never carries the mark. That property is what §7.4 wanted;
+// the clause it credited is simply not what enforces it. Keeping the four rows
+// means a future change to EITHER clause that reintroduces the mark fails here.
+func TestUnsortedMarkIgnoresNoHashlockKind(t *testing.T) {
+	const mark = "UNSORTED (EXPERIMENTAL)"
+	// The control: a sole, unsorted, UNHASHED 2-of-3 must carry the mark, or the
+	// rows below prove nothing -- they would pass against a predicate that never
+	// draws it at all.
+	plain := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: false}},
+	}}
+	c, err := md.Compose(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, _ := c.Chunks()
+	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), mark) {
+		t.Fatalf("INCONCLUSIVE: an unhashed sole unsorted path does not carry %q, so the "+
+			"hashed rows below cannot distinguish anything:\n%s", mark, strings.Join(lines, "\n"))
+	}
+
+	for _, k := range composerHashKinds {
+		t.Run(k.Token(), func(t *testing.T) {
+			lock, ok := md.NewHashLock(k, bytes.Repeat([]byte{0x5a}, k.DigestLen()))
+			if !ok {
+				t.Fatalf("%s rejected its own width", k.Token())
+			}
+			hashed := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 3, Sorted: false}, Hash: lock},
+			}}
+			c, err := md.Compose(hashed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chunks, err := c.Chunks()
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Join(lines, "\n")
+			if strings.Contains(got, mark) {
+				t.Errorf("a %s-locked sole unsorted path carries %q. The mark means "+
+					"'unlocked and unhashed', and this path is hashed -- it was printed "+
+					"only because the decoder used to record digests for sha256 alone.\n%s",
+					k.Token(), mark, got)
+			}
+		})
+	}
+}

@@ -103,6 +103,22 @@ func composerBranchLines(b md.Branch, pathNo int, sole bool) []string {
 		// operator reads before agreeing to a policy.
 		out = append(out, "  hash "+d.Kind().Token()+" "+composerDigestShort(d))
 	}
+	// `len(b.Hashlocks)`, AND THE CHANGE OF MEANING IS DELIBERATE (§7.4). This
+	// read `len(b.Sha256Digests)`, which was zero for a ripemd160 or hash160
+	// path because the decoder recorded digests only for tagSha256 -- so a
+	// 20-byte-locked sole unsorted path PRINTED `UNSORTED (EXPERIMENTAL)` and
+	// now does not.
+	//
+	// The new reading is the correct one: the mark is honest only for a sole
+	// path that is unlocked AND unhashed (§5 admits sortedmulti only there).
+	//
+	// BUT THE FLIP §7.4 ANNOUNCES IS NOT OBSERVABLE, measured: a keyed+hashed
+	// path decodes with N=0, so `b.N >= 2` already excludes it and this clause
+	// never gets to decide. §7.4 says such a path "today prints UNSORTED
+	// (EXPERIMENTAL) and after this change does not" -- it did not print it
+	// before either. F-542. The clause stays because it states the rule the
+	// mark means, and TestUnsortedMarkIgnoresNoHashlockKind pins the outcome at
+	// every kind.
 	if sole && !b.Sorted && b.N >= 2 && len(b.Locks) == 0 && len(b.Hashlocks) == 0 {
 		out = append(out, "  UNSORTED (EXPERIMENTAL)")
 	}
