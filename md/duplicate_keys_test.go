@@ -32,24 +32,33 @@ func vectorChunksFor(t *testing.T, name string) []string {
 	return out
 }
 
-// TestDuplicateKeySlotMatchesBitcoinCore pins the predicate to the only
-// authority that matters for it: what Core actually does.
+// TestDuplicateKeySlotOnTheCorpusKeyReuseVectors pins the predicate over the
+// corpus's three key-reuse policies, and names WHICH AUTHORITY decides each.
 //
-// These three vectors are the corpus's key-reuse policies, and Core 31.1 SPLITS
-// them — measured on a throwaway regtest datadir, with the keys version-swapped
-// to tpub and the stale BIP-380 checksum stripped:
+// IT WAS TestDuplicateKeySlotMatchesBitcoinCore, and the rename is F-533. Two
+// of the three rows are no longer Core's answer, so a name promising they are
+// would be the next reader's trap. Core's measurements have not changed and
+// are still the reason the third row reads as it does.
+//
+// Core 31.1, on a throwaway regtest datadir, with the keys version-swapped to
+// tpub and the stale BIP-380 checksum stripped:
 //
 //	keyed_tr_multi_a             ACCEPTED
 //	keyed_tr_sortedmulti_a       ACCEPTED
 //	keyed_wsh_timelock_hashlock  "... is not sane: contains duplicate public keys"
 //
-// A taproot internal key sits OUTSIDE the miniscript, so tr(K, multi_a(2,K,K2))
-// repeats nothing within any one expression. In the wsh vector a slot really is
-// repeated inside one miniscript, across both arms of the or_i.
+// That table is still TRUE and still the reason the two taproot rows are not
+// DuplicateRefusedByCore: a taproot internal key sits OUTSIDE the miniscript,
+// so tr(K, multi_a(2,K,K2)) repeats nothing within any one expression and Core
+// imports it. What changed is that Core is no longer the only rule here. BIP
+// 388 requires placeholders to be pairwise distinct across the WHOLE
+// descriptor, the Rust primary refuses both taproot vectors under it, and the
+// predicate now reports them as DuplicateTaprootInternalKey -- a third kind,
+// precisely so Core's verdict stays available to the sentences that quote it
+// instead of being overwritten (F-533).
 //
-// If this test ever disagrees with the table, the predicate is wrong, not the
-// table: warning about a wallet Core accepts trains the operator to tap through
-// the warning that matters.
+// If a row disagrees with the authority named beside it, the predicate is
+// wrong, not the table.
 //
 // MUTATION: scope the wsh case to a single or_i arm and the wsh row fails.
 //
@@ -60,15 +69,20 @@ func vectorChunksFor(t *testing.T, name string) []string {
 // scopings, because the corpus's only taproot reuse is between the internal key
 // and a leaf, which both scopings report identically. That hand-built test is
 // the ONLY coverage the scoping rule has, so do not delete it as redundant.
-func TestDuplicateKeySlotMatchesBitcoinCore(t *testing.T) {
+func TestDuplicateKeySlotOnTheCorpusKeyReuseVectors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		want DuplicateKind
 		why  string
 	}{
-		{"keyed_tr_multi_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_tr_sortedmulti_a", DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_wsh_timelock_hashlock", DuplicateRefusedByCore, "Core REFUSES: one slot repeats inside one miniscript"},
+		{"keyed_tr_multi_a", DuplicateTaprootInternalKey,
+			"Core ACCEPTS (the internal key is outside the miniscript); BIP 388 FORBIDS " +
+				"it, because @0 is both the internal key and a leaf key"},
+		{"keyed_tr_sortedmulti_a", DuplicateTaprootInternalKey,
+			"Core ACCEPTS (the internal key is outside the miniscript); BIP 388 FORBIDS " +
+				"it, because @0 is both the internal key and a leaf key"},
+		{"keyed_wsh_timelock_hashlock", DuplicateRefusedByCore,
+			"Core REFUSES: one slot repeats inside one miniscript"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			slot, kind, err := DuplicateKeySlotChunks(vectorChunksFor(t, tc.name))

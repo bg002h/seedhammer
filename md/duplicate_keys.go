@@ -19,9 +19,33 @@ package md
 //	keyed_tr_sortedmulti_a     ACCEPTED
 //	keyed_wsh_timelock_hashlock  "... is not sane: contains duplicate public keys"
 //
-// This predicate answers CORE's question, because that is the one that predicts
-// whether the wallet an operator is about to engrave will be accepted by the
-// coordinator they will try to spend from.
+// This predicate answers CORE's question for the two kinds named after Core's
+// verdicts, because that is the one that predicts whether the wallet an
+// operator is about to engrave will be accepted by the coordinator they will
+// try to spend from.
+//
+// AND ONE QUESTION THAT IS NOT CORE'S (F-533, and this paragraph replaces the
+// one that said the remedy was a second predicate). The tr arm also reports
+// DuplicateTaprootInternalKey when a slot sits at the taproot internal key AND
+// inside the taptree -- the shape in the first two rows above, which Core
+// imports and BIP 388 forbids. It is a THIRD KIND rather than a wider reading
+// of the other two: the Core sentences stay attached to the Core kinds and
+// stay true, and the new shape gets copy in BIP 388's voice.
+//
+// WHY ONE PREDICATE AND NOT TWO. F-533 was filed calling for a second
+// predicate, and gui/policy_address.go argued in as many words against one:
+// "Two predicates would drift, and the drift would show up as a screen that
+// warns and derives, or one that refuses in silence." The nesting result
+// reconciles them. In the md1 wire a use-site is per-@N -- descriptor.useSite
+// plus strictly-ascending per-idx overrides -- so one slot cannot carry two
+// disjoint key expressions, which makes Core-duplicate a STRICT SUBSET of
+// BIP-388-forbidden here. There is no policy that is Core-duplicate and
+// BIP-388-legal, so no case exists where a refusal would lift while a duplicate
+// remained, and the predicate gets WIDER rather than doubled.
+//
+// IT PORTS EXACTLY ONE BIP-388 RULE, not the primary's taxonomy. A slot in two
+// different LEAVES is not reported: the wire cannot give one @N two different
+// key expressions, so that shape is not forbidden here and derives correctly.
 //
 // IT IS NOW A REFUSAL'S PREDICATE TOO (F-531), and this paragraph used to say
 // the opposite -- "a WARNING's predicate, never a refusal's", on the ground
@@ -30,15 +54,16 @@ package md
 // the card still decodes, displays, verifies and warns; so nothing is stranded,
 // and what F-514 weighed was the wider refusal of the card itself.
 //
-// THAT MAKES THE SCOPING ABOVE LOAD-BEARING IN A SECOND WAY. As a warning's
-// predicate, answering Core's question rather than BIP 388's was simply
-// correct. As a refusal's, it is narrower than the operator's ruling on
-// BIP-388-forbidden wallets: tr(@0, multi_a(2,@0,@1)) repeats a slot across the
-// internal key and a leaf, BIP 388 forbids it, the Rust primary refuses it, and
-// this reports DuplicateNone because Core imports it. Two vectors are in that
-// gap today and the corpus gate names them. Filed as F-533, whose remedy is a
-// SECOND predicate for BIP 388's rule -- not a change to this one, whose two
-// sentences are Core verdicts and would become false.
+// THAT MADE THE SCOPING ABOVE LOAD-BEARING IN A SECOND WAY, and F-533 is what
+// closed it. As a warning's predicate, answering Core's question rather than
+// BIP 388's was simply correct. As a refusal's, it was NARROWER than the
+// operator's ruling on BIP-388-forbidden wallets: tr(@0, multi_a(2,@0,@1))
+// repeats a slot across the internal key and a leaf, BIP 388 forbids it, the
+// Rust primary refuses it, and this used to report DuplicateNone because Core
+// imports it. Two vendored vectors sat in that gap -- keyed_tr_multi_a and
+// keyed_tr_sortedmulti_a, now pinned fork-side against F-529's re-vendor. They
+// report DuplicateTaprootInternalKey, and the corpus's ok/refused bucket is
+// empty.
 
 // DuplicateKind says WHICH harm a repeated slot carries, because the two are
 // different and an operator told the wrong one looks in the wrong place.
@@ -75,20 +100,47 @@ const (
 	// miniscript at all. Naming the kinds after the sentence they produce keeps
 	// the next such surprise from silently picking the wrong one.
 	DuplicateFewerKeys
+	// DuplicateTaprootInternalKey: one key slot sits at the taproot internal
+	// key AND inside the taptree. F-533.
+	//
+	// THIS IS THE ONE KIND THAT IS NOT A CORE VERDICT, and that is why it is a
+	// separate kind rather than a wider read of the two above. Core 31.1
+	// ACCEPTS this shape -- measured, see the table at the top of this file --
+	// so both of the sentences those kinds produce would be FALSE here. BIP
+	// 388 forbids it: a wallet policy's key placeholders must be pairwise
+	// distinct across the whole descriptor, and the internal key is part of
+	// the descriptor even though it is outside every miniscript expression.
+	//
+	// ITS HARM IS THE STRONGER FORM OF THE ONE F-531 CITED. A repeated seat in
+	// a multisig signs the same sighash twice; a key that is both the internal
+	// key and a leaf key signs a key-path sighash AND a script-path sighash --
+	// two genuinely different messages, which is the pubkey-reuse insecurity
+	// BIP 388's disjointness rule points at.
+	//
+	// WHAT WOULD FALSIFY IT: nothing Core does. Unlike DuplicateRefusedByCore
+	// this states a rule of BIP 388, which is a written specification rather
+	// than somebody else's software, so it cannot go stale on a version bump.
+	DuplicateTaprootInternalKey
 )
 
-// DuplicateKeySlot reports the lowest key slot that appears more than once
-// inside a SINGLE miniscript expression, and which harm that carries.
+// DuplicateKeySlot reports a key slot used more than once by this policy, and
+// which harm that carries. DuplicateNone means there is none.
 //
-// The scoping is the whole of the rule:
+// The scoping is the whole of the rule, and it is TWO rules since F-533:
 //
-//   - under tr, every taptree LEAF is its own expression and the internal key is
-//     in none of them, so a key shared between the internal key and a leaf, or
-//     between two different leaves, is not a duplicate;
+//   - under tr, every taptree LEAF is its own miniscript expression and the
+//     internal key is in none of them, so the lowest slot repeated within one
+//     leaf is a Core duplicate (DuplicateFewerKeys). A key shared between two
+//     different leaves is NOT;
+//   - also under tr, a PLACEHOLDER internal key -- is_nums=false -- that occurs
+//     again anywhere in the taptree is DuplicateTaprootInternalKey, which is BIP
+//     388's rule rather than Core's. The within-leaf finding is reported first
+//     when both apply;
 //   - under wsh, sh(wsh(...)) and bare sh(...), the script is one expression and
 //     a slot repeated anywhere within it is a duplicate.
 //
-// The second return is false when there is none.
+// The slot returned is the lowest repeated one for the within-expression kinds,
+// and the internal key's own slot for DuplicateTaprootInternalKey.
 func DuplicateKeySlot(tree node) (uint8, DuplicateKind) {
 	switch tree.tag {
 	case tagTr:
@@ -107,8 +159,51 @@ func DuplicateKeySlot(tree node) (uint8, DuplicateKind) {
 		// operator Core refuses a descriptor Core imports. I believed tapscript
 		// multi_a WAS miniscript to Core and was wrong; the fix came from
 		// running getdescriptorinfo, not from reading the parser.
-		slot, dup := duplicateInTapTree(*b.tree)
-		return slot, kindOf(dup, DuplicateFewerKeys)
+		//
+		// THE WITHIN-LEAF FINDING IS TESTED FIRST, and the order is a decision
+		// rather than an accident: both harms can be present at once, only one
+		// sentence is shown, and this one is the older and better-measured of
+		// the two. Keeping it first also means F-533 moved no policy that
+		// already reported a duplicate -- the whole corpus delta is two vectors
+		// that reported DuplicateNone before
+		// (TestAWithinLeafDuplicateStillWinsOverTheInternalKey).
+		if slot, dup := duplicateInTapTree(*b.tree); dup {
+			return slot, DuplicateFewerKeys
+		}
+		// F-533: THE INTERNAL KEY IS A USE-SITE TOO, and BIP 388 counts it.
+		//
+		// This is the one rule in this file that is not Core's. Core's question
+		// is per miniscript EXPRESSION and the internal key is in none of them,
+		// so tr(@0, multi_a(2,@0,@1)) repeats nothing Core can see and Core
+		// imports it. BIP 388 requires a policy's placeholders to be pairwise
+		// distinct across the whole descriptor, the Rust primary refuses these,
+		// and the operator's standing ruling of 2026-08-30 is that a
+		// BIP-388-forbidden wallet is not one this constellation supports. It
+		// gets its OWN kind so the copy can say what is actually true of it --
+		// the two Core-voiced sentences would both be false here.
+		//
+		// ONLY WHEN !isNums, and this qualifier is the whole difference between
+		// a rule and a catastrophe. SPEC 7: is_nums=true means the internal key
+		// is the NUMS H-point and keyIndex is not a reference to anything --
+		// canonicalize.go's walkCollectFirst skips registration on exactly this
+		// condition. Counting it unconditionally reads the NUMS placeholder as
+		// slot 0 and falsely refuses every NUMS taproot policy whose taptree
+		// touches @0, which in the vendored corpus is eight cards that derive
+		// correctly today.
+		//
+		// ONE RULE, NOT A PORT OF THE PRIMARY'S TAXONOMY. A slot in two
+		// different LEAVES is still not reported: the md1 wire cannot give one
+		// @N two different key expressions (use-site is per-@N, with only
+		// strictly-ascending per-idx overrides), so that shape is not
+		// BIP-388-forbidden here and derives correctly.
+		if !b.isNums {
+			var counts [256]int
+			countKeySlots(*b.tree, &counts)
+			if counts[b.keyIndex] > 0 {
+				return b.keyIndex, DuplicateTaprootInternalKey
+			}
+		}
+		return 0, DuplicateNone
 	case tagWsh, tagSh:
 		b, ok := tree.body.(childrenBody)
 		if !ok || len(b.children) != 1 {
