@@ -19,6 +19,17 @@ func shapeOf(t *testing.T, name string) PolicyShape {
 
 func lk(kind LockKind, v uint32) []Lock { return []Lock{{Kind: kind, Value: v}} }
 
+// hl wraps a 32-byte fixture as the sha256 lock the shape now carries (§7.4).
+// These vectors are all sha256, which is what they have always been.
+func hl(t *testing.T, b [32]byte) []*HashLock {
+	t.Helper()
+	l, ok := NewHashLock(KindSha256, b[:])
+	if !ok {
+		t.Fatal("32 bytes is sha256's width")
+	}
+	return []*HashLock{l}
+}
+
 func TestPolicyShapeSplitsAlternativesIntoBranches(t *testing.T) {
 	h := [32]byte{}
 	for i := range h {
@@ -47,7 +58,7 @@ func TestPolicyShapeSplitsAlternativesIntoBranches(t *testing.T) {
 		// or_i(pkh(@0), and_v(v:multi(2,@1,@2), and_v(v:sha256(H), after(1893456000))))
 		{"keyed_compose_wsh_hash_and_time", []Branch{
 			{Keys: 1},
-			{Keys: 2, Timelock: true, Hashlock: true, Locks: lk(LockAfterTime, 1_893_456_000), Sha256Digests: [][32]byte{h}},
+			{Keys: 2, Timelock: true, Hashlock: true, Locks: lk(LockAfterTime, 1_893_456_000), Hashlocks: hl(t, h)},
 		}},
 		// or_i(and_v(v:multi(2,@0,@1), after(905000)), pkh(@2))
 		{"keyed_compose_wsh_locked_head_or_i", []Branch{
@@ -89,7 +100,7 @@ func TestPolicyShapeSplitsTheShippedOrCards(t *testing.T) {
 		}},
 		// wsh(or_i(and_v(v:after(1000000), and_v(v:sha256(H), multi(2,@0,@1,@2))), and_v(v:older(65535), multi(1,@1,@2))))
 		{"keyed_wsh_timelock_hashlock", []Branch{
-			{Keys: 3, Timelock: true, Hashlock: true, Locks: lk(LockAfterHeight, 1_000_000), Sha256Digests: [][32]byte{hh}},
+			{Keys: 3, Timelock: true, Hashlock: true, Locks: lk(LockAfterHeight, 1_000_000), Hashlocks: hl(t, hh)},
 			{Keys: 2, Timelock: true, Locks: lk(LockOlderBlocks, 65535)},
 		}},
 	} {
@@ -183,7 +194,7 @@ func TestPolicyShapeReportsAKeylessAlternativeHonestly(t *testing.T) {
 	if !s.Complete || len(s.Branches) != 2 {
 		t.Fatalf("Complete=%v branches=%d", s.Complete, len(s.Branches))
 	}
-	if b := s.Branches[1]; b.Keys != 0 || !b.Hashlock || !b.Timelock || len(b.Sha256Digests) != 1 || !reflect.DeepEqual(b.Locks, lk(LockAfterHeight, 1_383_520)) {
+	if b := s.Branches[1]; b.Keys != 0 || !b.Hashlock || !b.Timelock || len(b.Hashlocks) != 1 || !reflect.DeepEqual(b.Locks, lk(LockAfterHeight, 1_383_520)) {
 		t.Fatalf("keyless branch = %+v", b)
 	}
 }

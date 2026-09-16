@@ -58,9 +58,15 @@ func composerListedPaths(list md.PathList) (listed []int, keyPathNo int) {
 // composerDigestShort renders a digest as §7e asks: first 8 and last 8 hex.
 // A full 64-hex line is CUT rather than wrapped at the label budget, and a
 // cut digest hides which end is missing.
-func composerDigestShort(d [32]byte) string {
-	h := hex.EncodeToString(d[:])
-	return h[:8] + ".." + h[56:]
+//
+// It takes a HashLock and slices from the END rather than at 56. A 20-byte
+// kind is 40 hex and h[56:] PANICS on it -- that literal is one of
+// SPEC_hashlock_kinds §10's six 64-hex assumptions. There is deliberately only
+// one of these: a [32]byte twin kept beside it would be the shape this cycle
+// is retiring, and a second copy of a width rule is how the two disagree.
+func composerDigestShort(l *md.HashLock) string {
+	h := hex.EncodeToString(l.Digest())
+	return h[:8] + ".." + h[len(h)-8:]
 }
 
 // composerBranchLines describes one spend path from its decoded Branch.
@@ -91,10 +97,13 @@ func composerBranchLines(b md.Branch, pathNo int, sole bool) []string {
 			out = append(out, "  "+line)
 		}
 	}
-	for _, d := range b.Sha256Digests {
-		out = append(out, "  hash "+composerDigestShort(d))
+	for _, d := range b.Hashlocks {
+		// The consent screen NAMES THE KIND, like every other surface that
+		// shows a digest (§6's both-or-neither rule): this is the screen an
+		// operator reads before agreeing to a policy.
+		out = append(out, "  hash "+d.Kind().Token()+" "+composerDigestShort(d))
 	}
-	if sole && !b.Sorted && b.N >= 2 && len(b.Locks) == 0 && len(b.Sha256Digests) == 0 {
+	if sole && !b.Sorted && b.N >= 2 && len(b.Locks) == 0 && len(b.Hashlocks) == 0 {
 		out = append(out, "  UNSORTED (EXPERIMENTAL)")
 	}
 	return out
@@ -196,7 +205,7 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	// wallet was stated once, several screens earlier, on a policy that may
 	// have gained its hashlock afterwards.
 	for _, b := range shape.Branches {
-		if len(b.Sha256Digests) > 0 {
+		if len(b.Hashlocks) > 0 {
 			lines = append(lines, "", composerCopyHashRule())
 			break
 		}

@@ -50,7 +50,7 @@ type Branch struct {
 	// even when K/N are not, so a branch is never reported as keyless.
 	Keys int
 	// Timelock/Hashlock report whether the branch requires one ANYWHERE within
-	// it. Locks and Sha256Digests carry the values, in wire order, so the
+	// it. Locks and Hashlocks carry the values, in wire order, so the
 	// composer's consent surface (SPEC_wallet_policy_composer.md §7e) can say
 	// "older 26280 blocks" instead of "time-locked"; a value is a fact from the
 	// decoded tree, not a rendering, so the no-text rule above still holds. A
@@ -59,10 +59,20 @@ type Branch struct {
 	// inside the height band 1..499999999), so 26280 alone is equally
 	// older(26280) and after(26280). Only sha256 digests are carried (the
 	// composer emits no other hash); the other hash tags still set Hashlock.
-	Timelock      bool
-	Hashlock      bool
-	Locks         []Lock
-	Sha256Digests [][32]byte
+	Timelock bool
+	Hashlock bool
+	Locks    []Lock
+	// Hashlocks carries EVERY hashlock, whatever its kind (SPEC_hashlock_kinds
+	// §7.4). It was Sha256Digests [][32]byte and recorded a digest only for
+	// tagSha256 while setting Hashlock=true for all four -- so a decoded
+	// ripemd160 card showed "hashlock" with NO digest, and the composer's
+	// self-check then refused the wallet for having one hashlock in the shape
+	// and zero decoded. Fail-closed, but it meant no non-sha256 wallet could be
+	// composed on the device at all.
+	//
+	// This is a DECODE-SIDE behaviour change and §7.4 says to declare it as
+	// one: policy_shape runs on payloads this device never composed.
+	Hashlocks []*HashLock
 	// Sorted is set with K/N: true for sortedmulti/sortedmulti_a, false for
 	// multi/multi_a, so §7e's "unsorted where sorted was legal" mark is read
 	// from the decoded md1 rather than from builder state.
@@ -281,14 +291,32 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 			br.Locks = append(br.Locks, lockFromWire(n.tag, uint32(v)))
 		}
 		return true
-	case tagSha256:
+	case tagSha256, tagHash256, tagRipemd160, tagHash160:
 		br.Hashlock = true
-		if h, ok := n.body.(hash256Body); ok {
-			br.Sha256Digests = append(br.Sha256Digests, [32]byte(h))
+		// Every kind records its digest, at its own width. Switched on the tag
+		// with no default so a fifth hash tag is a missing case here rather
+		// than a silently dropped digest.
+		var kind HashKind
+		switch n.tag {
+		case tagSha256:
+			kind = KindSha256
+		case tagHash256:
+			kind = KindHash256
+		case tagRipemd160:
+			kind = KindRipemd160
+		case tagHash160:
+			kind = KindHash160
 		}
-		return true
-	case tagHash256, tagRipemd160, tagHash160:
-		br.Hashlock = true
+		switch h := n.body.(type) {
+		case hash256Body:
+			if l, ok := NewHashLock(kind, h[:]); ok {
+				br.Hashlocks = append(br.Hashlocks, l)
+			}
+		case hash160Body:
+			if l, ok := NewHashLock(kind, h[:]); ok {
+				br.Hashlocks = append(br.Hashlocks, l)
+			}
+		}
 		return true
 	case tagTrue, tagFalse:
 		return true

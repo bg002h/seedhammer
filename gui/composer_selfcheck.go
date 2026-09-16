@@ -131,22 +131,22 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 		if p.Hash != nil {
 			wantHash = 1
 		}
-		if len(b.Sha256Digests) != wantHash {
+		if len(b.Hashlocks) != wantHash {
 			return fmt.Errorf("self-check: path %d has %d hash locks in the shape and %d decoded",
-				i+1, wantHash, len(b.Sha256Digests))
+				i+1, wantHash, len(b.Hashlocks))
 		}
 		if p.Hash != nil {
-			// THE DECODE'S SIDE IS sha256 BY ITS FIELD NAME, so the comparison
-			// is made through a sha256 lock rather than on bytes alone: a path
-			// carrying some other kind is a MISMATCH here, not a digest to
-			// compare, and md.HashLock.Equal is what says so (its kind check is
-			// the half `bytes.Equal` would drop). The wantHash count above
-			// would already have refused such a path, since the decoder puts
-			// nothing but sha256 in Sha256Digests -- this is the second lock on
-			// the same door.
-			got := b.Sha256Digests[0]
-			want, ok := md.NewHashLock(md.KindSha256, got[:])
-			if !ok || !p.Hash.Equal(want) {
+			// COMPARED THROUGH md.HashLock.Equal, which checks the KIND as well
+			// as the bytes -- the half bytes.Equal would drop. A path whose
+			// wire tag decoded to one kind and whose composed lock says another
+			// is a MISMATCH, not a digest to compare.
+			//
+			// The decode side used to be sha256-only by its field name, so a
+			// ripemd160 path failed the COUNT check above instead: one hashlock
+			// in the shape, zero decoded. Fail-closed, but it meant no
+			// non-sha256 wallet could be composed on the device at all
+			// (SPEC_hashlock_kinds §7.4).
+			if !p.Hash.Equal(b.Hashlocks[0]) {
 				return fmt.Errorf("self-check: path %d's digest differs from the shape's", i+1)
 			}
 		}
