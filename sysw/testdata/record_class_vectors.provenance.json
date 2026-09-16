@@ -16,7 +16,7 @@
   "commit": "40e1962e79b96ce34ece41ee6ce1de7b643bf4b5",
   "file_commit": "73f3e7d89644388f9fdecd001223e08736feab5f",
   "repo_clean_when_recorded": true,
-  "sha256": "d6766fdd7308ce28a23ef954f227d8e4e8431f841b64ea336ea9ea9a09b928dd",
+  "sha256": "14a1c56328d68527156694c77bfb04738d7457ec3cb17919be18608b30c04e73",
   "vectors": 81,
   "recorded_at": "2026-09-15",
   "commit_branch": "master"

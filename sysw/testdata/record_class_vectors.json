@@ -416,8 +416,8 @@
   {
     "name": "phrase-64-hex",
     "record": "phrase:68617264656e65642c61626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162",
-    "class": "Unknown",
-    "host_line": "record 0: phrase: must be <method>,<phrase> as lowercase hex, with method hardened or sha256"
+    "class": "Phrase",
+    "host_line": null
   },
   {
     "name": "phrase-ms1-shaped",
