@@ -1747,8 +1747,11 @@ func TestComposerHashKindDefaultsToSha256WithoutATap(t *testing.T) {
 // exist on this device before, and it fails if ANY link is still sha256-only.
 //
 // MUTATION: `md.NewHashLock(md.KindSha256, raw)` in composerHexEntry -> the pad
-// refuses 40 bytes at sha256's width, the entry never returns, and this test
-// reports that the path holds no hash at all.
+// refuses 40 bytes at sha256's width, so the entry never returns and the
+// HARNESS TIMES OUT: "composerAddPath never returned after 256 frames". An
+// earlier version of this comment claimed the failure was "the path holds no
+// hash at all"; the mutation is genuinely caught either way, but the message
+// quoted was one the test never prints -- checked by running it.
 func TestComposerCanBuildARipemd160HashlockOnTheDevice(t *testing.T) {
 	const digest40 = "98a20fc25dbcdf236fb0307e3f82cad47fca2e80"
 	st := composerStateWithPaths(t, 1)
