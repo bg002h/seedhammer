@@ -195,9 +195,26 @@ func composerHashKindPick(ctx *Context, th *Colors, initial md.HashKind) (md.Has
 // §7.1 put a kind screen in front of this pad, in the same commit that added
 // the parameter above it. Left as it was, it described the screen it had just
 // stopped describing, directly over the signature that contradicts it.
-func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock, bool) {
+// `draft` is what was typed on a previous visit, restored on re-entry, and the
+// second return value hands back whatever is on the pad when Back is pressed
+// (F-541).
+//
+// BACK USED TO DISCARD IT SILENTLY. §7.1 put the kind screen behind Back, so
+// "step back and check which kind this is" cost the whole entry -- up to 64
+// characters transcribed from paper, thrown away for looking. The phrase arm
+// already restores its draft (hashlockPhraseFlow takes `initial` for exactly
+// this); the pad did not, which made the two arms disagree about what Back
+// means.
+func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind, draft string) (*md.HashLock, string, bool) {
 	want := kind.DigestLen() * 2
 	kbd := NewKeyboard(ctx, composerHexKeys)
+	// The draft may have been typed at a WIDER kind: re-entering at ripemd160
+	// after typing 64 hex keeps the first 40 rather than discarding them, which
+	// is the same clamp the live entry applies and for the same reason.
+	if len(draft) > want {
+		draft = draft[:want]
+	}
+	kbd.Fragment = draft
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
 	// THE CLAMP IS SILENT NO LONGER (journey walk I-3). Dropping keystrokes
@@ -225,7 +242,7 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 		frag := kbd.Fragment
 		valid := len(frag) == want
 		if backBtn.Clicked(ctx) {
-			return nil, false
+			return nil, frag, false
 		}
 		clicked := okBtn.Clicked(ctx)
 		if valid && clicked {
@@ -255,7 +272,7 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 					fmt.Sprintf("That is not a %s digest.", kind.Token()))
 				continue
 			}
-			return lock, true
+			return lock, frag, true
 		}
 
 		dims := ctx.Platform.DisplaySize()
@@ -305,7 +322,7 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, kind.Token()+" hash")
 		ctx.Frame(op.Layer(kbdOp, word, countOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
-	return nil, false
+	return nil, "", false
 }
 
 const composerHashRowPhrase = "Type a hashlock phrase"
@@ -657,15 +674,22 @@ func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			}
 		case sel == rows.hexRow:
 			kind := md.KindSha256
+			// THE DRAFT LIVES OUT HERE, with the kind, because both survive the
+			// same Back (F-541). Stepping back to check the kind used to cost
+			// the whole entry -- up to 64 characters off paper, discarded for
+			// looking -- which made the kind screen expensive to consult and so
+			// consulted less than it should be.
+			draft := ""
 			for {
 				k, ok := composerHashKindPick(ctx, th, kind)
 				if !ok {
 					break // -> `Which hash?`, path intact
 				}
 				kind = k
-				d, ok := composerHexEntry(ctx, th, kind)
+				d, kept, ok := composerHexEntry(ctx, th, kind, draft)
+				draft = kept
 				if !ok {
-					continue // Back from the pad -> the kind screen, kind still selected
+					continue // Back from the pad -> the kind screen, kind AND draft kept
 				}
 				// SPEC §8: a TYPED digest is never device-derived.
 				if !composerWarnTwentyByteUnseen(ctx, th, st, d) {

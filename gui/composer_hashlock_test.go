@@ -1977,3 +1977,80 @@ func TestTwentyByteWarningFiresExactlyWhereSpecEightSaysIt(t *testing.T) {
 		})
 	}
 }
+
+// TestBackFromThePadKeepsTheTypedDigest is F-541.
+//
+// §7.1 put the kind screen behind the pad's Back, so "step back and check which
+// kind this is" used to cost the entire entry -- up to 64 characters
+// transcribed off paper, discarded for looking. That makes the kind screen
+// expensive to consult, which is the opposite of what a screen added to prevent
+// kind confusion should be.
+//
+// The phrase arm already restored its draft (hashlockPhraseFlow takes
+// `initial`); the pad did not, so the two arms disagreed about what Back means.
+//
+// MUTATION: drop `kbd.Fragment = draft` in composerHexEntry -> the re-entry
+// assertion fails, because the pad reopens empty.
+func TestBackFromThePadKeepsTheTypedDigest(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(1, 3) // Type a digest
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.pickKind(0) // sha256, 64 hex
+	h.mustReach("0 of 64 hex")
+
+	const typed = "abcdef0123456789"
+	for _, r := range typed {
+		h.ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
+		h.next("typing the digest")
+	}
+	h.mustReach("16 of 64 hex")
+
+	// Back to the kind screen -- the move this test exists for.
+	h.tapNav(Button1)
+	h.mustReach("32-byte preimage")
+	// And forward again, same kind.
+	h.tapRow(0, len(composerHashKinds))
+	body := h.mustReach("of 64 hex")
+	if !uiContains(body, "16 of 64 hex") {
+		t.Errorf("the pad reopened without the 16 characters already typed, so checking "+
+			"the kind cost the whole entry:\n%q", body)
+	}
+	if !uiContains(body, typed) {
+		t.Errorf("the readout does not carry the typed digest back:\n%q", body)
+	}
+}
+
+// TestBackFromThePadClampsADraftToANarrowerKind: re-entering at a 20-byte kind
+// after typing at a 32-byte one keeps what fits rather than discarding it.
+//
+// The alternative -- dropping the draft whenever the width shrinks -- would put
+// the F-541 cost back on exactly the operator who is switching kinds, which is
+// who the kind screen is for.
+func TestBackFromThePadClampsADraftToANarrowerKind(t *testing.T) {
+	st := composerStateWithPaths(t, 1)
+	var ret bool
+	h := runComposerHashEdit(t, st, composerSessionWith(nil, nil), 0, &ret)
+	h.mustReach("Type a hashlock phrase")
+	h.tapRow(1, 3)
+	h.mustReach("32-byte value")
+	h.tapNav(Button3)
+	h.pickKind(0) // sha256: 64 hex
+	h.mustReach("0 of 64 hex")
+	for _, r := range strings.Repeat("a", 50) {
+		h.ctx.Router.Events(nil, RuneEvent{Rune: r}.Event())
+		h.next("typing")
+	}
+	h.mustReach("50 of 64 hex")
+	h.tapNav(Button1)
+	h.mustReach("32-byte preimage")
+	h.tapRow(2, len(composerHashKinds)) // ripemd160: 40 hex
+	body := h.mustReach("of 40 hex")
+	if !uiContains(body, "40 of 40 hex") {
+		t.Errorf("a 50-character draft re-entered at ripemd160 should clamp to 40, the same "+
+			"clamp live entry applies:\n%q", body)
+	}
+}

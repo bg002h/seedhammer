@@ -382,9 +382,27 @@ func hashlockPhraseLead(ctx *Context, th *Colors, dims image.Point, top int) (op
 	return lbl.Offset(image.Pt(left+(width-sz.X)/2, top)), sz
 }
 
+// hashlockMethodRows is the method pick's two rows, named so the row-geometry
+// gate can measure them (§7.5: a new row form is measured, never assumed).
+var hashlockMethodRows = [2]string{
+	"hardened - slow KDF, about 10 s",
+	"sha256 - one hash of the phrase",
+}
+
 func hashlockMethodPick(ctx *Context, th *Colors) (hashlockMethod, bool) {
+	// THE ROWS SPELL THE METHOD AS THE OPERATOR WILL TYPE IT (F-540). This row
+	// read `SHA-256` while `method:` prints `sha256` and the reconcile screen
+	// now tells them to run `ms hashlock --method sha256` -- one axis, two
+	// spellings, and the one on screen was the one no command accepts.
+	//
+	// The journey walk left this alone for a real reason: the kind screen also
+	// offers a row reading `sha256`, and making the two identical makes the two
+	// AXES look more alike, which is the confusion this whole cycle exists to
+	// prevent. So they are disambiguated by MEANING rather than by
+	// capitalisation -- which was never a signal an operator could rely on
+	// anyway, and cost them the string they have to type.
 	sel, ok := composerPickScreen(ctx, th, "Hashlock method", "Which method?",
-		[]string{"Hardened (about 10 s)", "SHA-256"})
+		hashlockMethodRows[:])
 	if !ok {
 		return 0, false
 	}

@@ -930,7 +930,7 @@ func TestComposerHexEntryItselfRefusesAnythingButTheKindsWidth(t *testing.T) {
 					ctx := NewContext(p)
 					returned := false
 					frame, quit := runUI(ctx, func() {
-						composerHexEntry(ctx, &descriptorTheme, kind)
+						composerHexEntry(ctx, &descriptorTheme, kind, "")
 						returned = true
 					})
 					defer quit()
@@ -979,7 +979,7 @@ func TestComposerHexEntryItselfRefusesAnythingButTheKindsWidth(t *testing.T) {
 				var got *md.HashLock
 				var ok bool
 				frame, quit := runUI(ctx, func() {
-					got, ok = composerHexEntry(ctx, &descriptorTheme, kind)
+					got, _, ok = composerHexEntry(ctx, &descriptorTheme, kind, "")
 				})
 				defer quit()
 				frame()

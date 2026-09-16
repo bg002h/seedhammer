@@ -273,6 +273,11 @@ func TestWhichHashRowsDrawOnOneLine(t *testing.T) {
 	// the default value cannot see a row that wraps on a non-default.
 	rows := []string{composerHashRowPhrase, composerHashRowHex, "No hash lock",
 		composerHashPhraseRow(10, nil)}
+	// THE METHOD PICK'S ROWS TOO (F-540). They gained a describing clause when
+	// they stopped spelling the method a way no command accepts, and §7.5's
+	// rule is that a new row form is MEASURED rather than assumed to fit --
+	// these are wider than the bare tokens they replaced.
+	rows = append(rows, hashlockMethodRows[:]...)
 	for _, k := range composerHashKinds {
 		lock, ok := md.NewHashLock(k, raw[:k.DigestLen()])
 		if !ok {
