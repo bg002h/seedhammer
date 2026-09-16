@@ -3,6 +3,7 @@ package gui
 import (
 	"encoding/hex"
 	"fmt"
+	"seedhammer.com/md"
 	"strings"
 	"testing"
 
@@ -18,16 +19,24 @@ func TestComposerHashRowIsShortEnoughToDraw(t *testing.T) {
 	copy(raw32[:], raw)
 	d := composerTestLock(raw32)
 	got := composerHashRow(1, d)
-	if !strings.HasPrefix(got, "hash 1  0123456789abcdef"[:8]) {
-		t.Errorf("the row does not lead with the index and the digest head: %q", got)
+	// THE ROW LEADS WITH THE KIND since SPEC_hashlock_kinds §7.5: `sha256 1  ...`.
+	// The old form was `hash 1  ...`, and the generic noun could not survive the
+	// kind joining it -- the combined form wraps for hash256 and ripemd160.
+	if !strings.HasPrefix(got, "sha256 1  ") {
+		t.Errorf("the row does not lead with the kind and the index: %q", got)
+	}
+	if !strings.Contains(got, "0123456789abcdef"[:8]) {
+		t.Errorf("the row does not carry the digest head: %q", got)
 	}
 	if !strings.Contains(got, "..") {
 		t.Errorf("the row does not elide the middle, so a 64-hex line would be cut: %q", got)
 	}
-	if len(got) > 32 {
-		t.Errorf("the row is %d characters; §6c budgets about 28 so it draws inside the "+
-			"436 px label rather than being cut", len(got))
-	}
+	// THE CHARACTER BUDGET IS GONE, and deliberately: §7.5's measurement is that
+	// character count is NOT the constraint on this proportional face (`rmd160`
+	// and `sha256` are both 6 characters and differ in width). The arbiter is
+	// TestWhichHashRowsDrawOnOneLine, which measures every kind in pixels and
+	// requires a margin. A character bound here would either duplicate that or
+	// contradict it.
 	assertChoiceLabelFits(t, got)
 }
 
@@ -237,6 +246,10 @@ func TestWhichHashAnnotatesAHashRowThePayloadAlsoCarries(t *testing.T) {
 // composerPageLines' own band -- the ONE measure site (composer_paged.go).
 // Every row of every band must draw on ONE line; a picker band that wraps
 // halves the number of choices a frame can carry.
+// composerRowMargin is the width a picker row must leave clear at the shipped
+// band, in pixels -- about three characters at this face.
+const composerRowMargin = 20
+
 func TestWhichHashRowsDrawOnOneLine(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
@@ -250,20 +263,46 @@ func TestWhichHashRowsDrawOnOneLine(t *testing.T) {
 	var raw [32]byte
 	copy(raw[:], mustHexBytes(t, hashlockAnchorSHA_H))
 	d := composerTestLock(raw)
-	for _, row := range []string{
-		composerHashRow(10, d),
-		composerHashInPayloadRow(10, d),
-		composerHashPreimageRow(10, d),
-		composerHashPhraseRow(10, nil),
-		composerHashPhraseRow(10, d),
-		composerHashRowPhrase, composerHashRowHex, "No hash lock",
-	} {
+
+	// EVERY KIND, NOT JUST sha256 (SPEC_hashlock_kinds §7.5: the row form is
+	// "re-measured as a whole", and §7.5's own lesson is that CHARACTER COUNT
+	// IS NOT THE CONSTRAINT -- the face is proportional). The first version of
+	// this gate measured one sha256 lock, which is both the shortest token and
+	// the default: `ripemd160` is three characters longer, and the widest row
+	// here had 6 px of headroom in a 411 px band. A gate that exercises only
+	// the default value cannot see a row that wraps on a non-default.
+	rows := []string{composerHashRowPhrase, composerHashRowHex, "No hash lock",
+		composerHashPhraseRow(10, nil)}
+	for _, k := range composerHashKinds {
+		lock, ok := md.NewHashLock(k, raw[:k.DigestLen()])
+		if !ok {
+			t.Fatalf("%s: %d bytes is its own width", k.Token(), k.DigestLen())
+		}
+		rows = append(rows,
+			composerHashRow(10, lock),
+			composerHashInPayloadRow(10, lock),
+			composerHashPreimageRow(10, lock),
+			composerHashPhraseRow(10, lock))
+	}
+	_ = d
+	for _, row := range rows {
 		_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, width, descriptorTheme.Text, row)
 		lines := (sz.Y + one.Y - 1) / one.Y
-		t.Logf("%-46q %2d chars %3d px %d line(s)", row, len(row), sz.X, lines)
+		t.Logf("%-46q %2d chars %3d px %d line(s) %+d px margin", row, len(row), sz.X, lines, width-sz.X)
 		if lines != 1 {
 			t.Errorf("%q wraps to %d lines in the %d px band; a picker row must draw on one",
 				row, lines, width)
+			continue
+		}
+		// AND IT CLEARS A MARGIN. Fitting exactly is how this gets re-broken:
+		// the first kind-bearing form left the widest row 3 px clear, which is
+		// under one character at this face, so the NEXT token or annotation
+		// edit would wrap it and nobody would learn that from a green test.
+		// F-185's own fix failed in exactly this way on the modal budget.
+		if m := width - sz.X; m < composerRowMargin {
+			t.Errorf("%q fits with only %d px to spare, under the %d px margin. Shorten "+
+				"the row's fixed text -- not the digest elision, and not by abbreviating "+
+				"the kind token -- rather than lowering this margin.", row, m, composerRowMargin)
 		}
 	}
 	t.Logf("band width %d px, one line %d px, band height %d px",

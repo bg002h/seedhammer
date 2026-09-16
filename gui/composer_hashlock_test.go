@@ -1505,7 +1505,8 @@ func TestWhichHashPhraseRowShowsTheDigestOnceDerived(t *testing.T) {
 		phrase: []byte(hashlockAnchorPhrase), method: hashlockSHA256,
 		preimage: x, provenance: hashlockFromPayload,
 	})
-	want := "phrase 1  " + hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
+	want := "phrase 1  " + md.KindSha256.Token() + " " +
+		hashlockAnchorSHA_H[:8] + ".." + hashlockAnchorSHA_H[56:]
 	if got := composerHashRows(s, st).labels[0]; got != want {
 		t.Errorf("after derivation the row reads %q, want %q", got, want)
 	}

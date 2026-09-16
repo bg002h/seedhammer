@@ -50,7 +50,21 @@ const composerHexKeys = "0123456789\nabcdef"
 // slice h[:8] and h[56:], which is the same string for a 64-hex sha256 digest
 // and reads twelve bytes of alloc-gate padding for a 40-hex one.
 func composerHashRow(i int, digest *md.HashLock) string {
-	return fmt.Sprintf("hash %d  %s", i, hashlockFirst8Last8(digest))
+	// THE KIND REPLACES THE WORD `hash` RATHER THAN JOINING IT, and that is a
+	// measurement, not a preference (SPEC_hashlock_kinds §7.5: the row form is
+	// re-measured AS A WHOLE, and character count is not the constraint on a
+	// proportional face). `hash 10  ripemd160 <elision>  (in payload)` WRAPS TO
+	// TWO LINES at the shipped band -- so does the hash256 form -- while
+	// `ripemd160 10  <elision>  (in payload)` draws at 383 px in a 411 px band,
+	// 28 px clear. The alternative §7.5 sanctions, an abbreviated DISPLAY token
+	// (`rmd160`), was declined: it would put a second vocabulary on the device
+	// for the one axis this whole cycle exists to make unambiguous.
+	//
+	// The band's lead is `Which hash?`, so a row that answers with the name of
+	// a hash function reads as an answer. The sibling bands keep their own
+	// nouns (`preimage`, `phrase`) because those name the record the digest
+	// CAME FROM, which is a different question and one the kind does not answer.
+	return fmt.Sprintf("%s %d  %s", digest.Kind().Token(), i, hashlockFirst8Last8(digest))
 }
 
 // composerPayloadDigests returns every well-formed hash: record, in payload
@@ -157,11 +171,27 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 	kbd := NewKeyboard(ctx, composerHexKeys)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
+	// THE CLAMP IS SILENT NO LONGER (journey walk I-3). Dropping keystrokes
+	// past the bound while lighting the checkmark and reporting `N of N hex` is
+	// how a 64-hex PREIMAGE typed into a 40-hex ripemd160 pad becomes an
+	// accepted, unspendable lock: the operator has just been told twice that
+	// the preimage is 32 bytes, the word "digest" was last on screen two
+	// screens ago, and the only signals that anything was dropped are a readout
+	// that stops growing and a last-8 that will not match their paper.
+	//
+	// The clamp stays -- it is what keeps "an entry N characters long is N
+	// VALID characters by construction" true -- but it now says so. `over`
+	// clears as soon as the entry is short again, so it describes the entry in
+	// hand rather than accusing the operator of a mistake they have corrected.
+	over := false
 	for !ctx.Done {
 		for kbd.Update(ctx) {
 		}
 		if len(kbd.Fragment) > want {
 			kbd.Fragment = kbd.Fragment[:want]
+			over = true
+		} else if len(kbd.Fragment) < want {
+			over = false
 		}
 		frag := kbd.Fragment
 		valid := len(frag) == want
@@ -223,8 +253,11 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 			op.RoundedRect2(&ctx.B, r, cornerRadius),
 		)).Offset(wordOff)
 
-		count, csz := widget.Label(&ctx.B, ctx.Styles.body, th.Text,
-			fmt.Sprintf("%d of %d hex", len(frag), want))
+		countText := fmt.Sprintf("%d of %d hex", len(frag), want)
+		if over {
+			countText += " - extra ignored"
+		}
+		count, csz := widget.Label(&ctx.B, ctx.Styles.body, th.Text, countText)
 		countOp := count.Offset(image.Pt((dims.X-csz.X)/2, wordOff.Y+frgSize.Y+8))
 
 		navBtns := []NavButton{{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack}}
@@ -232,7 +265,15 @@ func composerHexEntry(ctx *Context, th *Colors, kind md.HashKind) (*md.HashLock,
 			navBtns = append(navBtns, NavButton{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconCheckmark})
 		}
 		nav, _ := layoutNavigation(&ctx.B, th, dims, navBtns...)
-		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Hash lock")
+		// THE TITLE NAMES THE KIND (journey walk I-2). This screen shows a
+		// digest being BUILT, for longer than any other screen shows one at
+		// all, and it was the one screen in the flow that did not say which
+		// hash it belonged to. The width alone cannot answer it: sha256 and
+		// hash256 are both 64 hex, ripemd160 and hash160 both 40, so an
+		// off-by-one tap on the kind screen lands on a same-width sibling and
+		// nothing here would differ. §6's both-or-neither rule engages -- the
+		// width is a token an operator will READ as the kind, and it is not one.
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, kind.Token()+" hash")
 		ctx.Frame(op.Layer(kbdOp, word, countOp, nav, titleOp, op.Color(&ctx.B, th.Background)))
 	}
 	return nil, false
@@ -266,7 +307,7 @@ func composerHashInPayloadRow(i int, digest *md.HashLock) string {
 // composerHashPreimageRow is band 2: a preimage PLATE record in the payload,
 // whose digest is computed directly from the record -- no KDF, no countdown.
 func composerHashPreimageRow(i int, digest *md.HashLock) string {
-	return fmt.Sprintf("preimage %d  %s", i, hashlockFirst8Last8(digest))
+	return fmt.Sprintf("preimage %d  %s %s", i, digest.Kind().Token(), hashlockFirst8Last8(digest))
 }
 
 // composerHashPhraseRow is band 3, in its two forms (§5.1 Step 1).
@@ -280,7 +321,7 @@ func composerHashPhraseRow(i int, d *md.HashLock) string {
 	if d == nil {
 		return fmt.Sprintf("phrase record %d (derive to see the digest)", i)
 	}
-	return fmt.Sprintf("phrase %d  %s", i, hashlockFirst8Last8(d))
+	return fmt.Sprintf("phrase %d  %s %s", i, d.Kind().Token(), hashlockFirst8Last8(d))
 }
 
 // hashlockPayloadPreimage is one ClassPreimage record of the loaded payload,
