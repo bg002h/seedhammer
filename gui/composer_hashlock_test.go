@@ -1035,7 +1035,7 @@ func TestHashlockReconcileScreenIsReachableOnAMixedPolicy(t *testing.T) {
 	// `never reached "back up every phrase"`.
 	h.mustReach("back up every phrase")
 	h.holdConfirm()
-	h.mustReach("run ms hashlock --kind sha256 with this phrase")
+	h.mustReach("run ms hashlock --kind sha256 --method sha256 with this phrase")
 	if got := st.list.Paths[1].Hash; got == nil || hashlockHashHex(got) != hashlockAnchorSHA_H {
 		t.Fatalf("path 2 hash = %v, want the anchor's sha256 digest", got)
 	}
@@ -1082,7 +1082,7 @@ func TestHashlockReconcileScreenCarriesTheDigestMethodAndChars(t *testing.T) {
 	h.tapRow(0, 2) // Hardened: 28 characters, so no §4.3a warning
 	h.mustReach("Write down the phrase")
 	h.holdConfirm()
-	frame := h.mustReach("run ms hashlock --kind sha256 with this phrase")
+	frame := h.mustReach("run ms hashlock --kind sha256 --method hardened with this phrase")
 	for _, want := range []string{
 		"hash  sha256 3cf5d421..b70a4c12",
 		"method: hardened   chars: 28",
@@ -1363,7 +1363,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		// MUTATION: drop the !payloadStatesDigest guard -> the subtest below
 		// fails; invert it -> `never reached "run ms hashlock with this
 		// phrase"` here. Neither direction passes both.
-		h.mustReach("run ms hashlock --kind sha256 with this phrase")
+		h.mustReach("run ms hashlock --kind sha256 --method sha256 with this phrase")
 		h.tapNav(Button3) // dismiss it, as the phrase route's own test does
 		h.waitDone()
 		if !ret {
@@ -1421,7 +1421,7 @@ func TestComposerHashEditDispatchesTheTwoNewBands(t *testing.T) {
 		if !ret {
 			t.Fatal("composerHashEdit returned false after the phrase-record row was taken")
 		}
-		if strings.Contains(normalizeDrawn(h.content), normalizeDrawn("run ms hashlock --kind sha256 with this phrase")) {
+		if strings.Contains(normalizeDrawn(h.content), normalizeDrawn("run ms hashlock --kind sha256 --method sha256 with this phrase")) {
 			t.Errorf("a payload phrase the payload already states drew the reconciliation screen: %q",
 				normalizeDrawn(h.content))
 		}

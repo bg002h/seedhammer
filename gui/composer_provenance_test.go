@@ -65,7 +65,7 @@ func TestComposerPhraseRouteHoldsOnTheZeroValueState(t *testing.T) {
 	h.holdConfirm()
 	h.mustReach("Write down the phrase")
 	h.holdConfirm()
-	h.mustReach("run ms hashlock --kind sha256 with this phrase")
+	h.mustReach("run ms hashlock --kind sha256 --method sha256 with this phrase")
 
 	want := hashlockMustLock(t, hashlockAnchorSHA_H)
 	if _, ok := st.phraseDigests[want.MapKey()]; !ok {

@@ -165,7 +165,7 @@ func composerCopyTable() []composerCopyRow {
 			"another path has a different hash: back up every phrase"},
 		{"composerCopyHashlockReconcile", "H2-4.5", composerCopyHashlockReconcile("b867db87..edbc96cb", "hardened", 100, md.KindSha256),
 			"hash  sha256 b867db87..edbc96cb method: hardened   chars: 100 " +
-				"Before you cut plates, run ms hashlock --kind sha256 with this phrase and method on the host and check the digest matches. " +
+				"Before you cut plates, run ms hashlock --kind sha256 --method hardened with this phrase on the host and check the digest matches. " +
 				"If they differ, do not fund this wallet: build it again."},
 		{"composerCopyHashEveryPathPhrase", "H2-4.7", composerCopyHashEveryPathPhrase(),
 			"HASH ON EVERY PATH Every way to spend this wallet needs a hashlock preimage. It is not on this device and not on these plates. Back up every phrase and its method, and every preimage plate, separately."},
