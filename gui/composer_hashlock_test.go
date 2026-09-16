@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -1791,5 +1792,86 @@ func TestComposerCanBuildARipemd160HashlockOnTheDevice(t *testing.T) {
 	}
 	if _, err := c.Chunks(); err != nil {
 		t.Fatalf("a device-built ripemd160 policy does not chunk: %v", err)
+	}
+}
+
+// TestReconcileScreenInstructionReproducesTheDigestItShows IS SPEC §12
+// ACCEPTANCE ITEM 7, which had never been executed: "A hash256 wallet survives
+// its own reconciliation screen: compose one, follow the screen's instruction
+// literally, and the check passes."
+//
+// It is the gate that would have caught the cycle's worst operator-facing
+// defect on day one, and both folds of that screen shipped without it. The
+// repo's rule is that nothing closes while one of its own gates has never run.
+//
+// THE FLAGS ARE PARSED OUT OF THE DRAWN STRING, NOT READ FROM THE VARIABLES.
+// That is the whole design. A test that re-derived from `kind` and `method`
+// directly would pass no matter what the screen printed; this one re-derives
+// from what an operator would actually TYPE, so a flag the screen fails to
+// name is a flag this test cannot supply.
+//
+// WHY IT MATTERS THAT `--method` IS PRESENT: in the host, omitting `--kind`
+// lists every kind's digest (it fails safe), while omitting `--method` runs
+// `unwrap_or(Method::Hardened)` and silently answers for the wrong derivation.
+//
+// MUTATION: drop " --method " + method from composerCopyHashlockReconcile ->
+// the flag regexp finds nothing and every method: sha256 row fails.
+func TestReconcileScreenInstructionReproducesTheDigestItShows(t *testing.T) {
+	const phrase = "correct horse battery staple"
+	flagRe := func(flag string) *regexp.Regexp {
+		return regexp.MustCompile(`--` + flag + `\s+([a-z0-9]+)`)
+	}
+	for _, m := range []hashlockMethod{hashlockSHA256, hashlockHardened} {
+		for _, kind := range composerHashKinds {
+			t.Run(m.String()+"/"+kind.Token(), func(t *testing.T) {
+				// What the device composed.
+				var x [32]byte
+				if m == hashlockSHA256 {
+					x = hashlock.PreimageSHA256([]byte(phrase))
+				} else {
+					x = hashlock.PreimageHardened([]byte(phrase))
+				}
+				lock := hashlockLockOf(kind, &x)
+				shown := hashlockFirst8Last8(lock)
+				body := composerCopyHashlockReconcile(shown, m.String(), len(phrase), kind)
+
+				// What the operator reads off the screen and types.
+				km := flagRe("kind").FindStringSubmatch(body)
+				if km == nil {
+					t.Fatalf("the reconcile screen names no --kind flag, so the operator "+
+						"must guess the hash function:\n%s", body)
+				}
+				mm := flagRe("method").FindStringSubmatch(body)
+				if mm == nil {
+					t.Fatalf("the reconcile screen names no --method flag. The host "+
+						"defaults it to hardened, so an operator following this "+
+						"instruction literally on a %s wallet gets a MISMATCH -- and "+
+						"this same screen then tells them not to fund a correct wallet "+
+						"and to build it again:\n%s", m.String(), body)
+				}
+
+				// Run what they typed. Nothing below reads `kind` or `m`.
+				typedKind, ok := md.HashKindFromToken(km[1])
+				if !ok {
+					t.Fatalf("the screen printed --kind %q, which the host would reject", km[1])
+				}
+				var typedX [32]byte
+				switch mm[1] {
+				case "sha256":
+					typedX = hashlock.PreimageSHA256([]byte(phrase))
+				case "hardened":
+					typedX = hashlock.PreimageHardened([]byte(phrase))
+				default:
+					t.Fatalf("the screen printed --method %q, which the host would reject", mm[1])
+				}
+				got := hashlockFirst8Last8(hashlockLockOf(typedKind, &typedX))
+				if got != shown {
+					t.Errorf("FOLLOWING THE SCREEN LITERALLY GIVES A DIFFERENT DIGEST.\n"+
+						"screen shows: %s\ntyped command yields: %s\ninstruction: %s\n"+
+						"An operator complying exactly would discard a correct wallet "+
+						"and re-cut five plates.", shown, got, body)
+				}
+			})
+		}
 	}
 }

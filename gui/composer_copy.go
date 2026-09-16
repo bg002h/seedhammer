@@ -749,12 +749,31 @@ func composerCopyHashlockReconcile(first8last8, method string, chars int, kind m
 	// and an operator complying exactly discarded a good wallet and re-cut five
 	// plates.
 	//
-	// So the body names the kind AND the sentence names the flag: an operator
-	// who runs the command as written now gets the digest this screen shows.
+	// BOTH FLAGS ARE NAMED, and the second one is why this was re-folded.
+	// The first fix named `--kind` and left "and method" as prose. Review then
+	// measured the host: `--kind` is optional and omitting it LISTS EVERY
+	// KIND'S DIGEST -- it fails SAFE. `--method` is optional and omitting it
+	// runs `unwrap_or(Method::Hardened)` (ms-cli/src/cmd/hashlock.rs:220) --
+	// it fails SILENTLY WRONG. So the screen was naming the flag that cannot
+	// hurt you and inferring the one that can: on a `method: sha256` wallet an
+	// operator who typed the command as written got a mismatch, and this same
+	// screen then told them not to fund a CORRECT wallet and to build it
+	// again -- five plates at ~21 minutes each.
+	//
+	// That is §13.2's own mechanism, one axis over, inside the fold that fixed
+	// §13.2. The rule it stated -- "what the operator types is what decides
+	// which digest comes back" -- applies to every axis the command takes, not
+	// to the one the cycle happened to be about.
+	//
+	// The tokens are the host's own: hashlockMethod.String() emits
+	// "sha256"/"hardened" and md.HashKind.Token() the four kind names, which
+	// are exactly clap's value_enum spellings. The printed command is
+	// copyable as it stands.
 	return "hash  " + kind.Token() + " " + first8last8 + "\n" +
 		fmt.Sprintf("method: %s   chars: %d", method, chars) + "\n" +
 		"Before you cut plates, run ms hashlock --kind " + kind.Token() +
-		" with this phrase and method on the host and check the digest matches. " +
+		" --method " + method +
+		" with this phrase on the host and check the digest matches. " +
 		"If they differ, do not fund this wallet: build it again."
 }
 
