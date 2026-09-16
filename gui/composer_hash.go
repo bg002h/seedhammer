@@ -136,7 +136,12 @@ var composerHashKinds = [...]md.HashKind{
 // composerHashKindRow is one row: the token, then the digest width in hex
 // characters, which is what the pad on the next screen will demand.
 func composerHashKindRow(k md.HashKind) string {
-	return fmt.Sprintf("%-10s %d hex", k.Token(), k.DigestLen()*2)
+	// TWO SPACES, NOT %-10s PADDING. The face is proportional (SPEC_hashlock_
+	// kinds §7.5's own measurement: `rmd160` and `sha256` are both six
+	// characters and differ in width), so padding to a character count cannot
+	// align a column -- it only makes the gap ragged in a way that reads as a
+	// rendering fault.
+	return fmt.Sprintf("%s  %d hex", k.Token(), k.DigestLen()*2)
 }
 
 // composerHashKindPick is SPEC_hashlock_kinds §7.1's own screen: the hash KIND,
