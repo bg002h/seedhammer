@@ -1,0 +1,71 @@
+{
+  "keyed": {
+    "A": {
+      "addresses": [
+        "bc1q8cf5g5fxfld9t22xguk7e0mg9mkjl2ujcxuux9napkw8cy89n3mqk0tp4l",
+        "bc1qkd729k2r3kvrewzgdtpj0quhrrv9u4jgndt2zsmy6ypnr7rslzwsfhmu9a",
+        "bc1q9ms8tdk54dzaelef0rrg82fpm3s9nfgyr30aed96rnyuj02hhgrqy3dyru",
+        "bc1q3cs923r9rdcv5s8zmwkd5strrh7svzzpg2yrl4hcue3f3fv4lyfsdp3tz9"
+      ],
+      "censusLines": [
+        "This engraves 2 plates.",
+        "md1 policy: 2 plates (the wallet policy, with its keys)"
+      ],
+      "digest": "dbe9 e774 e9a4 9231 0b62 626c 2b41 cf4b",
+      "entries": 2,
+      "policyId": "4dd749a8372af515a61d7104faf944ef",
+      "policyStub": "4dd749a8",
+      "strings": [
+        "md1flv5xrq9qjtvyyy5jmpprjjtvyyy4qqxpxqcyy2v6tjv6a4w46h2at4w46h2at4w46h2at4gj8fq03ncnsuxv",
+        "md1flv5xrqw46h2at4w46h2at4w46h2at4w4hqqqqe2qzlxrnchdq5h83w6p2hp5gmug4u83waqg8k6ntsjqqddg",
+        "md1flv5xrqscl9pvz58pmltjs9tjrg0g2z0agd4urfpzanhaq3lcdlz64mrqgdrha0m7umapumg67jfj6m3fvh7y",
+        "md1flv5xrqej075dhzfzvynh66n94j5lcxlmx9ayav9mj0jjejcxy50llpx82qfmryv7l68w6hqqhypxt9s9j68n",
+        "md1flv5xrpzragnj3g5qrl85zeape8wq0vdczfyy55tqsd5576trsa3p40nfpd7hsyjyf7vlx6saxquqfv5er72p",
+        "md1flv5xrp0k2j6ckr4wf0m36nn9pm0wkz5duhr4fq2pwsjch4zfmsclyyxap2w2ua7583pn5tsnkrk4cfxj37uw",
+        "md1flv5xrpj7qeewyp4dfykwfkgg6fxyxetdcmythf4hsqzd3v879jprztejzs7ru967l2aj4n0rcs"
+      ],
+      "templateId": "531ab9e1777f018ae53694387dd0d128",
+      "templateStub": "531ab9e1"
+    },
+    "B": {
+      "addresses": [
+        "bc1q8cf5g5fxfld9t22xguk7e0mg9mkjl2ujcxuux9napkw8cy89n3mqk0tp4l",
+        "bc1qkd729k2r3kvrewzgdtpj0quhrrv9u4jgndt2zsmy6ypnr7rslzwsfhmu9a",
+        "bc1q9ms8tdk54dzaelef0rrg82fpm3s9nfgyr30aed96rnyuj02hhgrqy3dyru",
+        "bc1q3cs923r9rdcv5s8zmwkd5strrh7svzzpg2yrl4hcue3f3fv4lyfsdp3tz9"
+      ],
+      "censusLines": [
+        "This engraves 4 plates.",
+        "md1 template: 1 plate (key-less wallet policy)",
+        "mk1 key @0: 1 plate (m/48'/0'/0'/2')",
+        "mk1 key @1: 1 plate (m/48'/0'/1'/2')",
+        "mk1 key @2: 1 plate (m/48'/0'/0'/2')"
+      ],
+      "digest": "dbe9 e774 e9a4 9231 0b62 626c 2b41 cf4b",
+      "entries": 4,
+      "policyId": "4dd749a8372af515a61d7104faf944ef",
+      "policyStub": "4dd749a8",
+      "strings": [
+        "md1fxnz3qs9qjtvyyy5jmpprjjtvyyy4qqxpxqcyy2v6tjv6a4w46h2at4w46h2at4w46h2shlte30qvuhvrq",
+        "md1fxnz3qsw46h2at4w46h2at4w46h2at4w46h2msqqqv4qp0npeutks2tnchdq4ts6yd7yq5swf47peq533w",
+        "mk1qp0tx8pqqsp9xx4eu9xawjdgw0za5zs9qjyty8su72t3dwaqcl9pvz58pmltjs9tjrg0g2z0agd4urfpzanhaq3lcdlz6wxr0qw70xlh738c",
+        "mk1qp0tx8pp2a3syx3m7halwd7s7d5e8l2xm3y3xzfmadfj6e20ur0anz7jwkzae8ef0tx83ncqsgvkaz2l8ag3",
+        "mk1qpcqd3zqqsp9xx4eu9xawjdgw0za5zh7qjcgpqyqpzqgpqyqpzqcpqyqpzpgpqyqpqzg3vs78m0n74uevrz28llsnr4qy6wvz3ttzcx58juf",
+        "mk1qpcqd3zpwcer8h73mk4csl2yu529qqleaqk0gwfmsrmrwqjfp99zcyrd98kjcu8vgdtu6gt04upy3z0n8ek4aj5kk9sa22359sgj8evvk2gn",
+        "mk1qpcqd3zze9lw8sqmzuvsnk6p3stnn6sgf",
+        "mk1qpvyhfpqqsp9xx4eu9xawjdghp5gmug9qjyty8hlm8z3nfejsahhtp2x7t365s9qhgfvt63yacv0jzrws489wwl2rcse667p7mrf6mctmefu",
+        "mk1qpvyhfppzuhsxwt3qdt2f9njdjzxjf3pk2mwxeza6dduqqnvtpl3vsgcj7vs58slvyhfe6svmcsnvan3zxgg"
+      ],
+      "templateId": "531ab9e1777f018ae53694387dd0d128",
+      "templateStub": "531ab9e1"
+    }
+  },
+  "keyless": {
+    "entries": 1,
+    "strings": [
+      "md1fkzyyqq9qjtvyyykjmpprj6tvyy49cqps8ys3psqcsmzu90h5wvl3"
+    ],
+    "templateId": "e0863d3ccac31a64d3b5e14b85ccd6c0",
+    "templateStub": "e0863d3c"
+  }
+}

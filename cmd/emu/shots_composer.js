@@ -473,7 +473,38 @@ async function addKeyPath(n, k, pathNo, expectRow) {
 }
 
 export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
-                            form = "A", expect = {} } = {}) {
+                            form = "A", expect = null } = {}) {
+  // F-545: WITHOUT AN EXPECTATION SET THIS WALK COULD NOT BE RUN AT ALL. Every
+  // `must` below compares against `expect.*`, so with none supplied it threw on
+  // the first comparison -- and a walk nobody can run goes stale in silence. It
+  // did: it carried two assertions this cycle had retired and nobody noticed
+  // until a review READ the file.
+  //
+  // expect_composer.json is the host-derived set for the standard payload,
+  // committed beside this file so it is fetchable from the served directory
+  // (the hashlock corpus is NOT, which is why that walk pins constants by
+  // hand). Regenerate it with
+  //
+  //   design/journeys/capture_composer.py --emit-expect <this file>
+  //
+  // and keep it honest with --check-expect, which diffs it against the host and
+  // exits non-zero on drift.
+  //
+  // A CALLER-SUPPLIED `expect` STILL WINS, and the driver always passes one --
+  // that is what makes `--prove-it-can-fail` able to hand in a corrupted
+  // address. The fixture is the default, not an override.
+  if (expect === null) {
+    const res = await fetch("./expect_composer.json", { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error("no expectation set: pass `expect`, or regenerate " +
+        "expect_composer.json with capture_composer.py --emit-expect");
+    }
+    const all = await res.json();
+    expect = arm === "keyless" ? all.keyless : all.keyed[form];
+    if (!expect) {
+      throw new Error(`expect_composer.json has no entry for arm=${arm} form=${form}`);
+    }
+  }
   if (typeof window.shTargets !== "function") {
     throw new Error("shTargets is missing -- this is a STALE emu.wasm. The browser caches it " +
       "and a cache-buster on index.html does not help; serve on a fresh port.");
