@@ -187,10 +187,66 @@ func composerCopyHashEveryPath() string {
 		"on this device and not on these plates. Back up every preimage separately."
 }
 
+// §8i SPLITS IN TWO (SPEC_hashlock_kinds §7.2), and WHEN each body fires is
+// what forces the split -- not a wish for two wordings.
+//
+// composerCopyHashRule is the ENTRY body. It fires on row selection in
+// `Path N hash`, which is before either typed arm is entered and therefore
+// BEFORE A KIND EXISTS -- so there is no kind to name and it must not invent
+// one. The shipped body said the hash must be "SHA-256 of a 32-byte value".
+// That was true of a one-kind world and is FALSE the moment a hash256 or
+// ripemd160 wallet can be built here, which is what this cycle does.
+//
+// It is reworded to the part that holds for all four -- the preimage is 32
+// bytes -- and names no function at all. Do NOT "fix" this later by naming
+// sha256 as the default: the screen below it offers four kinds, and a rule
+// modal asserting one of them is worse than one asserting none.
 func composerCopyHashRule() string {
-	return "The hash must be SHA-256 of a 32-byte value. A passphrase must be " +
+	return "The preimage must be a 32-byte value. A passphrase must be " +
 		"hashed to 32 bytes first, then hashed again. A hash of the passphrase " +
 		"itself can never be spent."
+}
+
+// composerCopyHashRuleForKinds is the CONSENT body. By then the policy is
+// decided, so the kinds ARE known, and §6's both-or-neither rule applies: where
+// the kind axis can be read, it is named.
+//
+// IT TAKES A SET, and that is not over-engineering. §7.2 says "names the kind",
+// singular, but a policy may carry two paths with two different kinds -- naming
+// one of them would be a false statement about the other path, printed on the
+// one screen the operator consents from. The spec's singular is a gap its own
+// §5 data model allows; this resolves it toward saying less confidently rather
+// than saying something wrong.
+func composerCopyHashRuleForKinds(kinds []md.HashKind) string {
+	const tail = " A passphrase must be hashed to 32 bytes first, then hashed " +
+		"again. A hash of the passphrase itself can never be spent."
+	switch len(kinds) {
+	case 0:
+		// Unreachable from the consent call site, which tests len>0 first.
+		// Returning the kind-generic body rather than panicking keeps a future
+		// caller honest instead of crashing an operator's consent screen.
+		return composerCopyHashRule()
+	case 1:
+		return "The hash must be " + kinds[0].Token() + " of a 32-byte value." + tail
+	}
+	return "This wallet's hashes are " + composerKindList(kinds) +
+		". Each must be of a 32-byte value." + tail
+}
+
+// composerKindList joins kind tokens the way composerSlotList joins slots.
+func composerKindList(kinds []md.HashKind) string {
+	out := ""
+	for i, k := range kinds {
+		switch {
+		case i == 0:
+			out = k.Token()
+		case i == len(kinds)-1:
+			out += " and " + k.Token()
+		default:
+			out += ", " + k.Token()
+		}
+	}
+	return out
 }
 
 func composerCopyEditClearsKeys() string {

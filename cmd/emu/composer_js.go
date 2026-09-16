@@ -12,10 +12,15 @@ import (
 // installComposerAPI exposes the running composition's stored path hashes to the
 // page as window.shComposerPathHashes.
 //
-//	shComposerPathHashes()   [ "<64 hex>" | null, ... ]  one entry per spend
-//	                         path, in path order, null where a path carries no
-//	                         hash; null (not an array) when no composition is
-//	                         running.
+//	shComposerPathHashes()   [ "<hex>" | null, ... ]  one entry per spend path,
+//	                         in path order, null where a path carries no hash;
+//	                         null (not an array) when no composition is running.
+//
+// THE HEX IS THE KIND'S WIDTH, NOT ALWAYS 64: 64 characters for sha256 and
+// hash256, 40 for ripemd160 and hash160 (SPEC_hashlock_kinds §7.3). This
+// contract said "<64 hex>" while the composer could build only sha256 locks,
+// and a consumer that hardcoded 64 would silently read twelve bytes of
+// alloc-gate padding as digest. Compare by the string you are given.
 //
 // WHY A WALK NEEDS IT (H5 §4, F-485). Every other reading primitive here reports
 // what was DRAWN. That is the right default -- a walk is evidence about the

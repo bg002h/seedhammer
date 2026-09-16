@@ -68,7 +68,8 @@
 //     `null` -- the assignment has not happened yet. The read is pinned to that
 //     frame rather than taken "some time before the hold", because a read taken
 //     earlier passes trivially and proves nothing about the ORDER.
-//   * after the hold, it is the corpus's FULL 64-hex hardened digest, and its
+//   * after the hold, it is the corpus's FULL hardened digest at the kind's own
+//     width (64 hex for sha256, 40 for a 20-byte kind), and its
 //     first8..last8 is the token the confirm modal displayed. Full hex on both
 //     sides: comparing one abbreviation against another would accept 2^192
 //     wrong digests.
@@ -310,7 +311,12 @@ async function trial(phrase, method) {
 }
 
 /**
- * The composition's STORED path hashes, as 64-hex or null, in path order.
+ * The composition's STORED path hashes, as hex or null, in path order.
+ *
+ * THE WIDTH IS THE KIND'S (SPEC_hashlock_kinds §7.3): 64 hex for sha256 and
+ * hash256, 40 for ripemd160 and hash160. Never assume 64 -- the seam used to
+ * hand out the padded 32-byte array, which returned 64 for every kind and made
+ * the stored-versus-displayed assertion unfalsifiable for the 20-byte ones.
  *
  * Throws rather than returning undefined when the seam is missing: an emulator
  * built before H5 has no shComposerPathHashes, and a walk that silently skipped
@@ -330,8 +336,15 @@ function pathHashes(where) {
   return h;
 }
 
-/** first8..last8 of a 64-hex digest -- the abbreviation gui.hashlockFirst8Last8 draws. */
-const short8 = (hex64) => `${hex64.slice(0, 8)}..${hex64.slice(-8)}`;
+/**
+ * first8..last8 of a hex digest -- the abbreviation gui.hashlockFirst8Last8 draws.
+ *
+ * Slices from the END, not at 56, so it is correct at both widths. The Go side
+ * (gui/composer_hashlock.go hashlockFirst8Last8, gui/composer_consent.go
+ * composerDigestShort) slices the same way for the same reason: h[56:] PANICS
+ * on a 40-hex digest.
+ */
+const short8 = (hexDigest) => `${hexDigest.slice(0, 8)}..${hexDigest.slice(-8)}`;
 
 /**
  * The first8..last8 token a frame DREW, read out of the frame itself.

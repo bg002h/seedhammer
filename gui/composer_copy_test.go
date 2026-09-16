@@ -60,7 +60,15 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyHashEveryPath", "8h", composerCopyHashEveryPath(),
 			"HASH ON EVERY PATH Every way to spend this wallet needs the preimage of a hash. It is not on this device and not on these plates. Back up every preimage separately."},
 		{"composerCopyHashRule", "8i", composerCopyHashRule(),
-			"The hash must be SHA-256 of a 32-byte value. A passphrase must be hashed to 32 bytes first, then hashed again. A hash of the passphrase itself can never be spent."},
+			"The preimage must be a 32-byte value. A passphrase must be hashed to 32 bytes first, then hashed again. A hash of the passphrase itself can never be spent."},
+		// THE FOUR-KIND FORM, deliberately: this row feeds §12 item 5's glyph,
+		// raster and modal-fits gates, which measure the string they are given,
+		// and the longest body is the one that can overflow. A policy with four
+		// paths carrying one kind each reaches it. The one- and two-kind
+		// wordings are asserted in TestComposerConsentHashRuleNamesTheKinds.
+		{"composerCopyHashRuleForKinds", "8i", composerCopyHashRuleForKinds(
+			[]md.HashKind{md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160}),
+			"This wallet's hashes are sha256, hash256, ripemd160 and hash160. Each must be of a 32-byte value. A passphrase must be hashed to 32 bytes first, then hashed again. A hash of the passphrase itself can never be spent."},
 		{"composerCopyEditClearsKeys", "8j", composerCopyEditClearsKeys(),
 			"EDITING THE SHAPE CLEARS THE KEYS Slot numbers change with the shape. Every key you seated will be cleared. Continue?"},
 		{"composerCopyPersonInTwoPaths", "8k", composerCopyPersonInTwoPaths(),
@@ -369,8 +377,14 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// md1 behind it -- a scanned QR or a payload record. It needs its OWN
 	// sentence because the md1 one says "slot @N", and a scanned descriptor has
 	// no @N on any screen the operator has seen.
-	if declared != 78 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 78 -- "+
+	// 79 SINCE SPEC_hashlock_kinds §7.2 SPLIT §8i IN TWO. The entry body fires
+	// on row selection, before a kind exists, so it can name none; the consent
+	// body fires on a decided policy, where §6's both-or-neither rule says the
+	// kind must be named. One string could not do both jobs once four kinds
+	// existed -- it asserted SHA-256 at a moment when the answer might be
+	// ripemd160.
+	if declared != 79 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 79 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

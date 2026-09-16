@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"slices"
@@ -852,9 +853,17 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(lines, "\n"), composerCopyHashRule()) {
-		t.Errorf("a hash-bearing policy consents without restating the 32-byte rule:\n%s",
-			strings.Join(lines, "\n"))
+	// THE KIND-NAMED BODY (SPEC_hashlock_kinds §7.2), not the entry one. Those
+	// are now different strings, and asserting the entry body here would pass
+	// only if consent had regressed to the kind-generic wording.
+	want := composerCopyHashRuleForKinds([]md.HashKind{md.KindSha256})
+	if !strings.Contains(strings.Join(lines, "\n"), want) {
+		t.Errorf("a hash-bearing policy consents without restating the 32-byte rule\nwant: %s\ngot:\n%s",
+			want, strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), composerCopyHashRule()) {
+		t.Error("consent drew the ENTRY body, which names no kind -- §6's " +
+			"both-or-neither rule applies here, where the kind IS known")
 	}
 	// And a policy with NO hash does not carry it: a rule restated where it does
 	// not apply is one the operator learns to skip.
@@ -870,7 +879,7 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.Join(lines2, "\n"), composerCopyHashRule()) {
+	if strings.Contains(strings.Join(lines2, "\n"), "32-byte value") {
 		t.Errorf("a hash-free policy carries §8i:\n%s", strings.Join(lines2, "\n"))
 	}
 }
@@ -1652,5 +1661,84 @@ func TestWrapperLabelsNameTheirOwnWrapper(t *testing.T) {
 			t.Errorf("row %d reads %q but its wrapper encodes InnerWsh=%v; the two sh "+
 				"forms hash to different addresses", i, label, tpl.InnerWsh)
 		}
+	}
+}
+
+// TestComposerConsentHashRuleNamesTheKinds is SPEC_hashlock_kinds §7.2's other
+// half: the consent body names the kind, and it names EVERY kind the policy
+// holds.
+//
+// MUTATION 1: put a `break` back in composerConsentLinesFor's kind sweep. The
+// two-kind case below then names only sha256 -- a true sentence about path 1
+// and a false one about path 2, printed on the screen the operator consents
+// from. That break was correct while the body was a constant string and became
+// wrong the moment the body reported content; this is the test that notices.
+//
+// MUTATION 2: make composerCopyHashRule name sha256 again. The first subtest
+// fails, because the ENTRY body fires before a kind exists.
+func TestComposerConsentHashRuleNamesTheKinds(t *testing.T) {
+	t.Run("the entry body names no kind", func(t *testing.T) {
+		body := composerCopyHashRule()
+		for _, k := range []md.HashKind{md.KindSha256, md.KindHash256, md.KindRipemd160, md.KindHash160} {
+			if strings.Contains(strings.ToLower(body), k.Token()) {
+				t.Errorf("the §8i ENTRY body names %q, but it fires on row selection "+
+					"-- before either typed arm, and therefore before a kind exists:\n%s",
+					k.Token(), body)
+			}
+		}
+		if strings.Contains(strings.ToUpper(body), "SHA-256") {
+			t.Errorf("the §8i entry body names SHA-256, the exact assertion §7.2 "+
+				"retired: it is false of a hash256 or ripemd160 wallet:\n%s", body)
+		}
+	})
+
+	// Two paths, two kinds, through the real consent path.
+	lock20, ok := md.NewHashLock(md.KindRipemd160, bytes.Repeat([]byte{0xcd}, 20))
+	if !ok {
+		t.Fatal("20 bytes is ripemd160's width")
+	}
+	two := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}, Hash: composerTestLock([32]byte{0xab})},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Hash: lock20},
+	}}
+	c, err := md.Compose(two)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := c.Chunks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(lines, "\n")
+
+	// SCOPED TO THE §8i LINE, not to the whole screen -- and that correction came
+	// from mutating this very test. Searching `got` for "ripemd160" PASSED under
+	// the early-`break` mutation, because the consent screen also draws the
+	// policy's miniscript, which spells `ripemd160(...)` itself. The assertion
+	// was true for a reason that had nothing to do with what it claimed to check.
+	var rule string
+	for _, l := range lines {
+		if strings.Contains(l, "32-byte value") {
+			rule = l
+			break
+		}
+	}
+	if rule == "" {
+		t.Fatalf("a hash-bearing policy consents with no §8i line at all:\n%s", got)
+	}
+	for _, want := range []string{"sha256", "ripemd160"} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("the §8i consent line does not name %q. §6's rule is "+
+				"both-or-neither, and a body naming one kind is a FALSE statement "+
+				"about the other path:\n%s", want, rule)
+		}
+	}
+	if !strings.Contains(got, composerCopyHashRuleForKinds(
+		[]md.HashKind{md.KindSha256, md.KindRipemd160})) {
+		t.Errorf("the two-kind consent body is not the one §7.2 specifies:\n%s", got)
 	}
 }

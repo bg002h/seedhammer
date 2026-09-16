@@ -204,11 +204,24 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	// consent": the rule whose whole purpose is to prevent an unspendable
 	// wallet was stated once, several screens earlier, on a policy that may
 	// have gained its hashlock afterwards.
+	//
+	// NAMING THE KINDS, not just firing on their presence. Before this cycle
+	// the body was constant, so the loop only had to find ONE hashlock and
+	// stop. It now reports which kinds the policy actually holds, which means
+	// the loop has to see every branch -- a `break` on the first would name
+	// sha256 on a wallet whose second path is ripemd160.
+	var kinds []md.HashKind
+	seen := make(map[md.HashKind]bool)
 	for _, b := range shape.Branches {
-		if len(b.Hashlocks) > 0 {
-			lines = append(lines, "", composerCopyHashRule())
-			break
+		for _, l := range b.Hashlocks {
+			if k := l.Kind(); !seen[k] {
+				seen[k] = true
+				kinds = append(kinds, k)
+			}
 		}
+	}
+	if len(kinds) > 0 {
+		lines = append(lines, "", composerCopyHashRuleForKinds(kinds))
 	}
 	// §8d, on the surface §7g's divergence table puts it on: the row
 	// "consent | compares the shown id with a coordinator's" answers

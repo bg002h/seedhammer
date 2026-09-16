@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"encoding/hex"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -120,5 +122,76 @@ func TestComposerStateHookReportsEachPathAndHandsOutCopies(t *testing.T) {
 	if !st.list.Paths[1].Hash.Equal(d) {
 		t.Errorf("the policy's digest moved: %s, want %s",
 			hashlockHashHex(st.list.Paths[1].Hash), hashlockHashHex(d))
+	}
+}
+
+// TestComposerStateHookHandsOutNoPadding is SPEC_hashlock_kinds §7.3's gate,
+// and §7.3 exists because without it the walk's central assertion COULD NOT
+// FAIL.
+//
+// The seam used to hand out *[32]byte -- the stored array. A 20-byte kind keeps
+// its digest in the first 20 bytes of that array and twelve alloc-gate zeros
+// after it, so hex.EncodeToString over the array returns 64 characters for a
+// ripemd160 lock: 40 real and 24 of padding. A walk asserting "path 1 holds
+// digest D" would then pass identically for sha256(D) and for any 20-byte kind
+// sharing D's first 20 bytes, because both sides of the comparison were drawn
+// from the same padded source.
+//
+// So this asserts the WIDTH and the ABSENCE OF THE PADDING, not just equality:
+// an Equal check passes even while the hex a walk reads is wrong, since Equal
+// slices to the kind's width and the emulator bridge is a different call.
+//
+// MUTATION: make md.HashLock.Digest return the whole array (`h.digest[:]`) ->
+// the width assertion fails at 64 != 40 and the suffix assertion names the
+// padding it found (measured: ...b0b1b2b3 followed by 24 zeros).
+//
+// AND THE ABBREVIATION ASSERTION AT THE BOTTOM STAYS GREEN UNDER THAT MUTATION.
+// That is not a flaw in it -- it is this test's whole subject, demonstrated on
+// itself. Both sides of that comparison read through Digest, so padding moves
+// them together and the check cannot fail. Only the WIDTH and the SUFFIX are
+// independent of the mutated source, which is why they are asserted separately
+// rather than folded into one "the abbreviation matches" line.
+func TestComposerStateHookHandsOutNoPadding(t *testing.T) {
+	// A ripemd160 digest whose real bytes END in a non-zero, so padding is
+	// distinguishable from a digest that merely happens to trail off.
+	var d20 [20]byte
+	for i := range d20 {
+		d20[i] = byte(0xa0 + i)
+	}
+	lock, ok := md.NewHashLock(md.KindRipemd160, d20[:])
+	if !ok {
+		t.Fatal("20 bytes is ripemd160's width")
+	}
+	st := &composerState{list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Hash: lock},
+	}}}
+	setComposerStateHook(st)
+	t.Cleanup(clearComposerStateHook)
+
+	got := ComposerPathHashes()
+	if len(got) != 1 {
+		t.Fatalf("the hook reports %d entries for a 1-path composition", len(got))
+	}
+	// This is the exact expression cmd/emu/composer_js.go hands to JavaScript.
+	h := hex.EncodeToString(got[0].Digest())
+	if len(h) != 40 {
+		t.Errorf("the seam reports %d hex characters for a ripemd160 lock, want 40. "+
+			"A walk comparing this against a displayed abbreviation is comparing "+
+			"two views of the same padded array:\n%s", len(h), h)
+	}
+	if strings.HasSuffix(h, "00") {
+		t.Errorf("the seam's hex ends in alloc-gate padding, so it is the stored "+
+			"ARRAY and not the digest:\n%s", h)
+	}
+	if want := hex.EncodeToString(d20[:]); h != want {
+		t.Errorf("the seam reports %s, want %s", h, want)
+	}
+	// And the abbreviation the walk builds from it is the one the screen draws.
+	// short8 in walk_hashlock_phrase.js slices [0:8] and [-8:]; the Go side must
+	// agree at a width that is not 64, or the two disagree only for 20-byte
+	// kinds -- the case no sha256 fixture can reach.
+	if tok, want := hashlockFirst8Last8(got[0]), h[:8]+".."+h[len(h)-8:]; tok != want {
+		t.Errorf("the drawn abbreviation %q is not what the walk's short8 builds "+
+			"from the seam's hex (%q)", tok, want)
 	}
 }
