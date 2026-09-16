@@ -342,10 +342,15 @@ func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedK
 	// asserting coverage of code that cannot run is worse than no test --
 	// mutating it away left 1312/1312 green.
 	//
-	// IF A DUPLICATE EVER DERIVES AGAIN -- F-533 proposes moving the refusal
-	// onto a BIP-388 predicate while the warning stays on md.DuplicateKeySlot,
-	// which would do exactly that -- this block has to come back, and it will
-	// have no coverage. noAddressLines is where the sentence lives now.
+	// IF A DUPLICATE EVER DERIVES AGAIN this block has to come back, and it
+	// will have no coverage. noAddressLines is where the sentence lives now.
+	//
+	// F-533 WAS THE OBVIOUS WAY THAT COULD HAVE HAPPENED and it did not. It was
+	// filed proposing to move the refusal onto a separate BIP-388 predicate
+	// while the warning stayed on md.DuplicateKeySlot, which would have split
+	// the two and made this branch reachable for a warned policy. It was
+	// implemented the other way: ONE predicate, widened, with a third kind for
+	// BIP 388's rule, so `ok` here still implies DuplicateNone.
 	lines := []string{""}
 	for _, chain := range []struct {
 		label  string

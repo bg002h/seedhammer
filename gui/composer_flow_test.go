@@ -576,9 +576,15 @@ func TestConsentNamesTheScript(t *testing.T) {
 // gui/duplicate_seat_address_test.go.)
 //
 // The positive and negative cases are both here, against vectors whose Core
-// verdicts were measured on a throwaway regtest datadir. A warning that fired
-// on the taproot pair — which Core ACCEPTS — would be a warning the operator
-// learns to read past.
+// verdicts were measured on a throwaway regtest datadir.
+//
+// THE TAPROOT PAIR MOVED SIDES AT F-533, and the negative case moved with it.
+// They used to be here as vectors that must NOT be warned about, on the ground
+// that Core ACCEPTS them; Core still does, and they are warned about anyway,
+// because BIP 388 forbids a slot that is both the key path and a leaf key and
+// the operator's ruling is that such a wallet is not supported. The negative
+// case is now keyed_compose_wsh_timelock_hashlock, which reuses nothing at all
+// -- a row that still fails if the predicate warns about everything.
 //
 // MUTATION: remove the duplicate-key block from noAddressLines -- which is
 // where composerConsentLinesFor's sentence comes from since F-531 -- and the
@@ -591,8 +597,16 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 		core   string
 	}{
 		{"keyed_wsh_timelock_hashlock", md.DuplicateRefusedByCore, "Core REFUSES: duplicate keys in one miniscript"},
-		{"keyed_tr_multi_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
-		{"keyed_tr_sortedmulti_a", md.DuplicateNone, "Core ACCEPTS: the internal key is outside the miniscript"},
+		// F-533 REVERSED THESE TWO, and the Core half of the rationale is still
+		// true: Core ACCEPTS both, because the internal key is outside the
+		// miniscript. What changed is that Core is no longer the only rule --
+		// BIP 388 forbids a slot at both the key path and a leaf, and the
+		// predicate reports it as its own kind so Core's verdict stays
+		// available to the sentences that quote it.
+		{"keyed_tr_multi_a", md.DuplicateTaprootInternalKey,
+			"Core ACCEPTS (internal key outside the miniscript); BIP 388 FORBIDS: @0 is key path AND leaf"},
+		{"keyed_tr_sortedmulti_a", md.DuplicateTaprootInternalKey,
+			"Core ACCEPTS (internal key outside the miniscript); BIP 388 FORBIDS: @0 is key path AND leaf"},
 		{"keyed_compose_wsh_timelock_hashlock", md.DuplicateNone, "no key reuse at all"},
 	} {
 		t.Run(tc.vector, func(t *testing.T) {
@@ -615,13 +629,17 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 			// it -- the third time in this cycle a copy edit broke a test that
 			// had hardcoded the words rather than asking for them.
 			got := strings.Contains(joined, composerCopyDuplicateKeys(slot, tc.want))
-			if got != (tc.want == md.DuplicateRefusedByCore) {
-				if tc.want == md.DuplicateRefusedByCore {
-					t.Errorf("the consent screen shows addresses for a descriptor Core "+
-						"refuses and says nothing about it.\n%s", joined)
+			// ANY non-None kind is warned about, not only Core's refusal
+			// (F-533). This read `tc.want == md.DuplicateRefusedByCore`, which
+			// was the same thing while the taproot rows were DuplicateNone and
+			// would now assert that a BIP-388-forbidden wallet gets NO warning.
+			if got != (tc.want != md.DuplicateNone) {
+				if tc.want != md.DuplicateNone {
+					t.Errorf("the consent screen says nothing about a policy this device "+
+						"reports as %v (%s).\n%s", tc.want, tc.core, joined)
 				} else {
-					t.Errorf("the consent screen warns about duplicate keys on a wallet "+
-						"Core accepts (%s); a warning that cries wolf is one the "+
+					t.Errorf("the consent screen warns about key reuse on a wallet that "+
+						"has none (%s); a warning that cries wolf is one the "+
 						"operator reads past.\n%s", tc.core, joined)
 				}
 			}
@@ -806,6 +824,15 @@ func TestDuplicateWarningNamesTheRightHarm(t *testing.T) {
 			name: "nested miniscript",
 			want: md.DuplicateRefusedByCore,
 			says: "Bitcoin Core refuses", notSays: "fewer separate keys",
+		},
+		// F-533's kind, and the notSays is the whole reason it is a KIND. Core
+		// 31.1 imports tr(@0, multi_a(2,@0,@1)) -- measured -- so the
+		// "Bitcoin Core refuses" sentence is FALSE here, and it is exactly the
+		// sentence this card would have inherited from the fallthrough.
+		{
+			name: "taproot key path reused in a leaf",
+			want: md.DuplicateTaprootInternalKey,
+			says: "BIP 388", notSays: "Bitcoin Core refuses",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

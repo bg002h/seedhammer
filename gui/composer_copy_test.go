@@ -113,6 +113,10 @@ func composerCopyTable() []composerCopyRow {
 			"Check before funding: slot @1 repeats in one script, and Bitcoin Core refuses such a descriptor."},
 		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(2, md.DuplicateFewerKeys),
 			"Check before funding: slot @2 fills more than one seat, so fewer separate keys can spend this than its k-of-n says."},
+		// F-533's kind. It is here because this table enumerates kinds BY HAND
+		// and would otherwise stay green while a third kind shipped unmeasured.
+		{"composerCopyDuplicateKeys", "8s", composerCopyDuplicateKeys(3, md.DuplicateTaprootInternalKey),
+			"Check before funding: slot @3 fills both the key path and a script key, which BIP 388 forbids."},
 		{"composerCopyDescriptorRepeatsAKey", "8s", composerCopyDescriptorRepeatsAKey(),
 			"Check before funding: one key fills more than one seat of this wallet, so fewer separate keys can spend it than its k-of-n says."},
 		{"composerCopyNoAddressesDuplicateKeys", "8s", composerCopyNoAddressesDuplicateKeys(),

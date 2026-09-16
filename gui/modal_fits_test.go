@@ -330,6 +330,17 @@ func TestModalsThisBlockTouchesAreDrawnInFull(t *testing.T) {
 			"F-531's inspect refusal, fewer-keys, keyless (warning alone)",
 			composerCopyDuplicateKeys(0, md.DuplicateFewerKeys),
 		},
+		// F-533's third kind, both forms. This list enumerates kinds by hand
+		// too, so a new one ships unmeasured unless it is added here.
+		{
+			"F-533's inspect refusal, taproot internal key, keyed",
+			composerCopyDuplicateKeys(0, md.DuplicateTaprootInternalKey) + " " +
+				composerCopyNoAddressesDuplicateKeys(),
+		},
+		{
+			"F-533's inspect refusal, taproot internal key, keyless (warning alone)",
+			composerCopyDuplicateKeys(0, md.DuplicateTaprootInternalKey),
+		},
 		{
 			"the build's unshowable-keys refusal",
 			"Couldn't show the keys this policy holds, so it was not engraved. Build " +

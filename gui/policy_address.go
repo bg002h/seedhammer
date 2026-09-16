@@ -45,14 +45,21 @@ func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint3
 	// F-531: NO ADDRESS FOR A POLICY THAT REPEATS A KEY SLOT INSIDE ONE SCRIPT
 	// EXPRESSION, on either route.
 	//
-	// THAT IS NARROWER THAN "reuses a key", and the difference is F-533. The
-	// predicate is md.DuplicateKeySlot, which answers CORE's question by
-	// design and scopes to one expression, so tr(@0, multi_a(2,@0,@1)) -- the
-	// same slot at the internal key and in a leaf -- reports DuplicateNone and
-	// still derives, while BIP 388 forbids it and the Rust primary refuses it.
-	// Two corpus vectors sit in that gap. Do not read the line below as the
-	// wider rule; closing it needs a second predicate, not a wider read of
-	// this one.
+	// IT IS NO LONGER NARROWER THAN "reuses a key", and closing that gap was
+	// F-533. The predicate is md.DuplicateKeySlot, which answers CORE's
+	// question for its two Core-named kinds and scopes them to one expression;
+	// tr(@0, multi_a(2,@0,@1)) -- the same slot at the internal key and in a
+	// leaf -- used to report DuplicateNone and derive, while BIP 388 forbade it
+	// and the Rust primary refused it. Two corpus vectors sat in that gap and
+	// the corpus gate named them; they now report
+	// md.DuplicateTaprootInternalKey and the line below refuses them.
+	//
+	// IT GOT WIDER RATHER THAN DOUBLED, which is the opposite of what F-533 was
+	// filed proposing and is what the paragraph below argued for. In the md1
+	// wire one slot cannot carry two disjoint key expressions, so Core-duplicate
+	// is a strict subset of BIP-388-forbidden and there is no policy that is one
+	// and not the other -- no case where a refusal would lift while a duplicate
+	// remained, and so no second predicate to keep in step.
 	//
 	// The gate sits ABOVE the deriver, and above it rather than inside it, so
 	// that the deriver stays callable by the test carrying the Bitcoin Core
@@ -72,7 +79,9 @@ func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint3
 	// predicate, and it now carries two consequences instead of one -- the
 	// F-514 sentence on screen and this refusal. Two predicates would drift,
 	// and the drift would show up as a screen that warns and derives, or one
-	// that refuses in silence.
+	// that refuses in silence. F-533 widened this one instead, and the
+	// condition is `kind != md.DuplicateNone` rather than a list of kinds for
+	// the same reason: a fourth kind is refused the day it exists.
 	if _, kind, err := md.DuplicateKeySlotChunks(collected); err == nil && kind != md.DuplicateNone {
 		return nil, false
 	}

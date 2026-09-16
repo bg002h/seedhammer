@@ -390,11 +390,15 @@ func composerCopyIdChanged() string {
 		"will not seat here."
 }
 
-// composerCopyDuplicateKeys is the §8s warning for a policy whose script repeats
-// a key, in the words of the harm that repeat actually carries.
+// composerCopyDuplicateKeys is the §8s warning for a policy that reuses a key
+// slot, in the words of the harm that reuse actually carries.
 //
-// TWO HARMS, TWO SENTENCES, because Bitcoin Core treats the two shapes
-// differently and an operator told the wrong one looks in the wrong place.
+// THREE HARMS, THREE SENTENCES since F-533. Two of them are Bitcoin Core's
+// verdicts and are split because Core treats those shapes differently, and an
+// operator told the wrong one looks in the wrong place. The third is not
+// Core's at all -- a slot at the taproot key path AND in the script, which
+// Core imports and BIP 388 forbids -- and it gets its own branch below rather
+// than a reworded fallthrough, for the reason stated there.
 // Measured on Core 25.0.0 via getdescriptorinfo, same key twice:
 //
 //	wsh(sortedmulti(2,A,A,B))  ACCEPTED  -- Core imports it happily
@@ -435,6 +439,31 @@ func composerCopyDuplicateKeys(slot uint8, kind md.DuplicateKind) string {
 	if kind == md.DuplicateFewerKeys {
 		return fmt.Sprintf("Check before funding: slot @%d fills more than one seat, "+
 			"so fewer separate keys can spend this than its k-of-n says.", slot)
+	}
+	// F-533, AND IT NEEDS ITS OWN BRANCH RATHER THAN THE FALLTHROUGH BELOW.
+	// This function was an `if` plus an unconditional return, so a new kind
+	// silently inherited "Bitcoin Core refuses such a descriptor" -- a sentence
+	// this repo MEASURED FALSE for exactly the two cards that reach here. Core
+	// 31.1 imports both (md/duplicate_keys.go's table): the internal key sits
+	// outside the miniscript, so nothing repeats within one expression. BIP 388
+	// is the rule that forbids it, so BIP 388 is what the sentence names.
+	//
+	// "KEY PATH" IS THE WORD THIS FIRMWARE ALREADY USES for the taproot
+	// internal key -- composerCopySeatKeyPathPrompt says "slot @N, key path
+	// (spends alone)" on the screen where the operator seated it. "Internal
+	// key" is BIP 341's word, not one this device has ever shown them.
+	//
+	// MEASURED, not counted: 94 characters, SIX lines word-wrapped at the
+	// Inspect screen's width of 20, against a page that holds SEVEN. (The same
+	// measurement reproduces the two numbers recorded below: the 96-character
+	// Core sentence is 6 lines and the 122-character version it replaced was
+	// 8.) Through showError -- the modal this body actually reaches since
+	// F-531, via duplicateRefusalBody -- it draws in full with 418 characters
+	// of headroom alongside composerCopyNoAddressesDuplicateKeys, and
+	// modal_fits_test.go holds that.
+	if kind == md.DuplicateTaprootInternalKey {
+		return fmt.Sprintf("Check before funding: slot @%d fills both the key path "+
+			"and a script key, which BIP 388 forbids.", slot)
 	}
 	// 96 chars, 6 lines, so it FITS page one of the Inspect screen, which holds
 	// 7. The shipped version was 122 chars and 8 lines, and page one ended on a
