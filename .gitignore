@@ -7,6 +7,12 @@ seedhammerii-*.uf2
 test-*.uf2
 _artifacts
 
+# The emulator binary (go build ./cmd/emu). Same reasoning as the uf2 rules
+# above, and it has already been tested: a 5.8 MB /emu sat untracked here while
+# a phase-4 commit was staged with `git add -A` (against this repo's own rule)
+# and missed being committed by luck alone.
+/emu
+
 # Boot-signing keys and OTP json must NEVER be committed -- this remote is public.
 *.pem
 *-otp*.json

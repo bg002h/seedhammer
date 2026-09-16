@@ -1633,6 +1633,53 @@ func TestComposerHashKindScreenDrawsAllFourRows(t *testing.T) {
 	}
 }
 
+// TestComposerHashKindScreenDrawsAllFourRowsFromEveryStart is the gate the
+// first version of the one above SHOULD have been.
+//
+// That test only ever opened the screen at index 0, and two independent review
+// lenses then found what it could not see: reopening on `hash160` after a Back
+// from the pad drew ONE row, because composerPickScreenFrom started the page AT
+// the cursor. One page press then wrapped to row 0 and the in-page clamp moved
+// the SELECTION there -- so an operator stepping back to check their kind could
+// silently have it reset to sha256.
+//
+// A gate that exercises only the default value cannot see a bug in restoring a
+// non-default one. This opens at every index.
+//
+// MUTATION: `start := sel` in composerPickScreenFrom -> indices 1..3 each draw
+// fewer rows than the list holds.
+func TestComposerHashKindScreenDrawsAllFourRowsFromEveryStart(t *testing.T) {
+	for i, k := range composerHashKinds {
+		t.Run(k.Token(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				p := newPlatform()
+				p.display = sh2DisplaySize
+				ctx := NewContext(p)
+				h := &sessionHarness{t: t, ctx: ctx, done: new(bool)}
+				frame, drawer, quit := runUITouch(ctx, func() {
+					composerHashKindPick(ctx, &descriptorTheme, k)
+				})
+				h.frame, h.drawer = frame, drawer
+				defer quit()
+				body := h.mustReach("32-byte preimage")
+				pts := plateHitPoints(h.ctx, h.drawer())
+				if len(pts) != len(composerHashKinds) {
+					t.Errorf("opened on %s (index %d): %d tappable rows, want %d. A kind "+
+						"screen reopened from a Back must show the whole list, not the "+
+						"rows from the cursor down.\nFrame: %q",
+						k.Token(), i, len(pts), len(composerHashKinds), body)
+				}
+				for _, want := range composerHashKinds {
+					if !uiContains(body, want.Token()) {
+						t.Errorf("opened on %s: the first page does not name %s:\n%q",
+							k.Token(), want.Token(), body)
+					}
+				}
+			})
+		})
+	}
+}
+
 // TestComposerHashKindDefaultsToSha256WithoutATap is §7.1's "rows default to
 // sha256, seeded once per screen".
 //

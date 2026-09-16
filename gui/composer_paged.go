@@ -315,7 +315,18 @@ func composerPickScreenFrom(ctx *Context, th *Colors, title, lead string, rows [
 	if sel < 0 || sel >= len(lines) {
 		sel = 0
 	}
-	start := sel
+	// START AT THE TOP, NOT AT THE CURSOR. `start = sel` was the first version
+	// of this and it was wrong twice over: reopening a 4-row screen on row 3
+	// drew ONE row (the rows above the cursor were simply gone), and the page
+	// button then wrapped to row 0 and MOVED the selection there -- so looking
+	// at an already-chosen setting could silently change it back to the
+	// default. Reported independently by two review lenses.
+	//
+	// The page is re-homed below, after the first layout knows how many rows
+	// fit, using the same rule the Up/Down handler uses. Doing it here is not
+	// possible: `shown` does not exist until composerPageLines has measured.
+	start := 0
+	homed := false
 	for !ctx.Done {
 		if backBtn.Clicked(ctx) {
 			return 0, false
@@ -332,6 +343,16 @@ func composerPickScreenFrom(ctx *Context, th *Colors, title, lead string, rows [
 			// A header that fills the frame would leave no room for a row and
 			// the list could never advance. One row always draws.
 			shown = 1
+		}
+		if !homed {
+			homed = true
+			if sel >= start+shown {
+				// The seeded cursor is past the first page. Re-home exactly as
+				// the Up/Down handler does, and redraw before anything is
+				// tappable so no frame shows a cursor that is not on screen.
+				start = sel
+				continue
+			}
 		}
 		body := pageOps
 		// The hit areas, one per row this page COUNTED as inside the box. Not

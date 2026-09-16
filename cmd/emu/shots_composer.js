@@ -664,7 +664,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   const hashRows = window.shScreen();
   must(hashRows, "hash 1", "the payload's hash row");
   must(hashRows, "abababab..abababab", "the hash row's digest");
-  must(hashRows, "Type 64 hex", "the type-it row");
+  must(hashRows, "Type a digest", "the type-it row");
   must(hashRows, "No hash lock", "the clear row");
   // §8i draws only once the operator is actually TAKING a hash (r0 I-8).
   // "The preimage must be", not "The hash must be SHA-256": SPEC_hashlock_kinds
