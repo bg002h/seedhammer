@@ -823,13 +823,20 @@ export async function runKindTrial() {
   // different kind -- so ripemd160 of the wrong preimage fails here, and so
   // does hash160 where ripemd160 was asked for. Comparing against a value the
   // device supplied would be the tautology this file warns about for sha256.
+  // WIDTH FIRST, THEN VALUE -- and the order is the whole point. Written the
+  // other way round (it was), the length check sits BELOW an equality against a
+  // 40-character constant and can never fail: a padded 64-character digest is
+  // caught by the equality, and the length line is dead code advertising §7.3
+  // coverage it does not add. Checking width first gives the padding case its
+  // own failing input and its own message, which is what names the defect.
+  if (last.digest.length !== 40) {
+    throw new Error(`a ripemd160 digest reached the seam as ${last.digest.length} hex ` +
+      `characters, not 40 -- the alloc-gate padding is observable again (§7.3).\n` +
+      `  stored: ${last.digest}`);
+  }
   if (last.digest !== ANCHOR_HARD_RIPEMD160) {
     throw new Error("the stored ripemd160 digest is not the corpus's value for this " +
       `phrase and method.\n  stored: ${last.digest}\n  corpus: ${ANCHOR_HARD_RIPEMD160}`);
-  }
-  if (last.digest.length !== 40) {
-    throw new Error(`a ripemd160 digest reached the seam as ${last.digest.length} hex ` +
-      "characters, not 40 -- the alloc-gate padding is observable again (§7.3).");
   }
   return { ok: true, kind: last.kind, digest: last.digest, modal: squash(modal).slice(0, 200) };
 }

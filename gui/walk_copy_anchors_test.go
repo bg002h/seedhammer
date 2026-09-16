@@ -3,6 +3,7 @@ package gui
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -40,53 +41,190 @@ import (
 // are not composer copy. What it gates is every fragment that comes from a
 // composerCopy* body, which is where all three failures were.
 func TestEmulatorWalksQuoteCopyThatStillExists(t *testing.T) {
-	for _, tc := range []struct {
-		walk     string // file under cmd/emu
-		fragment string // what the walk waits for
-		produced string // the copy that must still contain it
-		why      string
-	}{
-		{"walk_hashlock_phrase.js", "32-byte preimage", composerCopyHashKindLead(),
-			"§7.1's kind screen lead"},
-		{"walk_hashlock_phrase.js", "run ms hashlock --kind",
-			composerCopyHashlockReconcile("b8..cb", "hardened", 28, md.KindSha256),
-			"§13.2's reconcile instruction, stale across two folds before this gate"},
-		{"walk_hashlock_phrase.js", "ripemd160",
-			composerCopyHashlockConfirm("09..6b", "hardened", 28, "", "", md.KindRipemd160),
-			"§12 item 2's non-sha256 trial: the confirm modal must name the kind the " +
-				"walk then asserts through the seam"},
-		// THE FOURTH OCCURRENCE, and the one that proves the table has to be
-		// filled by RUNNING the walk rather than by reading it. The confirm
-		// modal was reworded to "Write down the phrase, method, hash kind and
-		// digest now" when §13.2 added the kind to it; the walk still waited
-		// for "Write down this phrase", so it threw on its FIRST trial and had
-		// done since that fold. I built this gate, listed three fragments I
-		// knew about, and missed this one -- it surfaced sixty seconds into
-		// the first actual run of the walk.
-		{"walk_hashlock_phrase.js", "Write down the phrase",
-			composerCopyHashlockConfirm("b8..cb", "sha256", 28, "", "", md.KindSha256),
-			"§4.4's confirm modal, stale in the walk since §13.2 added the kind to it"},
-		{"shots_composer.js", "The preimage must be", composerCopyHashRule(),
-			"§8i's ENTRY body, which names no hash function since §7.2"},
-		{"shots_composer.js", "Type a digest", composerHashRowHex,
-			"the typed-digest row, renamed from `Type 64 hex` by §7.1"},
-	} {
-		t.Run(tc.walk+"/"+tc.fragment, func(t *testing.T) {
-			if !strings.Contains(tc.produced, tc.fragment) {
-				t.Errorf("PRODUCTION NO LONGER EMITS %q (%s).\nThe walk waits for it and would "+
-					"throw at that frame -- and no compiler, vet or node --check can see it, "+
-					"because the walks do not run in CI.\nProduced now: %q",
-					tc.fragment, tc.why, tc.produced)
-			}
-			raw, err := os.ReadFile(filepath.Join("..", "cmd", "emu", tc.walk))
-			if err != nil {
-				t.Fatalf("reading the walk: %v", err)
-			}
-			if !strings.Contains(string(raw), tc.fragment) {
-				t.Errorf("cmd/emu/%s no longer contains %q (%s). Either the walk was edited "+
-					"away from the copy, or this row is stale -- both mean the gate below it "+
-					"is not gating what it names.", tc.walk, tc.fragment, tc.why)
-			}
-		})
+	// EVERY FRAGMENT THE WALKS WAIT FOR, checked against EVERY copy body this
+	// package declares -- not a hand-picked list.
+	//
+	// THE HAND-PICKED LIST WAS THE DEFECT. The first version of this gate held
+	// four rows and its comment claimed it covered "every fragment that comes
+	// from a composerCopy* body". Measured by review: it covered 6 of 26. Three
+	// rewordings the walks wait for -- "One phrase per policy", "check the
+	// digest matches", and §8.3's census heading -- would each break a walk
+	// while this test printed ok. A gate that names its own coverage wrongly is
+	// worse than no gate, because it stops anyone looking.
+	//
+	// So coverage is now STRUCTURAL. Every quoted fragment passed to waitFor or
+	// must in the walk files must either appear in some copy body, or be listed
+	// in notComposerCopy below WITH A REASON. Adding a waitFor for new copy
+	// fails here until one of those is true.
+	//
+	// composerCopyTable() is the enumeration it checks against, and
+	// TestComposerCopyTableCoversEveryBody proves that table holds every
+	// composerCopy* function declared in composer_copy.go -- so "some copy
+	// body" really does mean all of them.
+	corpus := make([]string, 0, 128)
+	for _, r := range composerCopyTable() {
+		corpus = append(corpus, normalizeDrawn(r.got))
 	}
+	// Bodies that take arguments are rendered by the table at one sample; add
+	// the kind-bearing variants the walks actually meet.
+	for _, k := range composerHashKinds {
+		corpus = append(corpus,
+			normalizeDrawn(composerCopyHashlockConfirm("b8..cb", "hardened", 28, "", "", k)),
+			normalizeDrawn(composerCopyHashlockReconcile("b8..cb", "hardened", 28, k)),
+			normalizeDrawn(composerCopyHashRuleForKinds([]md.HashKind{k})),
+			normalizeDrawn(composerCopyTwentyByteUnseen(k)),
+			normalizeDrawn(composerHashRowHex),
+			normalizeDrawn(composerHashRowPhrase))
+	}
+	// ARGUMENT-DEPENDENT BODIES AT THE ARGUMENTS THE WALKS USE. The table
+	// renders each body once, at the spec's own example; §8.3's heading is
+	// rendered there at n=2 and the walk meets it at n=1, so the table's
+	// sample did not contain the walk's string. That is the shape that made
+	// the first version of this gate under-cover: a body IS in the table and
+	// still does not produce the fragment being waited for.
+	for n := 1; n <= 3; n++ {
+		corpus = append(corpus, normalizeDrawn(composerCopyPreimagePlateHeading(n)))
+	}
+
+	for _, walk := range []string{"walk_hashlock_phrase.js", "shots_composer.js"} {
+		raw, err := os.ReadFile(filepath.Join("..", "cmd", "emu", walk))
+		if err != nil {
+			t.Fatalf("reading %s: %v", walk, err)
+		}
+		frags := walkWaitFragments(string(raw))
+		if len(frags) < 10 {
+			t.Fatalf("%s: extracted only %d fragments -- the extractor has stopped "+
+				"matching this file's call shapes, so this gate is measuring nothing",
+				walk, len(frags))
+		}
+		for _, f := range frags {
+			if reason, exempt := notComposerCopy[f]; exempt {
+				_ = reason
+				continue
+			}
+			found := false
+			for _, body := range corpus {
+				if strings.Contains(body, normalizeDrawn(f)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("cmd/emu/%s waits for %q, which NO composer copy body emits.\n"+
+					"The walks assert on screen text and do not run in CI, so a reworded "+
+					"body leaves them syntactically perfect and broken at that frame.\n"+
+					"Either the copy drifted, or this fragment is not composer copy and "+
+					"belongs in notComposerCopy with a reason.", walk, f)
+			}
+		}
+	}
+}
+
+// walkWaitFragments extracts the quoted strings a walk waits for or asserts on.
+//
+// IT FAILS LOUD IF IT MATCHES NOTHING (the caller checks the count): an
+// extractor that silently stops matching turns this whole gate green forever,
+// which is the failure mode of every "scan the tree" test.
+func walkWaitFragments(src string) []string {
+	re := regexp.MustCompile(`(?:waitFor|must)\((?:[^,()]*,\s*)?"((?:[^"\\]|\\.){6,}?)"`)
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range re.FindAllStringSubmatch(src, -1) {
+		f := m[1]
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		out = append(out, f)
+	}
+	return out
+}
+
+// notComposerCopy lists fragments that are NOT drawn by a composerCopy* body,
+// each with why. Screen titles, fixed widget labels and menu rows live in the
+// screens themselves; payload-derived text is data, not copy.
+//
+// An entry here is a claim that rewording the named thing cannot break a walk
+// silently -- so keep the reasons specific enough to be checkable.
+var notComposerCopy = map[string]string{
+	// ── payload- and fixture-derived DATA, not copy ──────────────────────
+	// Digests, fingerprints, origins and slot labels come from the payload the
+	// walk loaded. Rewording is not possible; they change when the FIXTURE
+	// changes, and the walk's own corpus constants are what gate that.
+	"73c5da0a m/48h/0h/0h/2h":                 "payload/fixture-derived data",
+	"73c5da0a m/48h/0h/1h/2h":                 "payload/fixture-derived data",
+	"@0: 73c5da0a m/48'/0'/0'/2'":             "payload/fixture-derived data",
+	"@1: 73c5da0a m/48'/0'/1'/2'":             "payload/fixture-derived data",
+	"@2: b8688df1 m/48'/0'/0'/2'":             "payload/fixture-derived data",
+	"Slot @0 expects a key at m/48h/0h/0h/2h": "payload/fixture-derived data",
+	"Slot @0 expects a key at m/48h/0h/0h/3h": "payload/fixture-derived data",
+	"Slot @0, Path 1 key 1 of 2":              "payload/fixture-derived data",
+	"Slot @0: 73c5da0a m/48h/0h/0h/2h":        "payload/fixture-derived data",
+	"Slot @1 expects a key at m/48h/0h/1h/2h": "payload/fixture-derived data",
+	"Slot @1 expects a key at m/48h/0h/1h/3h": "payload/fixture-derived data",
+	"Slot @2 expects a key at m/48h/0h/2h/2h": "payload/fixture-derived data",
+	"Slot @2 expects a key at m/48h/0h/2h/3h": "payload/fixture-derived data",
+	"Slot @2: b8688df1 m/48h/0h/0h/2h":        "payload/fixture-derived data",
+	"Slots @0 and @1 are the same seed.":      "payload/fixture-derived data",
+	"abababab..abababab":                      "payload/fixture-derived data",
+	"hash abababab..abababab":                 "payload/fixture-derived data",
+
+	// ── drawn by screens, not by a composerCopy* body ────────────────────
+	// Screen titles, menu rows, computed path summaries, and the copy of OTHER
+	// programs (Load Payload, the BIP-39 passphrase flow, Scan cards). These
+	// can still drift -- a retitled screen breaks a walk exactly as a reworded
+	// body does -- but they are outside what §8's copy table enumerates, so
+	// this gate cannot check them and says so rather than implying it can.
+	"(any slots)":                              "screen title, menu row, computed summary or another program's copy",
+	"12960 blocks":                             "screen title, menu row, computed summary or another program's copy",
+	"12960 blocks (about 90.0 days)":           "screen title, menu row, computed summary or another program's copy",
+	"A SECRET is stored unencrypted in flash.": "screen title, menu row, computed summary or another program's copy",
+	"Add a BIP-39 passphrase?":                 "screen title, menu row, computed summary or another program's copy",
+	"Add a spend path":                         "screen title, menu row, computed summary or another program's copy",
+	"Build a new policy":                       "screen title, menu row, computed summary or another program's copy",
+	"Build my own paths":                       "screen title, menu row, computed summary or another program's copy",
+	"FROM PAYLOAD":                             "screen title, menu row, computed summary or another program's copy",
+	"Keep this payload loaded?":                "screen title, menu row, computed summary or another program's copy",
+	"Keyless template - no addresses.":         "screen title, menu row, computed summary or another program's copy",
+	"Keys loaded: 2, plus 1 seed.":             "screen title, menu row, computed summary or another program's copy",
+	"Leave unseated":                           "screen title, menu row, computed summary or another program's copy",
+	"Load Payload":                             "screen title, menu row, computed summary or another program's copy",
+	"Load it?":                                 "screen title, menu row, computed summary or another program's copy",
+	"No hash lock":                             "screen title, menu row, computed summary or another program's copy",
+	"No slot is seated":                        "screen title, menu row, computed summary or another program's copy",
+	"No slot is seated, so there is a template and nothing else.": "screen title, menu row, computed summary or another program's copy",
+	"Path 1: 2-of-2":                      "screen title, menu row, computed summary or another program's copy",
+	"Path 1: 2-of-3":                      "screen title, menu row, computed summary or another program's copy",
+	"Path 1: KEY-LESS (EXPERIMENTAL)":     "screen title, menu row, computed summary or another program's copy",
+	"Path 1: hash only":                   "screen title, menu row, computed summary or another program's copy",
+	"Path 2: 1 key":                       "screen title, menu row, computed summary or another program's copy",
+	"Path 2: 1 key + 12960 blocks":        "screen title, menu row, computed summary or another program's copy",
+	"Path 2: 1 key + hash + 12960 blocks": "screen title, menu row, computed summary or another program's copy",
+	"Path 2: 2-of-3":                      "screen title, menu row, computed summary or another program's copy",
+	"Payload Digest":                      "screen title, menu row, computed summary or another program's copy",
+	"Payload Warnings":                    "screen title, menu row, computed summary or another program's copy",
+	"Plates To Cut":                       "screen title, menu row, computed summary or another program's copy",
+	"Policy-ID":                           "screen title, menu row, computed summary or another program's copy",
+	"Review":                              "screen title, menu row, computed summary or another program's copy",
+	"Scan cards":                          "screen title, menu row, computed summary or another program's copy",
+	"Seat keys into this template?":       "screen title, menu row, computed summary or another program's copy",
+	"SeedHammer":                          "screen title, menu row, computed summary or another program's copy",
+	"Spend paths":                         "screen title, menu row, computed summary or another program's copy",
+	"Stamp BOTH stubs on each key card:":  "screen title, menu row, computed summary or another program's copy",
+	"TEXT ONLY":                           "screen title, menu row, computed summary or another program's copy",
+	"TYPE IT":                             "screen title, menu row, computed summary or another program's copy",
+	"Template plus key cards":             "screen title, menu row, computed summary or another program's copy",
+	"The policy itself":                   "screen title, menu row, computed summary or another program's copy",
+	"This device cannot confirm a key was derived at the origin it declares.": "screen title, menu row, computed summary or another program's copy",
+	"This engraves 1 plate.": "screen title, menu row, computed summary or another program's copy",
+	"Type a seed":            "screen title, menu row, computed summary or another program's copy",
+	"Verify off-device.":     "screen title, menu row, computed summary or another program's copy",
+	"Watch-only (keys)":      "screen title, menu row, computed summary or another program's copy",
+	"Which form?":            "screen title, menu row, computed summary or another program's copy",
+	"Which method?":          "screen title, menu row, computed summary or another program's copy",
+	"md1 template: 1 plate (key-less wallet policy)": "screen title, menu row, computed summary or another program's copy",
+	"seed 1":                               "screen title, menu row, computed summary or another program's copy",
+	"slots: 0 / keys available: 2":         "screen title, menu row, computed summary or another program's copy",
+	"slots: 2 / keys available: 2":         "screen title, menu row, computed summary or another program's copy",
+	"there is a template and nothing else": "screen title, menu row, computed summary or another program's copy",
 }
