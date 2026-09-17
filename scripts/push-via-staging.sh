@@ -64,10 +64,27 @@ TIP="$(git rev-parse HEAD)"   # full 40 chars: an abbreviated SHA makes gh queri
 SLUG="$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
 echo "== $SLUG @ $BRANCH -- staging $TIP ($(git rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo '?') ahead)"
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "FATAL: working tree is dirty. Empty your hands before a push window." >&2
-  git status --short >&2
+# TRACKED modifications block the window; UNTRACKED files do not.
+#
+# Uncommitted tracked work means the tip about to be gated is not the work you
+# have, and mid-window is exactly when someone commits the rest -- which is the
+# 2026-08-16 failure this ritual exists to prevent. An untracked file carries
+# none of that risk: it cannot reach the remote and cannot move the tip. Blocking
+# on it just means a scratch directory stops a legitimate push, which is what
+# happened on 2026-09-17 -- `.claude/worktrees/` aborted this script's own first
+# run, and mnemonic-toolkit carries 38 untracked recon notes that would abort
+# every push there forever.
+#
+# They are still REPORTED, because "I forgot to `git add` it" is a real mistake
+# and silence would hide it.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "FATAL: tracked files are modified. Empty your hands before a push window." >&2
+  git status --short --untracked-files=no >&2
   exit 1
+fi
+if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo "== note: untracked files present -- NOT blocking, NOT pushed:"
+  git ls-files --others --exclude-standard | sed 's/^/     /'
 fi
 echo "== FREEZE $BRANCH now: no commits until this script finishes"
 
