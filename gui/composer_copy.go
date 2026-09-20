@@ -219,6 +219,35 @@ func composerCopyMixedLockBases() string {
 		"checks each path on its own."
 }
 
+// composerCopyOutsideLianaModel is the fable review r0 lens-5 I-1/I-2 notice:
+// one FIXED head naming Liana's own model, and one VARIABLE sentence naming
+// the first way, in Liana's own order of refusal, that this policy sits
+// outside it (composerLianaOutsideModelClass picks `class`).
+//
+// LIANA v8.0's MODEL, MEASURED BY RUNNING `LianaDescriptor::from_str` -- the
+// exact call the GUI's "Import the wallet" screen makes
+// (`step/descriptor/mod.rs:47`), which discards the reason and shows only
+// "Failed to read the descriptor" -- IS: exactly one unlocked path, at least
+// one path locked by `older` in BLOCKS, and no hash anywhere. 17 of the 56
+// composable shapes fit it; the other 39 fall into nine classes, and the
+// device named three of them (NUMS at §8f, same-seed at §8g twice) before
+// this notice. The demo payload's own plain 2-of-3 is in the largest silent
+// class -- no recovery path at all -- and an operator who composes "me now, my
+// heir after 2027-01-01" (`after`, the most natural inheritance clock) or the
+// hashlock-gated preset with a KEYED hash path was told nothing.
+//
+// ONE SENTENCE, NOT NINE. §7e's consent has one line budget per fact and a
+// policy usually fails more than one of Liana's checks at once (I-2's X24
+// fails the second-unlocked-path check AND could be misread as "no unlocked
+// path" if it had none) -- so this names the FIRST class that applies, in
+// Liana's own order of refusal, and composerLianaOutsideModelClass is the
+// only place that order is written down.
+func composerCopyOutsideLianaModel(class string) string {
+	return "OUTSIDE LIANA'S MODEL\n" +
+		"Liana takes one unlocked path, at least one path locked by older in " +
+		"blocks, and no hash. This policy: " + class + ". Bitcoin Core imports it."
+}
+
 // ─── §8g: C29, one seed at two slots INSIDE one path ─────────────────────────
 
 // composerCopySameSeedThreshold is §8g's FIRST body: the shared seed's slots

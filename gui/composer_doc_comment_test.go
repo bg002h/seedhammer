@@ -39,15 +39,22 @@ import (
 // replaced with dedup by fingerprint -- and composerCopyMixedLockBases took
 // composerCopySameSeedThreshold's. A named list only guards the names on it,
 // so the list grows with every symbol a fold puts at risk.
+// composerCopyOutsideLianaModel and composerLianaOutsideModelClass (fable
+// review r0 lens 5 I-1/I-2) are added on the same principle: both are new
+// helpers inserted directly beneath an existing doc comment in a file this
+// fold also edits, so both are exactly the shape of insertion that stole a
+// doc comment twice before.
 var composerDocOwners = map[string]string{
-	"composerFlow":                  "composer_flow.go",
-	"composerFlowExit":              "composer_flow.go",
-	"composerPageLines":             "composer_paged.go",
-	"composerTextBand":              "composer_paged.go",
-	"composerSecretCards":           "composer_flow.go",
-	"composerCopySameSeedThreshold": "composer_copy.go",
-	"composerSeedDerivedSlots":      "composer_flow.go",
-	"composerCopyMixedLockBases":    "composer_copy.go",
+	"composerFlow":                   "composer_flow.go",
+	"composerFlowExit":               "composer_flow.go",
+	"composerPageLines":              "composer_paged.go",
+	"composerTextBand":               "composer_paged.go",
+	"composerSecretCards":            "composer_flow.go",
+	"composerCopySameSeedThreshold":  "composer_copy.go",
+	"composerSeedDerivedSlots":       "composer_flow.go",
+	"composerCopyMixedLockBases":     "composer_copy.go",
+	"composerCopyOutsideLianaModel":  "composer_copy.go",
+	"composerLianaOutsideModelClass": "composer_consent.go",
 }
 
 // TestComposerHelpersDidNotStealADocComment is the gate for the above.

@@ -251,6 +251,16 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	if shape.KeyPath == md.KeyPathNone && composerMixesLockBases(shape.Branches) {
 		lines = append(lines, "", composerCopyMixedLockBases())
 	}
+	// OUTSIDE LIANA'S MODEL (fable review r0 lens 5 I-1/I-2). Liana imports
+	// 17 of 56 composable shapes; the other 39 fall into nine classes, of
+	// which §8f (NUMS, above) and §8g (same-seed, below) already name two.
+	// This names the rest -- tpl.Root is needed for the wrapper class (sh /
+	// sh(wsh)), which PolicyShape does not carry: policyShape walks tagWsh
+	// and tagSh identically (md/policy_shape.go), so a legacy wrapper is
+	// indistinguishable from wsh on shape.Branches alone.
+	if class := composerLianaOutsideModelClass(tpl.Root, shape); class != "" {
+		lines = append(lines, "", composerCopyOutsideLianaModel(class))
+	}
 	// §8a, RESTATED AT CONSENT (fable review r0, lens 1 I-1 = lens 3 I-1).
 	//
 	// §8a fires at path CREATION, several screens and possibly several edits
@@ -342,4 +352,120 @@ func composerMixesLockBases(branches []md.Branch) bool {
 		}
 	}
 	return time && height
+}
+
+// composerLianaOutsideModelClass names the FIRST way, in Liana's own order of
+// refusal, that this policy sits outside Liana 8.0's spending-policy model --
+// exactly one unlocked path, at least one path locked by `older` in blocks,
+// and no hash anywhere -- or "" when it fits. `root` is the DECODED wrapper
+// (md.ExpandWalletPolicyChunks' Template.Root), because PolicyShape does not
+// carry it: policyShape walks tagWsh and tagSh identically, so a legacy sh
+// wrapper is indistinguishable from wsh on shape.Branches alone.
+//
+// THE ORDER IS THE WHOLE PRECISION OF THIS FUNCTION, and it is Liana's own,
+// not the review report's table order: the wrapper and the taproot internal
+// key are checked before Liana ever walks the policy tree, so those two are
+// named ahead of a policy-content reason even when a shape is outside the
+// model in more than one way at once. decaying-multisig-wsh has BOTH an
+// after(...) lock and no unlocked path; this reports the lock it hit
+// (`analysis.rs:212-257` before `:633`), not every reason it is refused.
+//
+// A REAL SPENDABLE TAPROOT KEY PATH COUNTS AS AN UNLOCKED PATH (lens 5 I-2):
+// md.KeyPathSpendable means "a real key can spend directly, WITHOUT
+// satisfying any leaf" (md/policy_shape.go), which is exactly what an
+// unlocked path IS. Every shipped tr preset puts its primary there rather
+// than in a leaf, so without this a tr wallet with one real key path and one
+// timelocked leaf -- Liana's OWN accepted shape -- would read as "no
+// unlocked path" (its leaf list holds one entry and that entry is locked).
+// KeyPathNUMS does not count: a NUMS key spends no path at all.
+func composerLianaOutsideModelClass(root md.ScriptKind, shape md.PolicyShape) string {
+	// 1. Liana takes wsh or tr only (analysis.rs:586-587). ScriptSh covers
+	// BOTH bare sh and sh(wsh) (composerScriptLine's grouping): the composer
+	// only ever composes a legacy wrapper as a single sortedmulti path
+	// (ErrComposeLegacyWrapperShape), so this class and "no locked path"
+	// below are always simultaneously true of a legacy-wrapper shape, and
+	// this class is named first because Liana's wrapper check runs before
+	// it ever looks for a recovery path.
+	if root == md.ScriptSh {
+		return "legacy wrapper"
+	}
+	// 2. NUMS internal key under tr (analysis.rs:568-569). §8f
+	// (composerCopyNUMS) already names this by itself; this is a SEPARATE
+	// class in Liana's own list, not a duplicate of it -- the two bodies say
+	// different things (§8f is general to every coordinator; this one is
+	// Liana's own order-of-refusal notice).
+	if shape.KeyPath == md.KeyPathNUMS {
+		return "NUMS key path"
+	}
+	var (
+		anyLock    bool
+		hash       bool
+		after      bool
+		olderUnits bool
+		unlocked   int
+	)
+	if shape.KeyPath == md.KeyPathSpendable {
+		unlocked++
+	}
+	olderBlocks := map[uint32]int{}
+	for _, b := range shape.Branches {
+		if len(b.Locks) == 0 {
+			unlocked++
+		}
+		for _, l := range b.Locks {
+			anyLock = true
+			switch l.Kind {
+			case md.LockAfterHeight, md.LockAfterTime:
+				after = true
+			case md.LockOlderUnits:
+				olderUnits = true
+			case md.LockOlderBlocks:
+				olderBlocks[l.Value]++
+			}
+		}
+		if len(b.Hashlocks) > 0 {
+			hash = true
+		}
+	}
+	switch {
+	// 3. No lock ANYWHERE -- a plain multisig or single key has no recovery
+	// path at all (analysis.rs:554-558, :472-474, :583). The demo payload's
+	// own plain 2-of-3 is this class.
+	case !anyLock:
+		return "no locked path"
+	// 4. A hash, keyed or key-less, any kind (analysis.rs:186-199, :212-257
+	// only match Key/Threshold/Older/After). Checked before the lock-shaped
+	// classes below because it is a PARSE-time refusal, not a policy-shape
+	// one -- Liana never gets far enough to ask whether this path is a
+	// locked recovery path.
+	case hash:
+		return "a hash lock"
+	// 5. after(...), any path (analysis.rs:212-257).
+	case after:
+		return "an absolute lock"
+	// 6. older in 512-second units, any path (csv_check :139-145).
+	case olderUnits:
+		return "a lock in time units"
+	// 7. No unlocked path -- every path timelocked (analysis.rs:633).
+	case unlocked == 0:
+		return "no unlocked path"
+	}
+	// 8. Two locked paths with the same older value (analysis.rs:624-626).
+	// Only LockOlderBlocks values reach here: an older-units or after value
+	// would already have returned above.
+	for _, n := range olderBlocks {
+		if n >= 2 {
+			return "two paths with one lock"
+		}
+	}
+	// 9. A second unlocked path (analysis.rs:611-616). Liana refuses a
+	// second unlocked MULTI-key path outright; a second unlocked path that
+	// is a SINGLE key is silently folded into the first path as an extra
+	// key, without changing its threshold (lens 5 I-2, X24) -- so this
+	// class covers both: naming BOTH as "Liana will not show this wallet as
+	// built" is the whole point of not distinguishing them here.
+	if unlocked >= 2 {
+		return "a second unlocked path"
+	}
+	return ""
 }
