@@ -106,6 +106,64 @@ func TestPolicyShapeNeverClaimsAPlainThresholdItCannotSee(t *testing.T) {
 	if b.Keys != 1 {
 		t.Errorf("Keys = %d, want 1", b.Keys)
 	}
+	// THE MIXED BRANCH, and this is the case the guard did NOT cover when
+	// Branch.K/N widened to "the one multi at any depth" (round-1 review
+	// I-2). The fixture above holds no multi node at all, so it never enters
+	// the widened arm and passed either way; the risk the widening created is
+	// a branch holding one multi PLUS other key material.
+	//
+	//   wsh(and_v(v:older(10), or_d(multi(2,@0,@1,@2), c:pk_k(@3))))
+	//
+	// splitBranches splits or_*/andor but not an `or` under and_v, so this is
+	// ONE branch with Keys == 4 and a multi of 3. Reporting 2-of-3 for it
+	// labels a branch @3 can spend ALONE after 10 blocks as a 2-of-3 -- the
+	// exact misreading this test's own docstring names.
+	mixed := node{tag: tagWsh, body: childrenBody{children: []node{{
+		tag: tagAndV,
+		body: childrenBody{children: []node{
+			{tag: tagVerify, body: childrenBody{children: []node{{tag: tagOlder, body: timelockBody(10)}}}},
+			{tag: tagOrD, body: childrenBody{children: []node{
+				{tag: tagMulti, body: multiKeysBody{k: 2, indices: []uint8{0, 1, 2}}},
+				{tag: tagCheck, body: childrenBody{children: []node{{tag: tagPkK, body: keyArgBody{index: 3}}}}},
+			}}},
+		}},
+	}}}}
+	ms := policyShape(mixed)
+	if !ms.Complete {
+		t.Fatal("the mixed branch should be understood")
+	}
+	if len(ms.Branches) != 1 {
+		t.Fatalf("branches = %d, want 1 -- splitBranches does not split an or under and_v, "+
+			"which is what makes this branch mixed", len(ms.Branches))
+	}
+	mb := ms.Branches[0]
+	if mb.Keys != 4 {
+		t.Fatalf("INCONCLUSIVE: Keys = %d, want 4 -- the fixture is not a mixed branch", mb.Keys)
+	}
+	if mb.K != 0 || mb.N != 0 {
+		t.Errorf("K/N = %d/%d for a branch holding a multi(2,@0,@1,@2) AND c:pk_k(@3), want 0/0 "+
+			"-- @3 can spend this branch alone after 10 blocks, and labelling it %d-of-%d "+
+			"tells an operator two of three signatures are needed",
+			mb.K, mb.N, mb.K, mb.N)
+	}
+	// The same shape without the timelock, so the finding's second tree is
+	// pinned too: a branch is mixed because of its KEYS, not its locks.
+	mixedNoLock := node{tag: tagWsh, body: childrenBody{children: []node{{
+		tag: tagAndV,
+		body: childrenBody{children: []node{
+			{tag: tagVerify, body: childrenBody{children: []node{
+				{tag: tagMulti, body: multiKeysBody{k: 2, indices: []uint8{0, 1, 2}}}}}},
+			{tag: tagCheck, body: childrenBody{children: []node{{tag: tagPkK, body: keyArgBody{index: 3}}}}},
+		}},
+	}}}}
+	ns := policyShape(mixedNoLock)
+	if !ns.Complete || len(ns.Branches) != 1 {
+		t.Fatalf("INCONCLUSIVE: complete=%v branches=%d", ns.Complete, len(ns.Branches))
+	}
+	if nb := ns.Branches[0]; nb.K != 0 || nb.N != 0 {
+		t.Errorf("K/N = %d/%d for and_v(v:multi(2,@0,@1,@2), c:pk_k(@3)), want 0/0 "+
+			"(Keys = %d)", nb.K, nb.N, nb.Keys)
+	}
 }
 
 // TestPolicyShapeRefusesAnUnknownTag is the honesty contract itself.

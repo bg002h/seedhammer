@@ -43,11 +43,18 @@ const (
 // whole script for wsh/sh.
 type Branch struct {
 	// K, N are the threshold of the ONE multi/sortedmulti/multi_a/
-	// sortedmulti_a node the branch contains, at any depth — so a threshold
-	// behind a timelock or a hash reports its k-of-n too (fable review r0
-	// I-3), which is what §7e's consent and composerSelfCheck compare. Zero
-	// means the branch holds no threshold node, or more than one — NOT
-	// "1-of-1", which §5 lowers to pk and which Keys == 1 reports.
+	// sortedmulti_a node the branch contains, at any depth, AND ONLY WHEN
+	// THAT MULTI ACCOUNTS FOR EVERY KEY THE BRANCH REFERENCES. The first half
+	// is fable review r0 I-3 — a threshold behind a timelock or a hash must
+	// report its k-of-n, which is what §7e's consent and composerSelfCheck
+	// compare; the second is its round-1 review I-2 — a branch holding a
+	// multi PLUS another key has no single k-of-n, and reporting the multi's
+	// would say two of three signatures are needed where one other key spends
+	// alone.
+	//
+	// Zero therefore means: no threshold node, more than one, or one that
+	// does not account for the branch's keys. It does NOT mean "1-of-1",
+	// which §5 lowers to pk and which Keys == 1 reports.
 	K, N int
 	// Keys counts distinct key placeholders the branch references. It is set
 	// even when K/N are not, so a branch is never reported as keyless.
@@ -240,7 +247,7 @@ func branchOf(n node, depth int) (Branch, bool) {
 	// it was the sorted spelling.
 	if k, nkeys, sorted, ok := plainMulti(n); ok {
 		br.K, br.N, br.Sorted = k, nkeys, sorted
-	} else if k, nkeys, sorted, ok := soleMulti(n); ok {
+	} else if k, nkeys, sorted, ok := soleMulti(n); ok && nkeys == br.Keys {
 		// A THRESHOLD BEHIND A LOCK OR A HASH IS STILL A THRESHOLD (fable
 		// review r0 I-3). §5 lowers a multi-key path carrying a timelock to
 		// and_v(v:multi(k,...),older(n)) and one carrying a hash deeper still,
@@ -252,9 +259,26 @@ func branchOf(n node, depth int) (Branch, bool) {
 		// composerSelfCheck fell back to comparing the key COUNT there, so a
 		// mis-tapped k was invisible on both the promise and the check.
 		//
-		// The walk requires the branch to contain EXACTLY ONE multi node, so
-		// nothing is invented for a shape with two: two thresholds in one
-		// branch have no single k-of-n, and K/N stay zero for them as before.
+		// TWO CONDITIONS, AND THE SECOND IS ROUND-1 REVIEW I-2. The walk
+		// requires the branch to contain EXACTLY ONE multi node -- two
+		// thresholds in one branch have no single k-of-n -- AND requires that
+		// multi to account for EVERY key the branch references (`nkeys ==
+		// br.Keys`).
+		//
+		// Without the second, a branch holding one multi PLUS other key
+		// material reported the multi's threshold as the BRANCH's.
+		// splitBranches splits or_*/andor but not an `or` sitting under and_v
+		// or a wrapper, so that branch is constructible and the wire carries
+		// it: wsh(and_v(v:older(10), or_d(multi(2,@0,@1,@2), c:pk_k(@3))))
+		// reported 2-of-3 for a branch @3 can spend ALONE after 10 blocks --
+		// the exact misreading the anti-invention rule below names, arriving
+		// through the arm that was widened to fix a different one.
+		//
+		// `br.Keys` is DISTINCT placeholders and `nkeys` is the multi's index
+		// count, so the equality is "the branch's keys are exactly this
+		// threshold's keys". A multi that repeated a slot would make nkeys
+		// exceed br.Keys and fall to 0/0, which is the honest answer for a
+		// policy md.DuplicateKeySlot refuses anyway.
 		br.K, br.N, br.Sorted = k, nkeys, sorted
 	}
 	return br, true
@@ -262,8 +286,13 @@ func branchOf(n node, depth int) (Branch, bool) {
 
 // soleMulti reports the threshold of the ONE multi/sortedmulti/multi_a/
 // sortedmulti_a node a branch contains, at any depth. ok is false when the
-// branch has none or more than one, so a caller never gets a k-of-n that
-// describes only part of the branch.
+// branch has none or more than one.
+//
+// IT IS NOT SUFFICIENT ON ITS OWN: the caller also requires the multi's key
+// count to equal the branch's distinct-placeholder count, because a branch
+// can hold one multi and other key material beside it (round-1 review I-2).
+// "The one multi" and "the branch's threshold" are different questions, and
+// this function answers only the first.
 func soleMulti(n node) (k, nkeys int, sorted, ok bool) {
 	var found int
 	var walk func(node)
