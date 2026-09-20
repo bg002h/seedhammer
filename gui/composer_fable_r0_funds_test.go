@@ -30,6 +30,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip39"
 	"seedhammer.com/md"
+	"seedhammer.com/mk"
 )
 
 var fableFundsSeeds = []string{
@@ -762,5 +763,78 @@ func TestFableValidatePathListOrdersTheCapLast(t *testing.T) {
 			t.Errorf("%s: refused with %v, want %v -- the cap's remedy does not cure this",
 				tc.what, err, tc.want)
 		}
+	}
+}
+
+// ─── r1 review M-1: the mk1-card door is the other testnet entrance ─────────
+
+// TestFableTestnetCardIsNotOfferedAsASource is round-1 review M-1.
+//
+// r0's M-6 closed the `key:` record door and left the mk1-card door open.
+// mk.Card.Network is "mainnet" | "testnet" by design, mk/encode.go admits the
+// testnet public version, and the composer's card door reaches the material
+// through decodeXpubBytes -- which parses and never asks the network. So a
+// testnet card was offered in the seating pick-list, the slot bound its
+// chain-code||point, and the consent derived mainnet bc1q... for material
+// declared under coin type 1'. The door count does not flag it either: an mk1
+// card is ClassMDMK, so it never reaches composerCopyNotUnderstood.
+//
+// §4f is "mainnet-only by construction" at BOTH entrances or at neither.
+func TestFableTestnetCardIsNotOfferedAsASource(t *testing.T) {
+	m, err := bip39.ParseMnemonic(fableFundsSeeds[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hard = 0x80000000
+	tpub, tfp, err := deriveAccountXpub(m, "", &chaincfg.TestNet3Params,
+		[]uint32{48 | hard, 1 | hard, 0 | hard, 2 | hard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(tpub, "tpub") {
+		t.Fatalf("derived %s, not a tpub", tpub[:8])
+	}
+	xpub, xfp, err := deriveAccountXpub(m, "", &chaincfg.MainNetParams,
+		[]uint32{48 | hard, 0 | hard, 0 | hard, 2 | hard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := func(net, path, xp string, fp uint32) []string {
+		t.Helper()
+		strs, err := mk.Encode(mk.Card{Network: net, Path: path,
+			Fingerprint: fmt.Sprintf("%08x", fp), Xpub: xp, Stubs: [][4]byte{{1, 2, 3, 4}}})
+		if err != nil {
+			t.Fatalf("mk.Encode(%s): %v", net, err)
+		}
+		return strs
+	}
+	testnet := card("testnet", "m/48'/1'/0'/2'", tpub, tfp)
+	mainnet := card("mainnet", "m/48'/0'/0'/2'", xpub, xfp)
+
+	// THE CONTROL FIRST, so a door that offered nothing at all would fail.
+	ctx := NewContext(newPlatform())
+	ctx.sysw = composerSessionWith(mainnet, nil)
+	if got := composerCardSources(ctx); len(got) != 1 {
+		t.Fatalf("INCONCLUSIVE: the mainnet control yields %d card sources, want 1", len(got))
+	}
+	ctx = NewContext(newPlatform())
+	ctx.sysw = composerSessionWith(testnet, nil)
+	if got := composerCardSources(ctx); len(got) != 0 {
+		t.Errorf("the composer offers a testnet mk1 card as a source (%d): label %q xpub %s... "+
+			"-- the consent would derive mainnet bc1q addresses for material declared under "+
+			"coin type 1h, the same sentence sysw.ParseKeyRecord now prevents on the other door",
+			len(got), got[0].label, got[0].xpub[:12])
+	}
+	// BOTH IN ONE PAYLOAD: the testnet card must not take the mainnet one
+	// down with it.
+	ctx = NewContext(newPlatform())
+	ctx.sysw = composerSessionWith(append(append([]string{}, testnet...), mainnet...), nil)
+	got := composerCardSources(ctx)
+	if len(got) != 1 {
+		t.Fatalf("a payload with one testnet and one mainnet card yields %d sources, want 1", len(got))
+	}
+	if got[0].xpub != xpub {
+		t.Errorf("the surviving source is %s..., want the mainnet card %s...",
+			got[0].xpub[:12], xpub[:12])
 	}
 }
