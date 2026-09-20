@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	"seedhammer.com/codex32"
@@ -574,8 +575,12 @@ func composerSeedDerivedSlots(st *composerState) bool {
 	return false
 }
 
+// composerSecretCards is §7f's "a seed that filled several slots is cut
+// ONCE": one ms1 plate per distinct SECRET among the seated seed-derived
+// slots, whatever the slot count and whatever the registration count.
 func composerSecretCards(st *composerState) ([]bundleCard, error) {
-	// DEDUPED BY MASTER FINGERPRINT, NOT BY seedID (fable review r0 M-3).
+	// DEDUPED BY THE ENTROPY THE PLATE CARRIES, not by seedID and not by master
+	// fingerprint (fable review r0 M-3; fold-r1 review M-5).
 	//
 	// A seedID is one REGISTRATION, and an operator filling two slots from the
 	// same words answers "Type a seed" twice -- which is two registrations of
@@ -591,11 +596,16 @@ func composerSecretCards(st *composerState) ([]bundleCard, error) {
 	// same identity, so a seed that gets ONE account ordinal sequence gets ONE
 	// plate.
 	//
-	// (seed, passphrase) is the derivation unit and MasterFP is captured from
-	// the pair (seedRegistry.add / bindPassphrase), so one seed registered bare
-	// and again with a passphrase is TWO fingerprints and two plates -- which
-	// is correct: those are two different secrets and two different wallets.
-	seen := map[uint32]bool{}
+	// The fingerprint was the first key chosen, because composerSeedAccountFor
+	// keys the §4f account rule on it. It is the wrong key for a PLATE: the
+	// ms1 is codex32 over the ENTROPY and carries no passphrase, so one seed
+	// registered bare and again with a passphrase -- two fingerprints, two
+	// wallets -- is the same fifty characters twice. Measured (fold-r1 M-5):
+	// two byte-identical bearer plates, a census counting two shares, and
+	// nothing on either plate saying which pairing needed the passphrase. The
+	// dedup key is therefore sha256(entropy): a digest, never the secret, and
+	// exactly the identity of what gets cut.
+	seen := map[[32]byte]bool{}
 	var out []bundleCard
 	for _, a := range st.assigned {
 		if a.src < 0 || a.src >= len(st.sources) {
@@ -609,11 +619,13 @@ func composerSecretCards(st *composerState) ([]bundleCard, error) {
 		if !ok {
 			continue
 		}
-		if seen[seed.MasterFP] {
+		entropy := seed.Mnemonic.Entropy()
+		key := sha256.Sum256(entropy)
+		if seen[key] {
+			wipeBytes(entropy)
 			continue
 		}
-		seen[seed.MasterFP] = true
-		entropy := seed.Mnemonic.Entropy()
+		seen[key] = true
 		ms1, err := codex32.EncodeMS1(entropy)
 		wipeBytes(entropy)
 		if err != nil {

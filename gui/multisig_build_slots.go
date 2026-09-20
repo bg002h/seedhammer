@@ -906,6 +906,10 @@ func seedPassphraseStep(ctx *Context, th *Colors, reg *seedRegistry, seedID int,
 		}
 		if err := reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
 			showError(ctx, th, errTitle, "Couldn't apply that passphrase.")
+			// A decline un-registers, on this leg like every other (fold-r1
+			// review N-1): the caller treats false as "no source", so the
+			// registry must not keep a seed the label numbering would count.
+			reg.discardLast(seedID)
 			return false
 		}
 		return true

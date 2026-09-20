@@ -480,6 +480,51 @@ func TestFableSpecEngraveModeIsAskedOnlyForSeedDerivedSlots(t *testing.T) {
 
 // ─── 7. One seed registered twice is cut twice ───────────────────────────────
 
+// TestFableSpecOneSeedBareAndWithPassphraseIsCutOnce: the same words
+// registered once bare and once with a passphrase are two masters and two
+// wallets -- and ONE plate, because the ms1 carries the entropy and no
+// passphrase (fold-r1 review M-5: the fingerprint dedup planned two
+// byte-identical bearer plates and a census of two shares).
+func TestFableSpecOneSeedBareAndWithPassphraseIsCutOnce(t *testing.T) {
+	st := &composerState{reg: &seedRegistry{}, list: md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 2, Sorted: true}},
+	}}}
+	for _, pass := range []string{"", "hunter2"} {
+		id, err := st.reg.add("seed", composerTestMnemonic(t), pass, &chaincfg.MainNetParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed, _ := st.reg.at(id)
+		var fp [4]byte
+		binary.BigEndian.PutUint32(fp[:], seed.MasterFP)
+		st.sources = append(st.sources, composerSource{
+			kind: composerSourceSeed, label: "seed", fingerprint: fp, fpPresent: true, seedID: id,
+		})
+	}
+	s0, _ := st.reg.at(st.sources[0].seedID)
+	s1, _ := st.reg.at(st.sources[1].seedID)
+	if s0.MasterFP == s1.MasterFP {
+		t.Fatal("premise: a passphrase must change the master fingerprint")
+	}
+	st.assigned = make([]composerAssignment, 2)
+	for i := range st.assigned {
+		a, err := composerSeedDerive(st, uint8(i), i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.assigned[i] = a
+	}
+	cards, err := composerSecretCards(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 {
+		same := len(cards) == 2 && cards[0].strings[0] == cards[1].strings[0]
+		t.Errorf("one seed, bare and with a passphrase, planned %d ms1 plates (byte-identical: %v); the plate carries no passphrase, so §7f's ONCE applies",
+			len(cards), same)
+	}
+}
+
 // TestFableSpecOneSeedTypedTwiceIsCutOnce: §7f "A seed that filled several
 // slots is cut ONCE". Typing the same words at two "Type a seed" prompts
 // registers two ids for one secret.
