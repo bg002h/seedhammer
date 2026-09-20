@@ -315,10 +315,27 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 	if !composerSortedIsLegal(st.list, 0) {
 		return true
 	}
+	// IT OPENS ON THE SETTING IN FORCE (fable review r0 lens 4 I-1), which is
+	// journey C-1's class -- "a picker that opens on row zero proposes a
+	// setting" -- the same defect F-527 closed for the script picker, still
+	// open here. Measured walk: the operator picked "Keep my order", held §8b
+	// to confirm, reached the Template screen, pressed Back to re-read the
+	// list, pressed Done, and the key-order question was asked again OPENING
+	// ON ROW 0. The forward button -- the control that has advanced every
+	// other screen -- then made the wallet sortedmulti, §8b did not re-fire,
+	// and the only signal was the stub screen's "The shape changed, so this
+	// id changed", which names no cause. A multi() wallet and a sortedmulti()
+	// wallet over the same keys are different wallets unless the keys happen
+	// to be in lexicographic order.
+	initial := 0
+	if !st.list.Paths[0].Keys.Sorted {
+		initial = 1
+	}
 	cs := &ChoiceScreen{
 		Title:   "Key order",
 		Lead:    "Sorted keys, or your order?",
 		Choices: []string{"Sorted (usual)", "Keep my order"},
+		Initial: initial,
 	}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
@@ -328,11 +345,26 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 		st.list.Paths[0].Keys.Sorted = true
 		return true
 	}
-	if !composerConfirmScreen(ctx, th, "EXPERIMENTAL",
-		composerConfirmBody(composerCopyUnsortedKeys())) {
-		return false
+	// §8b FIRES ONCE PER DECLINE, NOT ONCE PER PASS, which is §5a's rule and
+	// is what makes the preselection above safe. Re-firing the hold on a
+	// second pass over an answer the operator already confirmed would teach
+	// them to hold through it, and holding through §8b is the one thing the
+	// screen exists to prevent.
+	//
+	// `Sorted == false` IS the record of the confirmed decline and needs no
+	// second copy: every other writer in this package sets Sorted TRUE
+	// (composerKeysEdit at :303 and composerPresetKeys), and the only
+	// assignment of false is the line below, downstream of the hold. So a key
+	// set edited or re-preset comes back Sorted and re-earns the confirm --
+	// which is the §8a lesson (an index is not an identity) applied to a
+	// setting rather than to a path.
+	if st.list.Paths[0].Keys.Sorted {
+		if !composerConfirmScreen(ctx, th, "EXPERIMENTAL",
+			composerConfirmBody(composerCopyUnsortedKeys())) {
+			return false
+		}
+		st.list.Paths[0].Keys.Sorted = false
 	}
-	st.list.Paths[0].Keys.Sorted = false
 	return true
 }
 
