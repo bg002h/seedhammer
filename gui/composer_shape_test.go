@@ -52,7 +52,13 @@ func TestComposerRefusalBodyMapsEverySentinelToItsSection8mLine(t *testing.T) {
 		want string
 	}{
 		{md.ErrComposeNoKeyedPath, composerCopyRefuseNoKeyedPath()},
+		// The BARE sentinel keeps the lock-only body: composerRefusalBody only
+		// switches to the empty-path one when the typed error says the path
+		// carries no lock, so an errors.Is-only caller is never told about a
+		// state the error did not report.
 		{md.ErrComposeLockOnlyPath, composerCopyRefuseLockOnly()},
+		{md.LockOnlyPathError{Path: 2, Lock: true}, composerCopyRefuseLockOnly()},
+		{md.LockOnlyPathError{Path: 2, Lock: false}, composerCopyRefuseEmptyPath()},
 		{md.ErrComposeKeylessUnderTr, composerCopyRefuseKeylessTr()},
 		{md.ErrComposeLegacyWrapperShape, composerCopyRefuseLegacyShape()},
 		{md.ErrComposeTooManySlots, composerCopyRefuseSlotCap()},

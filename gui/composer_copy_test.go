@@ -89,6 +89,8 @@ func composerCopyTable() []composerCopyRow {
 			"Every wallet needs at least one path with a key."},
 		{"composerCopyRefuseLockOnly", "8m", composerCopyRefuseLockOnly(),
 			"A path with only a time lock means anyone can spend after it. Add a key or a hash."},
+		{"composerCopyRefuseEmptyPath", "8m", composerCopyRefuseEmptyPath(),
+			"This path has no key and no hash, so nothing can spend it. Add a key or a hash, or remove the path."},
 		{"composerCopyRefuseKeylessTr", "8m", composerCopyRefuseKeylessTr(),
 			"This build will not put a key-less path in taproot. Use wsh, or add a key."},
 		{"composerCopyRefuseTwoKeylessPaths", "8m", composerCopyRefuseTwoKeylessPaths(),
@@ -429,8 +431,12 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// coordinator names a wallet it will refuse -- and because §8's existing
 	// lock sections (§8c, §8o) are about OPERANDS and bands, not about who
 	// imports the result.
-	if declared != 84 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 84 -- "+
+	// 85 SINCE fable review r0 lens 4 M-5 split §8m's lock-only line in two.
+	// ErrComposeLockOnlyPath refuses "neither keys nor a hash", which is TWO
+	// operator-visible states, and the lock-only body was being drawn on a row
+	// reading "Path 2: empty" -- naming a time lock nobody had set.
+	if declared != 85 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 85 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

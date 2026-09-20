@@ -327,25 +327,45 @@ func TestFableSpecDateBelowTheFloorInsideTwoThousandNineNamesTheFloor(t *testing
 // TestFableEmptiedKeylessPathIsRefusedWithTheLockOnlyBody documents the body
 // an operator meets after "Hash lock -> No hash lock" on a key-less path: the
 // row says "empty", the refusal talks about "only a time lock".
-func TestFableEmptiedKeylessPathIsRefusedWithTheLockOnlyBody(t *testing.T) {
-	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
-		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
-		{}, // key-less path whose hash was cleared
-	}}
-	if got := composerPathLine(list.Paths[1], 1); got != "Path 2: empty" {
-		t.Fatalf("row reads %q", got)
-	}
-	_, err := md.ValidatePathList(list)
-	if err == nil {
-		t.Fatal("an empty path validated")
-	}
-	body, ok := composerRefusalBody(err)
-	if !ok {
-		t.Fatalf("no §8m body for %v", err)
-	}
-	t.Logf("row %q is refused with %q", composerPathLine(list.Paths[1], 1), body)
-	if body != composerCopyRefuseLockOnly() {
-		t.Errorf("body changed: %q", body)
+//
+// REWORDED IN THE FOLD (M-5). The reviewer's version pinned the body that was
+// SHIPPED -- composerCopyRefuseLockOnly -- and named the defect in its own
+// title: the row reads "Path 2: empty" and the refusal spoke about a time
+// lock nobody had set. The fold chose the REFUSAL over silent removal (see
+// composerCopyRefuseEmptyPath for why), so the test now asserts the body that
+// names the actual state, and keeps the other arm under test beside it so the
+// two states cannot collapse back onto one body.
+func TestFableEmptiedKeylessPathIsRefusedWithABodyThatNamesIt(t *testing.T) {
+	for _, tc := range []struct {
+		what string
+		path md.SpendPath
+		row  string
+		want string
+	}{
+		{"a key-less path whose hash was cleared: no key, no hash, no lock",
+			md.SpendPath{}, "Path 2: empty", composerCopyRefuseEmptyPath()},
+		{"a path carrying only a time lock",
+			md.SpendPath{Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}},
+			"Path 2: empty + 5 blocks", composerCopyRefuseLockOnly()},
+	} {
+		list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+			{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
+			tc.path,
+		}}
+		if got := composerPathLine(list.Paths[1], 1); got != tc.row {
+			t.Fatalf("%s: row reads %q, want %q", tc.what, got, tc.row)
+		}
+		_, err := md.ValidatePathList(list)
+		if err == nil {
+			t.Fatalf("%s: the path validated", tc.what)
+		}
+		body, ok := composerRefusalBody(err)
+		if !ok {
+			t.Fatalf("%s: no §8m body for %v", tc.what, err)
+		}
+		if body != tc.want {
+			t.Errorf("%s: row %q is refused with %q, want %q", tc.what, tc.row, body, tc.want)
+		}
 	}
 }
 

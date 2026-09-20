@@ -104,6 +104,25 @@ var (
 	ErrComposeIndistinguishableSlots = errors.New("md: compose: two slots declare the same origin without two distinct fingerprints; a template like that cannot be restored")
 )
 
+// LockOnlyPathError names the path that has neither keys nor a hash, and
+// whether it carries a timelock -- the two states ErrComposeLockOnlyPath
+// refuses. Path is 1-based, as every compose refusal's operands are.
+//
+// It carries ErrComposeLockOnlyPath for errors.Is.
+type LockOnlyPathError struct {
+	Path int
+	Lock bool
+}
+
+func (e LockOnlyPathError) Error() string {
+	if e.Lock {
+		return fmt.Sprintf("%v: path %d", ErrComposeLockOnlyPath, e.Path)
+	}
+	return fmt.Sprintf("%v: path %d has no key, no hash and no lock", ErrComposeLockOnlyPath, e.Path)
+}
+
+func (e LockOnlyPathError) Unwrap() error { return ErrComposeLockOnlyPath }
+
 // TwoKeylessPathsError names the two key-less paths that put the list over
 // the cap, by ZERO-BASED index -- the spelling the primary's conformance
 // vector uses in its `error.first` / `error.second` fields
@@ -520,7 +539,14 @@ func ValidatePathList(list PathList) (int, error) {
 			slots += int(ks.N)
 			anyKeyed = true
 		} else if p.Hash == nil {
-			return 0, fmt.Errorf("%w: path %d", ErrComposeLockOnlyPath, i+1)
+			// THE ERROR CARRIES WHETHER THE PATH HAS A LOCK, because the two
+			// states this one rule refuses are different things on a screen:
+			// a path carrying `older(5)` and nothing else is a spend
+			// condition anyone can meet, and a path carrying NOTHING is not a
+			// path at all. The codec is looking at the operand anyway; the
+			// alternative was a GUI that re-read the path list to find out
+			// what the codec had just seen (fable review r0 lens 4 M-5).
+			return 0, LockOnlyPathError{Path: i + 1, Lock: p.Lock != nil}
 		} else if list.Wrapper == ComposeTr {
 			return 0, fmt.Errorf("%w: path %d", ErrComposeKeylessUnderTr, i+1)
 		}

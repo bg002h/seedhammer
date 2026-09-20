@@ -41,6 +41,14 @@ func composerRefusalBody(err error) (string, bool) {
 	case errors.Is(err, md.ErrComposeNoPaths), errors.Is(err, md.ErrComposeNoKeyedPath):
 		return composerCopyRefuseNoKeyedPath(), true
 	case errors.Is(err, md.ErrComposeLockOnlyPath):
+		// TWO STATES, TWO BODIES (fable review r0 lens 4 M-5). The codec
+		// refuses "neither keys nor a hash" as one rule, and the error says
+		// which of its two states this is: a lock-only path, or a path with
+		// nothing on it at all.
+		var lo md.LockOnlyPathError
+		if errors.As(err, &lo) && !lo.Lock {
+			return composerCopyRefuseEmptyPath(), true
+		}
 		return composerCopyRefuseLockOnly(), true
 	case errors.Is(err, md.ErrComposeKeylessUnderTr):
 		return composerCopyRefuseKeylessTr(), true

@@ -385,6 +385,29 @@ func composerCopyRefuseNoKeyedPath() string {
 	return "Every wallet needs at least one path with a key."
 }
 
+// composerCopyRefuseEmptyPath is §8m's body for a path that has NOTHING --
+// no key, no hash, no lock (fable review r0 lens 4 M-5).
+//
+// It is a separate body because the lock-only one was being drawn on it and
+// was FALSE there: "A path with only a time lock means anyone can spend after
+// it" names a lock the operator never set, on a row that reads "Path 2:
+// empty". A refusal that says the wrong true thing is worse than one that
+// says an unpolished true thing (the rule composerRefusalBody's own header
+// states), and this is that rule applied to a second state inside one codec
+// sentinel.
+//
+// THE PATH IS REFUSED, NOT REMOVED, and that is the choice this finding
+// offered. composerAddPath removes a path that ends empty AT CREATION,
+// because there the operator never had one. An EDIT reaches this state from a
+// path that already exists in a list the operator is reading, and may carry a
+// timelock they set; deleting it silently would renumber the list under them
+// and discard that work, which is the very class -- a silent default at a
+// moment that deserved a screen -- that the rest of this review is about.
+func composerCopyRefuseEmptyPath() string {
+	return "This path has no key and no hash, so nothing can spend it. Add a key " +
+		"or a hash, or remove the path."
+}
+
 func composerCopyRefuseLockOnly() string {
 	return "A path with only a time lock means anyone can spend after it. Add a " +
 		"key or a hash."
