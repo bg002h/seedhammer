@@ -19,11 +19,15 @@ package gui
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os/exec"
 	"testing"
 
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"seedhammer.com/bip39"
 	"seedhammer.com/md"
 )
 
@@ -149,4 +153,96 @@ func TestFableTwoKeylessPathsAgreeWithTheHostOracle(t *testing.T) {
 				c.what, oracleAdmits, gerr == nil, gerr)
 		}
 	}
+}
+
+// ─── I-2: the same KEY at two slots, whatever its serialisation ─────────────
+
+// TestFableRedSameKeyReserializedIsRefused is lens-1 I-2.
+//
+// §7d's same-xpub refusal compared xpub STRINGS. The same key re-serialised
+// with a zero parent fingerprint -- the form `md descriptor` itself prints
+// (F-611), so an operator copying an xpub off host output produces exactly
+// this -- is one key on the wire and two strings on the screen, and the
+// "2-of-3" it built was spent by one signer signing twice (Core v31.1,
+// `sig1 == sig2`).
+func TestFableRedSameKeyReserializedIsRefused(t *testing.T) {
+	st := fableSameKeyTwoSlots(t)
+	if _, _, dup := composerDuplicateXpub(st); !dup {
+		t.Fatalf("composerDuplicateXpub did not refuse the same key at @0 and @1 (xpub strings %q vs %q)",
+			st.assigned[0].xpub, st.assigned[1].xpub)
+	}
+}
+
+// TestFableSameKeyReserializedIsRefusedAtTheMint is the other half of I-2:
+// the device must not MINT what `md encode` refuses. composerArtifactsFor is
+// the mint path, and it binds the 65-byte chain-code||point, so the two
+// strings collapse to one key there.
+func TestFableSameKeyReserializedIsRefusedAtTheMint(t *testing.T) {
+	st := fableSameKeyTwoSlots(t)
+	_, keyed, err := composerArtifactsFor(st)
+	if err == nil {
+		t.Fatalf("composerArtifactsFor minted a policy that repeats a key at @0 and @1: %v", keyed)
+	}
+	if !errors.Is(err, md.ErrComposeRepeatedKeyMaterial) {
+		t.Fatalf("composerArtifactsFor refused with %v, want md.ErrComposeRepeatedKeyMaterial", err)
+	}
+	// And §8m draws the §7d body for it rather than the codec's own text.
+	body, ok := composerRefusalBody(err)
+	if !ok || body != composerCopySameXpub(0, 1) {
+		t.Fatalf("composerRefusalBody(%v) = %q, %v; want the §7d same-key body", err, body, ok)
+	}
+}
+
+// fableSameKeyTwoSlots seats @0 from a seed, @1 from a `key:`-shaped source
+// carrying THE SAME KEY re-serialised (zero parent fingerprint, depth 4,
+// child 2') under a different declared account, and @2 from a second seed.
+func fableSameKeyTwoSlots(t *testing.T) *composerState {
+	t.Helper()
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}}}}
+	st := &composerState{list: list, reg: &seedRegistry{}}
+	for i := 0; i < 2; i++ {
+		m, err := bip39.ParseMnemonic(fableFundsSeeds[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := st.reg.add("seed", m, "", &chaincfg.MainNetParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed, _ := st.reg.at(id)
+		var fp [4]byte
+		binary.BigEndian.PutUint32(fp[:], seed.MasterFP)
+		st.sources = append(st.sources, composerSource{kind: composerSourceSeed, fingerprint: fp, fpPresent: true, seedID: id})
+	}
+	composerSizeAssignments(st)
+	a0, err := composerSeedDerive(st, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.assigned[0] = a0
+	ek, err := hdkeychain.NewKeyFromString(a0.xpub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ek.ECPubKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := hdkeychain.NewExtendedKey(chaincfg.MainNetParams.HDPublicKeyID[:],
+		pub.SerializeCompressed(), ek.ChainCode(), []byte{0, 0, 0, 0},
+		4, 2+hdkeychain.HardenedKeyStart, false)
+	if re.String() == a0.xpub {
+		t.Fatal("the re-serialisation is byte-identical, so the test cannot see a string comparison")
+	}
+	src := composerSource{kind: composerSourceKey, fingerprint: a0.fingerprint, fpPresent: true,
+		origin: md.DefaultOrigin(md.ComposeWsh, 1), xpub: re.String(), seedID: -1}
+	st.sources = append(st.sources, src)
+	st.assigned[1] = composerAssignment{src: 2, origin: src.origin, fingerprint: src.fingerprint, fpPresent: true, xpub: src.xpub}
+	a2, err := composerSeedDerive(st, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.assigned[2] = a2
+	return st
 }

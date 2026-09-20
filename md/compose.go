@@ -95,6 +95,7 @@ var (
 	ErrComposeLockOnlyPath           = errors.New("md: compose: a path with neither keys nor a hash is not a spend path")
 	ErrComposeKeylessUnderTr         = errors.New("md: compose: a key-less path is not expressible under tr")
 	ErrComposeTwoKeylessPaths        = errors.New("md: compose: a policy admits at most one key-less path; two of them lower to a malleable or_i")
+	ErrComposeRepeatedKeyMaterial    = errors.New("md: compose: the same extended key is bound at two slots; BIP 388 requires the keys to be pairwise distinct")
 	ErrComposeBadThreshold           = errors.New("md: compose: threshold needs 1 <= k <= n <= 9")
 	ErrComposeTooManySlots           = errors.New("md: compose: this wallet would have more key slots than the wire holds (32)")
 	ErrComposeLegacyWrapperShape     = errors.New("md: compose: sh and sh-wsh admit exactly one sortedmulti path")
@@ -102,6 +103,17 @@ var (
 	ErrComposeWrongSlotCount         = errors.New("md: compose: declarations given for a different number of slots than the policy has")
 	ErrComposeIndistinguishableSlots = errors.New("md: compose: two slots declare the same origin without two distinct fingerprints; a template like that cannot be restored")
 )
+
+// RepeatedKeyMaterialError names the two slots Bind found bound to the same
+// key, so a caller can say WHICH -- an operator repairs "slots @1 and @2",
+// not "two slots". It carries ErrComposeRepeatedKeyMaterial for errors.Is.
+type RepeatedKeyMaterialError struct{ A, B uint8 }
+
+func (e RepeatedKeyMaterialError) Error() string {
+	return fmt.Sprintf("%v: slots @%d and @%d", ErrComposeRepeatedKeyMaterial, e.A, e.B)
+}
+
+func (e RepeatedKeyMaterialError) Unwrap() error { return ErrComposeRepeatedKeyMaterial }
 
 // operand is the tag and consensus operand this lock encodes to (§4c).
 func (l Lock) operand() (tag, uint32, error) {
@@ -404,11 +416,34 @@ func (c *Composed) Bind(pubkeys map[uint8][65]byte, fingerprints map[uint8][4]by
 		return fmt.Errorf("md: compose: Bind needs a key for each of %d slots, got %d", n, len(pubkeys))
 	}
 	pubs := make([]idxPub, n)
+	// BIP 388's pairwise-distinct rule, applied to the BYTES (fable review r0
+	// I-2). The primary refuses the same extended key at two positions --
+	// `md decompose` prints BIP 388's own sentence for it and calls the wallet
+	// UNSUPPORTED, never invalid -- and this port had no counterpart, so the
+	// device could MINT a policy the primary would not decompose. Measured on
+	// md 0.16.2 with the lens-1 descriptor: the device emitted six keyed
+	// chunks and `md decompose` of the descriptor they decode to reported
+	// "the same extended key is used at 2 positions".
+	//
+	// THE COMPARISON IS THE 65 BYTES, NOT THE XPUB STRING. depth and parent
+	// fingerprint are header fields, so one key has many serialisations and a
+	// string comparison misses the re-serialised copy `md descriptor` itself
+	// prints. Measured against the oracle: `md decompose` refuses the repeat
+	// whether the two positions share a use-site (`/<0;1>/*` twice) or not
+	// (`/<0;1>/*` and `/<2;3>/*`), so the material alone decides.
+	//
+	// Convergence, not a lead (CLAUDE.md, Rust-primary rule): the rule is
+	// already correct in Rust and this brings the Go port to it.
+	seen := map[[65]byte]int{}
 	for i := 0; i < n; i++ {
 		x, ok := pubkeys[uint8(i)]
 		if !ok {
 			return fmt.Errorf("md: compose: Bind has no key for slot @%d", i)
 		}
+		if j, dup := seen[x]; dup {
+			return RepeatedKeyMaterialError{A: uint8(j), B: uint8(i)}
+		}
+		seen[x] = i
 		pubs[i] = idxPub{idx: uint8(i), xpub: x}
 	}
 	c.d.tlv.pubkeys = pubs

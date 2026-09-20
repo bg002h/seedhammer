@@ -60,6 +60,18 @@ func composerRefusalBody(err error) (string, bool) {
 	case errors.Is(err, md.ErrComposeIndistinguishableSlots):
 		return composerCopySameOriginFewFingerprints(), true
 	}
+	// §7d's same-key body, for the codec's own refusal of the repeat (fable
+	// review r0 I-2). composerDuplicateXpub draws this body at the mapping
+	// review and names the two slots; md's Bind is the backstop underneath it,
+	// and without this arm an operator reaching it -- a route that skips the
+	// review, or a future one -- would read `md: compose: the same extended
+	// key is bound at two slots ...`, an internal prefix §11 forbids. The
+	// slots come from the error rather than being assumed, so the body names
+	// the pair the codec actually found.
+	var rep md.RepeatedKeyMaterialError
+	if errors.As(err, &rep) {
+		return composerCopySameXpub(rep.A, rep.B), true
+	}
 	return "", false
 }
 
