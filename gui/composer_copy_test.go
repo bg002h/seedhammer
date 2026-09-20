@@ -59,6 +59,8 @@ func composerCopyTable() []composerCopyRow {
 		// 2.1.1. Filed as a §8 amendment so this table stays the diff target.
 		{"composerCopyNUMS", "8f", composerCopyNUMS(),
 			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core imports this form. Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a tr policy whose first path is a single key. Liana and BIP-388 signers need an unspendable xpub instead (see F-449), which is a different wallet with different addresses."},
+		{"composerCopyMixedLockBases", "8g", composerCopyMixedLockBases(),
+			"MIXED LOCK BASES Some paths lock by block height and others by time. Nunchuk will refuse this wallet; Bitcoin Core imports it. Taproot accepts both, because it checks each path on its own."},
 		{"composerCopySameSeedThreshold", "8g", composerCopySameSeedThreshold([]uint8{1, 2}, 2, 3),
 			"SAME SEED, SAME PATH Slots @1 and @2 are the same seed. This path's 2-of-3 can be satisfied by one person. Liana will refuse it."},
 		{"composerCopySameSeedBelow", "8g", composerCopySameSeedBelow([]uint8{1, 2}, 3),
@@ -422,8 +424,13 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// existing body could carry it -- §8a's confirm describes ONE key-less
 	// path and is true of it, and the lock-only and key-less-under-tr lines
 	// name different conditions.
-	if declared != 83 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 83 -- "+
+	// 84 SINCE fable review r0 lens 2 I-2 added the mixed-lock-bases notice.
+	// It is filed under §8g because it is that section's register -- a
+	// coordinator names a wallet it will refuse -- and because §8's existing
+	// lock sections (§8c, §8o) are about OPERANDS and bands, not about who
+	// imports the result.
+	if declared != 84 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 84 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

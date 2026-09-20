@@ -201,6 +201,28 @@ func composerCopyNUMS() string {
 
 // composerCopySameSeedThreshold is §8g's FIRST body: the shared seed's slots
 // in this path REACH the threshold, so one person can satisfy the path alone.
+// composerCopyMixedLockBases is the fable review r0 lens-2 I-2 notice, in the
+// register of §8g's Liana line: one sentence naming the wallet that refuses
+// and one naming the way round it.
+//
+// libnunchuk 2.1.1's MiniscriptTimeline walks the WHOLE wsh script and throws
+// "Timelock mixing" on the first lock whose base -- TIME vs HEIGHT -- differs
+// from any earlier one, regardless of relative-vs-absolute and regardless of
+// which `or` branch it sits in. ParseDescriptors swallows the exception, so
+// the app shows only "Could not parse descriptor" and the operator has
+// nothing to act on. Bitcoin Core imports the same descriptor: miniscript's
+// own rule only forbids mixing inside ONE satisfaction.
+//
+// THE AXIS IS THE BASE, NOT relative-vs-absolute, and getting that wrong
+// would put this notice on a shipped preset: decaying-multisig mixes
+// older(blocks) with after(height), which are both HEIGHT, and imports.
+func composerCopyMixedLockBases() string {
+	return "MIXED LOCK BASES\n" +
+		"Some paths lock by block height and others by time. Nunchuk will refuse " +
+		"this wallet; Bitcoin Core imports it. Taproot accepts both, because it " +
+		"checks each path on its own."
+}
+
 func composerCopySameSeedThreshold(slots []uint8, k, n int) string {
 	return fmt.Sprintf("SAME SEED, SAME PATH\nSlots %s are the same seed. This path's "+
 		"%d-of-%d can be satisfied by one person. Liana will refuse it.",

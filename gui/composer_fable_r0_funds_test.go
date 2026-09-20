@@ -449,3 +449,76 @@ func TestFableNUMSNoteDoesNotPromiseNunchuk(t *testing.T) {
 	}
 	assertModalBodyFits(t, "the §8f NUMS note", errorScreenBody, body)
 }
+
+// ─── L2 I-2: a wsh policy mixing lock BASES is refused by Nunchuk ───────────
+
+// TestFableMixedLockBasesUnderWshAreNoticed is lens-2 I-2.
+//
+// libnunchuk 2.1.1's MiniscriptTimeline walks the WHOLE wsh script and throws
+// "Timelock mixing" on the first lock whose base -- TIME vs HEIGHT -- differs
+// from any earlier one, regardless of relative/absolute and regardless of
+// which `or` branch it sits in. Bitcoin Core imports the same descriptor
+// (miniscript's own rule only forbids mixing inside ONE satisfaction), and
+// §4c admits both bases with nothing anywhere saying a coordinator will
+// refuse the combination.
+//
+// THE BASES ARE THE AXIS, NOT relative-vs-absolute: older(blocks) and
+// after(height) are both HEIGHT, which is why preset-decaying-multisig-wsh
+// mixes them and imports. older(units) and after(time) are both TIME.
+//
+// Under tr the tapscript route validates each leaf separately and a composer
+// path carries at most one lock, so no leaf can mix and the notice must not
+// fire there.
+func TestFableMixedLockBasesUnderWshAreNoticed(t *testing.T) {
+	single := func() md.SpendPath { return md.SpendPath{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}} }
+	locked := func(k md.LockKind, v uint32) md.SpendPath {
+		p := single()
+		p.Lock = &md.Lock{Kind: k, Value: v}
+		return p
+	}
+	body := composerCopyMixedLockBases()
+	for _, tc := range []struct {
+		what   string
+		list   md.PathList
+		notice bool
+	}{
+		{"wsh: [1 key], [older 100 units], [after height 1000000] -- the lens's own case",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(), locked(md.LockOlderUnits, 100), locked(md.LockAfterHeight, 1_000_000)}}, true},
+		{"wsh: [1 key], [after time 1893456000], [older 5 blocks]",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(), locked(md.LockAfterTime, 1_893_456_000), locked(md.LockOlderBlocks, 5)}}, true},
+		{"wsh: decaying-multisig's shape -- older(blocks) with after(height), both HEIGHT",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(), locked(md.LockOlderBlocks, 5), locked(md.LockAfterHeight, 150)}}, false},
+		{"wsh: older(units) with after(time), both TIME",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(), locked(md.LockOlderUnits, 169), locked(md.LockAfterTime, 1_893_456_000)}}, false},
+		{"wsh: no locks at all",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}}}}, false},
+		{"tr: the same mixed bases -- each leaf validates separately",
+			md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
+				single(), locked(md.LockOlderUnits, 100), locked(md.LockAfterHeight, 1_000_000)}}, false},
+	} {
+		c, err := md.Compose(tc.list)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		chunks, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		listed, kp := composerListedPaths(tc.list)
+		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		got := strings.Contains(normalizeDrawn(strings.Join(lines, "\n")), normalizeDrawn(body))
+		if got != tc.notice {
+			t.Errorf("%s: mixed-lock-bases notice shown=%v, want %v:\n%s",
+				tc.what, got, tc.notice, strings.Join(lines, "\n"))
+		}
+	}
+	assertModalBodyFits(t, "the mixed-lock-bases notice", errorScreenBody, body)
+}
