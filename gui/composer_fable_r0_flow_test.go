@@ -639,9 +639,25 @@ func TestFableDigitPadBands(t *testing.T) {
 
 // ─── 12. A testnet xpub in a key: record ─────────────────────────────────────
 
-// TestFableTestnetXpubKeyRecord measures what the device does with a key:
-// record whose xpub is a tpub: is it classified as a key, and what does the
-// card minted from it say.
+// TestFableTestnetXpubKeyRecord is lens 4's M-6, INVERTED by the fold (it is
+// also lens 1's M-2 and lens 3's M-2 -- three lenses, one defect).
+//
+// As the reviewer ran it, it MEASURED: sysw.ParseKeyRecord accepted
+// `[73c5da0a/48'/1'/0'/2']tpub...` because it checked depth and the last
+// child index and never the version bytes; Classify returned ClassKey, so
+// the door counted the record and seating offered it; the consent then
+// printed mainnet bc1q addresses for material derived under coin type 1';
+// and the mk1 card the composer minted carried the composer's
+// Network: "mainnet" label while mk.Encode serialised the tpub's version
+// bytes, so mk.Decode of that same card reported Network="testnet".
+//
+// It now asserts the refusal. §4f: complex-policy derivation is mainnet-only
+// by construction. The host half landed FIRST (mnemonic-engrave 1cbecbfd,
+// the Rust-primary rule) and the shared record_class_vectors table came back
+// with the old `key-testnet-tpub-valid` row retired in place; the device rule
+// is the convergence port, driven by that table in
+// sysw/composer_records_test.go. This test is the same measurement from the
+// device side, on a tpub derived here rather than one read out of a fixture.
 func TestFableTestnetXpubKeyRecord(t *testing.T) {
 	m, err := bip39.ParseMnemonic(fixtureMasterA)
 	if err != nil {
@@ -658,19 +674,30 @@ func TestFableTestnetXpubKeyRecord(t *testing.T) {
 	var fpb [4]byte
 	binary.BigEndian.PutUint32(fpb[:], fp)
 	rec := composerRecord("key:", "[73c5da0a/48'/1'/0'/2']"+tpub)
-	kr, err := sysw.ParseKeyRecord(rec)
-	t.Logf("ParseKeyRecord(tpub record): err=%v; Classify=%v", err, sysw.Classify(rec))
-	if err != nil {
-		return
+	if _, err := sysw.ParseKeyRecord(rec); err == nil {
+		t.Errorf("ParseKeyRecord admitted a testnet key (%s...): the consent would print "+
+			"mainnet bc1q addresses for material derived under coin type 1h, and the mk1 "+
+			"card minted from it decodes as Network=\"testnet\" under the composer's "+
+			"mainnet label", tpub[:8])
 	}
-	card, err := mk.Encode(mk.Card{Network: "mainnet", Path: "m/48'/1'/0'/2'",
-		Fingerprint: "73c5da0a", Xpub: kr.Xpub, Stubs: [][4]byte{{1, 2, 3, 4}}})
-	if err != nil {
-		t.Logf("mk.Encode(card with tpub, Network mainnet): %v", err)
-		return
+	if got := sysw.Classify(rec); got != sysw.ClassUnknown {
+		t.Errorf("Classify(tpub record) = %v, want ClassUnknown -- the door must not count "+
+			"it and seating must never offer it", got)
 	}
-	back, err := mk.Decode(card)
-	t.Logf("re-decoded card: Network=%q Xpub prefix=%s err=%v", back.Network, back.Xpub[:4], err)
+	// THE CONTROL: the same origin and depth with a MAINNET xpub is still a
+	// key, so the refusal is about the network and not about the shape.
+	xpub, _, err := deriveAccountXpub(m, "", &chaincfg.MainNetParams, []uint32{48 | h, 0 | h, 0 | h, 2 | h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := composerRecord("key:", "[73c5da0a/48'/0'/0'/2']"+xpub)
+	if _, err := sysw.ParseKeyRecord(ok); err != nil {
+		t.Errorf("the mainnet control is refused too (%v), so the rule is not about the "+
+			"network", err)
+	}
+	if got := sysw.Classify(ok); got != sysw.ClassKey {
+		t.Errorf("Classify(mainnet control) = %v, want ClassKey", got)
+	}
 }
 
 // ─── 8. Malformed record spellings are inert ─────────────────────────────────

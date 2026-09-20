@@ -58,15 +58,23 @@ func loadRecordClassRows(t *testing.T) []recordClassRow {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatalf("parsing fixture: %v", err)
 	}
-	// 81 since SPEC_hashlock_kinds phase 3 added the §6 `hash: [<kind>:] <hex>`
-	// grammar: 13 rows for the three new kinds -- each valid, an explicit
-	// sha256:, wrong width per kind twice, and three unknown/miscased tokens.
+	// 82 since the composer fable review r0 M-6 (lens 4) = lens 1 M-2 = lens 3
+	// M-2: a testnet key (tpub) in a `key:` record was admitted as a MAINNET
+	// key, silently, on host and device. The host half landed first (engrave
+	// 1cbecbfd), which is the Rust-primary rule, and this re-vendor is the
+	// convergence port. `key-testnet-tpub-valid` (class Key) is RETIRED and
+	// converted in place to `key-testnet-tpub-refused-s1` -- the SAME record
+	// bytes, now class Unknown -- and `key-testnet-tpub-refused` is new. 81 ->
+	// 82.
+	//
+	// (Before that, 81 since SPEC_hashlock_kinds phase 3 added the §6
+	// `hash: [<kind>:] <hex>` grammar: 13 rows for the three new kinds.)
 	//
 	// THREE NUMBERS, CHECKED AGAINST EACH OTHER: the fixture's own length, the
 	// provenance pin, and this literal. A re-vendor that updated two of the
 	// three would otherwise pass.
-	if len(rows) != pin.Vectors || len(rows) != 81 {
-		t.Fatalf("fixture has %d rows, pin says %d, plan says 81", len(rows), pin.Vectors)
+	if len(rows) != pin.Vectors || len(rows) != 82 {
+		t.Fatalf("fixture has %d rows, pin says %d, plan says 82", len(rows), pin.Vectors)
 	}
 	return rows
 }
@@ -123,8 +131,25 @@ func TestComposerRecordParsersReturnTheHostsValues(t *testing.T) {
 	if _, err := ParseKeyRecord(byName["key-depth-3-valid"].Record); err != nil {
 		t.Errorf("depth-3 key: %v", err)
 	}
-	if _, err := ParseKeyRecord(byName["key-testnet-tpub-valid"].Record); err != nil {
-		t.Errorf("tpub key: %v", err)
+	// THE ROW THIS LOOKED UP WAS RETIRED, not renamed for tidiness: a testnet
+	// key in a mainnet policy is refused now (fable review r0 M-6), so the
+	// assertion INVERTS -- the same record bytes, under the name the host's
+	// table gives them, must be refused by the parser AND classified Unknown.
+	// Both tpub rows are driven, so a parser that checked the string prefix
+	// rather than the VERSION BYTES would still have to answer for the second.
+	for _, name := range []string{"key-testnet-tpub-refused-s1", "key-testnet-tpub-refused"} {
+		row, ok := byName[name]
+		if !ok {
+			t.Fatalf("INCONCLUSIVE: the fixture has no row %q", name)
+		}
+		if _, err := ParseKeyRecord(row.Record); err == nil {
+			t.Errorf("%s: ParseKeyRecord admitted a testnet key; §4f makes complex-policy "+
+				"derivation mainnet-only by construction", name)
+		}
+		if got := Classify(row.Record); got != ClassUnknown {
+			t.Errorf("%s: Classify = %v, want ClassUnknown -- the door must not count it "+
+				"and seating must never offer it", name, got)
+		}
 	}
 	h, err := ParseHashRecord(byName["hash-valid"].Record)
 	if err != nil {

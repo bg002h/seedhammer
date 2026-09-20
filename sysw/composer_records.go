@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/bip32"
 	"seedhammer.com/hashlock"
 	"seedhammer.com/md"
@@ -394,6 +395,27 @@ func ParseKeyRecord(record string) (KeyRecord, error) {
 	}
 	ek, err := hdkeychain.NewKeyFromString(xpubText)
 	if err != nil || ek.IsPrivate() {
+		return KeyRecord{}, ErrKeyRecord
+	}
+	// THE NETWORK IS CHECKED, AND IT IS CHECKED ON THE VERSION BYTES (composer
+	// fable review r0 M-6 = lens 1 M-2 = lens 3 M-2). This checked depth and
+	// the last child index and never the version, so
+	// `[73c5da0a/48'/1'/0'/2']tpub...` parsed, Classify returned ClassKey, the
+	// door counted it and seating offered it -- and the consent then printed
+	// mainnet bc1q addresses for material derived under coin type 1'. §4f:
+	// complex-policy derivation is mainnet-only by construction.
+	//
+	// ON THE VERSION BYTES, NOT THE "tpub" PREFIX: the prefix is what those
+	// bytes base58-encode to, and a check on the string is a check on one
+	// spelling of one network's one public version. IsForNet asks the
+	// question the wire actually settles.
+	//
+	// The Rust primary refused it first (mnemonic-engrave 1cbecbfd, the
+	// Rust-primary rule), and the shared record_class_vectors table came back
+	// with `key-testnet-tpub-valid` retired in place to
+	// `key-testnet-tpub-refused-s1`; this is the convergence port, driven by
+	// that table.
+	if !ek.IsForNet(&chaincfg.MainNetParams) {
 		return KeyRecord{}, ErrKeyRecord
 	}
 	depth := int(ek.Depth())

@@ -8,16 +8,17 @@
     "  git -C ../mnemonic-engrave rev-parse HEAD ; git -C ../mnemonic-engrave log -1 --format=%H -- crates/me-cli/testdata/record_class_vectors.json ;",
     "  sha256sum sysw/testdata/record_class_vectors.json",
     "COMMIT PIN (H6 Task 13, re-recorded): `commit` is the mnemonic-engrave revision this copy was taken from and `file_commit` is the commit that actually carries the 68-row file. Both are on branch `h6-b` (H6 Task 2's implementer), NOT yet on engrave master -- the fork's port landed first because the two repos merge on their own schedules. sha256 and vectors are unchanged from the provisional record: the FILE never moved, only the commit that names it was unknown.",
-    "SPEC_hashlock_kinds phase 3 moved this fixture for the \u00a76 `hash: [<kind>:] <hex>` grammar: 13 rows added (each kind valid, an explicit sha256:, wrong width per kind twice, three unknown/miscased tokens) and the hash refusal line now names the KIND'S OWN width instead of 'must be exactly 64 hex characters' -- which told a ripemd160 record given 64 hex that its 64-hex value should be 64 hex."
+    "SPEC_hashlock_kinds phase 3 moved this fixture for the \u00a76 `hash: [<kind>:] <hex>` grammar: 13 rows added (each kind valid, an explicit sha256:, wrong width per kind twice, three unknown/miscased tokens) and the hash refusal line now names the KIND'S OWN width instead of 'must be exactly 64 hex characters' -- which told a ripemd160 record given 64 hex that its 64-hex value should be 64 hex.",
+    "Composer fable review r0 M-6 (lens 4) = lens 1 M-2 = lens 3 M-2: a testnet key (tpub) in a `key:` record was admitted as a mainnet key, silently, on host and device. The host half landed FIRST (engrave 1cbecbfd, the Rust-primary rule), which is what this re-vendor takes: `key-testnet-tpub-valid` (class Key) is RETIRED and converted IN PLACE to `key-testnet-tpub-refused-s1` (class Unknown, same record bytes), and a new row `key-testnet-tpub-refused` carries the zoo demo seed on testnet at bip48 account 0. 81 -> 82."
   ],
   "repo": "mnemonic-engrave",
   "remote": "git@github.com:bg002h/mnemonic-engrave.git",
   "path": "crates/me-cli/testdata/record_class_vectors.json",
-  "commit": "40e1962e79b96ce34ece41ee6ce1de7b643bf4b5",
-  "file_commit": "73f3e7d89644388f9fdecd001223e08736feab5f",
+  "commit": "1cbecbfd5ae387f19c864712e7be33ff5b6cd9c5",
+  "file_commit": "1cbecbfd5ae387f19c864712e7be33ff5b6cd9c5",
   "repo_clean_when_recorded": true,
-  "sha256": "14a1c56328d68527156694c77bfb04738d7457ec3cb17919be18608b30c04e73",
-  "vectors": 81,
-  "recorded_at": "2026-09-15",
+  "sha256": "c5f721455b75513b4217c200cf49b4b0eed471fbfcb704121c3cebbd09066770",
+  "vectors": 82,
+  "recorded_at": "2026-09-19",
   "commit_branch": "master"
 }
