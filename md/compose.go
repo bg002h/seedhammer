@@ -123,6 +123,31 @@ func (e LockOnlyPathError) Error() string {
 
 func (e LockOnlyPathError) Unwrap() error { return ErrComposeLockOnlyPath }
 
+// KeylessUnderTrError names the key-less path a tr policy cannot express, by
+// ZERO-BASED index -- the spelling the primary's conformance vector uses in
+// its `error.path` field. Error() renders the operator's 1-based path number.
+//
+// It carries ErrComposeKeylessUnderTr for errors.Is.
+type KeylessUnderTrError struct{ Path int }
+
+func (e KeylessUnderTrError) Error() string {
+	return fmt.Sprintf("%v: path %d", ErrComposeKeylessUnderTr, e.Path+1)
+}
+
+func (e KeylessUnderTrError) Unwrap() error { return ErrComposeKeylessUnderTr }
+
+// TooManySlotsError carries the slot total and the wire's cap, the fields the
+// primary's vector compares as `error.got` and `error.max`.
+//
+// It carries ErrComposeTooManySlots for errors.Is.
+type TooManySlotsError struct{ Got, Max int }
+
+func (e TooManySlotsError) Error() string {
+	return fmt.Sprintf("%v: got %d", ErrComposeTooManySlots, e.Got)
+}
+
+func (e TooManySlotsError) Unwrap() error { return ErrComposeTooManySlots }
+
 // TwoKeylessPathsError names the two key-less paths that put the list over
 // the cap, by ZERO-BASED index -- the spelling the primary's conformance
 // vector uses in its `error.first` / `error.second` fields
@@ -548,7 +573,7 @@ func ValidatePathList(list PathList) (int, error) {
 			// what the codec had just seen (fable review r0 lens 4 M-5).
 			return 0, LockOnlyPathError{Path: i + 1, Lock: p.Lock != nil}
 		} else if list.Wrapper == ComposeTr {
-			return 0, fmt.Errorf("%w: path %d", ErrComposeKeylessUnderTr, i+1)
+			return 0, KeylessUnderTrError{Path: i}
 		}
 		if p.Lock != nil {
 			if err := p.Lock.Check(); err != nil {
@@ -588,7 +613,7 @@ func ValidatePathList(list PathList) (int, error) {
 		return 0, TwoKeylessPathsError{First: keyless[0], Second: keyless[1]}
 	}
 	if slots > ComposeMaxSlots {
-		return 0, fmt.Errorf("%w: got %d", ErrComposeTooManySlots, slots)
+		return 0, TooManySlotsError{Got: slots, Max: ComposeMaxSlots}
 	}
 	if list.Wrapper.isLegacy() {
 		sole := len(list.Paths) == 1 && list.Paths[0].isBareMulti()

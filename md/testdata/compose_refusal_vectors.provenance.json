@@ -19,17 +19,18 @@
     "file carries the one vector the fable r0 fold needs, at the commit it",
     "actually came from.",
     "",
-    "TO RE-PIN: scripts/vendor-compose-refusal-vectors.sh /path/to/descriptor-mnemonic"
+    "TO RE-PIN: scripts/vendor-compose-refusal-vectors.sh /path/to/descriptor-mnemonic",
+    "RE-VENDORED at the fold's round-1 review (I-1/M-3). The primary moved after the first vendoring: dd7cdffc ordered the key-less cap AFTER TooManySlots and LegacyWrapperShape -- their remedies are not cured by \"fold them into one path\" -- and added four precedence_* cases plus a tightened refused_when (key-less = keys == null AND hash != null). The file is byte-identical at dd7cdffc and at the merge b2c5d693; b2c5d693 is what is pinned because it is on main and tagged."
   ],
   "repo": "descriptor-mnemonic",
   "remote": "git@github.com:bg002h/descriptor-mnemonic.git",
-  "commit": "4de55155f7bb5dda6896f733331f9ccd97275490",
-  "commit_on_branch": "fable-r0-fold",
+  "commit": "b2c5d69384327265da239dc13502727c8f9645fb",
+  "commit_on_branch": "main (md-codec 0.45.0 / md-cli 0.17.0, tagged)",
   "path": "crates/md-codec/tests/vectors",
   "files": [
     {
       "name": "compose_refusal_keyless_cap.json",
-      "sha256": "efc5c2d418f501117796fba973a4d2924405c8df860ae2f8073f6319a765ca5a"
+      "sha256": "7b6505f75cc1fc937fd65279fe200129746cf1534c3fe3adf2e8c9d81ce1de8f"
     }
   ],
   "file_count": 1,

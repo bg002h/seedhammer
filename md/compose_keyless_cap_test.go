@@ -128,11 +128,18 @@ type keylessCapVector struct {
 				Value uint32 `json:"value"`
 			} `json:"lock"`
 		} `json:"paths"`
-		Expect string `json:"expect"`
-		Error  *struct {
-			Kind   string `json:"kind"`
-			First  int    `json:"first"`
-			Second int    `json:"second"`
+		Expect  string `json:"expect"`
+		Message string `json:"message"`
+		Error   *struct {
+			Kind string `json:"kind"`
+			// TooManyKeylessPaths
+			First  int `json:"first"`
+			Second int `json:"second"`
+			// KeylessUnderTr
+			Path int `json:"path"`
+			// TooManySlots
+			Got int `json:"got"`
+			Max int `json:"max"`
 		} `json:"error"`
 		Slots int `json:"slots"`
 	} `json:"cases"`
@@ -161,6 +168,7 @@ func TestComposeKeylessCapAgreesWithTheRustVector(t *testing.T) {
 		t.Fatal("INCONCLUSIVE: the vector carries no cases")
 	}
 	var refused, admitted int
+	kinds := map[string]int{}
 	for _, c := range v.Cases {
 		list := PathList{}
 		switch c.Wrapper {
@@ -230,18 +238,71 @@ func TestComposeKeylessCapAgreesWithTheRustVector(t *testing.T) {
 				t.Errorf("%s: ValidatePathList admitted a list the primary refuses (%s)", c.Name, v.RefusedWhen)
 				continue
 			}
-			if c.Error == nil || c.Error.Kind != v.Error {
-				t.Fatalf("%s: the vector's case names error %+v, the file's rule names %q",
-					c.Name, c.Error, v.Error)
+			if c.Error == nil {
+				t.Fatalf("%s: the vector refuses the case and names no error kind", c.Name)
 			}
-			var got TwoKeylessPathsError
-			if !errors.As(err, &got) {
-				t.Errorf("%s: refused with %v, want %s", c.Name, err, v.Error)
-				continue
+			// DISPATCH ON THE CASE'S OWN `kind`, which is the Rust gate's own
+			// shape (md-codec/tests/compose_keyless_cap.rs). The file's
+			// top-level `error` names the rule this vector is ABOUT; the
+			// PRECEDENCE cases are refused by other rules on purpose, and
+			// comparing every case against the top-level name aborted the
+			// whole test on the first of them -- so the fork had no gate at
+			// all for the precedence half of the contract, which is exactly
+			// the half it was violating (round-1 review M-3, and I-1 is what
+			// it was hiding).
+			kinds[c.Error.Kind]++
+			switch c.Error.Kind {
+			case "TooManyKeylessPaths":
+				var got TwoKeylessPathsError
+				if !errors.As(err, &got) {
+					t.Errorf("%s: refused with %v, want TooManyKeylessPaths", c.Name, err)
+					continue
+				}
+				if got.First != c.Error.First || got.Second != c.Error.Second {
+					t.Errorf("%s: TooManyKeylessPaths names paths %d and %d (0-based), the vector says %d and %d",
+						c.Name, got.First, got.Second, c.Error.First, c.Error.Second)
+				}
+			case "KeylessUnderTr":
+				var got KeylessUnderTrError
+				if !errors.As(err, &got) {
+					t.Errorf("%s: refused with %v, want KeylessUnderTr -- the tr rule is the "+
+						"one in force there, and the cap's remedy does not cure it", c.Name, err)
+					continue
+				}
+				if got.Path != c.Error.Path {
+					t.Errorf("%s: KeylessUnderTr names path %d (0-based), the vector says %d",
+						c.Name, got.Path, c.Error.Path)
+				}
+			case "NoKeyedPath":
+				if !errors.Is(err, ErrComposeNoKeyedPath) {
+					t.Errorf("%s: refused with %v, want NoKeyedPath", c.Name, err)
+				}
+			case "TooManySlots":
+				var got TooManySlotsError
+				if !errors.As(err, &got) {
+					t.Errorf("%s: refused with %v, want TooManySlots -- folding two key-less "+
+						"paths into one sheds no slot, so the cap's remedy does not cure it",
+						c.Name, err)
+					continue
+				}
+				if got.Got != c.Error.Got || got.Max != c.Error.Max {
+					t.Errorf("%s: TooManySlots says got=%d max=%d, the vector says got=%d max=%d",
+						c.Name, got.Got, got.Max, c.Error.Got, c.Error.Max)
+				}
+			case "LegacyWrapperShape":
+				if !errors.Is(err, ErrComposeLegacyWrapperShape) {
+					t.Errorf("%s: refused with %v, want LegacyWrapperShape -- folding leaves "+
+						"two paths under sh, still not one sorted multisig", c.Name, err)
+				}
+			default:
+				t.Fatalf("%s: unknown error kind %q", c.Name, c.Error.Kind)
 			}
-			if got.First != c.Error.First || got.Second != c.Error.Second {
-				t.Errorf("%s: %s names paths %d and %d (0-based), the vector says %d and %d",
-					c.Name, v.Error, got.First, got.Second, c.Error.First, c.Error.Second)
+			// The case's `message` is compared ONLY where the case carries
+			// one: the precedence cases do not, because their message is the
+			// other rule's and belongs to that rule's own vector.
+			if c.Message != "" && !strings.Contains(c.Message, "key") {
+				t.Errorf("%s: the case's message does not describe a key-less condition: %q",
+					c.Name, c.Message)
 			}
 		case "admitted":
 			admitted++
@@ -262,5 +323,17 @@ func TestComposeKeylessCapAgreesWithTheRustVector(t *testing.T) {
 		t.Fatalf("INCONCLUSIVE: %d refusals and %d admissions -- the vector must carry both "+
 			"or one direction of the rule is untested", refused, admitted)
 	}
-	t.Logf("%s: %d refused, %d admitted", v.Rule, refused, admitted)
+	// EVERY PRECEDENCE RULE THE FILE STATES MUST HAVE BEEN EXERCISED. The
+	// vector's own `precedence` list ends "Every precedence rule has a case
+	// below"; without this, a re-vendor that dropped the precedence cases
+	// would leave the ordering ungated again and the test would still be
+	// green on the three refusals that remain.
+	for _, k := range []string{"TooManyKeylessPaths", "KeylessUnderTr", "NoKeyedPath",
+		"TooManySlots", "LegacyWrapperShape"} {
+		if kinds[k] == 0 {
+			t.Errorf("no case exercises %s; the vector's precedence list names it and this "+
+				"gate would prove nothing about it", k)
+		}
+	}
+	t.Logf("%s: %d refused, %d admitted, kinds %v", v.Rule, refused, admitted, kinds)
 }
