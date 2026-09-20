@@ -109,20 +109,28 @@ func composerCopyUnsortedKeys() string {
 
 // ─── §8c: the five lock echoes plus the two bound lines ──────────────────────
 
+// F-628 (lens 1 N-1): the echoes read "1 blocks". A relative block lock of 1
+// IS reachable from the pad -- composerLockEntry admits 1..65535 -- so an
+// operator can meet it. `plural` already exists in this package
+// (transaction.go:264) and takes an int, so the uint32 counts convert at the
+// call site rather than growing a second helper.
+
 // composerCopyLockEchoDays echoes a relative TIME lock. Both the operator's
 // days and the encoded units are printed, with the units converted BACK to
 // days, because ceil() to 512-second units does not round-trip: the operator
 // is entitled to see what the wallet will actually enforce.
 func composerCopyLockEchoDays(days, units uint32) string {
 	back := float64(units) * 512 / 86400
-	return fmt.Sprintf("%d days = %d units of 512 s (%.1f days)", days, units, back)
+	return fmt.Sprintf("%d %s = %d %s of 512 s (%.1f days)",
+		days, plural(int(days), "day", "days"), units, plural(int(units), "unit", "units"), back)
 }
 
 // composerCopyLockEchoBlocks echoes a relative BLOCK lock (§6b's table).
 // 600 seconds a block is the same figure §4c's "455.1 days" ceiling comes
 // from: 65535 * 600 / 86400.
 func composerCopyLockEchoBlocks(blocks uint32) string {
-	return fmt.Sprintf("%d blocks (about %.1f days)", blocks, float64(blocks)*600/86400)
+	return fmt.Sprintf("%d %s (about %.1f days)",
+		blocks, plural(int(blocks), "block", "blocks"), float64(blocks)*600/86400)
 }
 
 func composerCopyLockEchoHeight(height uint32) string {

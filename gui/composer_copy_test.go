@@ -481,3 +481,61 @@ func TestComposerCopyTableCoversTheSameXpubRefusal(t *testing.T) {
 	}
 	assertModalBodyFits(t, "the §7d same-xpub refusal", errorScreenBody, body)
 }
+
+// TestComposerLockEchoesAreGrammatical pins F-628 (lens 1 N-1).
+//
+// The echoes read "1 blocks". A relative block lock of exactly 1 is REACHABLE
+// from the pad -- composerLockEntry admits 1..65535 -- so an operator can meet
+// this string, which is why it is a fix and not a note.
+//
+// MUTATION: drop either plural() call and the matching row fails.
+func TestComposerLockEchoesAreGrammatical(t *testing.T) {
+	for _, tc := range []struct {
+		name, got, want string
+	}{
+		{"one block", composerCopyLockEchoBlocks(1), "1 block (about 0.0 days)"},
+		{"two blocks", composerCopyLockEchoBlocks(2), "2 blocks (about 0.0 days)"},
+		{"1000 blocks (the §8c example, unchanged)",
+			composerCopyLockEchoBlocks(1000), "1000 blocks (about 6.9 days)"},
+		{"one day, one unit", composerCopyLockEchoDays(1, 1), "1 day = 1 unit of 512 s (0.0 days)"},
+		{"the pad minimum: one day", composerCopyLockEchoDays(1, composerDaysToUnits(1)),
+			"1 day = 169 units of 512 s (1.0 days)"},
+		{"90 days (the §8c example, unchanged)",
+			composerCopyLockEchoDays(90, 15188), "90 days = 15188 units of 512 s (90.0 days)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Errorf("\n got  %q\n want %q", tc.got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubDayLockIsUnreachableFromThePad pins the OTHER half of F-628 rather
+// than writing copy for it.
+//
+// A 3-unit `older` echoes "0 days = 3 units of 512 s (0.0 days)" -- a lock
+// that claims zero days while enforcing 25.6 minutes. The review saw it only
+// because the harness fed units directly: the pad takes DAYS, refuses 0, and
+// one day is already 169 units.
+//
+// So the string is wrong and no operator can reach it. Inventing copy for an
+// unreachable state would add a body the spec does not carry and nobody will
+// ever read; asserting the unreachability instead means that if a future pad
+// ever admits sub-day locks, THIS test fails and the copy gets written then --
+// by someone who knows what the new pad offers.
+func TestSubDayLockIsUnreachableFromThePad(t *testing.T) {
+	if got := composerDaysToUnits(1); got != 169 {
+		t.Fatalf("one day is %d units, want 169 -- §6b's conversion moved, so the "+
+			"sub-day reasoning below no longer holds", got)
+	}
+	// The pad's day band refuses zero, so `days` is never 0 at the echo.
+	if _, ok := composerDaysBandEcho("0"); ok {
+		t.Error("the pad now accepts 0 days: a sub-day lock is reachable, and " +
+			"composerCopyLockEchoDays would echo \"0 days = N units\" -- write the " +
+			"sub-day copy now (F-628)")
+	}
+	if _, ok := composerDaysBandEcho("1"); !ok {
+		t.Error("the pad no longer accepts 1 day; this pin is measuring the wrong thing")
+	}
+}

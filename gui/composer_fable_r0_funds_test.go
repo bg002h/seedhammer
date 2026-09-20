@@ -923,6 +923,23 @@ func TestFableOutsideLianaModelNamesTheFirstClass(t *testing.T) {
 		{"10. tr: hashlock-gated -- NUMS AND a keyed hash path both apply; NUMS is first",
 			preset(md.ComposeTr, "hashlock-gated"), "NUMS key path"},
 
+		// F-631: THE ONE SHAPE WHERE 5 AND 6 ARE BOTH TRUE.
+		//
+		// Every other row above makes exactly one of the lock-shaped classes
+		// fire, so the suite pinned each class's TEXT and none of them pinned
+		// the ORDER between `after` and `older`-in-units: swap cases 5 and 6
+		// in composerLianaOutsideModelClass and all fourteen rows still pass.
+		// This policy carries both, and Liana's own order puts the absolute
+		// lock first (analysis.rs:212-257 runs before csv_check:139-145).
+		//
+		// MUTATION: swap those two cases and this row alone fails, reporting
+		// "a lock in time units".
+		{"15. wsh: [1 key], [1 key, after(1000000)], [1 key, older 100 UNITS] -- 5 and 6 both apply, absolute wins",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(),
+				lockedAt(single(), md.LockAfterHeight, 1000000),
+				lockedAt(single(), md.LockOlderUnits, 100)}}, "an absolute lock"},
+
 		// ─── negatives: Liana imports these unedited (report runbook §4) ──
 		{"11. tr: simple-timelocked-inheritance -- the primary IS the key path, not a Branch",
 			preset(md.ComposeTr, "simple-timelocked-inheritance"), ""},
