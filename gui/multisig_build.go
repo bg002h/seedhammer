@@ -589,7 +589,7 @@ prefix:
 		// or never reached it, leaves `rec` at its zero value and this document
 		// claims nothing; an empty string would render as silence, and silence is
 		// what reads as a pass.
-		multisigRestoreDocFlow(ctx, th, tpl, keys,
+		multisigRestoreDocFlow(ctx, th, assembledMd1, tpl, keys,
 			buildVerifyStatusLine(rec),
 			// false: this path has no passphrase-plate offer at all -- R-B, a
 			// later phase -- so it can never have cut one (S6b spec 6/6a).
@@ -770,22 +770,12 @@ func buildSeedForSlot(ctx *Context, th *Colors, reg *seedRegistry, slot int) (in
 		showError(ctx, th, "Build Policy", "Couldn't read that seed.")
 		return 0, false
 	}
-	ppChoice := &ChoiceScreen{
-		Title:   "Passphrase " + label,
-		Lead:    "Add a BIP-39 passphrase?",
-		Choices: []string{"Skip", "Add passphrase"},
-	}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
-		// §3.3.2 admits ClassPassphrase to this program, so the payload is
-		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
-		// syswPassphraseFlow for the two normative rules a shared edit inside
-		// passphraseFlow would have broken.
-		if pass, ok := syswPassphraseFlowTitled(ctx, th, "Passphrase "+label); ok {
-			if err := reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
-				showError(ctx, th, "Build Policy", "Couldn't apply that passphrase.")
-				return 0, false
-			}
-		}
+	// BACK IS A DECLINE AT BOTH PASSPHRASE SCREENS. This flow carried a
+	// byte-identical copy of the composer's defect (fable review r0 lens 4
+	// I-2 names it out of lens), so it takes the same helper rather than a
+	// second copy of the fix.
+	if !seedPassphraseStep(ctx, th, reg, seedID, label, "Build Policy") {
+		return 0, false
 	}
 	return seedID, true
 }

@@ -586,12 +586,13 @@ func TestRestoreDocPutsTheStatusFirstAndTheInventoryLast(t *testing.T) {
 	})
 
 	t.Run("multisig", func(t *testing.T) {
-		tpl, keys, err := md.ExpandWalletPolicyChunks(buildAssembledMd1(t, md.MultisigWsh))
+		chunks := buildAssembledMd1(t, md.MultisigWsh)
+		tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
 		if err != nil {
 			t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
 		}
 		content := page1(t, func(ctx *Context) {
-			multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, statusNeedle, extra)
+			multisigRestoreDocFlow(ctx, &descriptorTheme, chunks, tpl, keys, statusNeedle, extra)
 		})
 		// "Type:" is multisigRestoreLines' own first line on the expandOK branch,
 		// which is the branch every assembled full policy lands on.

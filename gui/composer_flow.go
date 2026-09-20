@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	"seedhammer.com/codex32"
@@ -402,9 +403,19 @@ func composerEngraveStep(ctx *Context, th *Colors, st *composerState, template, 
 		cards = append(cards, minted...)
 	}
 
-	// FULL vs WATCH-ONLY, and only where a seed is actually held: the question
-	// is meaningless when no slot came from one.
-	if st.reg.count() > 0 {
+	// FULL vs WATCH-ONLY, and only where a SEATED SLOT came from a seed
+	// (fable review r0 M-2).
+	//
+	// It used to ask `st.reg.count() > 0`, which is the registry of every seed
+	// ever TYPED in this flow -- including one the operator typed, declined
+	// and replaced with a key record. composerSecretCards cuts only SEATED
+	// seeds, so the question was asked, "Full (seed + keys)" was chosen, and
+	// the census then reported one plate and no ms1: a question whose answer
+	// changed nothing. §7f scopes it to "seed-derived slots", and
+	// composerSeedDerivedSlots is that predicate over the same assignments
+	// composerSecretCards walks, so the question and the plates cannot
+	// disagree.
+	if composerSeedDerivedSlots(st) {
 		full, ok := composerEngraveModePick(ctx, th, st)
 		if !ok {
 			return false
@@ -535,35 +546,83 @@ func composerRestoreDoc(ctx *Context, th *Colors, keyed []string, census []strin
 		), census...))
 		return
 	}
-	multisigRestoreDocFlow(ctx, th, tpl, keys, verifyStatusNotFullyCheckedLine, census)
+	multisigRestoreDocFlow(ctx, th, keyed, tpl, keys, verifyStatusNotFullyCheckedLine, census)
 }
 
-// composerSecretCards is §7f's "a seed that filled several slots is cut ONCE".
+// composerSeedDerivedSlots reports whether any SEATED slot came from a seed.
 //
-// THE DEDUP IS BY REGISTERED SEED, not by slot: one seed at three slots is one
-// secret, and cutting it three times would triple the bearer plates in the set
-// for no recovery value. The form is ms1, which is what the bundle machinery
-// carries (cardMS1, gui/multisig_engrave.go:36) and what Multisig Build's own
-// Full mode cuts. The words-plus-SeedQR plate is a backup.Seed, not a bundle
-// card, and needs its own plate pass; it is filed with F-455 rather than
-// offered by a picker with no builder behind it.
+// It walks st.assigned, not st.reg, and that is the distinction §7f turns on:
+// the registry holds every seed the operator ever typed in this flow, and a
+// seed typed and then not used seats nothing and is cut by nothing.
+func composerSeedDerivedSlots(st *composerState) bool {
+	for _, a := range st.assigned {
+		if a.src < 0 || a.src >= len(st.sources) {
+			continue
+		}
+		if st.sources[a.src].kind == composerSourceSeed {
+			return true
+		}
+	}
+	return false
+}
+
+// composerSecretCards is §7f's "a seed that filled several slots is cut
+// ONCE": one ms1 plate per distinct SECRET among the seated seed-derived
+// slots, whatever the slot count and whatever the registration count.
+//
+// The form is ms1, which is what the bundle machinery carries (cardMS1,
+// gui/multisig_engrave.go:36) and what Multisig Build's own Full mode cuts.
+// The words-plus-SeedQR plate is a backup.Seed, not a bundle card, and needs
+// its own plate pass; it is filed with F-455 rather than offered by a picker
+// with no builder behind it.
 func composerSecretCards(st *composerState) ([]bundleCard, error) {
-	seen := map[int]bool{}
+	// DEDUPED BY THE ENTROPY THE PLATE CARRIES, not by seedID and not by master
+	// fingerprint (fable review r0 M-3; fold-r1 review M-5).
+	//
+	// A seedID is one REGISTRATION, and an operator filling two slots from the
+	// same words answers "Type a seed" twice -- which is two registrations of
+	// one secret. Measured: that planned TWO ms1 plates with byte-identical
+	// strings, labelled "ms1 secret share 1" and "2", so the set carried two
+	// bearer plates of one seed and the census counted two shares. §7f: "A
+	// seed that filled several slots is cut ONCE."
+	//
+	// The fingerprint is the right key because it is what composerSeedAccountFor
+	// already keys the §4f account rule on (gui/composer_sources.go:291-305),
+	// for the same reason stated there: the id would mint the same key twice
+	// whenever one master was registered twice. The two are now deduped on the
+	// same identity, so a seed that gets ONE account ordinal sequence gets ONE
+	// plate.
+	//
+	// The fingerprint was the first key chosen, because composerSeedAccountFor
+	// keys the §4f account rule on it. It is the wrong key for a PLATE: the
+	// ms1 is codex32 over the ENTROPY and carries no passphrase, so one seed
+	// registered bare and again with a passphrase -- two fingerprints, two
+	// wallets -- is the same fifty characters twice. Measured (fold-r1 M-5):
+	// two byte-identical bearer plates, a census counting two shares, and
+	// nothing on either plate saying which pairing needed the passphrase. The
+	// dedup key is therefore sha256(entropy): a digest, never the secret, and
+	// exactly the identity of what gets cut.
+	seen := map[[32]byte]bool{}
 	var out []bundleCard
 	for _, a := range st.assigned {
 		if a.src < 0 || a.src >= len(st.sources) {
 			continue
 		}
 		src := st.sources[a.src]
-		if src.kind != composerSourceSeed || seen[src.seedID] {
+		if src.kind != composerSourceSeed {
 			continue
 		}
-		seen[src.seedID] = true
 		seed, ok := st.reg.at(src.seedID)
 		if !ok {
 			continue
 		}
 		entropy := seed.Mnemonic.Entropy()
+		key := sha256.Sum256(entropy)
+		if seen[key] {
+			wipeBytes(entropy)
+			continue
+		}
+		seen[key] = true
 		ms1, err := codex32.EncodeMS1(entropy)
 		wipeBytes(entropy)
 		if err != nil {

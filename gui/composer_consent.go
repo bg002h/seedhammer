@@ -241,6 +241,36 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	// stop. It now reports which kinds the policy actually holds, which means
 	// the loop has to see every branch -- a `break` on the first would name
 	// sha256 on a wallet whose second path is ripemd160.
+
+	// MIXED LOCK BASES under a non-taproot wrapper (fable review r0 lens 2
+	// I-2). Nunchuk refuses the whole wsh script when any two locks disagree
+	// about TIME vs HEIGHT; Core imports it. Under tr each leaf is checked on
+	// its own and a composer path carries at most one lock, so no leaf can
+	// mix and the notice must not fire -- shape.KeyPath is what separates the
+	// two, since a tr policy always reports one.
+	if shape.KeyPath == md.KeyPathNone && composerMixesLockBases(shape.Branches) {
+		lines = append(lines, "", composerCopyMixedLockBases())
+	}
+	// §8a, RESTATED AT CONSENT (fable review r0, lens 1 I-1 = lens 3 I-1).
+	//
+	// §8a fires at path CREATION, several screens and possibly several edits
+	// earlier, and the row here says only `KEY-LESS (EXPERIMENTAL)` -- three
+	// words for "no coordinator will import this wallet". The consent is the
+	// screen §7e calls the promise and the last one before steel, so the
+	// import consequence is restated here for the same reason §8i is (§6c:
+	// "at entry AND at consent"). Whole body, verbatim, not a summary: a
+	// shortened restatement is a second copy of a rule that can drift from
+	// the first.
+	//
+	// ON THE DECODED SHAPE, not on st.list: this function is handed the
+	// CHUNKS that will be cut, so a path that became key-less after the §8a
+	// confirm -- or one that never saw it -- is still named here.
+	for _, b := range shape.Branches {
+		if b.Keys == 0 {
+			lines = append(lines, "", composerCopyKeylessPath())
+			break
+		}
+	}
 	var kinds []md.HashKind
 	seen := make(map[md.HashKind]bool)
 	for _, b := range shape.Branches {
@@ -285,4 +315,31 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 		}
 	}
 	return lines, nil
+}
+
+// composerMixesLockBases reports whether the decoded branches carry locks of
+// BOTH bases -- TIME (older in 512-second units, after a Unix time) and
+// HEIGHT (older in blocks, after a block height).
+//
+// THE SPLIT IS THE BASE, NOT relative-vs-absolute, and that is the whole
+// precision of this predicate: decaying-multisig, a shipped preset, mixes
+// older(blocks) with after(height) -- both HEIGHT -- and Nunchuk imports it.
+// Reading the axis as relative-vs-absolute would put the notice on a preset
+// the device offers by name.
+//
+// Switched with no default so a fifth LockKind is a missing case here rather
+// than a lock silently counted as neither base.
+func composerMixesLockBases(branches []md.Branch) bool {
+	var time, height bool
+	for _, b := range branches {
+		for _, l := range b.Locks {
+			switch l.Kind {
+			case md.LockOlderUnits, md.LockAfterTime:
+				time = true
+			case md.LockOlderBlocks, md.LockAfterHeight:
+				height = true
+			}
+		}
+	}
+	return time && height
 }

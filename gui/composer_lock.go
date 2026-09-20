@@ -79,6 +79,21 @@ func composerDateExists(y, m, d int) bool {
 	return t.Year() == y && int(t.Month()) == m && t.Day() == d
 }
 
+// composerDateToUnixUnbanded is composerDateToUnix without the band check:
+// the raw Unix second a real calendar date denotes, so a caller can ask WHICH
+// SIDE of the band it fell off. composerDateToUnix collapses every failure to
+// (0, false), which is what made "before the floor" and "past the ceiling"
+// indistinguishable to the refusal above.
+//
+// It assumes composerDateExists(y, m, d) has already passed -- time.Date
+// NORMALISES, so 2027-02-31 would come back as a real second in March.
+func composerDateToUnixUnbanded(y, m, d int) (int64, bool) {
+	if !composerDateExists(y, m, d) {
+		return 0, false
+	}
+	return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC).Unix(), true
+}
+
 // composerDateToUnix converts a calendar date to its 00:00:00 UTC Unix time
 // and reports whether it is inside the entry band.
 //
@@ -324,7 +339,16 @@ func composerDateBandEcho(s string) (string, bool) {
 		if !composerDateExists(y, m, d) {
 			return "that date does not exist", false
 		}
-		if y < 2009 {
+		// THE FLOOR IS A UNIX TIME, NOT A YEAR (fable review r0 M-4 = lens 1
+		// M-1). The floor is 2009-01-03, so `y < 2009` left 2009-01-01 and
+		// 2009-01-02 -- two real calendar days below the floor -- falling
+		// through to the CEILING arm, which advised a block height for a date
+		// that is too EARLY. The refusal refused either way (no operand
+		// reaches the artifact, and md.Lock.Check refuses too), so this is a
+		// wrong-reason refusal rather than a wrong wallet; the comparison is
+		// against the same constant composerDateToUnix banded on, so the two
+		// cannot disagree again.
+		if u, _ := composerDateToUnixUnbanded(y, m, d); u < int64(composerDateFloorUnix) {
 			return composerCopyDateFloor(), false
 		}
 		// A DATE PAST THE CEILING EXISTS; the build will not write it as a TIME

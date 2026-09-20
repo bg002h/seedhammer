@@ -86,18 +86,58 @@ func composerInvariantViolation(st *composerState) bool {
 // pairwise-distinct rule). md refuses it only at ENCODE, so catching it here
 // is the difference between a review that names both slots and a codec error
 // the operator cannot act on.
+//
+// IT COMPARES KEY MATERIAL, NOT THE XPUB STRING (fable review r0 I-2). One
+// key has many serialisations: depth and parent fingerprint are header fields
+// an exporter chooses, and `md descriptor` itself prints a re-serialised form
+// with a ZERO parent fingerprint (F-611). So an operator who copies an xpub
+// off host output into a `key:` record, or onto an mk1 card, hands the device
+// the same key spelled differently -- and the string comparison this replaced
+// saw two keys. Measured: a "2-of-3" built that way was spent on Core v31.1
+// by ONE signer signing twice (the witness carried sig1 == sig2), while the
+// mapping review labelled it with §8g's same-seed-two-accounts warning, which
+// is the PERMITTED case. The wire binds the 65-byte chain-code||point
+// (composerArtifactsFor), so the bytes are what the policy actually repeats.
+//
+// THE ORIGIN IS DELIBERATELY NOT PART OF THE COMPARISON. The operator ruling
+// is that the same SEED at two different accounts is allowed -- those are two
+// different keys -- and the same key at two slots is UNSUPPORTED however its
+// origins are declared. The declared origin is a claim this device cannot
+// verify (§8's "cannot confirm a key was derived at the origin it declares");
+// the material is not.
 func composerDuplicateXpub(st *composerState) (uint8, uint8, bool) {
-	seen := map[string]int{}
+	seen := map[[65]byte]int{}
 	for i, a := range st.assigned {
 		if a.xpub == "" {
 			continue
 		}
-		if j, ok := seen[a.xpub]; ok {
+		b, ok := composerKeyMaterial(a.xpub)
+		if !ok {
+			// An xpub that will not decode is refused downstream, by the
+			// decoder, with the decoder's own reason. Skipping it here keeps
+			// this predicate answering only its own question.
+			continue
+		}
+		if j, ok := seen[b]; ok {
 			return uint8(j), uint8(i), true
 		}
-		seen[a.xpub] = i
+		seen[b] = i
 	}
 	return 0, 0, false
+}
+
+// composerKeyMaterial is the 65-byte chain-code||compressed-point an xpub
+// carries -- the same bytes composerArtifactsFor binds into the md1 wire, so
+// two spellings of one key reduce to one value here exactly as they do there.
+func composerKeyMaterial(xpub string) ([65]byte, bool) {
+	var b [65]byte
+	cc, pk, _, err := decodeXpubBytes(xpub)
+	if err != nil {
+		return b, false
+	}
+	copy(b[0:32], cc[:])
+	copy(b[32:65], pk[:])
+	return b, true
 }
 
 // composerSharedSeed is one C29 finding: the slots INSIDE one path that share

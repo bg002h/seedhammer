@@ -41,9 +41,19 @@ func composerRefusalBody(err error) (string, bool) {
 	case errors.Is(err, md.ErrComposeNoPaths), errors.Is(err, md.ErrComposeNoKeyedPath):
 		return composerCopyRefuseNoKeyedPath(), true
 	case errors.Is(err, md.ErrComposeLockOnlyPath):
+		// TWO STATES, TWO BODIES (fable review r0 lens 4 M-5). The codec
+		// refuses "neither keys nor a hash" as one rule, and the error says
+		// which of its two states this is: a lock-only path, or a path with
+		// nothing on it at all.
+		var lo md.LockOnlyPathError
+		if errors.As(err, &lo) && !lo.Lock {
+			return composerCopyRefuseEmptyPath(), true
+		}
 		return composerCopyRefuseLockOnly(), true
 	case errors.Is(err, md.ErrComposeKeylessUnderTr):
 		return composerCopyRefuseKeylessTr(), true
+	case errors.Is(err, md.ErrComposeTwoKeylessPaths):
+		return composerCopyRefuseTwoKeylessPaths(), true
 	case errors.Is(err, md.ErrComposeLegacyWrapperShape):
 		return composerCopyRefuseLegacyShape(), true
 	case errors.Is(err, md.ErrComposeTooManySlots):
@@ -57,6 +67,18 @@ func composerRefusalBody(err error) (string, bool) {
 	// is one refactor away from being reachable with no body.
 	case errors.Is(err, md.ErrComposeIndistinguishableSlots):
 		return composerCopySameOriginFewFingerprints(), true
+	}
+	// §7d's same-key body, for the codec's own refusal of the repeat (fable
+	// review r0 I-2). composerDuplicateXpub draws this body at the mapping
+	// review and names the two slots; md's Bind is the backstop underneath it,
+	// and without this arm an operator reaching it -- a route that skips the
+	// review, or a future one -- would read `md: compose: the same extended
+	// key is bound at two slots ...`, an internal prefix §11 forbids. The
+	// slots come from the error rather than being assumed, so the body names
+	// the pair the codec actually found.
+	var rep md.RepeatedKeyMaterialError
+	if errors.As(err, &rep) {
+		return composerCopySameXpub(rep.A, rep.B), true
 	}
 	return "", false
 }
@@ -201,7 +223,7 @@ func composerScriptLine(tpl md.Template) string {
 //     force. That is the same rule every other picker follows -- Back preserves
 //     what was entered -- and a no-op confirm there is still gated by §8j, a
 //     hold-to-confirm, so it proposes rather than commits. (§4e refuses too,
-//     but only for the legacy wrappers: md/compose.go's isLegacy() is
+//     but only for the legacy wrappers: md/compose.go's IsLegacy() is
 //     ComposeSh || ComposeShWsh, so a second-pass pick of tr or wsh meets §8j
 //     alone.)
 //
@@ -232,7 +254,16 @@ func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (m
 
 // composerCountPick offers 1..max on a paged list, so a 9-row picker cannot
 // overflow the panel the way an unpaged ChoiceScreen would.
-func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max int) (int, bool) {
+//
+// `current` IS THE VALUE IN FORCE, and the picker opens on it (fable review
+// r0 M-1). Opening on `min` meant a picker was PROPOSING a count rather than
+// showing one: an operator who opened Keys on a 2-of-3 path to read it, and
+// left by the forward button that advances every other screen, rewrote the
+// path to 1 key. Journey C-1's class, the same one F-527 closed for the
+// script picker and this fold closed for the key-order picker. Pass 0 (or
+// anything outside min..max) where there is no value in force; the row is
+// clamped, and the picker then opens on `min` as before.
+func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max, current int) (int, bool) {
 	if max < min {
 		return 0, false
 	}
@@ -240,7 +271,11 @@ func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max in
 	for v := min; v <= max; v++ {
 		rows = append(rows, fmt.Sprintf("%d", v))
 	}
-	sel, ok := composerPickScreen(ctx, th, title, lead, rows)
+	initial := 0
+	if current >= min && current <= max {
+		initial = current - min
+	}
+	sel, ok := composerPickScreenFrom(ctx, th, title, lead, rows, initial)
 	if !ok {
 		return 0, false
 	}
@@ -265,11 +300,25 @@ func composerKeysEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			return false
 		}
 	}
-	n, ok := composerCountPick(ctx, th, "Keys", fmt.Sprintf("Path %d: how many keys?", idx+1), min, max)
+	// THE KEY SET IN FORCE SEEDS BOTH PICKERS (fable review r0 M-1). `before`
+	// is nil on a path whose keys have never been set -- a path just created
+	// on the Keys arm -- and the zero then falls outside min..max and the
+	// picker opens on min, which is the right proposal when there is nothing
+	// to show.
+	before := st.list.Paths[idx].Keys
+	curN, curK := 0, 0
+	if before != nil {
+		curN, curK = int(before.N), int(before.K)
+	}
+	n, ok := composerCountPick(ctx, th, "Keys", fmt.Sprintf("Path %d: how many keys?", idx+1), min, max, curN)
 	if !ok {
 		return false
 	}
-	k, ok := composerCountPick(ctx, th, "Threshold", fmt.Sprintf("Path %d: how many must sign?", idx+1), 1, n)
+	// THE THRESHOLD PICKER IS SEEDED ONLY WHERE k IS STILL REACHABLE. Its
+	// bound is the n just chosen, so a 2-of-3 edited down to 2 keys must not
+	// open on a k of 3 -- composerCountPick clamps that to "no value in
+	// force", which opens on 1.
+	k, ok := composerCountPick(ctx, th, "Threshold", fmt.Sprintf("Path %d: how many must sign?", idx+1), 1, n, curK)
 	if !ok {
 		return false
 	}
@@ -301,10 +350,27 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 	if !composerSortedIsLegal(st.list, 0) {
 		return true
 	}
+	// IT OPENS ON THE SETTING IN FORCE (fable review r0 lens 4 I-1), which is
+	// journey C-1's class -- "a picker that opens on row zero proposes a
+	// setting" -- the same defect F-527 closed for the script picker, still
+	// open here. Measured walk: the operator picked "Keep my order", held §8b
+	// to confirm, reached the Template screen, pressed Back to re-read the
+	// list, pressed Done, and the key-order question was asked again OPENING
+	// ON ROW 0. The forward button -- the control that has advanced every
+	// other screen -- then made the wallet sortedmulti, §8b did not re-fire,
+	// and the only signal was the stub screen's "The shape changed, so this
+	// id changed", which names no cause. A multi() wallet and a sortedmulti()
+	// wallet over the same keys are different wallets unless the keys happen
+	// to be in lexicographic order.
+	initial := 0
+	if !st.list.Paths[0].Keys.Sorted {
+		initial = 1
+	}
 	cs := &ChoiceScreen{
 		Title:   "Key order",
 		Lead:    "Sorted keys, or your order?",
 		Choices: []string{"Sorted (usual)", "Keep my order"},
+		Initial: initial,
 	}
 	sel, ok := cs.Choose(ctx, th)
 	if !ok {
@@ -314,12 +380,82 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 		st.list.Paths[0].Keys.Sorted = true
 		return true
 	}
-	if !composerConfirmScreen(ctx, th, "EXPERIMENTAL",
-		composerConfirmBody(composerCopyUnsortedKeys())) {
-		return false
+	// §8b FIRES ONCE PER DECLINE, NOT ONCE PER PASS, which is §5a's rule and
+	// is what makes the preselection above safe. Re-firing the hold on a
+	// second pass over an answer the operator already confirmed would teach
+	// them to hold through it, and holding through §8b is the one thing the
+	// screen exists to prevent.
+	//
+	// `Sorted == false` IS the record of the confirmed decline and needs no
+	// second copy: every other writer in this package sets Sorted TRUE
+	// (composerKeysEdit at :303 and composerPresetKeys), and the only
+	// assignment of false is the line below, downstream of the hold. So a key
+	// set edited or re-preset comes back Sorted and re-earns the confirm --
+	// which is the §8a lesson (an index is not an identity) applied to a
+	// setting rather than to a path.
+	if st.list.Paths[0].Keys.Sorted {
+		if !composerConfirmScreen(ctx, th, "EXPERIMENTAL",
+			composerConfirmBody(composerCopyUnsortedKeys())) {
+			return false
+		}
+		st.list.Paths[0].Keys.Sorted = false
 	}
-	st.list.Paths[0].Keys.Sorted = false
 	return true
+}
+
+// composerKeylessPathCount counts the key-less paths in the list, skipping
+// the path at `except` (pass a negative index to count them all).
+//
+// KEY-LESS IS `Keys == nil` AND `Hash != nil` (round-1 review M-2), which is
+// the primary's own spelling: its vector's `refused_when` reads "keys == null
+// AND hash != null -- a path with neither keys nor hash is LockOnlyPath,
+// refused earlier". Counting `Keys == nil` alone counted the EMPTIED path
+// item 11 exists for, so an operator holding one was told at creation that
+// they already hold a key-less path, and handed the cap's remedy ("fold them
+// into one path") for a condition the list does not have. The codec was never
+// wrong -- LockOnlyPathError returns first -- only this guard was loose.
+func composerKeylessPathCount(list md.PathList, except int) int {
+	n := 0
+	for i, p := range list.Paths {
+		if i == except {
+			continue
+		}
+		if p.Keys == nil && p.Hash != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// composerAddPathKeylessRefusal decides whether a key-less path at `idx` is
+// refused AT CREATION, and with which §8m body.
+//
+// IT YIELDS TO THE STRUCTURAL REFUSALS, for the reason md.ValidatePathList
+// now orders the cap last (round-1 review I-1): the cap's remedy does not
+// cure them. Under sh / sh-wsh the blocker is the one-sorted-multisig rule --
+// folding two key-less paths into one leaves TWO paths, still refused -- so
+// the operator must be handed the body whose remedy works ("Use wsh or tr"),
+// not the one whose does not.
+//
+// The 36-slot case needs no arm here: a key-less path carries no slots, so
+// creating one cannot be what put a list over the cap, and the list is
+// re-validated at Done where TooManySlots is reported with its own body.
+//
+// Separated from composerAddPath so a test can ask the question without
+// driving a UI: the defect this closes was a body shown on a screen, and a
+// walk that had to reach that screen under three wrappers would have been the
+// slowest possible way to pin three strings.
+func composerAddPathKeylessRefusal(list md.PathList, idx int) (string, bool) {
+	if list.Wrapper == md.ComposeTr {
+		return composerCopyRefuseKeylessTr(), true
+	}
+	if composerKeylessPathCount(list, idx) < 1 {
+		return "", false
+	}
+	if list.Wrapper.IsLegacy() {
+		return composerCopyRefuseLegacyShape(), true
+	}
+	return composerCopyRefuseTwoKeylessPaths(), true
 }
 
 // composerAddPath appends a path and runs the §8a confirm when the operator
@@ -351,9 +487,19 @@ func composerAddPath(ctx *Context, th *Colors, st *composerState) {
 	}
 	// A key-less path is wsh-only and EXPERIMENTAL (§4b, C16). Under tr it is
 	// refused with §8m line 3 rather than confirmed.
-	if st.list.Wrapper == md.ComposeTr {
+	// REFUSED AT CREATION, not only at Done (fable review r0 C-1, and its
+	// round-1 review I-1). md.ValidatePathList is still the authority and
+	// still refuses at Done -- this is §4e's "REFUSE at the picker" half, and
+	// it is worth having because the alternative is the operator holding
+	// §8a's bearer-access confirm, choosing a hash kind and entering 64 hex
+	// characters for a path the codec will not admit.
+	//
+	// composerAddPathKeylessRefusal picks the body, and it yields to the
+	// structural refusals the way the codec now does: `idx` is the path being
+	// created and is key-less on this arm, so it is excluded from the count.
+	if body, refused := composerAddPathKeylessRefusal(st.list, idx); refused {
 		st.list.Paths = st.list.Paths[:idx]
-		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), composerCopyRefuseKeylessTr())
+		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), body)
 		return
 	}
 	// §8a FIRES ON EVERY KEY-LESS PATH THAT IS CREATED, with no memo.

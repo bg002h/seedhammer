@@ -413,12 +413,19 @@ func TestEverySyswConsumptionSiteNamesAnAdmittedClass(t *testing.T) {
 func TestTheSeamPassphraseOfferReachesOnlyProgramsThatAdmitIt(t *testing.T) {
 	// The five sites, in the four programs §3.3.2 admits ClassPassphrase to.
 	want := map[string]int{
-		"derive_xpub.go":    1, // Account Xpub
-		"bip85.go":          1, // BIP-85 Child Seed
-		"singlesig.go":      1, // Engrave Single-Sig
-		"multisig.go":       1, // Engrave Multisig, supplied policy
-		"multisig_build.go": 1, // Engrave Multisig, built policy
-		"sysw_source.go":    1, // the declaration itself
+		"derive_xpub.go": 1, // Account Xpub
+		"bip85.go":       1, // BIP-85 Child Seed
+		"singlesig.go":   1, // Engrave Single-Sig
+		"multisig.go":    1, // Engrave Multisig, supplied policy
+		// SINCE the fable review r0 fold, Engrave Multisig (built policy)
+		// reaches the offer through seedPassphraseStep, which lives in
+		// multisig_build_slots.go. It is ONE helper because that flow and the
+		// composer carried a byte-identical "Back is not a decline" defect
+		// (lens 4 I-2) and two copies of the fix would drift; the row moves
+		// with the call rather than the file keeping a row it no longer
+		// earns. Both programs still admit ClassPassphrase under §3.3.2.
+		"multisig_build_slots.go": 1, // Engrave Multisig (built policy), and the composer
+		"sysw_source.go":          1, // the declaration itself
 	}
 	// And the callers that must keep the plain keyboard. Named individually,
 	// with the rule each one would break.

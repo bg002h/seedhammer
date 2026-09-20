@@ -51,7 +51,11 @@ func (w ComposeWrapper) ScriptType() uint32 {
 	}
 }
 
-func (w ComposeWrapper) isLegacy() bool { return w == ComposeSh || w == ComposeShWsh }
+// IsLegacy reports whether the wrapper is one of the two §4a admits exactly
+// one sortedmulti path under. Exported since round-1 review I-1: the GUI's
+// creation-time key-less guard has to ask the same question validate() asks,
+// and a second copy of the wrapper set in package gui is how the two drift.
+func (w ComposeWrapper) IsLegacy() bool { return w == ComposeSh || w == ComposeShWsh }
 
 // LockKind is the operator's lock unit (§4c).
 type LockKind uint8
@@ -94,6 +98,8 @@ var (
 	ErrComposeNoKeyedPath            = errors.New("md: compose: every path is key-less; at least one path must hold a key")
 	ErrComposeLockOnlyPath           = errors.New("md: compose: a path with neither keys nor a hash is not a spend path")
 	ErrComposeKeylessUnderTr         = errors.New("md: compose: a key-less path is not expressible under tr")
+	ErrComposeTwoKeylessPaths        = errors.New("md: compose: a policy admits at most one key-less path; two of them lower to a malleable or_i")
+	ErrComposeRepeatedKeyMaterial    = errors.New("md: compose: the same extended key is bound at two slots; BIP 388 requires the keys to be pairwise distinct")
 	ErrComposeBadThreshold           = errors.New("md: compose: threshold needs 1 <= k <= n <= 9")
 	ErrComposeTooManySlots           = errors.New("md: compose: this wallet would have more key slots than the wire holds (32)")
 	ErrComposeLegacyWrapperShape     = errors.New("md: compose: sh and sh-wsh admit exactly one sortedmulti path")
@@ -101,6 +107,78 @@ var (
 	ErrComposeWrongSlotCount         = errors.New("md: compose: declarations given for a different number of slots than the policy has")
 	ErrComposeIndistinguishableSlots = errors.New("md: compose: two slots declare the same origin without two distinct fingerprints; a template like that cannot be restored")
 )
+
+// LockOnlyPathError names the path that has neither keys nor a hash, and
+// whether it carries a timelock -- the two states ErrComposeLockOnlyPath
+// refuses. Path is 1-based, as every compose refusal's operands are.
+//
+// It carries ErrComposeLockOnlyPath for errors.Is.
+type LockOnlyPathError struct {
+	Path int
+	Lock bool
+}
+
+func (e LockOnlyPathError) Error() string {
+	if e.Lock {
+		return fmt.Sprintf("%v: path %d", ErrComposeLockOnlyPath, e.Path)
+	}
+	return fmt.Sprintf("%v: path %d has no key, no hash and no lock", ErrComposeLockOnlyPath, e.Path)
+}
+
+func (e LockOnlyPathError) Unwrap() error { return ErrComposeLockOnlyPath }
+
+// KeylessUnderTrError names the key-less path a tr policy cannot express, by
+// ZERO-BASED index -- the spelling the primary's conformance vector uses in
+// its `error.path` field. Error() renders the operator's 1-based path number.
+//
+// It carries ErrComposeKeylessUnderTr for errors.Is.
+type KeylessUnderTrError struct{ Path int }
+
+func (e KeylessUnderTrError) Error() string {
+	return fmt.Sprintf("%v: path %d", ErrComposeKeylessUnderTr, e.Path+1)
+}
+
+func (e KeylessUnderTrError) Unwrap() error { return ErrComposeKeylessUnderTr }
+
+// TooManySlotsError carries the slot total and the wire's cap, the fields the
+// primary's vector compares as `error.got` and `error.max`.
+//
+// It carries ErrComposeTooManySlots for errors.Is.
+type TooManySlotsError struct{ Got, Max int }
+
+func (e TooManySlotsError) Error() string {
+	return fmt.Sprintf("%v: got %d", ErrComposeTooManySlots, e.Got)
+}
+
+func (e TooManySlotsError) Unwrap() error { return ErrComposeTooManySlots }
+
+// TwoKeylessPathsError names the two key-less paths that put the list over
+// the cap, by ZERO-BASED index -- the spelling the primary's conformance
+// vector uses in its `error.first` / `error.second` fields
+// (md/testdata/vectors/compose_refusal_keyless_cap.json), so the Go port and
+// the vector can be compared without a translation step that could itself be
+// off by one. Error() renders them as the operator's 1-based path numbers,
+// which is what every other compose refusal prints.
+//
+// It carries ErrComposeTwoKeylessPaths for errors.Is.
+type TwoKeylessPathsError struct{ First, Second int }
+
+func (e TwoKeylessPathsError) Error() string {
+	return fmt.Sprintf("%v: paths %d and %d", ErrComposeTwoKeylessPaths, e.First+1, e.Second+1)
+}
+
+func (e TwoKeylessPathsError) Unwrap() error { return ErrComposeTwoKeylessPaths }
+
+// RepeatedKeyMaterialError names the two slots Bind found bound to the same
+// key, so a caller can say WHICH -- an operator repairs "slots @1 and @2",
+// not "two slots". It carries ErrComposeRepeatedKeyMaterial for errors.Is.
+type RepeatedKeyMaterialError struct{ A, B uint8 }
+
+func (e RepeatedKeyMaterialError) Error() string {
+	return fmt.Sprintf("%v: slots @%d and @%d", ErrComposeRepeatedKeyMaterial, e.A, e.B)
+}
+
+func (e RepeatedKeyMaterialError) Unwrap() error { return ErrComposeRepeatedKeyMaterial }
 
 // operand is the tag and consensus operand this lock encodes to (§4c).
 func (l Lock) operand() (tag, uint32, error) {
@@ -403,11 +481,34 @@ func (c *Composed) Bind(pubkeys map[uint8][65]byte, fingerprints map[uint8][4]by
 		return fmt.Errorf("md: compose: Bind needs a key for each of %d slots, got %d", n, len(pubkeys))
 	}
 	pubs := make([]idxPub, n)
+	// BIP 388's pairwise-distinct rule, applied to the BYTES (fable review r0
+	// I-2). The primary refuses the same extended key at two positions --
+	// `md decompose` prints BIP 388's own sentence for it and calls the wallet
+	// UNSUPPORTED, never invalid -- and this port had no counterpart, so the
+	// device could MINT a policy the primary would not decompose. Measured on
+	// md 0.16.2 with the lens-1 descriptor: the device emitted six keyed
+	// chunks and `md decompose` of the descriptor they decode to reported
+	// "the same extended key is used at 2 positions".
+	//
+	// THE COMPARISON IS THE 65 BYTES, NOT THE XPUB STRING. depth and parent
+	// fingerprint are header fields, so one key has many serialisations and a
+	// string comparison misses the re-serialised copy `md descriptor` itself
+	// prints. Measured against the oracle: `md decompose` refuses the repeat
+	// whether the two positions share a use-site (`/<0;1>/*` twice) or not
+	// (`/<0;1>/*` and `/<2;3>/*`), so the material alone decides.
+	//
+	// Convergence, not a lead (CLAUDE.md, Rust-primary rule): the rule is
+	// already correct in Rust and this brings the Go port to it.
+	seen := map[[65]byte]int{}
 	for i := 0; i < n; i++ {
 		x, ok := pubkeys[uint8(i)]
 		if !ok {
 			return fmt.Errorf("md: compose: Bind has no key for slot @%d", i)
 		}
+		if j, dup := seen[x]; dup {
+			return RepeatedKeyMaterialError{A: uint8(j), B: uint8(i)}
+		}
+		seen[x] = i
 		pubs[i] = idxPub{idx: uint8(i), xpub: x}
 	}
 	c.d.tlv.pubkeys = pubs
@@ -455,7 +556,11 @@ func ValidatePathList(list PathList) (int, error) {
 	}
 	slots := 0
 	anyKeyed := false
+	keyless := make([]int, 0, len(list.Paths))
 	for i, p := range list.Paths {
+		if p.Keys == nil {
+			keyless = append(keyless, i)
+		}
 		if ks := p.Keys; ks != nil {
 			if ks.K == 0 || ks.N == 0 || ks.K > ks.N || ks.N > ComposeMaxKeysPerPath {
 				return 0, fmt.Errorf("%w: path %d has %d-of-%d", ErrComposeBadThreshold, i+1, ks.K, ks.N)
@@ -463,9 +568,16 @@ func ValidatePathList(list PathList) (int, error) {
 			slots += int(ks.N)
 			anyKeyed = true
 		} else if p.Hash == nil {
-			return 0, fmt.Errorf("%w: path %d", ErrComposeLockOnlyPath, i+1)
+			// THE ERROR CARRIES WHETHER THE PATH HAS A LOCK, because the two
+			// states this one rule refuses are different things on a screen:
+			// a path carrying `older(5)` and nothing else is a spend
+			// condition anyone can meet, and a path carrying NOTHING is not a
+			// path at all. The codec is looking at the operand anyway; the
+			// alternative was a GUI that re-read the path list to find out
+			// what the codec had just seen (fable review r0 lens 4 M-5).
+			return 0, LockOnlyPathError{Path: i + 1, Lock: p.Lock != nil}
 		} else if list.Wrapper == ComposeTr {
-			return 0, fmt.Errorf("%w: path %d", ErrComposeKeylessUnderTr, i+1)
+			return 0, KeylessUnderTrError{Path: i}
 		}
 		if p.Lock != nil {
 			if err := p.Lock.Check(); err != nil {
@@ -477,14 +589,52 @@ func ValidatePathList(list PathList) (int, error) {
 		return 0, ErrComposeNoKeyedPath
 	}
 	if slots > ComposeMaxSlots {
-		return 0, fmt.Errorf("%w: got %d", ErrComposeTooManySlots, slots)
+		return 0, TooManySlotsError{Got: slots, Max: ComposeMaxSlots}
 	}
-	if list.Wrapper.isLegacy() {
+	if list.Wrapper.IsLegacy() {
 		sole := len(list.Paths) == 1 && list.Paths[0].isBareMulti()
 		sorted := list.Paths[0].Keys != nil && list.Paths[0].Keys.Sorted
 		if !(sole && sorted) {
 			return 0, ErrComposeLegacyWrapperShape
 		}
+	}
+	// AT MOST ONE KEY-LESS PATH, wherever it sits and whatever lock it carries.
+	//
+	// IT IS LAST, AND THE ORDER IS THE CONTRACT (round-1 review I-1). The
+	// primary moved this block to the end of validate() in md-codec 0.45.0
+	// ("the key-less cap yields to the structural refusals"), and the reason
+	// ports word for word: THE CAP'S REMEDY DOES NOT CURE THE RULES ABOVE IT.
+	// "Fold them into one path" sheds no slot, so a 36-slot list is still over
+	// the cap; and folding leaves two paths under sh, which is still not one
+	// sorted multisig. A port that refuses first still refuses -- but names a
+	// repair the operator can carry out and still be refused. The vector's
+	// four precedence_* cases pin all four orderings.
+	//
+	// §5 chains paths as or_i(P, R) unless the head is a bare multi, and
+	// or_i(X, Z) is non-malleable only when one arm is `safe` -- rust-miniscript
+	// malleability.rs and Core's miniscript.h both require X.s || Z.s. A
+	// key-less path needs no signature, so it is never safe; with two of them
+	// anywhere in the list, the innermost or_i containing both has two unsafe
+	// arms and the whole script is malleable. A timelock does NOT rescue it:
+	// `older` is not a signature.
+	//
+	// The Rust primary refuses the same set, and refuses it structurally
+	// rather than by case: `md compose` re-parses its own lowering through
+	// `md encode`, which reports "Miniscript is malleable". Measured against
+	// md 0.16.2 over twelve lists (gui/composer_fable_r0_funds_test.go, which
+	// also runs the CLI as an oracle): every list with >= 2 key-less paths is
+	// refused -- [keyed,K,K], [keyed,K,K+older(5)], [K,K+older(5),keyed],
+	// [keyed,K+older(5),K+after(200)], [K+older(5),keyed,K+after(200)],
+	// [keyed,2of2,K,K], [keyed,K,2of2,K] -- and every list with at most one is
+	// admitted.
+	//
+	// THIS PORT HAS NO POST-LOWERING PARSE to catch it the primary's way: this
+	// package "emits no text" by design (the header above), so the primary's
+	// re-parse has no counterpart here and the rule is stated instead. Rust
+	// remains normative (CLAUDE.md, Rust-primary rule); md-codec's validate()
+	// is taking the same rule, and this is the port of it.
+	if len(keyless) > 1 {
+		return 0, TwoKeylessPathsError{First: keyless[0], Second: keyless[1]}
 	}
 	return slots, nil
 }

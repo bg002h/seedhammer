@@ -31,8 +31,11 @@ type composerCopyRow struct {
 // exact.
 func composerCopyTable() []composerCopyRow {
 	return []composerCopyRow{
+		// §8a GAINED ITS SECOND SENTENCE in the fable review r0 fold (lens 1
+		// I-1 = lens 3 I-1); filed as a §8 amendment so this table stays the
+		// diff target for the spec.
 		{"composerCopyKeylessPath", "8a", composerCopyKeylessPath(),
-			"KEY-LESS PATH (EXPERIMENTAL) This path needs no signature. Whoever knows the preimage of its hash can spend it. If that preimage is ever engraved, the plate is bearer access."},
+			"KEY-LESS PATH (EXPERIMENTAL) This path needs no signature. Whoever knows the preimage of its hash can spend it. If that preimage is ever engraved, the plate is bearer access. It also makes the WHOLE wallet un-importable, keyed paths included. Bitcoin Core, Nunchuk and Liana all refuse it. Only md can rebuild this wallet, and md cannot sign: no other wallet will watch it or spend from it."},
 		{"composerCopyUnsortedKeys", "8b", composerCopyUnsortedKeys(),
 			"UNSORTED KEYS (EXPERIMENTAL) You chose unsorted keys where sorted was possible. Key order is part of this wallet. Anyone restoring it must keep the same order. Sorted keys need none."},
 		{"composerCopyLockEchoDays", "8c", composerCopyLockEchoDays(90, 15188),
@@ -51,8 +54,13 @@ func composerCopyTable() []composerCopyRow {
 			"This device cannot tell the time. Nothing here has checked that this is in the future."},
 		{"composerCopyOwnWallet", "8d", composerCopyOwnWallet(),
 			"A wallet built here is its own wallet. The same rules written by another tool give a different id and different addresses."},
+		// §8f REWRITTEN in the fable review r0 fold (lens 2 I-1): its Nunchuk
+		// claim was measured FALSE, 0 of 7 shapes, by running libnunchuk
+		// 2.1.1. Filed as a §8 amendment so this table stays the diff target.
 		{"composerCopyNUMS", "8f", composerCopyNUMS(),
-			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core and Nunchuk import this form. Liana and BIP-388 signers need an unspendable xpub instead (see F-449)."},
+			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core imports this form. Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a tr policy whose first path is a single key. Liana and BIP-388 signers need an unspendable xpub instead (see F-449), which is a different wallet with different addresses."},
+		{"composerCopyMixedLockBases", "8g", composerCopyMixedLockBases(),
+			"MIXED LOCK BASES Some paths lock by block height and others by time. Nunchuk will refuse this wallet; Bitcoin Core imports it. Taproot accepts both, because it checks each path on its own."},
 		{"composerCopySameSeedThreshold", "8g", composerCopySameSeedThreshold([]uint8{1, 2}, 2, 3),
 			"SAME SEED, SAME PATH Slots @1 and @2 are the same seed. This path's 2-of-3 can be satisfied by one person. Liana will refuse it."},
 		{"composerCopySameSeedBelow", "8g", composerCopySameSeedBelow([]uint8{1, 2}, 3),
@@ -81,8 +89,12 @@ func composerCopyTable() []composerCopyRow {
 			"Every wallet needs at least one path with a key."},
 		{"composerCopyRefuseLockOnly", "8m", composerCopyRefuseLockOnly(),
 			"A path with only a time lock means anyone can spend after it. Add a key or a hash."},
+		{"composerCopyRefuseEmptyPath", "8m", composerCopyRefuseEmptyPath(),
+			"This path has no key and no hash, so nothing can spend it. Add a key or a hash, or remove the path."},
 		{"composerCopyRefuseKeylessTr", "8m", composerCopyRefuseKeylessTr(),
 			"This build will not put a key-less path in taproot. Use wsh, or add a key."},
+		{"composerCopyRefuseTwoKeylessPaths", "8m", composerCopyRefuseTwoKeylessPaths(),
+			"A wallet can have one key-less path, not two. Two of them make this script malleable, and no wallet will import it. A time lock does not help. Give one of them a key, or fold them into one path."},
 		{"composerCopyRefuseLegacyShape", "8m", composerCopyRefuseLegacyShape(),
 			"Legacy wrappers hold one plain multisig only. Use wsh or tr."},
 		{"composerCopyRefuseSlotCap", "8m", composerCopyRefuseSlotCap(),
@@ -408,8 +420,23 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// warning (operator ruling 2026-09-16). The refusal it replaced was not a
 	// composerCopy* body at all -- it was an arm of composerCopyHashlockRefusal
 	// -- so the count moves by one even though one string replaced another.
-	if declared != 82 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 82 -- "+
+	// 83 SINCE the composer fable review r0 C-1 gave §8m a sixth structural
+	// refusal: a policy admits at most one key-less path, because two of them
+	// lower to an or_i with two unsafe arms and the script is malleable. No
+	// existing body could carry it -- §8a's confirm describes ONE key-less
+	// path and is true of it, and the lock-only and key-less-under-tr lines
+	// name different conditions.
+	// 84 SINCE fable review r0 lens 2 I-2 added the mixed-lock-bases notice.
+	// It is filed under §8g because it is that section's register -- a
+	// coordinator names a wallet it will refuse -- and because §8's existing
+	// lock sections (§8c, §8o) are about OPERANDS and bands, not about who
+	// imports the result.
+	// 85 SINCE fable review r0 lens 4 M-5 split §8m's lock-only line in two.
+	// ErrComposeLockOnlyPath refuses "neither keys nor a hash", which is TWO
+	// operator-visible states, and the lock-only body was being drawn on a row
+	// reading "Path 2: empty" -- naming a time lock nobody had set.
+	if declared != 85 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 85 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

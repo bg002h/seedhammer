@@ -416,9 +416,17 @@ func TestComposerSelfCheckAcceptsEveryOfferedPresetsHonestBuild(t *testing.T) {
 }
 
 // TestComposerSelfCheckStillComparesKeyCountsUnderALock is the other half: the
-// fix must not turn a real disagreement into a pass. A branch whose multi sits
-// under a lock reports Keys but not K/N, so the key COUNT is what remains
-// comparable -- and it must still be compared.
+// fix must not turn a real disagreement into a pass.
+//
+// IT NOW PINS THE THRESHOLD ARM ON THE LOCKED PATH (fable review r0 I-3).
+// This test was written when a branch whose multi sat under a lock reported
+// Keys but NOT K/N, so the key count was all that remained comparable; the
+// decoder reports the threshold there now, and the self-check takes the
+// stronger arm and says "2-of-4 in the shape and 2-of-3 decoded". The
+// property the test exists for is unchanged and still asserted: a real
+// disagreement on a LOCKED path must not pass. The count-only fallback is
+// kept under test by the second half below, on a branch that genuinely has
+// no threshold node.
 func TestComposerSelfCheckStillComparesKeyCountsUnderALock(t *testing.T) {
 	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
 		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true},
@@ -435,6 +443,45 @@ func TestComposerSelfCheckStillComparesKeyCountsUnderALock(t *testing.T) {
 		t.Fatal("the self-check ACCEPTED a shape claiming 4 keys against chunks carrying " +
 			"3, on a path whose multi sits under a lock -- the fix for the K/N contract " +
 			"must not stop comparing what the contract DOES set")
+	}
+	if !strings.Contains(err.Error(), "2-of-4") || !strings.Contains(err.Error(), "2-of-3") {
+		t.Errorf("the refusal does not name both thresholds: %v", err)
+	}
+	// AND THE MIS-TAPPED k IS CAUGHT TOO, which is the case I-3 opened: n is
+	// equal on both sides and only the threshold differs, so nothing but the
+	// K comparison can see it.
+	st.list.Paths[0].Keys = &md.KeySet{K: 1, N: 3, Sorted: true}
+	if err := composerSelfCheck(st, chunks); err == nil {
+		t.Fatal("the self-check ACCEPTED a 1-of-3 shape against 2-of-3 chunks on a locked path")
+	}
+}
+
+// TestComposerSelfCheckStillComparesKeyCountsWithNoThresholdNode keeps the
+// count-only fallback under test on a branch that really has no threshold
+// node: §5 lowers a 1-of-1 to pk, so K/N are zero there by construction and
+// Branch.Keys is the strongest fact the decoded tree offers.
+func TestComposerSelfCheckStillComparesKeyCountsWithNoThresholdNode(t *testing.T) {
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true},
+			Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 1000}},
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
+	}}
+	st, chunks := composerHonestBuildFor(t, md.ComposeWsh, list)
+	if err := composerSelfCheck(st, chunks); err != nil {
+		t.Fatalf("INCONCLUSIVE: the honest shape is refused: %v", err)
+	}
+	shape, err := md.PolicyShapeChunks(chunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shape.Branches[0].K != 0 || shape.Branches[0].N != 0 {
+		t.Fatalf("INCONCLUSIVE: branch 0 reports %d-of-%d, so this is not the fallback arm",
+			shape.Branches[0].K, shape.Branches[0].N)
+	}
+	st.list.Paths[0].Keys = &md.KeySet{K: 1, N: 2, Sorted: true}
+	err = composerSelfCheck(st, chunks)
+	if err == nil {
+		t.Fatal("the self-check ACCEPTED a shape claiming 2 keys against a branch carrying 1")
 	}
 	if !strings.Contains(err.Error(), "keys") {
 		t.Errorf("the refusal does not name the key count: %v", err)

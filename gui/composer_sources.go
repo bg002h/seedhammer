@@ -106,6 +106,27 @@ func composerCardSources(ctx *Context) []composerSource {
 			start++
 			continue
 		}
+		// A TESTNET CARD IS NOT A COMPOSER SOURCE (round-1 review M-1). §4f
+		// makes complex-policy derivation mainnet-only by construction, and
+		// r0's M-6 closed that door for `key:` records and left this one
+		// open: mk.Card.Network is "mainnet" | "testnet" by design, mk/encode
+		// admits the testnet public version, and the seating path reaches the
+		// material through decodeXpubBytes, which parses and never asks the
+		// network. So the card was offered, the slot bound its
+		// chain-code||point, and the consent derived mainnet bc1q addresses
+		// for material declared under coin type 1'. The door count cannot
+		// flag it either -- an mk1 card is ClassMDMK, so it never reaches
+		// composerCopyNotUnderstood.
+		//
+		// INERT, NOT REFUSED WITH A SCREEN, which is the same shape the
+		// record door takes: the card still decodes, displays and verifies
+		// everywhere else in the firmware; it is only not offered HERE. One
+		// unusable card must not hide the cards after it, so this advances
+		// past the set rather than stopping.
+		if !composerCardIsMainnet(card) {
+			start = end
+			continue
+		}
 		path, err := bip32.ParsePath(card.Path)
 		if err != nil {
 			start = end
@@ -130,6 +151,20 @@ func composerCardSources(ctx *Context) []composerSource {
 		start = end
 	}
 	return out
+}
+
+// composerCardIsMainnet asks the question §4f settles, on the card's own
+// declared network.
+//
+// ON mk.Card.Network, NOT ON THE XPUB STRING'S PREFIX: mk.Decode reads the
+// network out of the serialised version bytes (mk/encode.go), so this field
+// IS the version-byte answer, already decoded -- the same fact
+// sysw.ParseKeyRecord gets from hdkeychain's IsForNet. An empty Network is
+// treated as mainnet, because that is what mk.Decode reports for the only
+// version bytes a mainnet card can carry, and refusing on absence would drop
+// every card written before the field existed.
+func composerCardIsMainnet(card mk.Card) bool {
+	return card.Network == "" || card.Network == "mainnet"
 }
 
 // composerKeyLabel is §7d's label: fingerprint AND origin.
@@ -255,18 +290,12 @@ func composerSeedSource(ctx *Context, th *Colors, st *composerState) (composerSo
 		showError(ctx, th, "Seed", "Couldn't read that seed.")
 		return composerSource{}, false
 	}
-	pp := &ChoiceScreen{
-		Title:   "Passphrase " + label,
-		Lead:    "Add a BIP-39 passphrase?",
-		Choices: []string{"Skip", "Add passphrase"},
-	}
-	if sel, ok := pp.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := syswPassphraseFlowTitled(ctx, th, "Passphrase "+label); ok {
-			if err := st.reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
-				showError(ctx, th, "Seed", "Couldn't apply that passphrase.")
-				return composerSource{}, false
-			}
-		}
+	// BACK IS A DECLINE AT BOTH PASSPHRASE SCREENS (fable review r0 lens 4
+	// I-2), and seedPassphraseStep carries the whole rule -- including the
+	// un-registration, which this flow could not do inline because st.reg.add
+	// above runs before the question.
+	if !seedPassphraseStep(ctx, th, st.reg, seedID, label, "Seed") {
+		return composerSource{}, false
 	}
 	seed, _ := st.reg.at(seedID)
 	var fp [4]byte

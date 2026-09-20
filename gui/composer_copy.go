@@ -73,10 +73,31 @@ func composerSlotList(slots []uint8) string {
 
 // ─── §8a, §8b: the two EXPERIMENTAL confirm-to-proceed bodies ────────────────
 
+// composerCopyKeylessPath is §8a. It names TWO consequences, and the second
+// arrived with the fable review r0 (lens 1 I-1 and lens 3 I-1 found it
+// independently, from opposite ends).
+//
+// The body used to stop at bearer access, which is true and is not the whole
+// price. ONE key-less path makes the WHOLE wallet un-importable -- keyed paths
+// included -- because the descriptor as a whole is what a coordinator refuses:
+// measured on Bitcoin Core v25.0 and v31.1, `getdescriptorinfo` reports
+// "witnesses without signature exist" and never issues a checksum, so
+// `importdescriptors` cannot even be reached; libnunchuk 2.1.1 refuses;
+// Liana refuses any hashlock path. The Rust primary ADMITS the shape, so
+// nothing upstream of this screen says it either, and the operator who funds
+// one discovers it at restore -- with the money already in.
+//
+// THAT IS WHY IT SAYS "ANY OTHER WALLET" AND NOT "md ONLY CAN RESTORE IT".
+// md restores the wallet in the sense of reconstructing the descriptor and
+// deriving addresses; it does not sign. The honest sentence is about what can
+// WATCH and SPEND, which is what an operator about to fund is deciding.
 func composerCopyKeylessPath() string {
 	return "KEY-LESS PATH (EXPERIMENTAL)\n" +
 		"This path needs no signature. Whoever knows the preimage of its hash can " +
-		"spend it. If that preimage is ever engraved, the plate is bearer access."
+		"spend it. If that preimage is ever engraved, the plate is bearer access.\n" +
+		"It also makes the WHOLE wallet un-importable, keyed paths included. " +
+		"Bitcoin Core, Nunchuk and Liana all refuse it. Only md can rebuild this " +
+		"wallet, and md cannot sign: no other wallet will watch it or spend from it."
 }
 
 func composerCopyUnsortedKeys() string {
@@ -145,11 +166,57 @@ func composerCopyOwnWallet() string {
 		"another tool give a different id and different addresses."
 }
 
+// composerCopyNUMS is §8f. It used to say "Bitcoin Core and Nunchuk import
+// this form", and the Nunchuk half was FALSE (fable review r0 lens 2 I-1).
+//
+// MEASURED BY RUNNING libnunchuk 2.1.1, not by reading it: every NUMS-keyed
+// tr shape the composer can emit is refused by `Utils::ParseWalletDescriptor`
+// -- the function the desktop app calls -- in both the multipath and the
+// single-chain spellings, 14 of 14, code=-1017. Two mechanisms, and between
+// them they cover the whole space: `sortedmulti_a` is a descriptor function
+// and not a miniscript fragment, so its template validator refuses a plain
+// k-of-n under tr outright; and every other NUMS shape is stamped
+// DISABLE_KEY_PATH, which re-renders the key path as an unspendable XPUB and
+// then requires the re-rendered string to match the input, which a raw 32-byte
+// H never does.
+//
+// THE WAY OUT IS NAMED, AND IT IS NOT THE UNSPENDABLE XPUB. That form is the
+// one Nunchuk accepts and it is a DIFFERENT WALLET: measured, one preset
+// derives bc1pm0udr8a... through the xpub form and bc1pac935qv... through the
+// raw-H form this device cuts, because the xpub form derives per-index
+// children of H and the raw form does not. The F-449 sentence stays because
+// it is true of Liana and BIP-388 signers, for whom the xpub wallet is the
+// wallet they wanted; sending a NUNCHUK operator there would hand them a
+// different wallet under the name of this one.
 func composerCopyNUMS() string {
 	return "KEY PATH: NONE (NUMS)\n" +
-		"Spends use the script paths only. Bitcoin Core and Nunchuk import this " +
-		"form. Liana and BIP-388 signers need an unspendable xpub instead (see " +
-		"F-449)."
+		"Spends use the script paths only. Bitcoin Core imports this form. " +
+		"Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a " +
+		"tr policy whose first path is a single key. Liana and BIP-388 signers " +
+		"need an unspendable xpub instead (see F-449), which is a different " +
+		"wallet with different addresses."
+}
+
+// composerCopyMixedLockBases is the fable review r0 lens-2 I-2 notice, in the
+// register of §8g's Liana line: one sentence naming the wallet that refuses
+// and one naming the way round it.
+//
+// libnunchuk 2.1.1's MiniscriptTimeline walks the WHOLE wsh script and throws
+// "Timelock mixing" on the first lock whose base -- TIME vs HEIGHT -- differs
+// from any earlier one, regardless of relative-vs-absolute and regardless of
+// which `or` branch it sits in. ParseDescriptors swallows the exception, so
+// the app shows only "Could not parse descriptor" and the operator has
+// nothing to act on. Bitcoin Core imports the same descriptor: miniscript's
+// own rule only forbids mixing inside ONE satisfaction.
+//
+// THE AXIS IS THE BASE, NOT relative-vs-absolute, and getting that wrong
+// would put this notice on a shipped preset: decaying-multisig mixes
+// older(blocks) with after(height), which are both HEIGHT, and imports.
+func composerCopyMixedLockBases() string {
+	return "MIXED LOCK BASES\n" +
+		"Some paths lock by block height and others by time. Nunchuk will refuse " +
+		"this wallet; Bitcoin Core imports it. Taproot accepts both, because it " +
+		"checks each path on its own."
 }
 
 // ─── §8g: C29, one seed at two slots INSIDE one path ─────────────────────────
@@ -298,10 +365,47 @@ func composerCopyNothingChecked() string {
 		"receive address."
 }
 
-// ─── §8m: the five structural refusals (§4e) ─────────────────────────────────
+// ─── §8m: the six structural refusals (§4e) ──────────────────────────────────
+
+// composerCopyRefuseTwoKeylessPaths is §8m's sixth line (fable review r0 C-1).
+//
+// IT NAMES THE TIMELOCK BECAUSE THE TIMELOCK IS THE OPERATOR'S NEXT IDEA. A
+// key-less path is admitted one at a time, so the shape an operator reaches
+// this refusal with is a second bearer path they have already confirmed once
+// under §8a -- and the obvious repair, "put a delay on one of them", does not
+// work: malleability asks for a SIGNATURE on one arm, and `older` is not one.
+// A refusal that left that unsaid would send them round the loop.
+func composerCopyRefuseTwoKeylessPaths() string {
+	return "A wallet can have one key-less path, not two. Two of them make this " +
+		"script malleable, and no wallet will import it. A time lock does not " +
+		"help. Give one of them a key, or fold them into one path."
+}
 
 func composerCopyRefuseNoKeyedPath() string {
 	return "Every wallet needs at least one path with a key."
+}
+
+// composerCopyRefuseEmptyPath is §8m's body for a path that has NOTHING --
+// no key, no hash, no lock (fable review r0 lens 4 M-5).
+//
+// It is a separate body because the lock-only one was being drawn on it and
+// was FALSE there: "A path with only a time lock means anyone can spend after
+// it" names a lock the operator never set, on a row that reads "Path 2:
+// empty". A refusal that says the wrong true thing is worse than one that
+// says an unpolished true thing (the rule composerRefusalBody's own header
+// states), and this is that rule applied to a second state inside one codec
+// sentinel.
+//
+// THE PATH IS REFUSED, NOT REMOVED, and that is the choice this finding
+// offered. composerAddPath removes a path that ends empty AT CREATION,
+// because there the operator never had one. An EDIT reaches this state from a
+// path that already exists in a list the operator is reading, and may carry a
+// timelock they set; deleting it silently would renumber the list under them
+// and discard that work, which is the very class -- a silent default at a
+// moment that deserved a screen -- that the rest of this review is about.
+func composerCopyRefuseEmptyPath() string {
+	return "This path has no key and no hash, so nothing can spend it. Add a key " +
+		"or a hash, or remove the path."
 }
 
 func composerCopyRefuseLockOnly() string {

@@ -32,11 +32,22 @@ import (
 // screen"), so a package-wide "must start with the name" check would be noise.
 // What is asserted here is narrow and exact: these symbols have a doc comment,
 // and it is THEIR doc comment.
+// SIX SINCE THE COMPOSER FABLE REVIEW r0 FOLD did it twice more (round-1
+// review M-4), in the two files this list did not reach:
+// composerSeedDerivedSlots took composerSecretCards' block -- which still
+// read "THE DEDUP IS BY REGISTERED SEED, not by slot", a rule the SAME commit
+// replaced with dedup by fingerprint -- and composerCopyMixedLockBases took
+// composerCopySameSeedThreshold's. A named list only guards the names on it,
+// so the list grows with every symbol a fold puts at risk.
 var composerDocOwners = map[string]string{
-	"composerFlow":      "composer_flow.go",
-	"composerFlowExit":  "composer_flow.go",
-	"composerPageLines": "composer_paged.go",
-	"composerTextBand":  "composer_paged.go",
+	"composerFlow":                  "composer_flow.go",
+	"composerFlowExit":              "composer_flow.go",
+	"composerPageLines":             "composer_paged.go",
+	"composerTextBand":              "composer_paged.go",
+	"composerSecretCards":           "composer_flow.go",
+	"composerCopySameSeedThreshold": "composer_copy.go",
+	"composerSeedDerivedSlots":      "composer_flow.go",
+	"composerCopyMixedLockBases":    "composer_copy.go",
 }
 
 // TestComposerHelpersDidNotStealADocComment is the gate for the above.
