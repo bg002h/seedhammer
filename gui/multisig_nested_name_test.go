@@ -126,11 +126,12 @@ func buildAssembledMd1(t *testing.T, script md.MultisigScript) []string {
 // would read.
 func restoreDocBlob(t *testing.T, script md.MultisigScript) string {
 	t.Helper()
-	tpl, keys, err := md.ExpandWalletPolicyChunks(buildAssembledMd1(t, script))
+	chunks := buildAssembledMd1(t, script)
+	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
 	if err != nil {
 		t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
 	}
-	lines, _, err := multisigRestoreLines(tpl, keys)
+	lines, _, err := multisigRestoreLines(chunks, tpl, keys)
 	if err != nil {
 		t.Fatalf("multisigRestoreLines: %v", err)
 	}
@@ -222,7 +223,8 @@ func TestRestoreDocNestedNameIsActuallyDrawn(t *testing.T) {
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
-	tpl, keys, err := md.ExpandWalletPolicyChunks(buildAssembledMd1(t, md.MultisigShWsh))
+	chunks := buildAssembledMd1(t, md.MultisigShWsh)
+	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
 	if err != nil {
 		t.Fatalf("ExpandWalletPolicyChunks(assembled): %v", err)
 	}
@@ -230,7 +232,7 @@ func TestRestoreDocNestedNameIsActuallyDrawn(t *testing.T) {
 		// The status is the production placeholder (S6a step 4), not "": this test
 		// rasterises the document the operator is shown, and a document with an
 		// empty first line is not one any call site produces.
-		multisigRestoreDocFlow(ctx, &descriptorTheme, tpl, keys, verifyStatusNotFullyCheckedLine, nil)
+		multisigRestoreDocFlow(ctx, &descriptorTheme, chunks, tpl, keys, verifyStatusNotFullyCheckedLine, nil)
 	})
 	defer quit()
 	content, ok := pumpUntil(frame, "P2SH-P2WSH", 64)

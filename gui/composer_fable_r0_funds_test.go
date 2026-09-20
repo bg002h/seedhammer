@@ -522,3 +522,132 @@ func TestFableMixedLockBasesUnderWshAreNoticed(t *testing.T) {
 	}
 	assertModalBodyFits(t, "the mixed-lock-bases notice", errorScreenBody, body)
 }
+
+// ─── L3 I-3: the restore document must not deny addresses the consent showed ─
+
+// TestFableRestoreDocDerivesEveryShapeTheConsentDerives is lens-3 I-3.
+//
+// composerRestoreDoc hands the keyed policy to multisigRestoreDocFlow, whose
+// multisigRestoreLines knew only the flat expandedToDescriptor route and
+// printed "Addresses unavailable for this policy shape." for everything else
+// -- 13 of the reviewer's 22 keyed shapes. The consent screen one screen
+// earlier had derived and displayed four addresses for each of them, through
+// policyAddressAt's complex route. The document states as fact something the
+// same device disproved a screen ago, and a restorer reading it in five years
+// is told not to try.
+//
+// THE CHECK IS EQUALITY WITH THE CONSENT, not merely "an address appears":
+// two routes that both produce an address and disagree about WHICH is the
+// worse failure, and it is the one a "does it say unavailable" assertion
+// cannot see.
+func TestFableRestoreDocDerivesEveryShapeTheConsentDerives(t *testing.T) {
+	single := func() md.SpendPath { return md.SpendPath{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}} }
+	kofn := func(k, n uint8) md.SpendPath { return md.SpendPath{Keys: &md.KeySet{K: k, N: n, Sorted: true}} }
+	older := func(n uint32) *md.Lock { return &md.Lock{Kind: md.LockOlderBlocks, Value: n} }
+	locked := func(p md.SpendPath, l *md.Lock) md.SpendPath { p.Lock = l; return p }
+	for _, tc := range []struct {
+		what string
+		list md.PathList
+	}{
+		{"flat sortedmulti (the shape that already worked)",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{kofn(2, 3)}}},
+		{"or_d: 2-of-3 head, single-key recovery behind older(26280)",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{kofn(2, 3), locked(single(), older(26280))}}},
+		{"or_i: single head, single behind a lock",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{single(), locked(single(), older(5))}}},
+		{"three paths, two locks",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				kofn(2, 2), locked(single(), older(5)), locked(single(), older(6))}}},
+		{"tiered recovery: 2-of-2 then 1-of-2 behind a lock",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				kofn(2, 2), locked(kofn(1, 2), older(5))}}},
+		{"hashlock-gated",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}, Hash: fableFundsHash(t, fableFundsPreimage)},
+				locked(single(), older(5))}}},
+		{"tr with an extracted internal key",
+			md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{single(), locked(kofn(2, 3), older(5))}}},
+		{"tr NUMS, three leaves",
+			md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{
+				kofn(2, 2), locked(single(), older(5)), locked(single(), older(6))}}},
+	} {
+		chunks := fableKeyedBuild(t, tc.list)
+		tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		at, consentOK := policyAddressAt(chunks, tpl, keys)
+		if !consentOK {
+			t.Fatalf("INCONCLUSIVE: %s -- the consent route derives no address either", tc.what)
+		}
+		wantRecv, err := at(0, false)
+		if err != nil {
+			t.Fatalf("%s: consent receive 0: %v", tc.what, err)
+		}
+		wantChange, err := at(0, true)
+		if err != nil {
+			t.Fatalf("%s: consent change 0: %v", tc.what, err)
+		}
+		lines, hasAddr, err := multisigRestoreLines(chunks, tpl, keys)
+		if err != nil {
+			t.Fatalf("%s: multisigRestoreLines: %v", tc.what, err)
+		}
+		joined := strings.Join(lines, "\n")
+		if !hasAddr {
+			t.Errorf("%s: the restore document says it has no address for a shape the consent "+
+				"screen just derived %s for:\n%s", tc.what, wantRecv, joined)
+			continue
+		}
+		if !strings.Contains(joined, wantRecv) {
+			t.Errorf("%s: the document's first receive is not the consent's %s:\n%s",
+				tc.what, wantRecv, joined)
+		}
+		if !strings.Contains(joined, wantChange) {
+			t.Errorf("%s: the document's first change is not the consent's %s:\n%s",
+				tc.what, wantChange, joined)
+		}
+	}
+}
+
+// fableKeyedBuild seats every slot of `list` from the two demo seeds, in
+// rotation, through the PRODUCTION §4f account rule (composerSeedDerive), and
+// returns the keyed md1 chunks the device would cut.
+//
+// It is not composerHonestBuildFor: that one builds a TEMPLATE (declared
+// origins, no xpubs), and a template has no addresses on either route, so a
+// test about addresses built on it is INCONCLUSIVE by construction.
+func fableKeyedBuild(t *testing.T, list md.PathList) []string {
+	t.Helper()
+	st := &composerState{list: list, reg: &seedRegistry{}}
+	for i := range fableFundsSeeds {
+		m, err := bip39.ParseMnemonic(fableFundsSeeds[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := st.reg.add(fmt.Sprintf("seed %d", i+1), m, "", &chaincfg.MainNetParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed, _ := st.reg.at(id)
+		var fp [4]byte
+		binary.BigEndian.PutUint32(fp[:], seed.MasterFP)
+		st.sources = append(st.sources, composerSource{kind: composerSourceSeed,
+			label: fmt.Sprintf("seed %d", i+1), fingerprint: fp, fpPresent: true, seedID: id})
+	}
+	composerSizeAssignments(st)
+	for i := range st.assigned {
+		a, err := composerSeedDerive(st, uint8(i), i%len(fableFundsSeeds))
+		if err != nil {
+			t.Fatalf("composerSeedDerive(@%d): %v", i, err)
+		}
+		st.assigned[i] = a
+	}
+	_, keyed, err := composerArtifactsFor(st)
+	if err != nil {
+		t.Fatalf("composerArtifactsFor: %v", err)
+	}
+	if len(keyed) == 0 {
+		t.Fatal("INCONCLUSIVE: the build produced no keyed chunks")
+	}
+	return keyed
+}

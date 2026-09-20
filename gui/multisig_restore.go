@@ -18,11 +18,32 @@ import (
 // multisigRestoreLines builds the restore-doc display lines from a decoded
 // supplied md1. On expandOK it shows the descriptor + first receive/change
 // addresses (hasAddr=true). Otherwise it shows the descriptor template
-// read-only with an "addresses unavailable" note and NO address (hasAddr=false).
-func multisigRestoreLines(tpl md.Template, keys []md.ExpandedKey) (lines []string, hasAddr bool, err error) {
+// read-only, with the first receive/change where the COMPLEX route can derive
+// them and an "addresses unavailable" note only where neither route can.
+//
+// `md1` IS THE CHUNKS the policy came from, and it is a parameter rather than
+// a re-decode because the complex address route works over the wire form:
+// complexAddressSource walks the chunk set, not the expanded Template. A
+// caller that genuinely has no chunks passes nil, and the display-only branch
+// is then exactly what it was.
+//
+// THE COMPLEX ROUTE IS WHY THE PARAMETER EXISTS (fable review r0 lens 3 I-3).
+// This function knew only the flat expandedToDescriptor route and printed
+// "Addresses unavailable for this policy shape." for everything else -- 13 of
+// 22 keyed shapes in the reviewer's matrix -- while the consent screen one
+// screen earlier derived and displayed four addresses for each of them
+// through policyAddressAt, which routes over BOTH. The document stated as
+// fact something the same device had just disproved, and a restorer reading
+// it in five years is told not to try. policyAddressAt is called here rather
+// than a second copy of its routing, so the document's addresses and the
+// consent's are the same addresses by construction.
+func multisigRestoreLines(md1 []string, tpl md.Template, keys []md.ExpandedKey) (lines []string, hasAddr bool, err error) {
 	desc, status := expandedToDescriptor(tpl, keys)
 	if status != expandOK || desc == nil {
-		// Display-only: no descriptor we can derive addresses from (faithful-or-refuse).
+		// Display-only as far as a BIP-380 DESCRIPTOR goes: this device's md
+		// package emits no text, so there is no descriptor string to print for
+		// a complex policy. The md1 plate in the inventory below IS that
+		// policy, and the addresses can still be derived from it.
 		lines = []string{
 			"Wallet policy (read-only):",
 		}
@@ -33,10 +54,27 @@ func multisigRestoreLines(tpl md.Template, keys []md.ExpandedKey) (lines []strin
 		// twice -- the shape is ordinary, the REUSE is why there is no address.
 		// This is the document a reader holds in five years, so the sentence it
 		// carries should be the one that explains the gap.
+		//
+		// IT IS CHECKED BEFORE THE COMPLEX ROUTE, not after, and the order is
+		// load-bearing: complexAddressSource refuses a key-repeating policy too
+		// (F-531/F-533), so asking it first would reach the generic sentence
+		// and lose the specific one.
 		if repeatsASeat(tpl, keys) {
 			lines = append(lines, "Addresses unavailable: this policy seats one key",
 				"slot more than once.")
 			return lines, false, nil
+		}
+		if at, ok := policyAddressAt(md1, tpl, keys); ok {
+			recv0, err := at(0, false)
+			if err != nil {
+				return nil, false, err
+			}
+			change0, err := at(0, true)
+			if err != nil {
+				return nil, false, err
+			}
+			lines = append(lines, "First receive:", recv0, "First change:", change0)
+			return lines, true, nil
 		}
 		lines = append(lines, "Addresses unavailable for this policy shape.")
 		return lines, false, nil
@@ -115,8 +153,8 @@ func desc4Display(tpl md.Template) string {
 // index 0 is what page 1 means. Silence about the verification is the one thing
 // the status exists to stop being mistakable for a pass, so it goes where the
 // reader cannot miss it -- above the wallet it scopes, not below it.
-func multisigRestoreDocFlow(ctx *Context, th *Colors, tpl md.Template, keys []md.ExpandedKey, status string, extra []string) {
-	lines, _, err := multisigRestoreLines(tpl, keys)
+func multisigRestoreDocFlow(ctx *Context, th *Colors, md1 []string, tpl md.Template, keys []md.ExpandedKey, status string, extra []string) {
+	lines, _, err := multisigRestoreLines(md1, tpl, keys)
 	if err != nil {
 		showError(ctx, th, "Restore Doc", "Couldn't derive the restore addresses.")
 		return

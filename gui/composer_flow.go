@@ -535,7 +535,7 @@ func composerRestoreDoc(ctx *Context, th *Colors, keyed []string, census []strin
 		), census...))
 		return
 	}
-	multisigRestoreDocFlow(ctx, th, tpl, keys, verifyStatusNotFullyCheckedLine, census)
+	multisigRestoreDocFlow(ctx, th, keyed, tpl, keys, verifyStatusNotFullyCheckedLine, census)
 }
 
 // composerSecretCards is §7f's "a seed that filled several slots is cut ONCE".

@@ -159,7 +159,7 @@ func TestNoAddressSurfaceDerivesForARepeatedSeatPolicy(t *testing.T) {
 						"repeated-seat policy:\n%s", addr, joined)
 				}
 			}
-			restore, hasAddr, err := multisigRestoreLines(tpl, keys)
+			restore, hasAddr, err := multisigRestoreLines(chunks, tpl, keys)
 			if err != nil {
 				t.Fatalf("multisigRestoreLines: %v", err)
 			}
@@ -451,7 +451,7 @@ func TestTheRestoreDocNamesTheReuse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 			}
-			lines, hasAddr, err := multisigRestoreLines(tpl, keys)
+			lines, hasAddr, err := multisigRestoreLines(chunks, tpl, keys)
 			if err != nil {
 				t.Fatalf("multisigRestoreLines: %v", err)
 			}

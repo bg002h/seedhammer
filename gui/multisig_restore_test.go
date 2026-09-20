@@ -19,7 +19,7 @@ func TestMultisigRestoreLines(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExpandWalletPolicyChunks: %v", err)
 		}
-		lines, hasAddr, err := multisigRestoreLines(tpl, keys)
+		lines, hasAddr, err := multisigRestoreLines(chunks, tpl, keys)
 		if err != nil {
 			t.Fatalf("multisigRestoreLines: %v", err)
 		}
@@ -47,7 +47,9 @@ func TestMultisigRestoreLines(t *testing.T) {
 			{Index: 0, OriginPath: msPath(hard32+48, hard32+0, hard32+0, hard32+2), XpubPresent: false},
 			{Index: 1, OriginPath: msPath(hard32+48, hard32+0, hard32+0, hard32+2), XpubPresent: false},
 		}
-		lines, hasAddr, err := multisigRestoreLines(tpl, keys)
+		// nil chunks: this fixture is a hand-built Template with no wire form
+		// behind it, which is the case the `md1` parameter is nil for.
+		lines, hasAddr, err := multisigRestoreLines(nil, tpl, keys)
 		if err != nil {
 			t.Fatalf("multisigRestoreLines(template-only): %v", err)
 		}

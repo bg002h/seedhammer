@@ -589,7 +589,7 @@ prefix:
 		// or never reached it, leaves `rec` at its zero value and this document
 		// claims nothing; an empty string would render as silence, and silence is
 		// what reads as a pass.
-		multisigRestoreDocFlow(ctx, th, tpl, keys,
+		multisigRestoreDocFlow(ctx, th, assembledMd1, tpl, keys,
 			buildVerifyStatusLine(rec),
 			// false: this path has no passphrase-plate offer at all -- R-B, a
 			// later phase -- so it can never have cut one (S6b spec 6/6a).
