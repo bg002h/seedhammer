@@ -2,19 +2,19 @@
   "chains": {
     "0": {
       "addresses": [
-        "bc1p588jmtx4ptv76t9sclt6gt33eyydvsrea4njyayerqj2frw5m5aq5gzycw",
-        "bc1pcnwrffqu4s92jzhcsmfa6umx4fy6etr5mypgd4wd7exz3ulzkfsqgxrx9e",
-        "bc1p9hq3fjyts3jrd459falj98mth3dfn0jlhhrmh0kz3lag2r0nqyhscsh630"
+        "bc1pkr9ldx6mqct9wk4lxj2qlu72gahnmp47lzhm2p7wx6mlnzqvlrpsxq3yul",
+        "bc1pcc7ar6wunc0f658rlpqzsctdwnex4ly46c24wwr8y5xf2peje65swk6lkd",
+        "bc1pqq369mtrm980kzl282u44u2qc7lq8xlv6gh9q97tte3snskevqxqtk0lrr"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,sortedmulti_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*,[73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*))#aveqv6gq"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/0/*,sortedmulti_a(2,[73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/0/*,[73c5da0a/48'/0'/2'/2']xpub6DXuQW1Q2JpZxtXzMTDvvvEBFYiz9oAYAz8TQ7d3TzDD11M7eVRWtzaG16zfaFWM5JEiaLyS5fRYvihB1EKUQvmP5nA61urd52T3sWa2bPW/0/*))#yx7haaju"
     },
     "1": {
       "addresses": [
-        "bc1p6ynk908l3tegvsw3dxctw6z76sjw39k3p6c4udrwgqjw0rrc0fdqjcgxzz",
-        "bc1pxk4fpa4e92n27l0fzl4zcy7lynhjndqw9w7fqsevf9y9y5kfv0gqn5du5s",
-        "bc1p5cudgxhx3ctqv28s4x7ul963pyfq74vjvgvg6wy2k6slf2als3kslxumz7"
+        "bc1pj2ckccjgvltxnr0marza6kszk32c30fymvs6528aspxm2rgyfvps0s3xjl",
+        "bc1plpnq6yc402rp905c97mskv3jlwfv3dt8v9cd6xvsustxrtsy8crsdhj83e",
+        "bc1p2kxlxj57dhq4wh3aqv0zuy595g4gwvpwyvx49lxx0wfv5ye6dvpqm9w5wn"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,sortedmulti_a(2,[73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*,[73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*))#wz40cgjr"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/1/*,sortedmulti_a(2,[73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/1/*,[73c5da0a/48'/0'/2'/2']xpub6DXuQW1Q2JpZxtXzMTDvvvEBFYiz9oAYAz8TQ7d3TzDD11M7eVRWtzaG16zfaFWM5JEiaLyS5fRYvihB1EKUQvmP5nA61urd52T3sWa2bPW/1/*))#hgjcf0gl"
     }
   },
   "fingerprints": [
@@ -25,6 +25,10 @@
     {
       "fingerprint": "73c5da0a",
       "index": 1
+    },
+    {
+      "fingerprint": "73c5da0a",
+      "index": 2
     }
   ],
   "keys": [
@@ -35,12 +39,16 @@
     {
       "index": 1,
       "xpub": "xpub6DzhyrnFFYQ1HimDiM388xHnDiRPNdZJFBmmxge3Y1WWcHLtMJLfRuhRHqnQCPbTj3fGKTuKFLHzzwpJkp5Dtc3UtLKZKaVZe1yqMBXd6Vk"
+    },
+    {
+      "index": 2,
+      "xpub": "xpub6EGx8sPr9FxPPE1rbZazhqWwpMXA3Hf5DYKtZbL7c4BSddzmQktp96UaTvecEkoCZysuaj79GMCFZYT1KKk7Ph2M3Kf5g8B82KZ8TZ9SKQR"
     }
   ],
-  "md1_encoding_id": "d5a9d72c0bf534490b8618bcca7f48e9",
+  "md1_encoding_id": "a46667ee679c3b6cb8f70cb1d6774b56",
   "name": "keyed_tr_sortedmulti_a",
   "path": null,
-  "template": "tr(@0/48'/0'/0'/2'/<0;1>/*,sortedmulti_a(2,@0/48'/0'/0'/2'/<0;1>/*,@1/48'/0'/1'/2'/<0;1>/*))",
-  "wallet_descriptor_template_id": "87212fb6a4706fae35a577838e521b11",
-  "wallet_policy_id": "4174708e33c6cae3a49f4e48f460ccfd"
+  "template": "tr(@0/48'/0'/0'/2'/<0;1>/*,sortedmulti_a(2,@1/48'/0'/1'/2'/<0;1>/*,@2/48'/0'/2'/2'/<0;1>/*))",
+  "wallet_descriptor_template_id": "09903620dbcf4e059300f23391079052",
+  "wallet_policy_id": "81c65ea7ce4d09fd22dc95c8610e1f55"
 }

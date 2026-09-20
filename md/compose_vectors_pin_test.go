@@ -64,10 +64,37 @@ var composeVectorNames = []string{
 	"keyed_compose_preset_hashlock_gated_hash256",
 	"keyed_compose_preset_hashlock_gated_ripemd160",
 	"keyed_compose_preset_hashlock_gated_hash160",
+	// THE REST OF THE KEYED TIER, 36 -> 50 (F-630 D4). These 14 had no
+	// provenance pin of any kind: the selector was `^(keyed_)?compose_`, so
+	// files nobody could date sat beside 32 that were pinned, and 9 of them
+	// carried descriptors the md-codec 0.44.0 header rewrite had corrected
+	// upstream months earlier.
+	"keyed_tr_depth2",
+	"keyed_tr_depth2_rightspine",
+	"keyed_tr_keyonly",
+	"keyed_tr_multi_a",
+	"keyed_tr_pathological",
+	"keyed_tr_sortedmulti_a",
+	"keyed_tr_with_leaf",
+	"keyed_wpkh",
+	"keyed_wsh_multi_2of3",
+	"keyed_wsh_or_b",
+	"keyed_wsh_or_d_degrading",
+	"keyed_wsh_sortedmulti_2of3",
+	"keyed_wsh_thresh",
+	"keyed_wsh_timelock_hashlock",
 }
 
-// isComposeVectorFile: the corpus's file names, and nothing else in the
+// isComposeVectorFile: the pinned corpus's file names, and nothing else in the
 // shared vectors directory (the MANIFEST's other vectors live beside them).
+//
+// THE keyed_ PREFIX IS PART OF THE PREDICATE, not just keyed_compose_ (F-630
+// D4). The pin now covers the whole keyed tier, and this function drives the
+// DIRECTORY scan rather than the sha256 scan -- so leaving it at
+// keyed_compose_ would give the 14 newly-pinned vectors hash coverage and no
+// directory coverage at all. Measured by smuggling an unpinned
+// keyed_tr_smuggled.conformance.json into testdata/vectors: under the old
+// predicate it passes unflagged while a keyed_compose_smuggled one is caught.
 //
 // compose_refusal_* IS EXCLUDED, and it is excluded BY ITS OWN PIN rather
 // than by a literal name here: composeRefusalPinnedNames reads
@@ -76,7 +103,7 @@ var composeVectorNames = []string{
 // hardcoded prefix would have let any compose_refusal_*.json in unchecked,
 // which is the hole this scan exists to close.
 func isComposeVectorFile(name string) bool {
-	if !strings.HasPrefix(name, "compose_") && !strings.HasPrefix(name, "keyed_compose_") {
+	if !strings.HasPrefix(name, "compose_") && !strings.HasPrefix(name, "keyed_") {
 		return false
 	}
 	return !composeRefusalPinnedNames()[name]
@@ -103,12 +130,13 @@ func TestComposeVectorsMatchTheirProvenancePin(t *testing.T) {
 	if p.Vectors != len(composeVectorNames) {
 		t.Fatalf("pin says %d vectors, this test knows %d", p.Vectors, len(composeVectorNames))
 	}
-	// 32 keyed vectors carry five files, 4 unkeyed carry four: 176.
-	// The 29th is keyed_compose_wsh_timelock_hashlock, the composer's own
+	// 46 keyed vectors carry five files, 4 unkeyed carry four: 246
+	// (176 + 14x5 = 246, and 36 + 14 = 50 names).
+	// The 29th keyed_compose is keyed_compose_wsh_timelock_hashlock, the composer's own
 	// three-path wsh policy with both timelock kinds and a hashlock; 30-32 are
 	// the per-kind hashlock presets added by SPEC_hashlock_kinds §10.
-	if len(p.Files) != 176 {
-		t.Fatalf("pin lists %d files, want 176", len(p.Files))
+	if len(p.Files) != 246 {
+		t.Fatalf("pin lists %d files, want 246", len(p.Files))
 	}
 	pinned := map[string]bool{}
 	seen := map[string]bool{}

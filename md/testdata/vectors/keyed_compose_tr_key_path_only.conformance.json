@@ -6,7 +6,7 @@
         "bc1pv2pqza0emy8ne7grhp0ze38qyvkqxghhlphslfycqdrgy7jsk95qphegxw",
         "bc1pg66xgpxwcdx8hy0curef5f8aejjuf5dekkwrmvw2ce8xeg8qcewqm9yg8j"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/3']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*)#83x5ad3d"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/3']xpub6DXuQW1Q2Jpa1R4knHcUvkygN7KwRMuPvpiuSQiqrbK3rEjKdmbwKQbdR8rsPwN9vaRdoCJ3BktbxzwBm3y7mZX5jTBFgZbkV54FcqzxDPw/0/*)#zhzeq6dv"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1pn0m8uf6tzjl6rqj5temyhz0seqc3tdq39m258zle7t7rneen3ajqlpwpyl",
         "bc1pksg7n634qyxf86dnt0kzztxp2pncwflpclqls8smz34yytt2uafsa70pnt"
       ],
-      "descriptor": "tr([73c5da0a/48'/0'/0'/3']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*)#k9r4qcp4"
+      "descriptor": "tr([73c5da0a/48'/0'/0'/3']xpub6DXuQW1Q2Jpa1R4knHcUvkygN7KwRMuPvpiuSQiqrbK3rEjKdmbwKQbdR8rsPwN9vaRdoCJ3BktbxzwBm3y7mZX5jTBFgZbkV54FcqzxDPw/1/*)#nr8ca0a5"
     }
   },
   "fingerprints": [
