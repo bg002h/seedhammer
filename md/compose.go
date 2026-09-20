@@ -104,6 +104,23 @@ var (
 	ErrComposeIndistinguishableSlots = errors.New("md: compose: two slots declare the same origin without two distinct fingerprints; a template like that cannot be restored")
 )
 
+// TwoKeylessPathsError names the two key-less paths that put the list over
+// the cap, by ZERO-BASED index -- the spelling the primary's conformance
+// vector uses in its `error.first` / `error.second` fields
+// (md/testdata/vectors/compose_refusal_keyless_cap.json), so the Go port and
+// the vector can be compared without a translation step that could itself be
+// off by one. Error() renders them as the operator's 1-based path numbers,
+// which is what every other compose refusal prints.
+//
+// It carries ErrComposeTwoKeylessPaths for errors.Is.
+type TwoKeylessPathsError struct{ First, Second int }
+
+func (e TwoKeylessPathsError) Error() string {
+	return fmt.Sprintf("%v: paths %d and %d", ErrComposeTwoKeylessPaths, e.First+1, e.Second+1)
+}
+
+func (e TwoKeylessPathsError) Unwrap() error { return ErrComposeTwoKeylessPaths }
+
 // RepeatedKeyMaterialError names the two slots Bind found bound to the same
 // key, so a caller can say WHICH -- an operator repairs "slots @1 and @2",
 // not "two slots". It carries ErrComposeRepeatedKeyMaterial for errors.Is.
@@ -494,7 +511,7 @@ func ValidatePathList(list PathList) (int, error) {
 	keyless := make([]int, 0, len(list.Paths))
 	for i, p := range list.Paths {
 		if p.Keys == nil {
-			keyless = append(keyless, i+1)
+			keyless = append(keyless, i)
 		}
 		if ks := p.Keys; ks != nil {
 			if ks.K == 0 || ks.N == 0 || ks.K > ks.N || ks.N > ComposeMaxKeysPerPath {
@@ -542,7 +559,7 @@ func ValidatePathList(list PathList) (int, error) {
 	// remains normative (CLAUDE.md, Rust-primary rule); md-codec's validate()
 	// is taking the same rule, and this is the port of it.
 	if len(keyless) > 1 {
-		return 0, fmt.Errorf("%w: paths %d and %d", ErrComposeTwoKeylessPaths, keyless[0], keyless[1])
+		return 0, TwoKeylessPathsError{First: keyless[0], Second: keyless[1]}
 	}
 	if slots > ComposeMaxSlots {
 		return 0, fmt.Errorf("%w: got %d", ErrComposeTooManySlots, slots)

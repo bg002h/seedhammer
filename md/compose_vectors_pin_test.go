@@ -68,8 +68,18 @@ var composeVectorNames = []string{
 
 // isComposeVectorFile: the corpus's file names, and nothing else in the
 // shared vectors directory (the MANIFEST's other vectors live beside them).
+//
+// compose_refusal_* IS EXCLUDED, and it is excluded BY ITS OWN PIN rather
+// than by a literal name here: composeRefusalPinnedNames reads
+// compose_refusal_vectors.provenance.json, so a refusal vector that reached
+// the tree without an entry in THAT pin still fails this directory scan. A
+// hardcoded prefix would have let any compose_refusal_*.json in unchecked,
+// which is the hole this scan exists to close.
 func isComposeVectorFile(name string) bool {
-	return strings.HasPrefix(name, "compose_") || strings.HasPrefix(name, "keyed_compose_")
+	if !strings.HasPrefix(name, "compose_") && !strings.HasPrefix(name, "keyed_compose_") {
+		return false
+	}
+	return !composeRefusalPinnedNames()[name]
 }
 
 func loadComposeVectorPin(t *testing.T) composeVectorPin {
