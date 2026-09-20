@@ -298,7 +298,21 @@ func composerCopyNothingChecked() string {
 		"receive address."
 }
 
-// ─── §8m: the five structural refusals (§4e) ─────────────────────────────────
+// ─── §8m: the six structural refusals (§4e) ──────────────────────────────────
+
+// composerCopyRefuseTwoKeylessPaths is §8m's sixth line (fable review r0 C-1).
+//
+// IT NAMES THE TIMELOCK BECAUSE THE TIMELOCK IS THE OPERATOR'S NEXT IDEA. A
+// key-less path is admitted one at a time, so the shape an operator reaches
+// this refusal with is a second bearer path they have already confirmed once
+// under §8a -- and the obvious repair, "put a delay on one of them", does not
+// work: malleability asks for a SIGNATURE on one arm, and `older` is not one.
+// A refusal that left that unsaid would send them round the loop.
+func composerCopyRefuseTwoKeylessPaths() string {
+	return "A wallet can have one key-less path, not two. Two of them make this " +
+		"script malleable, and no wallet will import it. A time lock does not " +
+		"help. Give one of them a key, or fold them into one path."
+}
 
 func composerCopyRefuseNoKeyedPath() string {
 	return "Every wallet needs at least one path with a key."

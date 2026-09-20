@@ -47,6 +47,7 @@ func TestComposerSection8mRefusalsAllFitAndDraw(t *testing.T) {
 		{"§8m no keyed path", composerCopyRefuseNoKeyedPath()},
 		{"§8m lock-only path", composerCopyRefuseLockOnly()},
 		{"§8m key-less under tr", composerCopyRefuseKeylessTr()},
+		{"§8m two key-less paths", composerCopyRefuseTwoKeylessPaths()},
 		{"§8m legacy wrapper shape", composerCopyRefuseLegacyShape()},
 		{"§8m slot cap", composerCopyRefuseSlotCap()},
 	}

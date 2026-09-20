@@ -83,6 +83,8 @@ func composerCopyTable() []composerCopyRow {
 			"A path with only a time lock means anyone can spend after it. Add a key or a hash."},
 		{"composerCopyRefuseKeylessTr", "8m", composerCopyRefuseKeylessTr(),
 			"This build will not put a key-less path in taproot. Use wsh, or add a key."},
+		{"composerCopyRefuseTwoKeylessPaths", "8m", composerCopyRefuseTwoKeylessPaths(),
+			"A wallet can have one key-less path, not two. Two of them make this script malleable, and no wallet will import it. A time lock does not help. Give one of them a key, or fold them into one path."},
 		{"composerCopyRefuseLegacyShape", "8m", composerCopyRefuseLegacyShape(),
 			"Legacy wrappers hold one plain multisig only. Use wsh or tr."},
 		{"composerCopyRefuseSlotCap", "8m", composerCopyRefuseSlotCap(),
@@ -408,8 +410,14 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// warning (operator ruling 2026-09-16). The refusal it replaced was not a
 	// composerCopy* body at all -- it was an arm of composerCopyHashlockRefusal
 	// -- so the count moves by one even though one string replaced another.
-	if declared != 82 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 82 -- "+
+	// 83 SINCE the composer fable review r0 C-1 gave §8m a sixth structural
+	// refusal: a policy admits at most one key-less path, because two of them
+	// lower to an or_i with two unsafe arms and the script is malleable. No
+	// existing body could carry it -- §8a's confirm describes ONE key-less
+	// path and is true of it, and the lock-only and key-less-under-tr lines
+	// name different conditions.
+	if declared != 83 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 83 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

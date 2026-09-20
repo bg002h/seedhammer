@@ -44,6 +44,8 @@ func composerRefusalBody(err error) (string, bool) {
 		return composerCopyRefuseLockOnly(), true
 	case errors.Is(err, md.ErrComposeKeylessUnderTr):
 		return composerCopyRefuseKeylessTr(), true
+	case errors.Is(err, md.ErrComposeTwoKeylessPaths):
+		return composerCopyRefuseTwoKeylessPaths(), true
 	case errors.Is(err, md.ErrComposeLegacyWrapperShape):
 		return composerCopyRefuseLegacyShape(), true
 	case errors.Is(err, md.ErrComposeTooManySlots):
@@ -322,6 +324,21 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 	return true
 }
 
+// composerKeylessPathCount counts the key-less paths in the list, skipping
+// the path at `except` (pass a negative index to count them all).
+func composerKeylessPathCount(list md.PathList, except int) int {
+	n := 0
+	for i, p := range list.Paths {
+		if i == except {
+			continue
+		}
+		if p.Keys == nil {
+			n++
+		}
+	}
+	return n
+}
+
 // composerAddPath appends a path and runs the §8a confirm when the operator
 // makes it key-less.
 func composerAddPath(ctx *Context, th *Colors, st *composerState) {
@@ -354,6 +371,19 @@ func composerAddPath(ctx *Context, th *Colors, st *composerState) {
 	if st.list.Wrapper == md.ComposeTr {
 		st.list.Paths = st.list.Paths[:idx]
 		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), composerCopyRefuseKeylessTr())
+		return
+	}
+	// A SECOND KEY-LESS PATH IS REFUSED AT CREATION, not only at Done
+	// (fable review r0 C-1). md.ValidatePathList is still the authority and
+	// still refuses at Done -- this is §4e's "REFUSE at the picker" half, and
+	// it is worth having here because the alternative is the operator holding
+	// §8a's bearer-access confirm, choosing a hash kind and entering 64 hex
+	// characters for a path the codec will not admit. The count is over the
+	// paths that ALREADY exist: `idx` is the one being created, and it is
+	// key-less on this arm.
+	if composerKeylessPathCount(st.list, idx) >= 1 {
+		st.list.Paths = st.list.Paths[:idx]
+		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), composerCopyRefuseTwoKeylessPaths())
 		return
 	}
 	// §8a FIRES ON EVERY KEY-LESS PATH THAT IS CREATED, with no memo.

@@ -94,6 +94,7 @@ var (
 	ErrComposeNoKeyedPath            = errors.New("md: compose: every path is key-less; at least one path must hold a key")
 	ErrComposeLockOnlyPath           = errors.New("md: compose: a path with neither keys nor a hash is not a spend path")
 	ErrComposeKeylessUnderTr         = errors.New("md: compose: a key-less path is not expressible under tr")
+	ErrComposeTwoKeylessPaths        = errors.New("md: compose: a policy admits at most one key-less path; two of them lower to a malleable or_i")
 	ErrComposeBadThreshold           = errors.New("md: compose: threshold needs 1 <= k <= n <= 9")
 	ErrComposeTooManySlots           = errors.New("md: compose: this wallet would have more key slots than the wire holds (32)")
 	ErrComposeLegacyWrapperShape     = errors.New("md: compose: sh and sh-wsh admit exactly one sortedmulti path")
@@ -455,7 +456,11 @@ func ValidatePathList(list PathList) (int, error) {
 	}
 	slots := 0
 	anyKeyed := false
+	keyless := make([]int, 0, len(list.Paths))
 	for i, p := range list.Paths {
+		if p.Keys == nil {
+			keyless = append(keyless, i+1)
+		}
 		if ks := p.Keys; ks != nil {
 			if ks.K == 0 || ks.N == 0 || ks.K > ks.N || ks.N > ComposeMaxKeysPerPath {
 				return 0, fmt.Errorf("%w: path %d has %d-of-%d", ErrComposeBadThreshold, i+1, ks.K, ks.N)
@@ -475,6 +480,34 @@ func ValidatePathList(list PathList) (int, error) {
 	}
 	if !anyKeyed {
 		return 0, ErrComposeNoKeyedPath
+	}
+	// AT MOST ONE KEY-LESS PATH, wherever it sits and whatever lock it carries.
+	//
+	// §5 chains paths as or_i(P, R) unless the head is a bare multi, and
+	// or_i(X, Z) is non-malleable only when one arm is `safe` -- rust-miniscript
+	// malleability.rs and Core's miniscript.h both require X.s || Z.s. A
+	// key-less path needs no signature, so it is never safe; with two of them
+	// anywhere in the list, the innermost or_i containing both has two unsafe
+	// arms and the whole script is malleable. A timelock does NOT rescue it:
+	// `older` is not a signature.
+	//
+	// The Rust primary refuses the same set, and refuses it structurally
+	// rather than by case: `md compose` re-parses its own lowering through
+	// `md encode`, which reports "Miniscript is malleable". Measured against
+	// md 0.16.2 over twelve lists (gui/composer_fable_r0_funds_test.go, which
+	// also runs the CLI as an oracle): every list with >= 2 key-less paths is
+	// refused -- [keyed,K,K], [keyed,K,K+older(5)], [K,K+older(5),keyed],
+	// [keyed,K+older(5),K+after(200)], [K+older(5),keyed,K+after(200)],
+	// [keyed,2of2,K,K], [keyed,K,2of2,K] -- and every list with at most one is
+	// admitted.
+	//
+	// THIS PORT HAS NO POST-LOWERING PARSE to catch it the primary's way: this
+	// package "emits no text" by design (the header above), so the primary's
+	// re-parse has no counterpart here and the rule is stated instead. Rust
+	// remains normative (CLAUDE.md, Rust-primary rule); md-codec's validate()
+	// is taking the same rule, and this is the port of it.
+	if len(keyless) > 1 {
+		return 0, fmt.Errorf("%w: paths %d and %d", ErrComposeTwoKeylessPaths, keyless[0], keyless[1])
 	}
 	if slots > ComposeMaxSlots {
 		return 0, fmt.Errorf("%w: got %d", ErrComposeTooManySlots, slots)
