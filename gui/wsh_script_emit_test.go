@@ -3,9 +3,6 @@ package gui
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/v2"
@@ -28,17 +25,10 @@ func TestWshWitnessScriptHashesToRustsAddress(t *testing.T) {
 	// fixture leaves whole rules untested: with only the timelock/hashlock
 	// vector, dropping `sortedmulti`'s BIP-67 key sort changed nothing, because
 	// no vector reached that branch.
-	paths, err := filepath.Glob(filepath.Join("..", "md", "testdata", "vectors", "keyed_wsh_*.conformance.json"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(paths) == 0 {
-		t.Fatal("no keyed_wsh_* vectors vendored — this gate checks NOTHING")
-	}
+	names := eachKeyedVector(t, "keyed_wsh_*")
 	total, refused := 0, 0
-	for _, p := range paths {
-		name := strings.TrimSuffix(filepath.Base(p), ".conformance.json")
-		n := checkWshVector(t, name, p)
+	for _, name := range names {
+		n := checkWshVector(t, name)
 		if n < 0 {
 			refused++
 			continue
@@ -49,24 +39,23 @@ func TestWshWitnessScriptHashesToRustsAddress(t *testing.T) {
 		t.Fatalf("no addresses compared (%d vectors refused) — the gate asserted nothing", refused)
 	}
 	t.Logf("cross-checked %d wsh addresses against Rust across %d vector(s), %d refused",
-		total, len(paths)-refused, refused)
+		total, len(names)-refused, refused)
 }
 
 // checkWshVector returns the number of addresses compared, or -1 if the emitter
 // refused the shape (which is a legitimate outcome, not a failure).
-func checkWshVector(t *testing.T, name, p string) int {
+func checkWshVector(t *testing.T, name string) int {
 	t.Helper()
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("read %s: %v", p, err)
-	}
+	// Record AND card from the pin-preferring loaders: see
+	// gui/vector_fixtures_test.go. This site is one of the three that paired a
+	// pinned card with a vendored record.
 	var rec struct {
 		Chains map[string]struct {
 			Addresses []string `json:"addresses"`
 		} `json:"chains"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
-		t.Fatalf("parse: %v", err)
+	if err := json.Unmarshal(loadVectorRecord(t, name), &rec); err != nil {
+		t.Fatalf("parse %s.conformance.json: %v", name, err)
 	}
 
 	chunks := loadVectorChunks(t, name)

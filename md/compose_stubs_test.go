@@ -3,7 +3,6 @@ package md
 import (
 	"encoding/hex"
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -12,18 +11,15 @@ import (
 // STRIPPED template, policy id from the keyed chunks.
 func TestComposerStubsAreTheTwoIdsFirstFourBytes(t *testing.T) {
 	name := "keyed_compose_wsh_sole_sortedmulti"
-	raw, err := os.ReadFile(vectorPath(name, "conformance.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var rec struct {
 		TemplateID string `json:"wallet_descriptor_template_id"`
 		PolicyID   string `json:"wallet_policy_id"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	if err := json.Unmarshal(vectorRecordFor(t, name), &rec); err != nil {
 		t.Fatal(err)
 	}
-	keyed := loadPhraseChunks(t, name)
+	// Record and card from the same tier: see md/vector_fixtures_test.go.
+	keyed := vectorChunksFor(t, name)
 	template, err := StripToTemplate(keyed)
 	if err != nil {
 		t.Fatalf("StripToTemplate: %v", err)

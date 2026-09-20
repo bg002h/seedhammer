@@ -3,8 +3,6 @@ package gui
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -122,13 +120,7 @@ func assertMatchesRust(t *testing.T, vec policyAddrVector, at func(uint32, bool)
 // The addresses come from the primary Rust implementation. A route that derives
 // SOMETHING is worthless; every index of every chain must match Rust exactly.
 func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "md", "testdata", "vectors", "keyed_*.conformance.json"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(paths) == 0 {
-		t.Fatal("no keyed vectors vendored — this gate is checking NOTHING")
-	}
+	names := eachKeyedVector(t, "keyed_*")
 
 	// Shapes this device still cannot derive. EXPLICIT rather than tolerated: a
 	// test that lets an undeliverable shape pass quietly is how "display only"
@@ -160,16 +152,15 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 
 	routes := map[string]route{}
 	unexpected := []string{}
-	for _, p := range paths {
-		name := strings.TrimSuffix(filepath.Base(p), ".conformance.json")
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				t.Fatalf("read: %v", err)
-			}
+			// Record AND card from the pin-preferring loaders: see
+			// gui/vector_fixtures_test.go. This site is one of the three that
+			// paired a pinned card with a vendored record, and it reaches all
+			// three F-529 vectors.
 			var vec policyAddrVector
-			if err := json.Unmarshal(raw, &vec); err != nil {
-				t.Fatalf("parse: %v", err)
+			if err := json.Unmarshal(loadVectorRecord(t, name), &vec); err != nil {
+				t.Fatalf("parse %s.conformance.json: %v", name, err)
 			}
 			chunks := loadVectorChunks(t, name)
 			r, at := routeFor(t, chunks)
@@ -237,13 +228,13 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 	// complex route back to none is visible in the log rather than only in a
 	// failure.
 	var complexCount int
-	names := make([]string, 0, len(routes))
+	reported := make([]string, 0, len(routes))
 	for n := range routes {
-		names = append(names, n)
+		reported = append(reported, n)
 	}
-	sort.Strings(names)
+	sort.Strings(reported)
 	var b strings.Builder
-	for _, n := range names {
+	for _, n := range reported {
 		fmt.Fprintf(&b, "\n  %-32s %s", n, routes[n])
 		if routes[n] == routeComplex {
 			complexCount++
@@ -258,12 +249,8 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 // vectorAddress returns one address the primary Rust implementation derived.
 func vectorAddress(t *testing.T, name string, chain string, index int) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", name+".conformance.json"))
-	if err != nil {
-		t.Fatalf("read vector %s: %v", name, err)
-	}
 	var vec policyAddrVector
-	if err := json.Unmarshal(raw, &vec); err != nil {
+	if err := json.Unmarshal(loadVectorRecord(t, name), &vec); err != nil {
 		t.Fatalf("parse vector %s: %v", name, err)
 	}
 	c, ok := vec.Chains[chain]

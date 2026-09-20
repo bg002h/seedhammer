@@ -1,8 +1,10 @@
 package md
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,10 +31,49 @@ import (
 // CAN be produced by the primary and were; the drift that matters is the pin
 // silently diverging from the vendored corpus, which is what this compares.
 
-// pinnedKeyReuseVectors are the vector names carrying a fork-side pin.
+// pinnedKeyReuseVectors are the TAPROOT internal-key reuse pins.
 var pinnedKeyReuseVectors = []string{
 	"keyed_tr_multi_a",
 	"keyed_tr_sortedmulti_a",
+}
+
+// pinnedDuplicateVectors are the MINISCRIPT duplicate pins: one slot at two use
+// sites inside a single wsh expression, which is the shape Core itself refuses
+// ("... is not sane: contains duplicate public keys").
+//
+// A SEPARATE LIST because it is a different shape with a different authority,
+// and TestPinnedKeyReuseVectorsAreTheShapeTheyClaim cannot cover it: that test
+// asserts a taproot internal key that is a placeholder and repeats inside the
+// taptree, and this policy is not a taproot policy at all. Folding the name
+// into pinnedKeyReuseVectors would make that test fail on the trBody assertion;
+// leaving it in no list at all is how a pin ends up measured by nothing.
+var pinnedDuplicateVectors = []string{
+	"keyed_wsh_timelock_hashlock",
+}
+
+// allPinnedVectors is every name carrying a fork-side card pin, and is what the
+// anti-drift check below runs over.
+func allPinnedVectors() []string {
+	return append(append([]string(nil), pinnedKeyReuseVectors...), pinnedDuplicateVectors...)
+}
+
+// primaryMovedTo records, per pinned name, the EXACT wallet_descriptor_template_id
+// of the policy descriptor-mnemonic b2c5d693 replaced the pinned one with.
+//
+// F-529's premise was that a re-vendor DELETES these three vectors. Measured,
+// it does not: b2c5d693 still ships all three, CHANGED -- reuse-bearing
+// policies replaced by reuse-free ones. So the anti-drift check's "the vendored
+// file is gone" skip never fires, and without this table the check simply fails
+// on a divergence that is expected and understood.
+//
+// The full 32-hex id, not an 8-char prefix: this is the one thing standing
+// between "the primary moved to the policy we know about" and "the primary
+// moved somewhere else entirely", and a prefix is a materially weaker pin than
+// "an exact shape" promises. Any THIRD policy under these names fails here.
+var primaryMovedTo = map[string]string{
+	"keyed_tr_multi_a":            "8c1c05666abdf6b29df9c2056c0cb49e",
+	"keyed_tr_sortedmulti_a":      "09903620dbcf4e059300f23391079052",
+	"keyed_wsh_timelock_hashlock": "71ff3b7424b35d410c16b6d992aa437e",
 }
 
 // pinnedChunks reads a fork-side pin, or !ok when the name has none.
@@ -58,23 +99,38 @@ func md1Lines(raw string) []string {
 	return out
 }
 
-// TestPinnedKeyReuseVectorsStillMatchTheVendoredCorpus is the anti-drift half.
+// TestPinnedVectorsAgreeWithTheVendoredCorpusOrWithARecordedMove is the
+// anti-drift half, reworked for what the re-vendor actually did (F-630 D6).
 //
-// While the vendored vector is still there, the pin must be exactly it — a pin
-// that has quietly diverged is a fixture testing a policy the primary never
-// shipped. Once the re-vendor F-529 describes removes the vendored file, the
-// pin becomes the only copy and this test says so rather than failing: that is
-// the outcome the pin exists to produce, not a regression.
+// IT USED TO SKIP when the vendored file was GONE, on F-529's premise that a
+// re-vendor would delete these three vectors. Measured at descriptor-mnemonic
+// b2c5d693: all three are still shipped, CHANGED -- the reuse-BEARING policies
+// were replaced by reuse-FREE ones. So the skip never fires and the old test
+// fails instead, on a divergence that is expected. Worse, its failure message
+// prescribed the destructive remedy ("re-copy the vendored phrase"), which
+// would overwrite F-533's and F-514's only witnesses with policies that no
+// longer carry the reuse under test.
+//
+// The check is therefore: the pin is byte-identical to the vendored card, OR
+// the vendored record is EXACTLY the policy we recorded the primary moving to.
+// A pinned gap with an exact shape -- a third policy under these names fails.
+//
+// THIS FILE DELIBERATELY READS BOTH TIERS, and is the one exception to the
+// pairing rule in md/vector_fixtures_test.go: comparing them IS the job. It
+// reads the vendored record through os.ReadFile rather than vectorRecordFor for
+// exactly that reason -- vectorRecordFor would hand back the pin and the
+// comparison would be with itself.
 //
 // MUTATION: change one character of a pinned md1 string and the matching
-// subtest fails while the vendored file is present.
-func TestPinnedKeyReuseVectorsStillMatchTheVendoredCorpus(t *testing.T) {
-	for _, name := range pinnedKeyReuseVectors {
+// subtest fails, because the pin then matches neither the vendored card nor
+// (through it) the recorded move.
+func TestPinnedVectorsAgreeWithTheVendoredCorpusOrWithARecordedMove(t *testing.T) {
+	for _, name := range allPinnedVectors() {
 		t.Run(name, func(t *testing.T) {
 			pin, ok := pinnedChunks(name)
 			if !ok {
-				t.Fatalf("no pin at testdata/forkbuilt/%s.md1.txt; F-533's refusal has "+
-					"no fork-side witness left", name)
+				t.Fatalf("no pin at testdata/forkbuilt/%s.md1.txt; the fork-side witness "+
+					"for this policy is gone", name)
 			}
 			if len(pin) == 0 {
 				t.Fatalf("the pin for %s carries no md1 strings", name)
@@ -84,19 +140,96 @@ func TestPinnedKeyReuseVectorsStillMatchTheVendoredCorpus(t *testing.T) {
 				t.Skipf("the vendored %s is gone (%v); the pin is now the only copy, "+
 					"which is exactly what it is for", name, err)
 			}
-			vendored := md1Lines(string(raw))
-			if len(vendored) != len(pin) {
-				t.Fatalf("pin has %d chunks, vendored has %d", len(pin), len(vendored))
+			if vendored := md1Lines(string(raw)); slices.Equal(pin, vendored) {
+				return // still the same policy on both sides
 			}
-			for i := range pin {
-				if pin[i] != vendored[i] {
-					t.Fatalf("chunk %d has drifted:\n pin      %s\n vendored %s\n"+
-						"Re-copy the vendored phrase into testdata/forkbuilt/%s.md1.txt "+
-						"after checking WHY the primary changed it", i, pin[i], vendored[i], name)
-				}
+
+			// They differ. That is ALLOWED only where we recorded which policy
+			// the primary moved to, and only for that exact policy.
+			want, recorded := primaryMovedTo[name]
+			if !recorded {
+				t.Fatalf("the pin and the vendored %s have diverged and no move is recorded "+
+					"for this name. Find out WHY the primary changed it before touching "+
+					"either copy: the pin is a witness for a refusal, and overwriting it "+
+					"with the vendored card destroys the evidence", name)
+			}
+			recRaw, err := os.ReadFile(filepath.Join("testdata", "vectors", name+".conformance.json"))
+			if err != nil {
+				t.Fatalf("the pin and the vendored %s have diverged, and the vendored "+
+					"record that would identify the new policy is unreadable: %v", name, err)
+			}
+			var rec struct {
+				TemplateID string `json:"wallet_descriptor_template_id"`
+			}
+			if err := json.Unmarshal(recRaw, &rec); err != nil {
+				t.Fatalf("parse vendored %s.conformance.json: %v", name, err)
+			}
+			if rec.TemplateID != want {
+				t.Fatalf("the pin and the vendored %s have diverged, and the vendored policy "+
+					"is not the one we recorded the primary moving to:\n"+
+					"  vendored wallet_descriptor_template_id %s\n"+
+					"  recorded move                          %s\n"+
+					"A THIRD policy under this name means the primary moved again. Record the "+
+					"new id here only after establishing that the pinned witness is still the "+
+					"shape its tests claim", name, rec.TemplateID, want)
 			}
 		})
 	}
+}
+
+// TestPinnedDuplicateVectorsAreTheShapeTheyClaim measures the MINISCRIPT pin,
+// the same way TestPinnedKeyReuseVectorsAreTheShapeTheyClaim measures the
+// taproot ones: a slot at two use sites inside one wsh expression.
+//
+// Without it keyed_wsh_timelock_hashlock's pin is the only one whose shape
+// nothing asserts -- the taproot shape test cannot cover it (it is not a
+// taproot policy) and a pin of anything else would leave F-514's duplicate
+// warning untested while looking covered.
+func TestPinnedDuplicateVectorsAreTheShapeTheyClaim(t *testing.T) {
+	for _, name := range pinnedDuplicateVectors {
+		t.Run(name, func(t *testing.T) {
+			chunks, ok := pinnedChunks(name)
+			if !ok {
+				t.Fatalf("no pin for %s", name)
+			}
+			d, err := Reassemble(chunks)
+			if err != nil {
+				t.Fatalf("Reassemble: %v", err)
+			}
+			if _, isTr := d.tree.body.(trBody); isTr {
+				t.Fatal("the pin is a TAPROOT policy; a taproot internal key sits OUTSIDE " +
+					"the miniscript, so it is the other shape and the other test's subject")
+			}
+			if d.tree.tag != tagWsh {
+				t.Fatalf("the pin's outer script is %v, not wsh; Core's duplicate refusal is "+
+					"about one slot repeating inside one WSH/SH miniscript", d.tree.tag)
+			}
+			var counts [256]int
+			countKeySlots(d.tree, &counts)
+			var repeated []int
+			for slot, n := range counts {
+				if n > 1 {
+					repeated = append(repeated, slot)
+				}
+			}
+			if len(repeated) == 0 {
+				t.Fatalf("no slot appears twice anywhere under the wsh; this pin does not "+
+					"carry the duplicate it exists to preserve (slots seen: %d)",
+					countNonZero(counts))
+			}
+			t.Logf("slots at two or more use sites under one wsh miniscript: @%v", repeated)
+		})
+	}
+}
+
+func countNonZero(counts [256]int) int {
+	n := 0
+	for _, c := range counts {
+		if c > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // TestPinnedKeyReuseVectorsAreTheShapeTheyClaim measures the pin rather than

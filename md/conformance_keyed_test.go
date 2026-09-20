@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -55,28 +54,18 @@ type keyedConformanceRecord struct {
 // and Singlesig only) — that is Stage 3, and the sub-test below records which
 // shapes are waiting rather than passing over them in silence.
 func TestKeyedConformanceAgreesWithRust(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("testdata", "vectors", "keyed_*.conformance.json"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(paths) == 0 {
-		t.Fatal("no keyed_*.conformance.json vendored — the cross-language gate is checking NOTHING")
-	}
-
 	checked := 0
-	for _, p := range paths {
-		name := strings.TrimSuffix(filepath.Base(p), ".conformance.json")
+	for _, name := range eachKeyedVector(t, "keyed_*") {
 		t.Run(name, func(t *testing.T) {
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				t.Fatalf("read %s: %v", p, err)
-			}
 			var rec keyedConformanceRecord
-			if err := json.Unmarshal(raw, &rec); err != nil {
-				t.Fatalf("parse %s: %v", p, err)
+			if err := json.Unmarshal(vectorRecordFor(t, name), &rec); err != nil {
+				t.Fatalf("parse %s.conformance.json: %v", name, err)
 			}
 
-			chunks := loadPhraseChunks(t, name)
+			// The CARD comes from the pin-preferring loader because the RECORD
+			// above does: pairing a pinned record with a re-vendored card is
+			// D5a's split inverted, and it reds on wallet_policy_id.
+			chunks := vectorChunksFor(t, name)
 			if len(chunks) == 0 {
 				t.Fatalf("%s: no md1 chunks in the vendored phrase", name)
 			}
@@ -139,25 +128,6 @@ func TestKeyedConformanceAgreesWithRust(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("every keyed vector was skipped; the gate asserted nothing")
 	}
-}
-
-// loadPhraseChunks reads a vendored `.phrase.txt`, dropping the `chunk-set-id:`
-// header a chunked card carries and stripping the display separators an
-// operator's re-typed card would not have.
-func loadPhraseChunks(t *testing.T, name string) []string {
-	t.Helper()
-	raw, err := os.ReadFile(vectorPath(name, "phrase.txt"))
-	if err != nil {
-		t.Fatalf("read %s.phrase.txt: %v", name, err)
-	}
-	var out []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.ReplaceAll(strings.TrimSpace(line), " ", "")
-		if strings.HasPrefix(line, "md1") {
-			out = append(out, line)
-		}
-	}
-	return out
 }
 
 // ─── F-630: the rendered descriptor, gated ───────────────────────────────────
@@ -283,28 +253,15 @@ func TestKeyedConformanceDescriptorsAgreeWithTheirTemplates(t *testing.T) {
 		}
 	}
 
-	paths, err := filepath.Glob(filepath.Join("testdata", "vectors", "keyed_*.conformance.json"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(paths) == 0 {
-		t.Fatal("no keyed_*.conformance.json vendored — the descriptor gate is checking NOTHING")
-	}
-
 	passed, failed, legacyPassed := 0, 0, 0
-	for _, p := range paths {
-		name := strings.TrimSuffix(filepath.Base(p), ".conformance.json")
+	for _, name := range eachKeyedVector(t, "keyed_*") {
 		legacy := pinned[name]
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatalf("read %s: %v", p, err)
-		}
 		ok := t.Run(name, func(t *testing.T) {
 			var rec keyedConformanceRecord
-			if err := json.Unmarshal(raw, &rec); err != nil {
-				t.Fatalf("parse %s: %v", p, err)
+			if err := json.Unmarshal(vectorRecordFor(t, name), &rec); err != nil {
+				t.Fatalf("parse %s.conformance.json: %v", name, err)
 			}
-			assertDescriptorsAgree(t, name, rec, loadPhraseChunks(t, name), legacy)
+			assertDescriptorsAgree(t, name, rec, vectorChunksFor(t, name), legacy)
 		})
 		switch {
 		case !ok:
