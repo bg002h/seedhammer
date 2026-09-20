@@ -651,3 +651,116 @@ func fableKeyedBuild(t *testing.T, list md.PathList) []string {
 	}
 	return keyed
 }
+
+// ─── r1 review I-1 and M-2: the creation-time key-less guard ────────────────
+
+// TestFableKeylessCreationGuardYieldsToTheStructuralRefusals is the
+// operator-visible half of round-1 review I-1, plus M-2.
+//
+// composerAddPath refuses a SECOND key-less path at creation, which is §4e's
+// "REFUSE at the picker" half. But the cap's remedy -- "fold them into one
+// path" -- does not cure the structural refusals the codec now orders AHEAD
+// of it, so the guard must not claim it where it cannot work:
+//
+//   - under sh / sh-wsh the blocker is the one-sorted-multisig rule, and
+//     folding leaves two paths, still refused. The body whose remedy DOES
+//     work is one arm away.
+//   - the emptied path of M-5 (no key, no hash) is not a key-less path at
+//     all: the primary's own vector says key-less is `keys == null` AND
+//     `hash != null`, and the codec refuses an empty path earlier with
+//     LockOnlyPathError. Counting it told the operator they already hold a
+//     key-less path when they hold an empty one.
+func TestFableKeylessCreationGuardYieldsToTheStructuralRefusals(t *testing.T) {
+	H := fableFundsHash(t, fableFundsPreimage)
+	keyed := func(k, n uint8) md.SpendPath {
+		return md.SpendPath{Keys: &md.KeySet{K: k, N: n, Sorted: true}}
+	}
+	// M-2: the COUNT itself. An empty path is not a key-less path.
+	for _, tc := range []struct {
+		what  string
+		paths []md.SpendPath
+		want  int
+	}{
+		{"a real key-less path", []md.SpendPath{keyed(2, 3), {Hash: H}}, 1},
+		{"an EMPTY path (no key, no hash) -- M-5's shape",
+			[]md.SpendPath{keyed(2, 3), {}}, 0},
+		{"an empty path carrying only a time lock",
+			[]md.SpendPath{keyed(2, 3), {Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}}, 0},
+		{"a key-less path with a lock", []md.SpendPath{keyed(2, 3),
+			{Hash: H, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}}, 1},
+	} {
+		list := md.PathList{Wrapper: md.ComposeWsh, Paths: tc.paths}
+		if got := composerKeylessPathCount(list, -1); got != tc.want {
+			t.Errorf("%s: composerKeylessPathCount = %d, want %d", tc.what, got, tc.want)
+		}
+	}
+	// I-1: the BODY the creation guard shows, by wrapper.
+	for _, tc := range []struct {
+		what    string
+		wrapper md.ComposeWrapper
+		want    string
+	}{
+		{"wsh -- the cap is the blocker and folding cures it",
+			md.ComposeWsh, composerCopyRefuseTwoKeylessPaths()},
+		{"sh -- the blocker is the one-sorted-multisig rule; folding leaves two paths",
+			md.ComposeSh, composerCopyRefuseLegacyShape()},
+		{"sh-wsh -- the same",
+			md.ComposeShWsh, composerCopyRefuseLegacyShape()},
+	} {
+		list := md.PathList{Wrapper: tc.wrapper, Paths: []md.SpendPath{
+			keyed(2, 3), {Hash: H}, {Hash: H}}}
+		body, ok := composerAddPathKeylessRefusal(list, 2)
+		if !ok {
+			t.Errorf("%s: the creation guard admits a second key-less path", tc.what)
+			continue
+		}
+		if body != tc.want {
+			t.Errorf("%s: the creation guard shows %q, want %q", tc.what, body, tc.want)
+		}
+	}
+	// And a FIRST key-less path under wsh is not refused at creation at all.
+	first := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{keyed(2, 3), {Hash: H}}}
+	if body, ok := composerAddPathKeylessRefusal(first, 1); ok {
+		t.Errorf("the creation guard refused the FIRST key-less path with %q", body)
+	}
+}
+
+// TestFableValidatePathListOrdersTheCapLast is round-1 review I-1 at the
+// codec, stated as the four orderings rather than read off the vector -- so
+// the rule is pinned here too if the vector is ever re-shaped.
+func TestFableValidatePathListOrdersTheCapLast(t *testing.T) {
+	H := fableFundsHash(t, fableFundsPreimage)
+	H2 := fableFundsHash(t, fableFundsPreimage2)
+	keyed := func(k, n uint8) md.SpendPath {
+		return md.SpendPath{Keys: &md.KeySet{K: k, N: n, Sorted: true}}
+	}
+	for _, tc := range []struct {
+		what string
+		list md.PathList
+		want error
+	}{
+		{"tr: the tr rule is the one in force there",
+			md.PathList{Wrapper: md.ComposeTr, Paths: []md.SpendPath{keyed(2, 3), {Hash: H}, {Hash: H2}}},
+			md.ErrComposeKeylessUnderTr},
+		{"no keyed path at all (BIP-388 l.191)",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{{Hash: H}, {Hash: H2}}},
+			md.ErrComposeNoKeyedPath},
+		{"36 slots: folding two key-less paths into one sheds no slot",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				keyed(9, 9), keyed(9, 9), keyed(9, 9), keyed(9, 9), {Hash: H}, {Hash: H2}}},
+			md.ErrComposeTooManySlots},
+		{"sh: folding leaves two paths, still not one sorted multisig",
+			md.PathList{Wrapper: md.ComposeSh, Paths: []md.SpendPath{keyed(2, 3), {Hash: H}, {Hash: H2}}},
+			md.ErrComposeLegacyWrapperShape},
+	} {
+		_, err := md.ValidatePathList(tc.list)
+		if err == nil {
+			t.Errorf("%s: admitted", tc.what)
+			continue
+		}
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: refused with %v, want %v -- the cap's remedy does not cure this",
+				tc.what, err, tc.want)
+		}
+	}
+}

@@ -51,7 +51,11 @@ func (w ComposeWrapper) ScriptType() uint32 {
 	}
 }
 
-func (w ComposeWrapper) isLegacy() bool { return w == ComposeSh || w == ComposeShWsh }
+// IsLegacy reports whether the wrapper is one of the two §4a admits exactly
+// one sortedmulti path under. Exported since round-1 review I-1: the GUI's
+// creation-time key-less guard has to ask the same question validate() asks,
+// and a second copy of the wrapper set in package gui is how the two drift.
+func (w ComposeWrapper) IsLegacy() bool { return w == ComposeSh || w == ComposeShWsh }
 
 // LockKind is the operator's lock unit (§4c).
 type LockKind uint8
@@ -584,7 +588,27 @@ func ValidatePathList(list PathList) (int, error) {
 	if !anyKeyed {
 		return 0, ErrComposeNoKeyedPath
 	}
+	if slots > ComposeMaxSlots {
+		return 0, TooManySlotsError{Got: slots, Max: ComposeMaxSlots}
+	}
+	if list.Wrapper.IsLegacy() {
+		sole := len(list.Paths) == 1 && list.Paths[0].isBareMulti()
+		sorted := list.Paths[0].Keys != nil && list.Paths[0].Keys.Sorted
+		if !(sole && sorted) {
+			return 0, ErrComposeLegacyWrapperShape
+		}
+	}
 	// AT MOST ONE KEY-LESS PATH, wherever it sits and whatever lock it carries.
+	//
+	// IT IS LAST, AND THE ORDER IS THE CONTRACT (round-1 review I-1). The
+	// primary moved this block to the end of validate() in md-codec 0.45.0
+	// ("the key-less cap yields to the structural refusals"), and the reason
+	// ports word for word: THE CAP'S REMEDY DOES NOT CURE THE RULES ABOVE IT.
+	// "Fold them into one path" sheds no slot, so a 36-slot list is still over
+	// the cap; and folding leaves two paths under sh, which is still not one
+	// sorted multisig. A port that refuses first still refuses -- but names a
+	// repair the operator can carry out and still be refused. The vector's
+	// four precedence_* cases pin all four orderings.
 	//
 	// §5 chains paths as or_i(P, R) unless the head is a bare multi, and
 	// or_i(X, Z) is non-malleable only when one arm is `safe` -- rust-miniscript
@@ -611,16 +635,6 @@ func ValidatePathList(list PathList) (int, error) {
 	// is taking the same rule, and this is the port of it.
 	if len(keyless) > 1 {
 		return 0, TwoKeylessPathsError{First: keyless[0], Second: keyless[1]}
-	}
-	if slots > ComposeMaxSlots {
-		return 0, TooManySlotsError{Got: slots, Max: ComposeMaxSlots}
-	}
-	if list.Wrapper.isLegacy() {
-		sole := len(list.Paths) == 1 && list.Paths[0].isBareMulti()
-		sorted := list.Paths[0].Keys != nil && list.Paths[0].Keys.Sorted
-		if !(sole && sorted) {
-			return 0, ErrComposeLegacyWrapperShape
-		}
 	}
 	return slots, nil
 }

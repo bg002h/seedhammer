@@ -223,7 +223,7 @@ func composerScriptLine(tpl md.Template) string {
 //     force. That is the same rule every other picker follows -- Back preserves
 //     what was entered -- and a no-op confirm there is still gated by §8j, a
 //     hold-to-confirm, so it proposes rather than commits. (§4e refuses too,
-//     but only for the legacy wrappers: md/compose.go's isLegacy() is
+//     but only for the legacy wrappers: md/compose.go's IsLegacy() is
 //     ComposeSh || ComposeShWsh, so a second-pass pick of tr or wsh meets §8j
 //     alone.)
 //
@@ -405,17 +405,57 @@ func composerKeyOrderStep(ctx *Context, th *Colors, st *composerState) bool {
 
 // composerKeylessPathCount counts the key-less paths in the list, skipping
 // the path at `except` (pass a negative index to count them all).
+//
+// KEY-LESS IS `Keys == nil` AND `Hash != nil` (round-1 review M-2), which is
+// the primary's own spelling: its vector's `refused_when` reads "keys == null
+// AND hash != null -- a path with neither keys nor hash is LockOnlyPath,
+// refused earlier". Counting `Keys == nil` alone counted the EMPTIED path
+// item 11 exists for, so an operator holding one was told at creation that
+// they already hold a key-less path, and handed the cap's remedy ("fold them
+// into one path") for a condition the list does not have. The codec was never
+// wrong -- LockOnlyPathError returns first -- only this guard was loose.
 func composerKeylessPathCount(list md.PathList, except int) int {
 	n := 0
 	for i, p := range list.Paths {
 		if i == except {
 			continue
 		}
-		if p.Keys == nil {
+		if p.Keys == nil && p.Hash != nil {
 			n++
 		}
 	}
 	return n
+}
+
+// composerAddPathKeylessRefusal decides whether a key-less path at `idx` is
+// refused AT CREATION, and with which §8m body.
+//
+// IT YIELDS TO THE STRUCTURAL REFUSALS, for the reason md.ValidatePathList
+// now orders the cap last (round-1 review I-1): the cap's remedy does not
+// cure them. Under sh / sh-wsh the blocker is the one-sorted-multisig rule --
+// folding two key-less paths into one leaves TWO paths, still refused -- so
+// the operator must be handed the body whose remedy works ("Use wsh or tr"),
+// not the one whose does not.
+//
+// The 36-slot case needs no arm here: a key-less path carries no slots, so
+// creating one cannot be what put a list over the cap, and the list is
+// re-validated at Done where TooManySlots is reported with its own body.
+//
+// Separated from composerAddPath so a test can ask the question without
+// driving a UI: the defect this closes was a body shown on a screen, and a
+// walk that had to reach that screen under three wrappers would have been the
+// slowest possible way to pin three strings.
+func composerAddPathKeylessRefusal(list md.PathList, idx int) (string, bool) {
+	if list.Wrapper == md.ComposeTr {
+		return composerCopyRefuseKeylessTr(), true
+	}
+	if composerKeylessPathCount(list, idx) < 1 {
+		return "", false
+	}
+	if list.Wrapper.IsLegacy() {
+		return composerCopyRefuseLegacyShape(), true
+	}
+	return composerCopyRefuseTwoKeylessPaths(), true
 }
 
 // composerAddPath appends a path and runs the §8a confirm when the operator
@@ -447,22 +487,19 @@ func composerAddPath(ctx *Context, th *Colors, st *composerState) {
 	}
 	// A key-less path is wsh-only and EXPERIMENTAL (§4b, C16). Under tr it is
 	// refused with §8m line 3 rather than confirmed.
-	if st.list.Wrapper == md.ComposeTr {
-		st.list.Paths = st.list.Paths[:idx]
-		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), composerCopyRefuseKeylessTr())
-		return
-	}
-	// A SECOND KEY-LESS PATH IS REFUSED AT CREATION, not only at Done
-	// (fable review r0 C-1). md.ValidatePathList is still the authority and
+	// REFUSED AT CREATION, not only at Done (fable review r0 C-1, and its
+	// round-1 review I-1). md.ValidatePathList is still the authority and
 	// still refuses at Done -- this is §4e's "REFUSE at the picker" half, and
-	// it is worth having here because the alternative is the operator holding
+	// it is worth having because the alternative is the operator holding
 	// §8a's bearer-access confirm, choosing a hash kind and entering 64 hex
-	// characters for a path the codec will not admit. The count is over the
-	// paths that ALREADY exist: `idx` is the one being created, and it is
-	// key-less on this arm.
-	if composerKeylessPathCount(st.list, idx) >= 1 {
+	// characters for a path the codec will not admit.
+	//
+	// composerAddPathKeylessRefusal picks the body, and it yields to the
+	// structural refusals the way the codec now does: `idx` is the path being
+	// created and is key-less on this arm, so it is excluded from the count.
+	if body, refused := composerAddPathKeylessRefusal(st.list, idx); refused {
 		st.list.Paths = st.list.Paths[:idx]
-		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), composerCopyRefuseTwoKeylessPaths())
+		showError(ctx, th, fmt.Sprintf("Path %d", idx+1), body)
 		return
 	}
 	// §8a FIRES ON EVERY KEY-LESS PATH THAT IS CREATED, with no memo.
