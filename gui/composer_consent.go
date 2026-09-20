@@ -241,6 +241,26 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	// stop. It now reports which kinds the policy actually holds, which means
 	// the loop has to see every branch -- a `break` on the first would name
 	// sha256 on a wallet whose second path is ripemd160.
+	// §8a, RESTATED AT CONSENT (fable review r0, lens 1 I-1 = lens 3 I-1).
+	//
+	// §8a fires at path CREATION, several screens and possibly several edits
+	// earlier, and the row here says only `KEY-LESS (EXPERIMENTAL)` -- three
+	// words for "no coordinator will import this wallet". The consent is the
+	// screen §7e calls the promise and the last one before steel, so the
+	// import consequence is restated here for the same reason §8i is (§6c:
+	// "at entry AND at consent"). Whole body, verbatim, not a summary: a
+	// shortened restatement is a second copy of a rule that can drift from
+	// the first.
+	//
+	// ON THE DECODED SHAPE, not on st.list: this function is handed the
+	// CHUNKS that will be cut, so a path that became key-less after the §8a
+	// confirm -- or one that never saw it -- is still named here.
+	for _, b := range shape.Branches {
+		if b.Keys == 0 {
+			lines = append(lines, "", composerCopyKeylessPath())
+			break
+		}
+	}
 	var kinds []md.HashKind
 	seen := make(map[md.HashKind]bool)
 	for _, b := range shape.Branches {

@@ -335,3 +335,70 @@ func TestFableSelfCheckComparesTheThresholdOfALockedMulti(t *testing.T) {
 		t.Fatal("composerSelfCheck accepted an artifact whose locked path is 2-of-2 for a built 1-of-2")
 	}
 }
+
+// ─── L1 I-1 = L3 I-1: one key-less path un-imports the WHOLE wallet ─────────
+
+// TestFableKeylessPathNamesTheImportConsequence is the one finding two lenses
+// reached independently.
+//
+// §8a warned about the preimage and said nothing about import, and the
+// consent's `KEY-LESS (EXPERIMENTAL)` row restated no more. Measured by both
+// reviewers: Bitcoin Core v25.0 AND v31.1 refuse the descriptor at
+// `getdescriptorinfo` ("witnesses without signature exist") so
+// `importdescriptors` is never reached and no checksum is issued; libnunchuk
+// 2.1.1 refuses; Liana refuses any hashlock path. The KEYED path's owner
+// cannot watch or spend through any of them either -- the refusal is of the
+// whole descriptor. The Rust primary ADMITS the shape, so nothing upstream
+// says it, and funding it is discovered at restore.
+func TestFableKeylessPathNamesTheImportConsequence(t *testing.T) {
+	body := composerCopyKeylessPath()
+	for _, want := range []string{"Bitcoin Core", "Nunchuk", "Liana"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the §8a key-less body does not name %s:\n%s", want, body)
+		}
+	}
+	// AND IT IS RESTATED AT CONSENT, the screen §7e calls the promise.
+	list := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}},
+		{Hash: fableFundsHash(t, fableFundsPreimage), Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}}}
+	c, err := md.Compose(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := c.Chunks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, kp := composerListedPaths(list)
+	lines, err := composerConsentLinesFor(chunks, listed, kp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "KEY-LESS (EXPERIMENTAL)") {
+		t.Fatalf("INCONCLUSIVE: the fixture's consent has no key-less path:\n%s", joined)
+	}
+	if !strings.Contains(normalizeDrawn(joined), normalizeDrawn(body)) {
+		t.Errorf("the consent does not restate §8a's key-less body:\n%s", joined)
+	}
+	// AND A WALLET WITH NO KEY-LESS PATH MUST NOT CARRY IT -- a warning shown
+	// on every policy is a warning nobody reads.
+	plain := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}}}}
+	pc, err := md.Compose(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pchunks, err := pc.Chunks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plisted, pkp := composerListedPaths(plain)
+	plines, err := composerConsentLinesFor(pchunks, plisted, pkp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(normalizeDrawn(strings.Join(plines, "\n")), normalizeDrawn(body)) {
+		t.Error("a 2-of-3 with no key-less path carries §8a's key-less body at consent")
+	}
+}

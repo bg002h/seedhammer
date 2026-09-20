@@ -31,8 +31,11 @@ type composerCopyRow struct {
 // exact.
 func composerCopyTable() []composerCopyRow {
 	return []composerCopyRow{
+		// §8a GAINED ITS SECOND SENTENCE in the fable review r0 fold (lens 1
+		// I-1 = lens 3 I-1); filed as a §8 amendment so this table stays the
+		// diff target for the spec.
 		{"composerCopyKeylessPath", "8a", composerCopyKeylessPath(),
-			"KEY-LESS PATH (EXPERIMENTAL) This path needs no signature. Whoever knows the preimage of its hash can spend it. If that preimage is ever engraved, the plate is bearer access."},
+			"KEY-LESS PATH (EXPERIMENTAL) This path needs no signature. Whoever knows the preimage of its hash can spend it. If that preimage is ever engraved, the plate is bearer access. It also makes the WHOLE wallet un-importable, keyed paths included. Bitcoin Core, Nunchuk and Liana all refuse it. Only md can rebuild this wallet, and md cannot sign: no other wallet will watch it or spend from it."},
 		{"composerCopyUnsortedKeys", "8b", composerCopyUnsortedKeys(),
 			"UNSORTED KEYS (EXPERIMENTAL) You chose unsorted keys where sorted was possible. Key order is part of this wallet. Anyone restoring it must keep the same order. Sorted keys need none."},
 		{"composerCopyLockEchoDays", "8c", composerCopyLockEchoDays(90, 15188),

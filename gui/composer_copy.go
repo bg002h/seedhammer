@@ -73,10 +73,31 @@ func composerSlotList(slots []uint8) string {
 
 // ─── §8a, §8b: the two EXPERIMENTAL confirm-to-proceed bodies ────────────────
 
+// composerCopyKeylessPath is §8a. It names TWO consequences, and the second
+// arrived with the fable review r0 (lens 1 I-1 and lens 3 I-1 found it
+// independently, from opposite ends).
+//
+// The body used to stop at bearer access, which is true and is not the whole
+// price. ONE key-less path makes the WHOLE wallet un-importable -- keyed paths
+// included -- because the descriptor as a whole is what a coordinator refuses:
+// measured on Bitcoin Core v25.0 and v31.1, `getdescriptorinfo` reports
+// "witnesses without signature exist" and never issues a checksum, so
+// `importdescriptors` cannot even be reached; libnunchuk 2.1.1 refuses;
+// Liana refuses any hashlock path. The Rust primary ADMITS the shape, so
+// nothing upstream of this screen says it either, and the operator who funds
+// one discovers it at restore -- with the money already in.
+//
+// THAT IS WHY IT SAYS "ANY OTHER WALLET" AND NOT "md ONLY CAN RESTORE IT".
+// md restores the wallet in the sense of reconstructing the descriptor and
+// deriving addresses; it does not sign. The honest sentence is about what can
+// WATCH and SPEND, which is what an operator about to fund is deciding.
 func composerCopyKeylessPath() string {
 	return "KEY-LESS PATH (EXPERIMENTAL)\n" +
 		"This path needs no signature. Whoever knows the preimage of its hash can " +
-		"spend it. If that preimage is ever engraved, the plate is bearer access."
+		"spend it. If that preimage is ever engraved, the plate is bearer access.\n" +
+		"It also makes the WHOLE wallet un-importable, keyed paths included. " +
+		"Bitcoin Core, Nunchuk and Liana all refuse it. Only md can rebuild this " +
+		"wallet, and md cannot sign: no other wallet will watch it or spend from it."
 }
 
 func composerCopyUnsortedKeys() string {
