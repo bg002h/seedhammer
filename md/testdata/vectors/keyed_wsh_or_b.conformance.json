@@ -6,7 +6,7 @@
         "bc1qvxee3n7r7re00730ln44pljelpmqpycvmrae9hwu42hey8ukej8srfhq3w",
         "bc1qynrlawv3yzxfnjh75wl25md88sx2uzmj60l4jsyh2zpga2r9x9sq4zws4e"
       ],
-      "descriptor": "wsh(or_b(pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*),s:pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*)))#0t5kyuy8"
+      "descriptor": "wsh(or_b(pk([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/0/*),s:pk([73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/0/*)))#m4c3mmqy"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1q9hsqgw7cedx5ns5egplp69ncuu3hqaacm7rjrusf5nluqe24j3eqcd64gu",
         "bc1qs0rzn5vt2gh0f86m03m3amy2usp2k73ukl3h745kfz4qy2du880s286ex6"
       ],
-      "descriptor": "wsh(or_b(pk([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*),s:pk([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*)))#sr388s5m"
+      "descriptor": "wsh(or_b(pk([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/1/*),s:pk([73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/1/*)))#yaaqchsc"
     }
   },
   "fingerprints": [

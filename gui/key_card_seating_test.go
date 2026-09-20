@@ -3,8 +3,6 @@ package gui
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,10 +35,6 @@ func seatFixture(t *testing.T) ([]string, []mk.Card, string) {
 	if err != nil {
 		t.Fatalf("expand: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", seatVector+".conformance.json"))
-	if err != nil {
-		t.Fatalf("read vector: %v", err)
-	}
 	var rec struct {
 		Keys []struct {
 			Index int    `json:"index"`
@@ -50,7 +44,7 @@ func seatFixture(t *testing.T) ([]string, []mk.Card, string) {
 			Addresses []string `json:"addresses"`
 		} `json:"chains"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	if err := json.Unmarshal(loadVectorRecord(t, seatVector), &rec); err != nil {
 		t.Fatalf("parse vector: %v", err)
 	}
 	xpubOf := map[int]string{}
@@ -240,10 +234,6 @@ func seatSameOriginFixture(t *testing.T) ([]string, []mk.Card, string) {
 	if err != nil {
 		t.Fatalf("expand: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", name+".conformance.json"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
 	var rec struct {
 		Keys []struct {
 			Index int    `json:"index"`
@@ -253,7 +243,7 @@ func seatSameOriginFixture(t *testing.T) ([]string, []mk.Card, string) {
 			Addresses []string `json:"addresses"`
 		} `json:"chains"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	if err := json.Unmarshal(loadVectorRecord(t, name), &rec); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	// ALREADY a keyless template, and one that DECLARES fingerprints — which is

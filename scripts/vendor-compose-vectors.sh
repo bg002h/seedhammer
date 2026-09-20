@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Vendor the Rust primary's compose corpus (the MANIFEST's compose_* and
-# keyed_compose_* vectors) into md/testdata/vectors/ and write the provenance
+# Vendor the Rust primary's keyed + compose corpus (every MANIFEST vector named
+# keyed_* or compose_*, except the separately pinned compose_refusal_*) into
+# md/testdata/vectors/ and write the provenance
 # pin md/compose_vectors_pin_test.go checks. Re-run on every re-pin.
 #
 #   scripts/vendor-compose-vectors.sh [/path/to/descriptor-mnemonic]
@@ -13,7 +14,17 @@ PIN="$HERE/md/testdata/compose_vectors.provenance.json"
 [ -d "$VEC" ] || { echo "no vectors at $VEC" >&2; exit 2; }
 commit=$(git -C "$SRC" rev-parse HEAD)
 clean=true; [ -z "$(git -C "$SRC" status --porcelain -- crates/md-codec/tests/vectors)" ] || clean=false
-mapfile -t files < <(cd "$VEC" && ls | grep -E '^(keyed_)?compose_' | sort)
+# THE WHOLE KEYED TIER, minus the refusal vectors (F-630 D4). The selector used
+# to be '^(keyed_)?compose_', which reaches 32 of the 41 records the md-codec
+# 0.44.0 xpub-header rewrite moved and leaves 9 stale -- and a gate over a
+# corpus that is still stale in 9 places is a RED gate, which is worse than no
+# gate. The other 14 keyed vectors had no provenance pin at all.
+#
+# compose_refusal_* is EXCLUDED because it is pinned separately, by
+# md/testdata/compose_refusal_vectors.provenance.json. Without the exclusion
+# this selects 177 files against a pin of 176 and trips
+# md/compose_vectors_pin_test.go.
+mapfile -t files < <(cd "$VEC" && ls | grep -E '^(keyed_|compose_)' | grep -vE '^compose_refusal_' | sort)
 [ "${#files[@]}" -gt 0 ] || { echo "no compose_* vectors in $VEC" >&2; exit 2; }
 for f in "${files[@]}"; do cp "$VEC/$f" "$DST/$f"; done
 python3 - "$PIN" "$commit" "$clean" "$DST" "${files[@]}" <<'PY'

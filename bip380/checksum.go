@@ -52,9 +52,16 @@ func polymod(syms []byte) uint64 {
 	return chk
 }
 
-// validChecksum reports whether c is a valid checksum
-// for s.
-func validChecksum(s, c string) bool {
+// ValidChecksum reports whether c is a valid BIP-380 descriptor checksum
+// for s (the descriptor body, everything before the '#').
+//
+// EXPORTED for F-630's D1": md/conformance_keyed_test.go checks the checksum
+// on every rendered descriptor in the keyed conformance corpus, which is the
+// one of the seven measured descriptor mutations that survives both the header
+// assertion and the template reduction (the reduction strips the checksum).
+// bip380 does not import md, so there is no cycle. Exporting an identifier
+// changes no behaviour and no call site's semantics.
+func ValidChecksum(s, c string) bool {
 	if len(c) != 8 {
 		return false
 	}

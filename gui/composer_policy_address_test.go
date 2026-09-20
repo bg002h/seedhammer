@@ -2,8 +2,6 @@ package gui
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"seedhammer.com/md"
@@ -45,16 +43,12 @@ func TestDeviceDerivesTheComposerTimelockHashlockPolicy(t *testing.T) {
 		t.Fatalf("the vector seats %d keys, want 3 (template %v)", len(keys), tmpl)
 	}
 
-	raw, err := os.ReadFile(filepath.Join("..", "md", "testdata", "vectors", vector+".conformance.json"))
-	if err != nil {
-		t.Fatalf("read conformance record: %v", err)
-	}
 	var rec struct {
 		Chains map[string]struct {
 			Addresses []string `json:"addresses"`
 		} `json:"chains"`
 	}
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	if err := json.Unmarshal(loadVectorRecord(t, vector), &rec); err != nil {
 		t.Fatalf("parse conformance record: %v", err)
 	}
 	want := rec.Chains["0"].Addresses

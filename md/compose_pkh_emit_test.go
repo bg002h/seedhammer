@@ -3,7 +3,6 @@ package md
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"os"
 	"strconv"
 	"testing"
 
@@ -34,12 +33,8 @@ type composeConformanceKeys struct {
 
 func loadComposeConformance(t *testing.T, name string) composeConformanceKeys {
 	t.Helper()
-	raw, err := os.ReadFile(vectorPath(name, "conformance.json"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
 	var rec composeConformanceKeys
-	if err := json.Unmarshal(raw, &rec); err != nil {
+	if err := json.Unmarshal(vectorRecordFor(t, name), &rec); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	return rec
@@ -89,7 +84,7 @@ func TestPkhWitnessScriptsReproduceRustsAddresses(t *testing.T) {
 	for _, name := range pkhWshVectors {
 		t.Run(name, func(t *testing.T) {
 			rec := loadComposeConformance(t, name)
-			chunks := loadPhraseChunks(t, name)
+			chunks := vectorChunksFor(t, name)
 			// Receive (chain 0) AND change (chain 1), indices 0 and 1 each: §12
 			// item 1's "receive 0..1, change 0..1" (fidelity M-2).
 			for chain := uint32(0); chain < 2; chain++ {
@@ -118,7 +113,7 @@ func TestPkhWitnessScriptsReproduceRustsAddresses(t *testing.T) {
 func TestPkhScriptDependsOnTheKey(t *testing.T) {
 	name := "keyed_compose_wsh_single_head_or_i" // or_i(pkh(@0), and_v(v:pkh(@1), older(..)))
 	rec := loadComposeConformance(t, name)
-	chunks := loadPhraseChunks(t, name)
+	chunks := vectorChunksFor(t, name)
 	keys := derivedKeys(t, rec, 0, 0)
 	base, err := EmitWitnessScriptChunks(chunks, keys)
 	if err != nil {
@@ -148,7 +143,7 @@ func TestPkhScriptDependsOnTheKey(t *testing.T) {
 // (composer-S2-implementation-report F-1; the gui address gate is the oracle,
 // this is the byte-level pin).
 func TestVerifyWrappedMultiAFoldsIntoNumEqualVerify(t *testing.T) {
-	chunks := loadPhraseChunks(t, "keyed_compose_tr_nums_three_leaves")
+	chunks := vectorChunksFor(t, "keyed_compose_tr_nums_three_leaves")
 	keys := map[uint8][]byte{}
 	for i := uint8(0); i < 4; i++ {
 		k := make([]byte, 32)

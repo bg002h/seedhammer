@@ -6,7 +6,7 @@
         "bc1q9x4j0k2hvclql3j9psdwamk0q25glxd7sa7g47ktachl0xxt45nscqnj0k",
         "bc1qcdsg6dypmjdgjxygcpyqx2pnn9cxdy37su8v8gyt4szhuksj2jnsc2pzzn"
       ],
-      "descriptor": "wsh(or_i(and_v(v:pkh([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/0/*),hash160(b5b72c0e6896ff59dfa99e0d1052a9c0214cd0bd)),and_v(v:pkh([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/0/*),older(26280))))#0rt9mqp6"
+      "descriptor": "wsh(or_i(and_v(v:pkh([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/0/*),hash160(b5b72c0e6896ff59dfa99e0d1052a9c0214cd0bd)),and_v(v:pkh([73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/0/*),older(26280))))#4mal4lv6"
     },
     "1": {
       "addresses": [
@@ -14,7 +14,7 @@
         "bc1qnp8vuhzy0jwt6qu9ahrp3lxddvaxral5hnnjunvajqnerwlyw6psgemyg6",
         "bc1q98ke2ndfxs2425m6zcmgyp7thc287qjaaesrjwy3fslrrt2dxpmqpag02v"
       ],
-      "descriptor": "wsh(or_i(and_v(v:pkh([73c5da0a/48'/0'/0'/2']xpub661MyMwAqRbcGQnC8zMGwRc4EXYJCgXrxx9kXtw1RXqu4TcW26PxHqssgp6sU4N5CR5o9QcUZPG31fzPeUHEVPkFit1WpVZTmqZLzpvZG2s/1/*),hash160(b5b72c0e6896ff59dfa99e0d1052a9c0214cd0bd)),and_v(v:pkh([73c5da0a/48'/0'/1'/2']xpub661MyMwAqRbcG5161axqKvt7Kx7XBe4pWwNMvgbwdffMtvzPnXA85ToGs3EtpEVAAYf9PggopL6xt7ySJw5Kc7ELWVcwopEjYXVHaHy6tFz/1/*),older(26280))))#lmls56yr"
+      "descriptor": "wsh(or_i(and_v(v:pkh([73c5da0a/48'/0'/0'/2']xpub6DXuQW1Q2JpZxsEnFKrPvDuiRMmQgU4fzHU1wsvM5EqgGAWRJ3cmwbtS8u1HQjrEHg3YFb7XGnFovPydJ8qpaGNNd2hSEPoheWd27EABdGH/1/*),hash160(b5b72c0e6896ff59dfa99e0d1052a9c0214cd0bd)),and_v(v:pkh([73c5da0a/48'/0'/1'/2']xpub6DXuQW1Q2JpZxXTg7vTxJjBmWnLdfRbdYGgdLfbHHNf96dtK4UNwjDoqK89JkuyKFoctVsBrXj6jnqxfxbdugyrTQeJsDiUyRCYxgiPSpgC/1/*),older(26280))))#9rf269fr"
     }
   },
   "fingerprints": [
