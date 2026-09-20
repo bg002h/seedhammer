@@ -402,3 +402,50 @@ func TestFableKeylessPathNamesTheImportConsequence(t *testing.T) {
 		t.Error("a 2-of-3 with no key-less path carries §8a's key-less body at consent")
 	}
 }
+
+// ─── L2 I-1: §8f's NUMS note is FALSE for Nunchuk ───────────────────────────
+
+// TestFableNUMSNoteDoesNotPromiseNunchuk is lens-2 I-1.
+//
+// §8f claimed "Bitcoin Core and Nunchuk import this form". Core: true, 7/7.
+// Nunchuk: FALSE, 0 of 7, measured by RUNNING libnunchuk 2.1.1's
+// `Utils::ParseWalletDescriptor` -- the function the desktop calls -- over
+// every NUMS-keyed shape the composer emits, in both the multipath and the
+// single-chain spellings (14/14 refused, code=-1017). Two mechanisms:
+// `sortedmulti_a` is not a miniscript fragment for its template validator,
+// and every other NUMS shape is stamped DISABLE_KEY_PATH, which re-renders
+// the key path as an unspendable XPUB, so the round-trip string check fails.
+//
+// AND THE NOTE MUST NOT SEND A NUNCHUK USER TO THE UNSPENDABLE-XPUB FORM.
+// That form IS the one Nunchuk accepts, and it is a DIFFERENT WALLET:
+// measured, `preset-kofn-recovery-tr` derives bc1pm0udr8a... through the xpub
+// form and bc1pac935qv... through the raw-H form the device cuts, because the
+// xpub form derives per-index children of H and the raw form does not. The
+// existing F-449 sentence points LIANA there and that stays; the finding is
+// that a Nunchuk user must be sent to wsh, or to a tr policy whose first path
+// is a single key, and never there.
+func TestFableNUMSNoteDoesNotPromiseNunchuk(t *testing.T) {
+	body := composerCopyNUMS()
+	norm := normalizeDrawn(body)
+	if strings.Contains(norm, normalizeDrawn("Bitcoin Core and Nunchuk import this form")) {
+		t.Errorf("§8f still claims Nunchuk imports the NUMS form; libnunchuk 2.1.1 refuses 7 of 7:\n%s", body)
+	}
+	if !strings.Contains(norm, normalizeDrawn("Nunchuk")) {
+		t.Errorf("§8f does not mention Nunchuk at all, so an operator who wants it is told nothing:\n%s", body)
+	}
+	if !strings.Contains(norm, normalizeDrawn("Bitcoin Core")) {
+		t.Errorf("§8f no longer names the wallet that DOES import this form:\n%s", body)
+	}
+	// The way out must be named, and it must not be the unspendable xpub.
+	if !strings.Contains(norm, normalizeDrawn("use wsh")) {
+		t.Errorf("§8f does not name the wrapper a Nunchuk operator should choose instead:\n%s", body)
+	}
+	for _, sent := range []string{"Nunchuk and BIP-388 signers need an unspendable xpub",
+		"Nunchuk needs an unspendable xpub"} {
+		if strings.Contains(norm, normalizeDrawn(sent)) {
+			t.Errorf("§8f sends a Nunchuk user to the unspendable-xpub form, which is a "+
+				"DIFFERENT wallet with different addresses:\n%s", body)
+		}
+	}
+	assertModalBodyFits(t, "the §8f NUMS note", errorScreenBody, body)
+}

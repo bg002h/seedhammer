@@ -54,8 +54,11 @@ func composerCopyTable() []composerCopyRow {
 			"This device cannot tell the time. Nothing here has checked that this is in the future."},
 		{"composerCopyOwnWallet", "8d", composerCopyOwnWallet(),
 			"A wallet built here is its own wallet. The same rules written by another tool give a different id and different addresses."},
+		// §8f REWRITTEN in the fable review r0 fold (lens 2 I-1): its Nunchuk
+		// claim was measured FALSE, 0 of 7 shapes, by running libnunchuk
+		// 2.1.1. Filed as a §8 amendment so this table stays the diff target.
 		{"composerCopyNUMS", "8f", composerCopyNUMS(),
-			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core and Nunchuk import this form. Liana and BIP-388 signers need an unspendable xpub instead (see F-449)."},
+			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core imports this form. Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a tr policy whose first path is a single key. Liana and BIP-388 signers need an unspendable xpub instead (see F-449), which is a different wallet with different addresses."},
 		{"composerCopySameSeedThreshold", "8g", composerCopySameSeedThreshold([]uint8{1, 2}, 2, 3),
 			"SAME SEED, SAME PATH Slots @1 and @2 are the same seed. This path's 2-of-3 can be satisfied by one person. Liana will refuse it."},
 		{"composerCopySameSeedBelow", "8g", composerCopySameSeedBelow([]uint8{1, 2}, 3),

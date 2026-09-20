@@ -166,11 +166,35 @@ func composerCopyOwnWallet() string {
 		"another tool give a different id and different addresses."
 }
 
+// composerCopyNUMS is §8f. It used to say "Bitcoin Core and Nunchuk import
+// this form", and the Nunchuk half was FALSE (fable review r0 lens 2 I-1).
+//
+// MEASURED BY RUNNING libnunchuk 2.1.1, not by reading it: every NUMS-keyed
+// tr shape the composer can emit is refused by `Utils::ParseWalletDescriptor`
+// -- the function the desktop app calls -- in both the multipath and the
+// single-chain spellings, 14 of 14, code=-1017. Two mechanisms, and between
+// them they cover the whole space: `sortedmulti_a` is a descriptor function
+// and not a miniscript fragment, so its template validator refuses a plain
+// k-of-n under tr outright; and every other NUMS shape is stamped
+// DISABLE_KEY_PATH, which re-renders the key path as an unspendable XPUB and
+// then requires the re-rendered string to match the input, which a raw 32-byte
+// H never does.
+//
+// THE WAY OUT IS NAMED, AND IT IS NOT THE UNSPENDABLE XPUB. That form is the
+// one Nunchuk accepts and it is a DIFFERENT WALLET: measured, one preset
+// derives bc1pm0udr8a... through the xpub form and bc1pac935qv... through the
+// raw-H form this device cuts, because the xpub form derives per-index
+// children of H and the raw form does not. The F-449 sentence stays because
+// it is true of Liana and BIP-388 signers, for whom the xpub wallet is the
+// wallet they wanted; sending a NUNCHUK operator there would hand them a
+// different wallet under the name of this one.
 func composerCopyNUMS() string {
 	return "KEY PATH: NONE (NUMS)\n" +
-		"Spends use the script paths only. Bitcoin Core and Nunchuk import this " +
-		"form. Liana and BIP-388 signers need an unspendable xpub instead (see " +
-		"F-449)."
+		"Spends use the script paths only. Bitcoin Core imports this form. " +
+		"Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a " +
+		"tr policy whose first path is a single key. Liana and BIP-388 signers " +
+		"need an unspendable xpub instead (see F-449), which is a different " +
+		"wallet with different addresses."
 }
 
 // ─── §8g: C29, one seed at two slots INSIDE one path ─────────────────────────
