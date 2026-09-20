@@ -246,7 +246,16 @@ func composerWrapperPick(ctx *Context, th *Colors, current md.ComposeWrapper) (m
 
 // composerCountPick offers 1..max on a paged list, so a 9-row picker cannot
 // overflow the panel the way an unpaged ChoiceScreen would.
-func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max int) (int, bool) {
+//
+// `current` IS THE VALUE IN FORCE, and the picker opens on it (fable review
+// r0 M-1). Opening on `min` meant a picker was PROPOSING a count rather than
+// showing one: an operator who opened Keys on a 2-of-3 path to read it, and
+// left by the forward button that advances every other screen, rewrote the
+// path to 1 key. Journey C-1's class, the same one F-527 closed for the
+// script picker and this fold closed for the key-order picker. Pass 0 (or
+// anything outside min..max) where there is no value in force; the row is
+// clamped, and the picker then opens on `min` as before.
+func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max, current int) (int, bool) {
 	if max < min {
 		return 0, false
 	}
@@ -254,7 +263,11 @@ func composerCountPick(ctx *Context, th *Colors, title, lead string, min, max in
 	for v := min; v <= max; v++ {
 		rows = append(rows, fmt.Sprintf("%d", v))
 	}
-	sel, ok := composerPickScreen(ctx, th, title, lead, rows)
+	initial := 0
+	if current >= min && current <= max {
+		initial = current - min
+	}
+	sel, ok := composerPickScreenFrom(ctx, th, title, lead, rows, initial)
 	if !ok {
 		return 0, false
 	}
@@ -279,11 +292,25 @@ func composerKeysEdit(ctx *Context, th *Colors, st *composerState, idx int) bool
 			return false
 		}
 	}
-	n, ok := composerCountPick(ctx, th, "Keys", fmt.Sprintf("Path %d: how many keys?", idx+1), min, max)
+	// THE KEY SET IN FORCE SEEDS BOTH PICKERS (fable review r0 M-1). `before`
+	// is nil on a path whose keys have never been set -- a path just created
+	// on the Keys arm -- and the zero then falls outside min..max and the
+	// picker opens on min, which is the right proposal when there is nothing
+	// to show.
+	before := st.list.Paths[idx].Keys
+	curN, curK := 0, 0
+	if before != nil {
+		curN, curK = int(before.N), int(before.K)
+	}
+	n, ok := composerCountPick(ctx, th, "Keys", fmt.Sprintf("Path %d: how many keys?", idx+1), min, max, curN)
 	if !ok {
 		return false
 	}
-	k, ok := composerCountPick(ctx, th, "Threshold", fmt.Sprintf("Path %d: how many must sign?", idx+1), 1, n)
+	// THE THRESHOLD PICKER IS SEEDED ONLY WHERE k IS STILL REACHABLE. Its
+	// bound is the n just chosen, so a 2-of-3 edited down to 2 keys must not
+	// open on a k of 3 -- composerCountPick clamps that to "no value in
+	// force", which opens on 1.
+	k, ok := composerCountPick(ctx, th, "Threshold", fmt.Sprintf("Path %d: how many must sign?", idx+1), 1, n, curK)
 	if !ok {
 		return false
 	}
