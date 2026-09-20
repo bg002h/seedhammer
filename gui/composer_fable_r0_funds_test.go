@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
@@ -245,4 +246,92 @@ func fableSameKeyTwoSlots(t *testing.T) *composerState {
 	}
 	st.assigned[2] = a2
 	return st
+}
+
+// ─── I-3: the consent must name k-of-n of a locked or hashed multi ──────────
+
+// TestFableRedConsentNamesThresholdOfLockedMulti is lens-1 I-3.
+//
+// §7e: the consent "MUST name, per path in listed order: its k-of-n or single
+// key". md.PolicyShape set Branch.K/N only for a PLAIN threshold, so every
+// multi-key path carrying a lock or a hash printed `N key(s), custom` -- and
+// composerSelfCheck then compared the key COUNT alone, so a mis-tapped k was
+// invisible on both the promise and the check.
+func TestFableRedConsentNamesThresholdOfLockedMulti(t *testing.T) {
+	for _, tc := range []struct {
+		what  string
+		paths []md.SpendPath
+		want  []string
+	}{
+		{
+			"tiered-recovery: [2-of-2], [1-of-2 + older(5)]",
+			[]md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+				{Keys: &md.KeySet{K: 1, N: 2, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}},
+			[]string{"Path 1: 2-of-2", "Path 2: 1-of-2"},
+		},
+		{
+			"9-of-9 and 1-of-9 behind locks print identically at tip",
+			[]md.SpendPath{
+				{Keys: &md.KeySet{K: 5, N: 9, Sorted: true}},
+				{Keys: &md.KeySet{K: 9, N: 9, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}},
+				{Keys: &md.KeySet{K: 1, N: 9, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 6}}},
+			[]string{"Path 1: 5-of-9", "Path 2: 9-of-9", "Path 3: 1-of-9"},
+		},
+		{
+			"a hashed multi: [2-of-3 + sha256 + older(5)], [1 key]",
+			[]md.SpendPath{
+				{Keys: &md.KeySet{K: 2, N: 3, Sorted: true}, Hash: fableFundsHash(t, fableFundsPreimage), Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}},
+				{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}}},
+			[]string{"Path 1: 2-of-3"},
+		},
+	} {
+		list := md.PathList{Wrapper: md.ComposeWsh, Paths: tc.paths}
+		c, err := md.Compose(list)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		chunks, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		listed, kp := composerListedPaths(list)
+		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.what, err)
+		}
+		joined := strings.Join(lines, "\n")
+		for _, want := range tc.want {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s: the consent does not name %q:\n%s", tc.what, want, joined)
+			}
+		}
+		if strings.Contains(joined, "key(s), custom") {
+			t.Errorf("%s: the consent still prints the count-only form:\n%s", tc.what, joined)
+		}
+	}
+}
+
+// TestFableSelfCheckComparesTheThresholdOfALockedMulti is I-3's second half:
+// the self-check must compare k, not only n, where the path carries a lock.
+func TestFableSelfCheckComparesTheThresholdOfALockedMulti(t *testing.T) {
+	built := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+		{Keys: &md.KeySet{K: 1, N: 2, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}}}
+	// The artifact the device would cut if k were mis-lowered on path 2.
+	wrong := md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}},
+		{Keys: &md.KeySet{K: 2, N: 2, Sorted: true}, Lock: &md.Lock{Kind: md.LockOlderBlocks, Value: 5}}}}
+	c, err := md.Compose(wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := c.Chunks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &composerState{list: built, reg: &seedRegistry{}}
+	if err := composerSelfCheck(st, chunks); err == nil {
+		t.Fatal("composerSelfCheck accepted an artifact whose locked path is 2-of-2 for a built 1-of-2")
+	}
 }

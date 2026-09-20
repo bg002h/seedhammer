@@ -56,13 +56,19 @@ func TestPolicyShapeSplitsAlternativesIntoBranches(t *testing.T) {
 			{Keys: 1, Timelock: true, Locks: lk(LockAfterHeight, 1_000_000)},
 		}},
 		// or_i(pkh(@0), and_v(v:multi(2,@1,@2), and_v(v:sha256(H), after(1893456000))))
+		//
+		// K/N ON A LOCKED OR HASHED THRESHOLD: fable review r0 I-3. These two
+		// rows read {K: 0, N: 0} until soleMulti landed, because plainMulti
+		// looks through wrappers and not through and_v -- and the consent
+		// screen printed "2 key(s), custom" for both, naming no threshold at
+		// all on exactly the paths §7e requires it to name one for.
 		{"keyed_compose_wsh_hash_and_time", []Branch{
 			{Keys: 1},
-			{Keys: 2, Timelock: true, Hashlock: true, Locks: lk(LockAfterTime, 1_893_456_000), Hashlocks: hl(t, h)},
+			{K: 2, N: 2, Keys: 2, Timelock: true, Hashlock: true, Locks: lk(LockAfterTime, 1_893_456_000), Hashlocks: hl(t, h)},
 		}},
 		// or_i(and_v(v:multi(2,@0,@1), after(905000)), pkh(@2))
 		{"keyed_compose_wsh_locked_head_or_i", []Branch{
-			{Keys: 2, Timelock: true, Locks: lk(LockAfterHeight, 905_000)},
+			{K: 2, N: 2, Keys: 2, Timelock: true, Locks: lk(LockAfterHeight, 905_000)},
 			{Keys: 1},
 		}},
 	} {
@@ -99,9 +105,12 @@ func TestPolicyShapeSplitsTheShippedOrCards(t *testing.T) {
 			{Keys: 1, Timelock: true, Locks: lk(LockOlderBlocks, 65535)},
 		}},
 		// wsh(or_i(and_v(v:after(1000000), and_v(v:sha256(H), multi(2,@0,@1,@2))), and_v(v:older(65535), multi(1,@1,@2))))
+		// Both rows carried {K: 0, N: 0} before fable review r0 I-3: a shipped
+		// card whose two tiers are 2-of-3 and 1-of-2, and the consent named
+		// neither threshold.
 		{"keyed_wsh_timelock_hashlock", []Branch{
-			{Keys: 3, Timelock: true, Hashlock: true, Locks: lk(LockAfterHeight, 1_000_000), Hashlocks: hl(t, hh)},
-			{Keys: 2, Timelock: true, Locks: lk(LockOlderBlocks, 65535)},
+			{K: 2, N: 3, Keys: 3, Timelock: true, Hashlock: true, Locks: lk(LockAfterHeight, 1_000_000), Hashlocks: hl(t, hh)},
+			{K: 1, N: 2, Keys: 2, Timelock: true, Locks: lk(LockOlderBlocks, 65535)},
 		}},
 	} {
 		t.Run(tc.vector, func(t *testing.T) {
@@ -170,10 +179,11 @@ func TestPolicyShapeTapLeavesCarryLocks(t *testing.T) {
 	want := []Branch{
 		{Keys: 1, Timelock: true, Locks: lk(LockOlderBlocks, 1), Depth: 1},
 		{Keys: 1, Timelock: true, Locks: lk(LockOlderBlocks, 2), Depth: 2},
-		// K/N stay ZERO here: the multi_a sits under and_v with the lock, and
-		// plainMulti reports a threshold only for a BARE one (the existing
-		// TestPolicyShapeNeverClaimsAPlainThresholdItCannotSee rule).
-		{Keys: 2, Timelock: true, Locks: lk(LockAfterHeight, 2), Depth: 2},
+		// K/N are 2-of-2 SINCE fable review r0 I-3: the multi_a sits under
+		// and_v with the lock, which plainMulti cannot see through, and
+		// soleMulti can. This row read {K: 0, N: 0} before, so the consent
+		// named no threshold for a taproot leaf that has one.
+		{K: 2, N: 2, Keys: 2, Timelock: true, Locks: lk(LockAfterHeight, 2), Depth: 2},
 	}
 	if s.KeyPath != KeyPathNUMS || s.TapDepth != 2 {
 		t.Fatalf("KeyPath=%v TapDepth=%d, want NUMS depth 2", s.KeyPath, s.TapDepth)
