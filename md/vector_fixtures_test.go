@@ -3,6 +3,7 @@ package md
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -59,19 +60,37 @@ func vectorRecordFor(t *testing.T, name string) []byte {
 // (e.g. "keyed_*", "keyed_tr_*"), sorted. The glob is over the VENDORED
 // directory because that is what defines corpus membership; which tier each
 // record is then read from is vectorRecordFor's business.
+// eachKeyedVector enumerates the UNION of the vendored tier and the fork-side
+// record pins.
+//
+// THE UNION IS THE WHOLE POINT, and globbing only `testdata/vectors/` was a
+// defect the whole-diff review reproduced. A pin exists for the day F-529
+// describes -- the day a re-vendor DELETES the vector it preserves -- and a
+// vendored-only glob examines the pin only while the thing it replaces is
+// still there. Delete `testdata/vectors/keyed_tr_multi_a.*` and the gate
+// passed at "45 of 45 ... 0 fail" with the pin untouched on disk and still
+// named in forkbuiltRecordPins: coverage that evaporates exactly when it is
+// first needed.
 func eachKeyedVector(t *testing.T, pattern string) []string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join("testdata", "vectors", pattern+".conformance.json"))
-	if err != nil {
-		t.Fatalf("glob %s: %v", pattern, err)
+	seen := map[string]bool{}
+	for _, dir := range []string{"vectors", "forkbuilt"} {
+		paths, err := filepath.Glob(filepath.Join("testdata", dir, pattern+".conformance.json"))
+		if err != nil {
+			t.Fatalf("glob %s in %s: %v", pattern, dir, err)
+		}
+		for _, p := range paths {
+			seen[strings.TrimSuffix(filepath.Base(p), ".conformance.json")] = true
+		}
 	}
-	if len(paths) == 0 {
-		t.Fatalf("no %s.conformance.json vendored — a gate over them is checking NOTHING", pattern)
+	if len(seen) == 0 {
+		t.Fatalf("no %s.conformance.json in either tier — a gate over them is checking NOTHING", pattern)
 	}
-	out := make([]string, 0, len(paths))
-	for _, p := range paths {
-		out = append(out, strings.TrimSuffix(filepath.Base(p), ".conformance.json"))
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
 	}
+	sort.Strings(out)
 	return out
 }
 

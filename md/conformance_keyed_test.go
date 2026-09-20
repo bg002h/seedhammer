@@ -276,6 +276,34 @@ func TestKeyedConformanceDescriptorsAgreeWithTheirTemplates(t *testing.T) {
 	if passed+failed == 0 {
 		t.Fatal("every keyed vector was skipped; the gate asserted nothing")
 	}
+
+	// EVERY PIN MUST HAVE BEEN EXAMINED, not merely present on disk.
+	//
+	// The membership assertion above checks that each pinned record FILE
+	// exists; it cannot tell whether the loop ever reached it. Those are
+	// different claims, and the whole-diff review reproduced the gap: with the
+	// enumeration globbing only the vendored tier, deleting
+	// `testdata/vectors/keyed_tr_multi_a.*` left the pin on disk, still named
+	// in forkbuiltRecordPins, and the gate reported "45 of 45 ... 0 fail". The
+	// pin exists for exactly that day -- F-529's re-vendor -- so coverage that
+	// lapses when the vendored copy goes is coverage that is never there when
+	// it is needed. eachKeyedVector now unions both tiers; this asserts the
+	// union actually arrived.
+	if legacyPassed != len(forkbuiltRecordPins) {
+		t.Errorf("%d pinned record(s) reached the legacy arm, want %d (%v) — a pin that is "+
+			"never examined is not coverage, however present its file is",
+			legacyPassed, len(forkbuiltRecordPins), forkbuiltRecordPins)
+	}
+	// AND THE COUNTS ARE ASSERTED, NOT LOGGED. `t.Logf` in a passing test is
+	// invisible -- CI never prints it -- so a count that drifts says nothing.
+	// "Reports" is not "asserts"; this cycle has now learned that twice.
+	if failed != 0 {
+		t.Errorf("descriptor gate: %d vector(s) failed", failed)
+	}
+	if want := len(forkbuiltRecordPins); passed-legacyPassed+want != passed+failed-failed {
+		t.Errorf("tier arithmetic does not close: %d correct-header + %d pinned-legacy != %d examined",
+			passed-legacyPassed, legacyPassed, passed+failed)
+	}
 	t.Logf("descriptor gate: %d of %d vectors pass (%d correct-header, %d pinned-legacy), %d fail",
 		passed, passed+failed, passed-legacyPassed, legacyPassed, failed)
 }

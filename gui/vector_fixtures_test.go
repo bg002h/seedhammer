@@ -3,6 +3,7 @@ package gui
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -87,18 +88,28 @@ func loadVectorChunks(t *testing.T, name string) []string {
 // (e.g. "keyed_*", "keyed_tr_*"), sorted. The glob is over the VENDORED
 // directory because that is what defines corpus membership; which tier each
 // record is then read from is loadVectorRecord's business.
+// eachKeyedVector enumerates the UNION of the vendored tier and the fork-side
+// record pins -- see the md-package twin for why globbing only `vectors/`
+// loses the pins on precisely the day they matter (F-529's re-vendor).
 func eachKeyedVector(t *testing.T, pattern string) []string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join("..", "md", "testdata", "vectors", pattern+".conformance.json"))
-	if err != nil {
-		t.Fatalf("glob %s: %v", pattern, err)
+	seen := map[string]bool{}
+	for _, dir := range []string{"vectors", "forkbuilt"} {
+		paths, err := filepath.Glob(filepath.Join("..", "md", "testdata", dir, pattern+".conformance.json"))
+		if err != nil {
+			t.Fatalf("glob %s in %s: %v", pattern, dir, err)
+		}
+		for _, p := range paths {
+			seen[strings.TrimSuffix(filepath.Base(p), ".conformance.json")] = true
+		}
 	}
-	if len(paths) == 0 {
-		t.Fatalf("no %s.conformance.json vendored — a gate over them is checking NOTHING", pattern)
+	if len(seen) == 0 {
+		t.Fatalf("no %s.conformance.json in either tier — a gate over them is checking NOTHING", pattern)
 	}
-	out := make([]string, 0, len(paths))
-	for _, p := range paths {
-		out = append(out, strings.TrimSuffix(filepath.Base(p), ".conformance.json"))
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
 	}
+	sort.Strings(out)
 	return out
 }

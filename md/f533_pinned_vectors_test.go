@@ -1,7 +1,9 @@
 package md
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -266,5 +268,79 @@ func TestPinnedKeyReuseVectorsAreTheShapeTheyClaim(t *testing.T) {
 					"this pin does not carry the reuse", b.keyIndex)
 			}
 		})
+	}
+}
+
+// ─── The forkbuilt directory is a CLOSED, HASHED set ────────────────────────
+//
+// Two gaps the whole-diff review reproduced, both the same shape: a pin with
+// no integrity check is a fixture anyone can edit into something else.
+//
+//  1. NOTHING HASHED forkbuilt/*.conformance.json. Editing a pinned record's
+//     `template` and `descriptor` together turns it into a DIFFERENT POLICY
+//     and every gate stays green -- D1' compares the two to each other, so a
+//     consistent edit satisfies it. The identical edit to a VENDORED record
+//     reds immediately, because the provenance pin hashes that tier. The
+//     pinned tier had no such backstop.
+//  2. THE CARD TIER'S MEMBERSHIP WAS INFERRED FROM A FILE EXISTING -- exactly
+//     what D5g forbids for records, and for the same reason. A smuggled
+//     forkbuilt/<name>.md1.txt was accepted in silence by both packages.
+//
+// So: this set is exhaustive and hashed. Changing a pin is a deliberate,
+// visible edit to this table, which is what makes `git diff` mean something
+// for fixtures nobody upstream will ever correct.
+//
+// TO RE-PIN (only when the change is intended and explained in the commit):
+//
+//	for f in md/testdata/forkbuilt/*; do echo "$(basename $f) $(sha256sum $f | cut -d' ' -f1)"; done
+var forkbuiltPinnedFiles = map[string]string{
+	"dup_seat_wsh_sortedmulti_k1.md1.txt":          "bfe49796dbf8a4c7f6440fce2df85d7a2b6582b69ddbdea34fc0589da25cfeca",
+	"dup_seat_wsh_sortedmulti_k1_keyless.md1.txt":  "b35e1b0c2f67c67567a2c5d90524057bf31b54e87cc49375d6930aa5b8872b4b",
+	"dup_seat_wsh_sortedmulti_k2.md1.txt":          "b836b38ca08dd250f36753fa6ffc216963f93b32e18f5db91027ab37e81013d4",
+	"keyed_tr_multi_a.conformance.json":            "bf42efab0146c4baeb8de51f814bae3e8168821f9e22f1b65720f048cc7a67c3",
+	"keyed_tr_multi_a.md1.txt":                     "65af36d6406285aef3a38678b1326ffee5d70b9d5b8fdc606d6c097060fada37",
+	"keyed_tr_sortedmulti_a.conformance.json":      "2c8757048e1452d4cb4c2772fab4020e963dc2a2139274af8ab5e2828b97ead0",
+	"keyed_tr_sortedmulti_a.md1.txt":               "93c8cdf9f937be33204f0c60e67f6e28b6cd87ea089f018e1eee12333d20b258",
+	"keyed_wsh_timelock_hashlock.conformance.json": "4474e8a642d12e6c31da529bf804fa6fc8e4fd21dad32a9a71a46d354138f6e0",
+	"keyed_wsh_timelock_hashlock.md1.txt":          "109ce8c78128e0162648da1da53ce151611990e642f9fc952bb8ba5aeeb9ad08",
+}
+
+func TestForkbuiltPinsAreAClosedHashedSet(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join("testdata", "forkbuilt"))
+	if err != nil {
+		t.Fatalf("read forkbuilt: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		seen[name] = true
+		want, listed := forkbuiltPinnedFiles[name]
+		if !listed {
+			t.Errorf("testdata/forkbuilt/%s is on disk but not in forkbuiltPinnedFiles. A "+
+				"fork-side pin is a fixture with no upstream custodian, so an unlisted one "+
+				"is either a smuggled fixture or a pin somebody forgot to record", name)
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("testdata", "forkbuilt", name))
+		if err != nil {
+			t.Errorf("read %s: %v", name, err)
+			continue
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(body)); got != want {
+			t.Errorf("testdata/forkbuilt/%s has CHANGED\n  on disk %s\n  pinned  %s\n"+
+				"Nothing upstream will ever correct this file, so an unexplained edit to it "+
+				"is indistinguishable from a fixture quietly becoming a different policy", name, got, want)
+		}
+	}
+	for name := range forkbuiltPinnedFiles {
+		if !seen[name] {
+			t.Errorf("forkbuiltPinnedFiles names testdata/forkbuilt/%s, which is GONE", name)
+		}
+	}
+	if len(forkbuiltPinnedFiles) == 0 {
+		t.Fatal("INCONCLUSIVE: the pin table is empty, so this gate asserts nothing")
 	}
 }
