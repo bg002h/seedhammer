@@ -838,3 +838,128 @@ func TestFableTestnetCardIsNotOfferedAsASource(t *testing.T) {
 			got[0].xpub[:12], xpub[:12])
 	}
 }
+
+// ─── L5 I-1/I-2: one consent line naming why a policy is outside Liana's model ──
+
+// TestFableOutsideLianaModelNamesTheFirstClass is lens-5 I-1 (17 of 56
+// composable shapes import into Liana 8.0; the device named two of the other
+// nine refusal classes before this fold) and I-2 (a second unlocked path
+// after a multi-key one is silently absorbed as an extra key, not refused --
+// named the same as an outright second-unlocked refusal, because both leave
+// the operator with a wallet Liana will not show as built).
+//
+// NINE CLASSES, ONE PER ROW, IN LIANA'S OWN ORDER OF REFUSAL -- the wrapper
+// and the taproot internal key are checked before Liana ever walks the
+// policy tree, so they are named ahead of a policy-content reason even when
+// a shape is outside the model for more than one reason at once. Row 10 is
+// that overlap, pinned directly: the hashlock-gated preset under tr carries
+// BOTH a NUMS internal key and a keyed hash path, and the notice must name
+// the NUMS class, not the hash one, or a reorder of the two checks would
+// pass every other row and still be wrong.
+//
+// The three negatives are the tr-with-real-key preset (its "unlocked path"
+// is the taproot key path itself, not a Branch -- md.KeyPathSpendable) and
+// two of the three wsh presets Liana accepts unedited (report runbook §4);
+// row 4 covers the third (hashlock-gated fires, not accepted, but exercises
+// the same preset table). Together with row 3 (plain-multisig, the demo
+// payload's own shape) and row 5 (decaying-multisig), all six shipped
+// presets are exercised under at least one wrapper.
+func TestFableOutsideLianaModelNamesTheFirstClass(t *testing.T) {
+	single := func() md.SpendPath { return md.SpendPath{Keys: &md.KeySet{K: 1, N: 1, Sorted: true}} }
+	multiKeys := func(k, n uint8) md.SpendPath {
+		return md.SpendPath{Keys: &md.KeySet{K: k, N: n, Sorted: true}}
+	}
+	lockedAt := func(p md.SpendPath, kind md.LockKind, v uint32) md.SpendPath {
+		p.Lock = &md.Lock{Kind: kind, Value: v}
+		return p
+	}
+	preset := func(w md.ComposeWrapper, name string) md.PathList {
+		t.Helper()
+		for _, p := range composerPresets(w) {
+			if p.name == name {
+				return p.list
+			}
+		}
+		t.Fatalf("no preset %q under wrapper %v", name, w)
+		return md.PathList{}
+	}
+
+	for _, tc := range []struct {
+		what      string
+		list      md.PathList
+		wantClass string // "" means the notice must not fire
+	}{
+		// ─── one row per class, in Liana's own order ───────────────────────
+		{"1. sh: plain-multisig -- Liana takes wsh or tr only",
+			preset(md.ComposeSh, "plain-multisig"), "legacy wrapper"},
+		{"2. tr: plain-multisig -- a bare k-of-n under tr has a NUMS internal key",
+			preset(md.ComposeTr, "plain-multisig"), "NUMS key path"},
+		{"3. wsh: plain-multisig -- the demo payload's own wallet, no recovery path",
+			preset(md.ComposeWsh, "plain-multisig"), "no locked path"},
+		{"4. wsh: hashlock-gated -- a keyed hash path, no timelock recognised",
+			preset(md.ComposeWsh, "hashlock-gated"), "a hash lock"},
+		{"5. wsh: decaying-multisig -- carries after(1000000)",
+			preset(md.ComposeWsh, "decaying-multisig"), "an absolute lock"},
+		{"6. wsh: [1 key], [1 key, older 100 UNITS]",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				single(), lockedAt(single(), md.LockOlderUnits, 100)}}, "a lock in time units"},
+		{"7. wsh: three paths, all locked by older(blocks), all different values",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				lockedAt(multiKeys(2, 2), md.LockOlderBlocks, 100),
+				lockedAt(single(), md.LockOlderBlocks, 200),
+				lockedAt(single(), md.LockOlderBlocks, 300)}}, "no unlocked path"},
+		{"8. wsh: 2-of-3 unlocked, two recovery paths at the SAME older(100)",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				multiKeys(2, 3),
+				lockedAt(single(), md.LockOlderBlocks, 100),
+				lockedAt(single(), md.LockOlderBlocks, 100)}}, "two paths with one lock"},
+		{"9. wsh: 2-of-3 unlocked, 1 key unlocked, 1 key after older(100) -- lens 5 I-2's X24",
+			md.PathList{Wrapper: md.ComposeWsh, Paths: []md.SpendPath{
+				multiKeys(2, 3),
+				single(),
+				lockedAt(single(), md.LockOlderBlocks, 100)}}, "a second unlocked path"},
+
+		// ─── order priority: two classes true at once, first must win ─────
+		{"10. tr: hashlock-gated -- NUMS AND a keyed hash path both apply; NUMS is first",
+			preset(md.ComposeTr, "hashlock-gated"), "NUMS key path"},
+
+		// ─── negatives: Liana imports these unedited (report runbook §4) ──
+		{"11. tr: simple-timelocked-inheritance -- the primary IS the key path, not a Branch",
+			preset(md.ComposeTr, "simple-timelocked-inheritance"), ""},
+		{"12. wsh: kofn-recovery -- one unlocked 2-of-3, one older(26280) recovery",
+			preset(md.ComposeWsh, "kofn-recovery"), ""},
+		{"13. wsh: simple-timelocked-inheritance -- one unlocked, one older(26280)",
+			preset(md.ComposeWsh, "simple-timelocked-inheritance"), ""},
+		{"14. wsh: tiered-recovery -- one unlocked 2-of-2, one older(26280) recovery",
+			preset(md.ComposeWsh, "tiered-recovery"), ""},
+	} {
+		c, err := md.Compose(tc.list)
+		if err != nil {
+			t.Fatalf("%s: compose: %v", tc.what, err)
+		}
+		chunks, err := c.Chunks()
+		if err != nil {
+			t.Fatalf("%s: chunks: %v", tc.what, err)
+		}
+		listed, kp := composerListedPaths(tc.list)
+		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		if err != nil {
+			t.Fatalf("%s: consent: %v", tc.what, err)
+		}
+		drawn := normalizeDrawn(strings.Join(lines, "\n"))
+		if tc.wantClass == "" {
+			if strings.Contains(drawn, normalizeDrawn("OUTSIDE LIANA'S MODEL")) {
+				t.Errorf("%s: the outside-Liana notice fired, want it silent:\n%s",
+					tc.what, strings.Join(lines, "\n"))
+			}
+			continue
+		}
+		want := composerCopyOutsideLianaModel(tc.wantClass)
+		if !strings.Contains(drawn, normalizeDrawn(want)) {
+			t.Errorf("%s: outside-Liana notice for class %q not found:\n%s",
+				tc.what, tc.wantClass, strings.Join(lines, "\n"))
+		}
+	}
+	assertModalBodyFits(t, "the outside-Liana-model notice, longest class line",
+		errorScreenBody, composerCopyOutsideLianaModel("two paths with one lock"))
+}
