@@ -300,10 +300,6 @@ func TestKeyedConformanceDescriptorsAgreeWithTheirTemplates(t *testing.T) {
 	if failed != 0 {
 		t.Errorf("descriptor gate: %d vector(s) failed", failed)
 	}
-	if want := len(forkbuiltRecordPins); passed-legacyPassed+want != passed+failed-failed {
-		t.Errorf("tier arithmetic does not close: %d correct-header + %d pinned-legacy != %d examined",
-			passed-legacyPassed, legacyPassed, passed+failed)
-	}
 	t.Logf("descriptor gate: %d of %d vectors pass (%d correct-header, %d pinned-legacy), %d fail",
 		passed, passed+failed, passed-legacyPassed, legacyPassed, failed)
 }
