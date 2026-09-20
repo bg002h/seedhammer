@@ -270,7 +270,7 @@ func (d Derivation) Encode() string {
 // https://github.com/bitcoin/bitcoin/blob/master/doc/descriptors.md.
 func Parse(desc string) (*Descriptor, error) {
 	desc, checksum, ok := strings.Cut(desc, "#")
-	if ok && !validChecksum(desc, checksum) {
+	if ok && !ValidChecksum(desc, checksum) {
 		return nil, errors.New("bip380: invalid checksum")
 	}
 	// Chop off checksum, if any.
