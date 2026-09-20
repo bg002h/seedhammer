@@ -46,6 +46,8 @@ var composerDocOwners = map[string]string{
 	"composerTextBand":              "composer_paged.go",
 	"composerSecretCards":           "composer_flow.go",
 	"composerCopySameSeedThreshold": "composer_copy.go",
+	"composerSeedDerivedSlots":      "composer_flow.go",
+	"composerCopyMixedLockBases":    "composer_copy.go",
 }
 
 // TestComposerHelpersDidNotStealADocComment is the gate for the above.

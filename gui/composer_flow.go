@@ -549,15 +549,6 @@ func composerRestoreDoc(ctx *Context, th *Colors, keyed []string, census []strin
 	multisigRestoreDocFlow(ctx, th, keyed, tpl, keys, verifyStatusNotFullyCheckedLine, census)
 }
 
-// composerSecretCards is §7f's "a seed that filled several slots is cut ONCE".
-//
-// THE DEDUP IS BY REGISTERED SEED, not by slot: one seed at three slots is one
-// secret, and cutting it three times would triple the bearer plates in the set
-// for no recovery value. The form is ms1, which is what the bundle machinery
-// carries (cardMS1, gui/multisig_engrave.go:36) and what Multisig Build's own
-// Full mode cuts. The words-plus-SeedQR plate is a backup.Seed, not a bundle
-// card, and needs its own plate pass; it is filed with F-455 rather than
-// offered by a picker with no builder behind it.
 // composerSeedDerivedSlots reports whether any SEATED slot came from a seed.
 //
 // It walks st.assigned, not st.reg, and that is the distinction §7f turns on:
@@ -578,6 +569,12 @@ func composerSeedDerivedSlots(st *composerState) bool {
 // composerSecretCards is §7f's "a seed that filled several slots is cut
 // ONCE": one ms1 plate per distinct SECRET among the seated seed-derived
 // slots, whatever the slot count and whatever the registration count.
+//
+// The form is ms1, which is what the bundle machinery carries (cardMS1,
+// gui/multisig_engrave.go:36) and what Multisig Build's own Full mode cuts.
+// The words-plus-SeedQR plate is a backup.Seed, not a bundle card, and needs
+// its own plate pass; it is filed with F-455 rather than offered by a picker
+// with no builder behind it.
 func composerSecretCards(st *composerState) ([]bundleCard, error) {
 	// DEDUPED BY THE ENTROPY THE PLATE CARRIES, not by seedID and not by master
 	// fingerprint (fable review r0 M-3; fold-r1 review M-5).
