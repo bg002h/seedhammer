@@ -241,6 +241,7 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 	// stop. It now reports which kinds the policy actually holds, which means
 	// the loop has to see every branch -- a `break` on the first would name
 	// sha256 on a wallet whose second path is ripemd160.
+
 	// MIXED LOCK BASES under a non-taproot wrapper (fable review r0 lens 2
 	// I-2). Nunchuk refuses the whole wsh script when any two locks disagree
 	// about TIME vs HEIGHT; Core imports it. Under tr each leaf is checked on

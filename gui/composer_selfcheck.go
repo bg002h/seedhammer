@@ -83,16 +83,16 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 				return fmt.Errorf("self-check: path %d is key-less in the shape and has %d keys decoded", i+1, b.Keys)
 			}
 		case p.Keys.N >= 2:
-			// K AND N ARE ONLY MEANINGFUL FOR A PLAIN k-of-N HEAD, and reading
-			// them outside that domain made four of the twelve offered presets
-			// unbuildable (review r0 fold: tiered-recovery and
-			// decaying-multisig, under both wrappers). md.Branch documents it
-			// at md/policy_shape.go:45-48 -- "set ONLY when the branch is
-			// exactly a threshold over KEYS … Zero means 'not a plain k-of-N'
-			// — NOT '1-of-1'" -- and §5 lowers a multi behind a timelock to
-			// and_v(v:multi(k,…),older(n)), which is not one. The self-check
-			// was therefore comparing 2-of-2 against 0-of-0 on an HONEST build
-			// and drawing §8q at an operator whose composition was correct.
+			// K AND N ARE MEANINGFUL ONLY WHEN THE BRANCH'S KEY MATERIAL IS
+			// EXACTLY ONE multi (md.Branch, md/policy_shape.go): a multi behind
+			// a timelock -- and_v(v:multi(k,…),older(n)) -- reports its k-of-n,
+			// because the lock adds no key (fable review r0 L1 I-3); a multi
+			// beside another key reports 0/0, because a k-of-n label there
+			// would misdescribe who can spend (fold-r1 review I-2). Before the
+			// first of those, reading K/N outside a bare head made four of the
+			// twelve presets unbuildable (review r0 fold: tiered-recovery and
+			// decaying-multisig) -- the self-check compared 2-of-2 against
+			// 0-of-0 on an HONEST build and drew §8q at a correct composition.
 			//
 			// So the threshold is compared where the codec reports one, and
 			// the key COUNT -- which Branch.Keys always carries -- where it

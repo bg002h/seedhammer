@@ -197,10 +197,6 @@ func composerCopyNUMS() string {
 		"wallet with different addresses."
 }
 
-// ─── §8g: C29, one seed at two slots INSIDE one path ─────────────────────────
-
-// composerCopySameSeedThreshold is §8g's FIRST body: the shared seed's slots
-// in this path REACH the threshold, so one person can satisfy the path alone.
 // composerCopyMixedLockBases is the fable review r0 lens-2 I-2 notice, in the
 // register of §8g's Liana line: one sentence naming the wallet that refuses
 // and one naming the way round it.
@@ -223,6 +219,10 @@ func composerCopyMixedLockBases() string {
 		"checks each path on its own."
 }
 
+// ─── §8g: C29, one seed at two slots INSIDE one path ─────────────────────────
+
+// composerCopySameSeedThreshold is §8g's FIRST body: the shared seed's slots
+// in this path REACH the threshold, so one person can satisfy the path alone.
 func composerCopySameSeedThreshold(slots []uint8, k, n int) string {
 	return fmt.Sprintf("SAME SEED, SAME PATH\nSlots %s are the same seed. This path's "+
 		"%d-of-%d can be satisfied by one person. Liana will refuse it.",
