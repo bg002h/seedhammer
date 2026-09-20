@@ -255,18 +255,12 @@ func composerSeedSource(ctx *Context, th *Colors, st *composerState) (composerSo
 		showError(ctx, th, "Seed", "Couldn't read that seed.")
 		return composerSource{}, false
 	}
-	pp := &ChoiceScreen{
-		Title:   "Passphrase " + label,
-		Lead:    "Add a BIP-39 passphrase?",
-		Choices: []string{"Skip", "Add passphrase"},
-	}
-	if sel, ok := pp.Choose(ctx, th); ok && sel == 1 {
-		if pass, ok := syswPassphraseFlowTitled(ctx, th, "Passphrase "+label); ok {
-			if err := st.reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
-				showError(ctx, th, "Seed", "Couldn't apply that passphrase.")
-				return composerSource{}, false
-			}
-		}
+	// BACK IS A DECLINE AT BOTH PASSPHRASE SCREENS (fable review r0 lens 4
+	// I-2), and seedPassphraseStep carries the whole rule -- including the
+	// un-registration, which this flow could not do inline because st.reg.add
+	// above runs before the question.
+	if !seedPassphraseStep(ctx, th, st.reg, seedID, label, "Seed") {
+		return composerSource{}, false
 	}
 	seed, _ := st.reg.at(seedID)
 	var fp [4]byte

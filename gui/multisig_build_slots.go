@@ -824,3 +824,92 @@ func buildFingerprintContradictsMessage(e errBuildFingerprintContradicts, origin
 		"If the card is stale, rewrite the payload with `me sysw pack`.",
 		e.Slot, who, e.Declared, e.Derived)
 }
+
+// discardLast un-registers the seed most recently added, zeroing its words on
+// the way out.
+//
+// IT EXISTS FOR ONE CALLER SHAPE: a seed is registered the instant it is
+// entered, BEFORE the passphrase screens, so the deferred scrub owns the words
+// from that line -- and if the operator then DECLINES at those screens, the
+// registry is holding a seed the flow was told not to take. Without this the
+// bare seed stayed a source, was offered for seating, and minted keys from a
+// pairing the operator never confirmed (fable review r0 lens 4 I-2).
+//
+// ONLY THE LAST, and the id is checked rather than searched. seedIDs are
+// indices into r.seeds, so removing an interior entry would renumber every id
+// after it -- ids that callers are already holding. The decline case is
+// always the last entry, because nothing else can have been added between the
+// add and the screens that follow it. A non-last id is a caller defect and is
+// refused rather than papered over.
+func (r *seedRegistry) discardLast(id int) bool {
+	if id < 0 || id != len(r.seeds)-1 {
+		return false
+	}
+	for j := range r.seeds[id].Mnemonic {
+		r.seeds[id].Mnemonic[j] = 0
+	}
+	r.seeds[id].Passphrase = ""
+	r.seeds[id].MasterFP = 0
+	r.seeds = r.seeds[:id]
+	return true
+}
+
+// seedPassphraseStep asks SPEC 4.1's per-seed passphrase question and binds
+// the answer, treating BACK AS A DECLINE at both of its screens.
+//
+// "Back is a decline everywhere on this device" (gui/composer_digitpad.go
+// :57-60) and §7b's "going back should lose nothing" were both unmet here,
+// in the same three lines, in two flows (fable review r0 lens 4 I-2). Both
+// read `if sel, ok := pp.Choose(...); ok && sel == 1 { if pass, ok := ...;
+// ok { bind } }`, so BOTH !ok legs fell through to a successful return with
+// the seed registered and the passphrase silently omitted. Measured: the
+// operator chose "Add passphrase", typed one character, pressed Back to
+// correct it, and the seed was seated bare -- master fingerprint 73c5da0a
+// where the passphrased pairing is 1d39a522. A different wallet, different
+// keys, different addresses, and the engrave-mode label then read plain
+// "Full (seed + keys)" because no passphrase was registered, so nothing
+// downstream named the missing factor.
+//
+// The two Backs mean different things, and that is the whole fix:
+//
+//   - Back on the KEYBOARD is "I mis-typed": it returns to the question, so
+//     the operator can answer it again.
+//   - Back on the QUESTION is "not this seed": the seed is un-registered and
+//     the caller is told the source was declined.
+//
+// ONE HELPER, TWO FLOWS. The composer and Multisig Build had byte-identical
+// versions of the defect; fixing them separately would leave two copies of
+// the rule to drift.
+func seedPassphraseStep(ctx *Context, th *Colors, reg *seedRegistry, seedID int, label, errTitle string) bool {
+	pp := &ChoiceScreen{
+		Title:   "Passphrase " + label,
+		Lead:    "Add a BIP-39 passphrase?",
+		Choices: []string{"Skip", "Add passphrase"},
+	}
+	for !ctx.Done {
+		sel, ok := pp.Choose(ctx, th)
+		if !ok {
+			reg.discardLast(seedID)
+			return false
+		}
+		if sel == 0 {
+			return true
+		}
+		// §3.3.2 admits ClassPassphrase to these programs, so the payload is
+		// offered before the keyboard. NOT passphraseFlow: see
+		// syswPassphraseFlowTitled for the two normative rules a shared edit
+		// inside passphraseFlow would have broken.
+		pass, ok := syswPassphraseFlowTitled(ctx, th, "Passphrase "+label)
+		if !ok {
+			// Back on the keyboard: re-ask the question.
+			continue
+		}
+		if err := reg.bindPassphrase(seedID, pass, &chaincfg.MainNetParams); err != nil {
+			showError(ctx, th, errTitle, "Couldn't apply that passphrase.")
+			return false
+		}
+		return true
+	}
+	reg.discardLast(seedID)
+	return false
+}

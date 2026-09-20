@@ -914,3 +914,121 @@ func TestFableKeyThenSeedThenBackReachesThePlannerAsShown(t *testing.T) {
 		}
 	})
 }
+
+// ═══ ADDED IN THE FOLD, NOT PART OF APPENDIX A ══════════════════════════════
+//
+// Everything above is lens 4's file as the reviewer ran it. What follows was
+// written while folding its findings, for the halves the adopted walks did
+// not cover.
+
+// TestFableSpecBackOnThePassphraseQuestionUnRegistersTheSeed is the OTHER
+// half of lens 4 I-2.
+//
+// The adopted walk covers Back on the KEYBOARD ("I mis-typed" -> re-ask).
+// Back on the QUESTION means "not this seed", and st.reg.add runs BEFORE the
+// question -- deliberately, so the deferred scrub owns the words from the
+// moment they are entered -- so declining there has to undo the registration
+// or the bare seed stays a source and is offered for seating.
+func TestFableSpecBackOnThePassphraseQuestionUnRegistersTheSeed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := newPlatform()
+		p.display = sh2DisplaySize
+		ctx := NewContext(p)
+		ctx.sysw = composerSessionWith([]string{composerTestKeyRecord, composerTestKeyRecord2}, nil)
+		frame, quit := runUI(ctx, func() { composerFlow(ctx, &descriptorTheme) })
+		defer quit()
+
+		fableStartWsh(t, ctx, frame)
+		fableAddKeyedPath(t, ctx, frame, 0, 2, 1)
+		fableDone(t, ctx, frame, 1)
+		pumpUntil(frame, "Sorted keys, or your order?", 24)
+		click(&ctx.Router, Button3) // Sorted
+		if got, ok := pumpUntil(frame, "mk1 stub (template)", 32); !ok {
+			t.Fatalf("no stub screen.\nLast frame: %q", got)
+		}
+		composerPageToEnd(t, ctx, frame)
+		if got, ok := pumpUntil(frame, "Slot @0", 24); !ok {
+			t.Fatalf("no seat prompt.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
+		click(&ctx.Router, Button3)
+		fableTypeSeed(t, ctx, frame)
+		if got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 48); !ok {
+			t.Fatalf("no passphrase question.\nLast frame: %q", got)
+		}
+		click(&ctx.Router, Button1) // Back, ON THE QUESTION: not this seed
+
+		if got, ok := pumpUntil(frame, "choose a key", 24); !ok {
+			t.Fatalf("the seat prompt did not come back.\nLast frame: %q", got)
+		}
+		// THE OBSERVABLE IS THE NEXT SEED'S LABEL, not the seat prompt: a
+		// declined source is never appended to st.sources either way, so the
+		// prompt looks the same whether or not the REGISTRY kept the seed.
+		// What the stale entry changes is everything keyed on the registry --
+		// the per-seed label (st.reg.count()+1), usesPassphrase(), which
+		// decides the engrave-mode label, and the restore document's
+		// passphrase facts. Typing a second seed and reading the title it is
+		// given is the cheapest of those to drive, and it fails if and only if
+		// the first registration survived.
+		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
+		click(&ctx.Router, Button3)
+		fableTypeSeed(t, ctx, frame)
+		got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 48)
+		if !ok {
+			t.Fatalf("no passphrase question on the second seed.\nLast frame: %q", got)
+		}
+		if !uiContains(got, "Passphrase seed 1") {
+			t.Errorf("Back on the passphrase question left the bare seed in the registry: "+
+				"the NEXT seed is labelled from st.reg.count()+1 and the question drew "+
+				"%q, so usesPassphrase(), the engrave-mode label and the restore "+
+				"document's passphrase facts all still count a seed the operator "+
+				"declined", got)
+		}
+	})
+}
+
+// TestFableSeedRegistryDiscardLastOnlyDropsTheLastEntry pins discardLast's
+// bound, because seedIDs are INDICES: dropping an interior entry would
+// renumber every id after it, and callers hold those ids.
+func TestFableSeedRegistryDiscardLastOnlyDropsTheLastEntry(t *testing.T) {
+	reg := &seedRegistry{}
+	m, err := bip39.ParseMnemonic(
+		"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2, err := bip39.ParseMnemonic("zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id0, err := reg.add("a", m, "", &chaincfg.MainNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id1, err := reg.add("b", m2, "", &chaincfg.MainNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reg.discardLast(id0) {
+		t.Error("discardLast dropped an INTERIOR entry, which renumbers every id after it")
+	}
+	if reg.count() != 2 {
+		t.Fatalf("count = %d after a refused discard, want 2", reg.count())
+	}
+	if !reg.discardLast(id1) {
+		t.Fatal("discardLast refused the last entry")
+	}
+	if reg.count() != 1 {
+		t.Fatalf("count = %d, want 1", reg.count())
+	}
+	// And the words it dropped are zeroed, not merely unreferenced.
+	dropped := reg.seeds[:2][1]
+	for _, w := range dropped.Mnemonic {
+		if w != 0 {
+			t.Fatalf("discardLast left a live word in the dropped entry: %v", dropped.Mnemonic)
+		}
+	}
+	if s, ok := reg.at(id0); !ok || s.Label != "a" {
+		t.Errorf("the surviving entry moved: %+v ok=%v", s, ok)
+	}
+}

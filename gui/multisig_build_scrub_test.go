@@ -135,6 +135,17 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 				t.Fatalf("the per-seed passphrase keyboard was not reached; got %q", c)
 			}
 			click(&ctx.Router, Button1) // Back out of the keyboard: no passphrase
+			// SINCE the fable review r0 fold, Back on the KEYBOARD re-asks the
+			// question instead of falling through as a silent Skip (lens 4
+			// I-2), so the question has to be answered before the flow
+			// continues. The exit under test is unchanged -- this drives to
+			// the same slot-review Back with the same seed live.
+			if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 32); !ok {
+				t.Fatalf("Back on the keyboard did not re-ask the question; got %q", c)
+			}
+			click(&ctx.Router, Up) // the highlight is still on "Add passphrase"
+			frame()
+			click(&ctx.Router, Button3) // Skip
 			// The flow continues from here; drive it to ANY exit and the seed must
 			// be gone. The nearest one is the slot review's Back.
 			if c, ok := pumpUntil(frame, "Key sources", 96); !ok {
