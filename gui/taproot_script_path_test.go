@@ -54,13 +54,14 @@ func TestTaprootScriptPathMatchesRust(t *testing.T) {
 			case md.InternalKeyNUMS:
 				t.Skip("NUMS internal key: no key-path spend, not this gate's subject")
 			case md.InternalKeyLianaUnspendable:
-				// F-449: the device's kind-1 derivation is stage 4 (SPEC §7a.2).
-				// FUTURE-PROOFING ONLY at stage 3 (R0 n1): both kind-1 vectors
-				// never reach this arm, because md.TapLeavesChunks refuses their
-				// leaf shapes first and they skip above. The real gate is
-				// TestEveryKeyedVectorReachesAnAddress's stillUnsupported entries,
-				// which FAIL the day stage 4 derives kind 1.
-				t.Skip("Liana-unspendable internal key: device derivation is F-449 stage 4")
+				// UNREACHABLE for both kind-1 vectors (stage 3 R0 n1):
+				// md.TapLeavesChunks refuses their leaf shapes first and they
+				// skip above. Kind 1 has no key-path SLOT for
+				// address.TaprootScriptPath anyway; its internal key is SPEC §2's
+				// recipe, checked against Rust by
+				// TestEveryKeyedVectorReachesAnAddress and against Liana's own
+				// addresses by TestDeviceDerivesLianasOwnAddressesForKind1.
+				t.Skip("Liana-unspendable internal key: not this gate's subject (see the two tests named above)")
 			default:
 				t.Fatalf("%s: internal-key kind %d is unknown to this gate", name, ik)
 			}

@@ -134,6 +134,19 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 		probe[i] = make([]byte, 32)
 	}
 	if ikIndex, ik, _, err := md.EmitTapLeavesChunks(collected, probe); err == nil {
+		// THE LIANA KEY IS COMPUTED ONCE, before any index is asked for: it is
+		// SPEC §2's recipe over the leaf keys this deriver was GIVEN -- `keys`,
+		// the same keys every leaf script below is built from -- which do not
+		// change with the address index. A kind-1 set whose recipe cannot be
+		// computed has no address, never the NUMS branch's (SPEC §7a row 1).
+		var liana *bip380.Key
+		if ik == md.InternalKeyLianaUnspendable {
+			lk, lerr := lianaInternalKey(collected, keys, network)
+			if lerr != nil {
+				return nil, false
+			}
+			liana = &lk
+		}
 		src = func(index uint32, change bool) (string, error) {
 			xonly := make(map[uint8][]byte, len(byIndex))
 			for i, k := range byIndex {
@@ -153,23 +166,7 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 			for _, l := range leaves {
 				scripts = append(scripts, address.LeafScript{Depth: l.Depth, Script: l.Script})
 			}
-			var ikey *secp256k1.PublicKey
-			switch ik {
-			case md.InternalKeyNUMS:
-				ikey, err = address.NUMSInternalKey()
-			case md.InternalKeySlot:
-				internal, iok := byIndex[ikIndex]
-				if !iok {
-					return "", errors.New("gui: taproot internal key has no @N entry")
-				}
-				ikey, err = address.DeriveChild(internal, index, change)
-			default:
-				// SPEC §7a.3: a kind this firmware cannot derive gets NO address
-				// -- never the NUMS branch, which would show a DIFFERENT
-				// wallet's addresses. The probe below turns this error into
-				// "no address source". Liana-unspendable derivation is stage 4.
-				return "", errUnderivableInternalKey
-			}
+			ikey, err := taprootInternalKey(ik, ikIndex, byIndex, liana, index, change)
 			if err != nil {
 				return "", err
 			}
@@ -200,6 +197,69 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 		return nil, false
 	}
 	return src, true
+}
+
+// taprootInternalKey is the ONE switch over the internal-key kinds this
+// firmware derives. SPEC §7a has two rules and this function is both of them:
+//
+//   - kind 1 derives Liana's unspendable xpub at 0/index (receive) or 1/index
+//     (change), from `liana` -- never the raw H point, which is a different
+//     wallet's key (§7a row 1, the silent-wrong-address failure);
+//   - a kind with no arm here is REFUSED (§7a.3). No default falls back to
+//     NUMS, so a fourth kind is an error the day it exists rather than a
+//     well-formed address for somebody else's wallet.
+func taprootInternalKey(ik md.InternalKeyKind, ikIndex uint8, byIndex map[uint8]bip380.Key, liana *bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
+	switch ik {
+	case md.InternalKeyNUMS:
+		return address.NUMSInternalKey()
+	case md.InternalKeySlot:
+		internal, ok := byIndex[ikIndex]
+		if !ok {
+			return nil, errors.New("gui: taproot internal key has no @N entry")
+		}
+		return address.DeriveChild(internal, index, change)
+	case md.InternalKeyLianaUnspendable:
+		if liana == nil {
+			return nil, errUnderivableInternalKey
+		}
+		return address.DeriveChild(*liana, index, change)
+	}
+	return nil, errUnderivableInternalKey
+}
+
+// lianaInternalKey is the kind-1 internal key as a bip380.Key the shipped
+// deriver walks: SPEC §2 steps 3-4 (chain code = the recipe, public key = H,
+// depth 0, no origin) and step 6's `<0;1>/*` -- EXPLICITLY, not the wallet's
+// use-site. Liana derives this key at 0/i and 1/i "in every port, independent
+// of the wallet's use-site path" (§2), and §6 row 2 refuses any other use-site
+// at mint, so the two can never disagree on a card this device composed.
+//
+// OVER `keys`, NOT OVER THE CARD'S TLV (R0 I1). On the Wallet Policy route the
+// md1 is a key-less template and the keys are the seated mk1 cards; a recipe
+// that read the md1's Pubkeys TLV found nothing there, and every template +
+// cards kind-1 wallet showed "This device can't derive addresses" while its
+// NUMS twin derived. One key source for the leaves AND the internal key also
+// means the two can never come from different cards.
+func lianaInternalKey(collected []string, keys []md.ExpandedKey, network *chaincfg.Params) (bip380.Key, error) {
+	xpubs := make(map[uint8][65]byte, len(keys))
+	for _, k := range keys {
+		if k.XpubPresent {
+			xpubs[k.Index] = k.Xpub
+		}
+	}
+	lk, err := md.LianaUnspendableKeyFor(collected, xpubs)
+	if err != nil {
+		return bip380.Key{}, err
+	}
+	return bip380.Key{
+		Network: network,
+		Children: []bip380.Derivation{
+			{Type: bip380.RangeDerivation, Index: 0, End: 1},
+			{Type: bip380.WildcardDerivation},
+		},
+		KeyData:   append([]byte(nil), lk[32:65]...),
+		ChainCode: append([]byte(nil), lk[0:32]...),
+	}, nil
 }
 
 // tapLeafSpecs translates md's leaf descriptions into the address package's,
