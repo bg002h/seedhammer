@@ -1296,6 +1296,9 @@ type Template struct {
 	// single-sig sh root, symmetric with InnerWsh for the sorted-multi sh root.
 	// Meaningful only when Root==ScriptSh && Policy==PolicySingle.
 	InnerWpkh bool
+	// KeyPath is the root taproot internal key's kind (F-449 stage 4, SPEC §7:
+	// the inspect screen must name it), or KeyPathNone for a non-tr root.
+	KeyPath KeyPathKind
 }
 
 // Decode decodes a single-string md1 descriptor into a Template. It refuses
@@ -1459,7 +1462,20 @@ func summarize(d *descriptor) Template {
 		Renderable: renderable,
 		InnerWsh:   innerWshNesting(d.tree),
 		InnerWpkh:  innerWpkhNesting(d.tree),
+		KeyPath:    rootKeyPath(d.tree),
 	}
+}
+
+// rootKeyPath is keyPathOf for a root tr(), KeyPathNone otherwise -- including
+// for a kind keyPathOf has no name for, which summarize then reports as no key
+// path rather than as a guessed one.
+func rootKeyPath(tree node) KeyPathKind {
+	b, ok := tree.body.(trBody)
+	if tree.tag != tagTr || !ok {
+		return KeyPathNone
+	}
+	kp, _ := keyPathOf(b.ik)
+	return kp
 }
 
 // fingerprintFor returns the 8-hex lowercase fingerprint for @idx, or "".
