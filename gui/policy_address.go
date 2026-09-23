@@ -88,6 +88,10 @@ func complexAddressSource(collected []string, keys []md.ExpandedKey) (func(uint3
 	return complexAddressDeriver(collected, keys)
 }
 
+// errUnderivableInternalKey: the policy's taproot internal key is a kind this
+// firmware cannot derive (SPEC §7a.3).
+var errUnderivableInternalKey = errors.New("gui: taproot internal key of a kind this firmware cannot derive")
+
 // complexAddressDeriver is complexAddressSource's body, below the F-531 gate.
 //
 // Call it directly ONLY to measure what the emitter derives. Every screen goes
@@ -129,7 +133,7 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 	for i := range byIndex {
 		probe[i] = make([]byte, 32)
 	}
-	if ikIndex, isNUMS, _, err := md.EmitTapLeavesChunks(collected, probe); err == nil {
+	if ikIndex, ik, _, err := md.EmitTapLeavesChunks(collected, probe); err == nil {
 		src = func(index uint32, change bool) (string, error) {
 			xonly := make(map[uint8][]byte, len(byIndex))
 			for i, k := range byIndex {
@@ -150,14 +154,21 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 				scripts = append(scripts, address.LeafScript{Depth: l.Depth, Script: l.Script})
 			}
 			var ikey *secp256k1.PublicKey
-			if isNUMS {
+			switch ik {
+			case md.InternalKeyNUMS:
 				ikey, err = address.NUMSInternalKey()
-			} else {
+			case md.InternalKeySlot:
 				internal, iok := byIndex[ikIndex]
 				if !iok {
 					return "", errors.New("gui: taproot internal key has no @N entry")
 				}
 				ikey, err = address.DeriveChild(internal, index, change)
+			default:
+				// SPEC §7a.3: a kind this firmware cannot derive gets NO address
+				// -- never the NUMS branch, which would show a DIFFERENT
+				// wallet's addresses. The probe below turns this error into
+				// "no address source". Liana-unspendable derivation is stage 4.
+				return "", errUnderivableInternalKey
 			}
 			if err != nil {
 				return "", err

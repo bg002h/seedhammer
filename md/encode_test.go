@@ -161,7 +161,7 @@ func TestWriteNodeKeyArgN1ZeroBits(t *testing.T) {
 
 func TestWriteNodeTrNumsSuppressesKiw(t *testing.T) {
 	// tree.rs:693 — tr(NUMS) at any kiw: Tag(6)+is_nums(1)+has_tree(1) = 8.
-	n := node{tag: tagTr, body: trBody{isNums: true}}
+	n := node{tag: tagTr, body: trBody{ik: InternalKeyNUMS}}
 	var w bitWriter
 	if err := writeNode(&w, n, 2); err != nil {
 		t.Fatalf("writeNode: %v", err)

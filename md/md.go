@@ -112,10 +112,38 @@ type multiKeysBody struct { // Multi / SortedMulti / MultiA / SortedMultiA
 	indices []uint8
 }
 type trBody struct { // Tr
-	isNums   bool
+	// ik is the internal key's kind (port of md-codec tree.rs InternalKey).
+	// keyIndex is meaningful ONLY when ik == InternalKeySlot. The zero value
+	// is InternalKeySlot, which is what the pre-refactor `isNums: false`
+	// zero value meant, so a literal that omits ik is unchanged in meaning.
+	ik       InternalKeyKind
 	keyIndex uint8
 	tree     *node
 }
+
+// isNums reports the WIRE bit is_nums: true for every internal key that is
+// not a placeholder slot (NUMS or Liana-unspendable). It is the bit, not the
+// kind -- a caller that needs to tell the two unspendable kinds apart must
+// switch on ik, never on this.
+func (b trBody) isNums() bool { return b.ik != InternalKeySlot }
+
+// InternalKeyKind is a taproot internal key's three states -- the port of
+// md-codec's `tree::InternalKey` (md-codec 0.47.0, SPEC_liana_unspendable
+// _internal_key §3f). Exported because EmitTapLeavesChunks and
+// TapLeavesChunks return it: a two-state bool cannot say "Liana-unspendable",
+// and reading kind 1 as NUMS derives a DIFFERENT WALLET's addresses (§7a).
+type InternalKeyKind uint8
+
+const (
+	// InternalKeySlot -- a real, spendable key at a placeholder slot.
+	InternalKeySlot InternalKeyKind = iota
+	// InternalKeyNUMS -- the BIP-341 NUMS H point, raw x-only. Wire kind 0.
+	InternalKeyNUMS
+	// InternalKeyLianaUnspendable -- Liana's unspendable xpub, derived from the
+	// tap tree's leaf keys (SPEC §2). Wire kind 1; exists only at wire version 8.
+	InternalKeyLianaUnspendable
+)
+
 type keyArgBody struct{ index uint8 }
 type hash256Body [32]byte
 type hash160Body [20]byte
@@ -454,7 +482,11 @@ func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
 			}
 			sub = &child
 		}
-		b = trBody{isNums: isNums, keyIndex: keyIndex, tree: sub}
+		ik := InternalKeySlot
+		if isNums {
+			ik = InternalKeyNUMS
+		}
+		b = trBody{ik: ik, keyIndex: keyIndex, tree: sub}
 	case tagAfter, tagOlder:
 		v, err := r.read(32)
 		if err != nil {
@@ -954,7 +986,7 @@ func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
 			}
 		}
 	case trBody:
-		if !b.isNums {
+		if !b.isNums() {
 			if int(b.keyIndex) >= len(seen) {
 				return errNUMSConflict
 			}
@@ -1279,7 +1311,7 @@ func classifyPolicy(tree node) (PolicyKind, int, int) {
 			// classification locally robust — a NUMS-keypath-only tr (no @i
 			// referenced) is already rejected by validatePlaceholderUsage before
 			// summarize, but we never claim a single-key policy for is_nums here.
-			if !b.isNums && b.tree == nil {
+			if !b.isNums() && b.tree == nil {
 				return PolicySingle, 0, 0 // tr(@N) key-path only
 			}
 		}

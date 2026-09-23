@@ -203,8 +203,8 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8) error {
 		}
 	case trBody:
 		// is_nums 1b; if !is_nums key_index@kiw; has_tree 1b; optional subtree.
-		w.write(uint64(b2u(b.isNums)), 1)
-		if !b.isNums {
+		w.write(uint64(b2u(b.isNums())), 1)
+		if !b.isNums() {
 			w.write(uint64(b.keyIndex), int(keyIndexWidth))
 		}
 		w.write(uint64(b2u(b.tree != nil)), 1)

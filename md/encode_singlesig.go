@@ -87,7 +87,7 @@ func EncodeSingleSig(chainCode [32]byte, compressedPubkey [33]byte, fp [4]byte, 
 //
 //	ScriptPkh    -> node{tagPkh,  keyArgBody{0}}
 //	ScriptWpkh   -> node{tagWpkh, keyArgBody{0}}
-//	ScriptTr     -> node{tagTr,   trBody{isNums:false, keyIndex:0, tree:nil}}  (NOT keyArgBody)
+//	ScriptTr     -> node{tagTr,   trBody{ik:InternalKeySlot, keyIndex:0, tree:nil}}  (NOT keyArgBody)
 //	ScriptShWpkh -> node{tagSh,   childrenBody{[node{tagWpkh, keyArgBody{0}}]}}
 func singleSigTree(script ScriptKind) (node, error) {
 	switch script {
@@ -96,7 +96,7 @@ func singleSigTree(script ScriptKind) (node, error) {
 	case ScriptWpkh:
 		return node{tag: tagWpkh, body: keyArgBody{index: 0}}, nil
 	case ScriptTr:
-		return node{tag: tagTr, body: trBody{isNums: false, keyIndex: 0, tree: nil}}, nil
+		return node{tag: tagTr, body: trBody{ik: InternalKeySlot, keyIndex: 0, tree: nil}}, nil
 	case ScriptShWpkh:
 		inner := node{tag: tagWpkh, body: keyArgBody{index: 0}}
 		return node{tag: tagSh, body: childrenBody{children: []node{inner}}}, nil

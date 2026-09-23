@@ -42,8 +42,8 @@ func TestNestedNumsInternalKeyIsNotCounted(t *testing.T) {
 	key := func(slot uint8) node {
 		return node{tag: tagPkK, body: keyArgBody{index: slot}}
 	}
-	inner := node{tag: tagTr, body: trBody{isNums: true, tree: ptr(key(0))}}
-	outer := node{tag: tagTr, body: trBody{isNums: true, tree: ptr(inner)}}
+	inner := node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: ptr(key(0))}}
+	outer := node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: ptr(inner)}}
 
 	if _, kind := DuplicateKeySlot(outer); kind != DuplicateNone {
 		t.Errorf("two NUMS internal keys were counted as a repeat of slot 0: %v", kind)

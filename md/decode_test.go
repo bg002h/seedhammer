@@ -57,7 +57,7 @@ func TestDecodePayloadAST(t *testing.T) {
 		}},
 		{"tr_keyonly", "2002001810", 1, tagTr, func(t *testing.T, d *descriptor) {
 			tr, ok := d.tree.body.(trBody)
-			if !ok || tr.isNums || tr.tree != nil {
+			if !ok || tr.isNums() || tr.tree != nil {
 				t.Fatalf("tr body = %+v", d.tree.body)
 			}
 		}},

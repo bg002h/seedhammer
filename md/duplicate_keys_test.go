@@ -118,7 +118,7 @@ func TestDuplicateKeySlotScopesPerTapLeaf(t *testing.T) {
 	// DuplicateKeySlot's own scoping decision -- the test passed while the
 	// thing it was named for was broken.
 	trWith := func(tree node) node {
-		return node{tag: tagTr, body: trBody{isNums: true, tree: &tree}}
+		return node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: &tree}}
 	}
 
 	t.Run("one key in two leaves is not a duplicate", func(t *testing.T) {
@@ -187,7 +187,7 @@ func TestDuplicateKindSplitsByWhatCoreDoes(t *testing.T) {
 		tree := node{tag: tagTapTree, body: childrenBody{children: []node{
 			leaf, {tag: tagPkK, body: keyArgBody{index: 9}},
 		}}}
-		return node{tag: tagTr, body: trBody{isNums: true, tree: &tree}}
+		return node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: &tree}}
 	}
 	// and_v(v:pk(@0), pk(@0)) — a miniscript expression, not a bare threshold.
 	nested := node{tag: tagAndV, body: childrenBody{children: []node{

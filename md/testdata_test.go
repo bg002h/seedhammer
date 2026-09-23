@@ -298,7 +298,10 @@ func buildNode(t *testing.T, jn jsonNode) node {
 			Tree     *jsonNode `json:"tree"`
 		}
 		mustJSON(t, jn.Body.Data, &d)
-		tb := trBody{isNums: d.IsNums, keyIndex: d.KeyIndex}
+		tb := trBody{ik: InternalKeySlot, keyIndex: d.KeyIndex}
+		if d.IsNums {
+			tb.ik = InternalKeyNUMS
+		}
 		if d.Tree != nil {
 			sub := buildNode(t, *d.Tree)
 			tb.tree = &sub

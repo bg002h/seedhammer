@@ -19,7 +19,7 @@ import (
 func TestTemplateGuardAdmitsSortedMultiATapLeaf(t *testing.T) {
 	// tr(NUMS, sortedmulti_a(2, @0, @1)) as an AST, which is what the guard sees.
 	leaf := node{tag: tagSortedMultiA, body: multiKeysBody{k: 2, indices: []uint8{0, 1}}}
-	tree := node{tag: tagTr, body: trBody{isNums: true, tree: &leaf}}
+	tree := node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: &leaf}}
 	if err := templateEngraveShapeGuard(&descriptor{tree: tree}); err != nil {
 		t.Fatalf("a sortedmulti_a tap leaf is still refused: %v", err)
 	}

@@ -42,15 +42,27 @@ func TestTaprootScriptPathMatchesRust(t *testing.T) {
 			}
 
 			chunks := loadVectorChunks(t, name)
-			internalIdx, isNUMS, leaves, err := md.TapLeavesChunks(chunks)
+			internalIdx, ik, leaves, err := md.TapLeavesChunks(chunks)
 			if err != nil {
 				// A key-path-only tr has no tree; that path is already covered
 				// by address.Receive and is not this gate's subject.
 				skipped++
 				t.Skipf("%s: no script tree (%v)", name, err)
 			}
-			if isNUMS {
+			switch ik {
+			case md.InternalKeySlot:
+			case md.InternalKeyNUMS:
 				t.Skip("NUMS internal key: no key-path spend, not this gate's subject")
+			case md.InternalKeyLianaUnspendable:
+				// F-449: the device's kind-1 derivation is stage 4 (SPEC §7a.2).
+				// FUTURE-PROOFING ONLY at stage 3 (R0 n1): both kind-1 vectors
+				// never reach this arm, because md.TapLeavesChunks refuses their
+				// leaf shapes first and they skip above. The real gate is
+				// TestEveryKeyedVectorReachesAnAddress's stillUnsupported entries,
+				// which FAIL the day stage 4 derives kind 1.
+				t.Skip("Liana-unspendable internal key: device derivation is F-449 stage 4")
+			default:
+				t.Fatalf("%s: internal-key kind %d is unknown to this gate", name, ik)
 			}
 
 			_, keys, err := md.ExpandWalletPolicyChunks(chunks)

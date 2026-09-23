@@ -55,30 +55,30 @@ type TapLeaf struct {
 // and refuses — rather than approximating — any leaf shape it cannot describe.
 // An address derived from an approximated leaf commits funds to the wrong
 // script, so a refusal here is the only safe failure.
-func TapLeavesChunks(strs []string) (internalKeyIndex uint8, isNUMS bool, leaves []TapLeaf, err error) {
+func TapLeavesChunks(strs []string) (internalKeyIndex uint8, ik InternalKeyKind, leaves []TapLeaf, err error) {
 	d, err := Reassemble(strs)
 	if err != nil {
-		return 0, false, nil, err
+		return 0, InternalKeySlot, nil, err
 	}
 	return tapLeaves(d.tree)
 }
 
-func tapLeaves(tree node) (uint8, bool, []TapLeaf, error) {
+func tapLeaves(tree node) (uint8, InternalKeyKind, []TapLeaf, error) {
 	if tree.tag != tagTr {
-		return 0, false, nil, errNoTapTree
+		return 0, InternalKeySlot, nil, errNoTapTree
 	}
 	b, ok := tree.body.(trBody)
 	if !ok {
-		return 0, false, nil, errNoTapTree
+		return 0, InternalKeySlot, nil, errNoTapTree
 	}
 	if b.tree == nil {
-		return 0, false, nil, errNoTapTree
+		return 0, InternalKeySlot, nil, errNoTapTree
 	}
 	var out []TapLeaf
 	if err := collectTapLeaves(*b.tree, 0, &out); err != nil {
-		return 0, false, nil, err
+		return 0, InternalKeySlot, nil, err
 	}
-	return b.keyIndex, b.isNums, out, nil
+	return b.keyIndex, b.ik, out, nil
 }
 
 func collectTapLeaves(n node, depth int, out *[]TapLeaf) error {
@@ -169,6 +169,12 @@ type TapLeafScript struct {
 // EmitTapLeavesChunks decodes an md1 chunk set and emits the tapscript for every
 // leaf of its taproot tree, in depth-first order.
 //
+// THE INTERNAL KEY IS THREE-STATE (F-449, SPEC §7a.1). internalKeyIndex is
+// meaningful only when ik == InternalKeySlot. A caller must switch on ik and
+// REFUSE any kind it cannot derive -- never map a non-Slot kind to the NUMS
+// point: InternalKeyLianaUnspendable read as NUMS derives a DIFFERENT wallet's
+// addresses (SPEC §7a row 1).
+//
 // `keys` maps each `@N` to its DERIVED 32-byte X-ONLY public key. X-only, not
 // compressed: BIP-341 keys carry no parity byte, and a 33-byte push here builds
 // a perfectly valid script for a different key.
@@ -185,23 +191,23 @@ type TapLeafScript struct {
 // The result feeds `address.TaprootScriptPathAddress` directly: its `LeafScript`
 // is this type's shape, so the caller does no translation and there is no second
 // place for depth to be got wrong.
-func EmitTapLeavesChunks(strs []string, keys map[uint8][]byte) (internalKeyIndex uint8, isNUMS bool, leaves []TapLeafScript, err error) {
+func EmitTapLeavesChunks(strs []string, keys map[uint8][]byte) (internalKeyIndex uint8, ik InternalKeyKind, leaves []TapLeafScript, err error) {
 	d, err := Reassemble(strs)
 	if err != nil {
-		return 0, false, nil, err
+		return 0, InternalKeySlot, nil, err
 	}
 	if d.tree.tag != tagTr {
-		return 0, false, nil, errNoTapTree
+		return 0, InternalKeySlot, nil, errNoTapTree
 	}
 	b, ok := d.tree.body.(trBody)
 	if !ok || b.tree == nil {
-		return 0, false, nil, errNoTapTree
+		return 0, InternalKeySlot, nil, errNoTapTree
 	}
 	var out []TapLeafScript
 	if err := emitTapLeaves(*b.tree, 0, emitEnv{keys: keys, tap: true}, &out); err != nil {
-		return 0, false, nil, err
+		return 0, InternalKeySlot, nil, err
 	}
-	return b.keyIndex, b.isNums, out, nil
+	return b.keyIndex, b.ik, out, nil
 }
 
 // emitTapLeaves mirrors collectTapLeaves' walk exactly — same recursion, same
