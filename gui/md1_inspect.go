@@ -88,6 +88,13 @@ func md1Summary(tpl md.Template) []string {
 	} else {
 		lines = append(lines, "Complex policy - cannot display safely.", fmt.Sprintf("Keys: %d", tpl.N))
 	}
+	// THE KEY PATH, NAMED (SPEC §7). A year later this is the screen an
+	// operator asks "which kind are these plates?", and before F-449 stage 4
+	// it named no internal key at all. Every string is at most 20 bytes: the
+	// caller hard-chunks longer lines mid-word.
+	if line, ok := md1KeyPathLine(tpl); ok {
+		lines = append(lines, line)
+	}
 	for _, k := range tpl.Keys {
 		fp := k.Fingerprint
 		if fp == "" {
@@ -187,4 +194,22 @@ func md1PolicyFlow(ctx *Context, th *Colors, tpl md.Template, header []string, a
 		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
 		ctx.Frame(op.Layer(frameOps...))
 	}
+}
+
+// md1KeyPathLine names a taproot policy's key path, or !ok for a non-taproot
+// root. A tr root whose kind md could not name (KeyPathNone) says so rather
+// than guessing.
+func md1KeyPathLine(tpl md.Template) (string, bool) {
+	if tpl.Root != md.ScriptTr {
+		return "", false
+	}
+	switch tpl.KeyPath {
+	case md.KeyPathSpendable:
+		return "Key path: a key", true
+	case md.KeyPathNUMS:
+		return "Key path: NUMS", true
+	case md.KeyPathLianaUnspendable:
+		return "Key path: Liana key", true
+	}
+	return "Key path: unknown", true
 }

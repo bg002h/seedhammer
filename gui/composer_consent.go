@@ -211,6 +211,11 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 		lines = append(lines, line)
 	case md.KeyPathNUMS:
 		lines = append(lines, composerCopyNUMS())
+	case md.KeyPathLianaUnspendable:
+		// SPEC §7's kind-1 arm. Without it this switch printed NOTHING for a
+		// Liana-key policy -- the key-path fact silently absent from the one
+		// screen that consents to steel (fable M-3).
+		lines = append(lines, composerCopyLianaKeyPath())
 	}
 
 	id, kind, err := md.FormAwareIdChunks(chunks)
@@ -378,6 +383,16 @@ func composerMixesLockBases(branches []md.Branch) bool {
 // timelocked leaf -- Liana's OWN accepted shape -- would read as "no
 // unlocked path" (its leaf list holds one entry and that entry is locked).
 // KeyPathNUMS does not count: a NUMS key spends no path at all.
+//
+// THE LIANA KEY (F-449, SPEC §7) IS NEITHER CLASS 2 NOR AN UNLOCKED PATH, and
+// both halves are decided by the two equality tests below rather than by an
+// arm of their own: class 2 asks `== KeyPathNUMS`, and the unlocked count asks
+// `== KeyPathSpendable`, so KeyPathLianaUnspendable passes the first (it is
+// what Liana's own recipe produces, the reason the kind exists) and is not
+// counted by the second (an unspendable key spends nothing). Grouping it with
+// KeyPathSpendable would make `tr(<Liana key>, and_v(v:pk(@0),older(26280)))`
+// read as Liana-compatible when Liana refuses it -- class 7, measured at
+// v15.0 (design/evidence/f449-stage4/). TestComposerLianaClassRulings pins it.
 func composerLianaOutsideModelClass(root md.ScriptKind, shape md.PolicyShape) string {
 	// 1. Liana takes wsh or tr only (analysis.rs:586-587). ScriptSh covers
 	// BOTH bare sh and sh(wsh) (composerScriptLine's grouping): the composer

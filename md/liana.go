@@ -43,38 +43,6 @@ var (
 	errLianaMissingKey = errors.New("md: a leaf key has no xpub on this card; the Liana internal key cannot be computed")
 )
 
-// lianaLeafPubkeys walks d's root tr script tree in tap-tree left-to-right
-// order, and each leaf's key expressions in pre-order, one entry per key
-// OCCURRENCE (rust-miniscript TapTree::leaves() + Miniscript::iter_pk(), which
-// is what Rust feeds the recipe). Each occurrence's pubkey is bytes [32:65] of
-// its slot's Pubkeys-TLV entry.
-//
-// NEVER the derived-key-sorted order address.MultiALeafScript builds a
-// sortedmulti_a script from (SPEC §6 row 1, fable M-8): this reads the WRITTEN
-// indices off the wire tree, before any derivation.
-func lianaLeafPubkeys(d *descriptor) ([][33]byte, error) {
-	b, ok := d.tree.body.(trBody)
-	if d.tree.tag != tagTr || !ok || b.ik != InternalKeyLianaUnspendable {
-		return nil, errLianaNotKind1
-	}
-	if b.tree == nil {
-		return nil, errLianaNoLeaves
-	}
-	var idx []uint8
-	collectKeyOccurrences(*b.tree, &idx)
-	out := make([][33]byte, 0, len(idx))
-	for _, i := range idx {
-		x, ok := xpubForId(d, i)
-		if !ok {
-			return nil, errLianaMissingKey
-		}
-		var pk [33]byte
-		copy(pk[:], x[32:65])
-		out = append(out, pk)
-	}
-	return out, nil
-}
-
 // collectKeyOccurrences appends every placeholder index in n, left-first
 // pre-order. A TapTree node's two children are visited left then right, which
 // is the leaves' left-to-right order; inside a leaf it is the fragment order.
@@ -93,4 +61,56 @@ func collectKeyOccurrences(n node, out *[]uint8) {
 			collectKeyOccurrences(c, out)
 		}
 	}
+}
+
+// LianaUnspendableKeyFor is the 65-byte key material (chain code ‖ the
+// compressed H point) of a kind-1 chunk set's internal key: SPEC §2 over the
+// leaf keys the CALLER supplies, keyed by placeholder index, taken in the
+// tree's key-occurrence order (collectKeyOccurrences: rust-miniscript's
+// TapTree::leaves() + Miniscript::iter_pk(), one entry per key OCCURRENCE,
+// which is what Rust feeds the recipe). The device derives the key path at 0/i and 1/i from
+// it (SPEC §2, "derivation, not just rendering"), whatever the wallet's
+// use-site -- §6 row 2 refuses any other use-site at mint.
+//
+// THE KEYS COME FROM THE CALLER, NOT FROM THE CARD'S Pubkeys TLV (F-449 stage
+// 4 R0 I1). SPEC §7a.2 says the recipe runs "over the collected leaf keys", and
+// on the Wallet Policy route those are the seated mk1 key cards while the md1
+// is a key-less TEMPLATE with no TLV at all. Reading the TLV made every
+// template-plus-cards kind-1 wallet underivable. A keyed card's own keys reach
+// here the same way: ExpandWalletPolicyChunks reads them out of its TLV first.
+//
+// NEVER the derived-key-sorted order address.MultiALeafScript builds a
+// sortedmulti_a script from (SPEC §6 row 1, fable M-8): this reads the WRITTEN
+// indices off the wire tree, before any derivation.
+//
+// THE ONLY KEY WALK (F-449 stage 4 R1 N3): stage 3's TLV walk lianaLeafPubkeys
+// was deleted, and its tests moved here, so the two routes cannot diverge.
+//
+// An error for a set that is not kind 1, or when a leaf's key was not supplied:
+// the recipe needs every real leaf key, and there is no fallback.
+func LianaUnspendableKeyFor(strs []string, xpubs map[uint8][65]byte) ([65]byte, error) {
+	d, err := Reassemble(strs)
+	if err != nil {
+		return [65]byte{}, err
+	}
+	b, ok := d.tree.body.(trBody)
+	if d.tree.tag != tagTr || !ok || b.ik != InternalKeyLianaUnspendable {
+		return [65]byte{}, errLianaNotKind1
+	}
+	if b.tree == nil {
+		return [65]byte{}, errLianaNoLeaves
+	}
+	var idx []uint8
+	collectKeyOccurrences(*b.tree, &idx)
+	pks := make([][33]byte, 0, len(idx))
+	for _, i := range idx {
+		x, ok := xpubs[i]
+		if !ok {
+			return [65]byte{}, errLianaMissingKey
+		}
+		var pk [33]byte
+		copy(pk[:], x[32:65])
+		pks = append(pks, pk)
+	}
+	return lianaUnspendableKey(pks), nil
 }

@@ -386,11 +386,7 @@ func assertDescriptorsAgree(t *testing.T, name string, rec keyedConformanceRecor
 		// marker. Reduce it to the marker ONLY on full byte equality with the
 		// Go port's own recipe over the same card.
 		if strings.HasPrefix(rec.Template, lianaTemplatePrefix) {
-			d, err := Reassemble(chunks)
-			if err != nil {
-				t.Fatalf("%s: Reassemble: %v", name, err)
-			}
-			reducedBody, err := reduceLianaInternalKey(chain, body, d)
+			reducedBody, err := reduceLianaInternalKey(chain, body, chunks)
 			if err != nil {
 				t.Errorf("chain %s: %v", chain, err)
 				continue
@@ -552,13 +548,13 @@ const lianaTemplatePrefix = "tr(UNSPENDABLE(liana),"
 //     port, whatever the wallet's use-site;
 //   - it is a MAINNET xpub at depth 0, parent 0, child 0 (§2 steps 4-5; every
 //     vendored record is mainnet);
-//   - its 65 bytes EQUAL lianaUnspendableKey over d's own leaf keys.
+//   - its 65 bytes EQUAL LianaUnspendableKeyFor over the card's own leaf keys.
 //
 // The last clause is FULL byte equality, never "the pubkey is H": a structural
 // match accepts a valid recipe output computed over a DIFFERENT leaf set, and
 // a positive-only corpus cannot tell the two apart (SPEC §8.10) --
 // TestLianaReductionRefusesANearMiss is the input that separates them.
-func reduceLianaInternalKey(chain, body string, d *descriptor) (string, error) {
+func reduceLianaInternalKey(chain, body string, chunks []string) (string, error) {
 	rest, ok := strings.CutPrefix(body, "tr(")
 	if !ok {
 		return "", fmt.Errorf("a kind-1 record's descriptor does not open with tr(: %.24s…", body)
@@ -582,11 +578,11 @@ func reduceLianaInternalKey(chain, body string, d *descriptor) (string, error) {
 		return "", fmt.Errorf("the internal key is depth %d parent %08x child %d, want 0/0/0",
 			parsed.depth, parsed.parentFP, parsed.child)
 	}
-	leaves, err := lianaLeafPubkeys(d)
+	want, err := lianaKeyOverOwnKeys(chunks, nil)
 	if err != nil {
 		return "", err
 	}
-	if want := lianaUnspendableKey(leaves); parsed.material != want {
+	if parsed.material != want {
 		return "", fmt.Errorf("the internal key is not the recipe over this card's leaves\n"+
 			"  record: %x\n  go:     %x", parsed.material, want)
 	}

@@ -22,6 +22,13 @@ const seatVector = "keyed_tr_with_leaf"
 // seatFixture returns (templateCards, keyCards, expectedReceive0).
 func seatFixture(t *testing.T) ([]string, []mk.Card, string) {
 	t.Helper()
+	return seatFixtureFor(t, seatVector)
+}
+
+// seatFixtureFor is seatFixture over any keyed vector (F-449 stage 4 seats a
+// kind-1 wallet this way, R0 I1).
+func seatFixtureFor(t *testing.T, seatVector string) ([]string, []mk.Card, string) {
+	t.Helper()
 	keyed := loadVectorChunks(t, seatVector)
 	tmpl, err := md.StripToTemplate(keyed)
 	if err != nil {

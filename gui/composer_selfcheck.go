@@ -70,6 +70,14 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 	if !shape.Complete {
 		return errors.New("self-check: the decoded policy cannot be described")
 	}
+	// THE KEY-PATH CHOICE LANDED (F-449 stage 4). The operator chose a kind on
+	// §0b's screen; the decoded card must carry exactly that one. Compared as
+	// a biconditional so it catches both directions: a Liana choice that
+	// composed NUMS, and a NUMS wallet that came out kind 1.
+	if (st.unspendable == md.UnspendableLiana) != (shape.KeyPath == md.KeyPathLianaUnspendable) {
+		return fmt.Errorf("self-check: the key path is %v in the composition and %v decoded",
+			st.unspendable, shape.KeyPath)
+	}
 	leaves := composerLeafPaths(st.list)
 	if len(shape.Branches) != len(leaves) {
 		return fmt.Errorf("self-check: the decoded policy has %d spend paths, the shape has %d",

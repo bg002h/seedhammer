@@ -161,6 +161,10 @@ func policySummaryLines(shape md.PolicyShape) []string {
 		out = append(out, "Key-path: A KEY CAN SPEND ALONE")
 	case md.KeyPathNUMS:
 		out = append(out, "Key-path: none (script paths only)")
+	case md.KeyPathLianaUnspendable:
+		// SPEC §7: "THE KEY-PATH LINE COMES FIRST AND IS NEVER OMITTED" was
+		// false for kind 1 until this arm -- the switch has no default.
+		out = append(out, "Key-path: none (Liana key)")
 	}
 	if n := len(shape.Branches); n > 0 {
 		word := "paths"

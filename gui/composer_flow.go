@@ -95,6 +95,12 @@ func composerFlow(ctx *Context, th *Colors) {
 		}
 		composerSizeAssignments(st)
 
+		// SPEC §0b: the key-path choice, BEFORE the chunks exist, because the
+		// kind is part of the Template-ID the stub screen shows. Back returns
+		// to the path list, as Back from the stub screen does.
+		if !composerUnspendableStep(ctx, th, st) {
+			continue
+		}
 		template, err := composerTemplateChunksFor(st)
 		if err != nil {
 			composerShowRefusal(ctx, th, "Template", err)
@@ -265,7 +271,7 @@ func composerDeclaredOrigins(st *composerState) []*md.SlotOrigin {
 // composerTemplateChunksFor emits the keyless template for the current shape
 // and seating.
 func composerTemplateChunksFor(st *composerState) ([]string, error) {
-	c, err := md.ComposeWith(st.list, composerDeclaredOrigins(st))
+	c, err := composerCompose(st, composerDeclaredOrigins(st))
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +286,7 @@ func composerTemplateChunksFor(st *composerState) ([]string, error) {
 // that had been keyed by its own policy is not a template.
 func composerArtifactsFor(st *composerState) (template, keyed []string, err error) {
 	declared := composerDeclaredOrigins(st)
-	ct, err := md.ComposeWith(st.list, declared)
+	ct, err := composerCompose(st, declared)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -305,7 +311,7 @@ func composerArtifactsFor(st *composerState) (template, keyed []string, err erro
 			fps[uint8(i)] = a.fingerprint
 		}
 	}
-	ck, err := md.ComposeWith(st.list, declared)
+	ck, err := composerCompose(st, declared)
 	if err != nil {
 		return nil, nil, err
 	}

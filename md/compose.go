@@ -448,6 +448,10 @@ type Composed struct {
 	slots           []ComposeSlot
 	internalKeyPath int // -1 when the internal key is NUMS
 	experimental    []ComposeExperimental
+	// requested is the unspendable kind the caller ASKED for (F-449 stage 4).
+	// What was BUILT is the tree's trBody.ik; the two differ exactly when a
+	// Liana request met a real internal key (UnspendableRequestUnmet).
+	requested UnspendableKind
 }
 
 // Slots is the emitted slot map, index-ascending.
@@ -645,20 +649,16 @@ func Compose(list PathList) (Composed, error) {
 	if err != nil {
 		return Composed{}, err
 	}
-	return lowerPathList(list, make([]*SlotOrigin, slots))
+	return lowerPathList(list, make([]*SlotOrigin, slots), UnspendableNums)
 }
 
 // ComposeWith lowers a list whose slots may carry declared origins (one entry
 // per emitted slot, index-ascending; nil = unseated).
+//
+// It composes the NUMS internal key under tr; ComposeWithUnspendable takes the
+// request (F-449 stage 4).
 func ComposeWith(list PathList, declared []*SlotOrigin) (Composed, error) {
-	slots, err := ValidatePathList(list)
-	if err != nil {
-		return Composed{}, err
-	}
-	if len(declared) != slots {
-		return Composed{}, fmt.Errorf("%w: %d given, policy has %d", ErrComposeWrongSlotCount, len(declared), slots)
-	}
-	return lowerPathList(list, declared)
+	return ComposeWithUnspendable(list, declared, UnspendableNums)
 }
 
 // ─── lowering (the primary's lowering.rs) ─────────────────────────────────────
@@ -905,9 +905,9 @@ func finishComposed(list PathList, declared []*SlotOrigin, tree node, slots []Co
 	return Composed{d: d, slots: slots, internalKeyPath: ik, experimental: exp}, nil
 }
 
-func lowerPathList(list PathList, declared []*SlotOrigin) (Composed, error) {
+func lowerPathList(list PathList, declared []*SlotOrigin, unspendable UnspendableKind) (Composed, error) {
 	if list.Wrapper == ComposeTr {
-		return lowerTr(list, declared)
+		return lowerTr(list, declared, unspendable)
 	}
 	numbered, slots := numberSlots(list, -1)
 	sole := len(list.Paths) == 1
@@ -930,7 +930,7 @@ func lowerPathList(list PathList, declared []*SlotOrigin) (Composed, error) {
 // lowerTr extracts the FIRST-LISTED unlocked, unhashed single key as the
 // internal key (else NUMS); the remaining paths become leaves on a
 // right-leaning spine (depth of leaf j is min(j, m-1)).
-func lowerTr(list PathList, declared []*SlotOrigin) (Composed, error) {
+func lowerTr(list PathList, declared []*SlotOrigin, unspendable UnspendableKind) (Composed, error) {
 	ik := -1
 	for i, p := range list.Paths {
 		if p.isBareSingle() {
@@ -958,12 +958,18 @@ func lowerTr(list PathList, declared []*SlotOrigin) (Composed, error) {
 		}
 		spine = &acc
 	}
-	// ik < 0: no path became the internal key, so it is the NUMS point.
-	// (Stage 3 ports no Liana selection into the composer; that is the port
-	// of md-codec's `--unspendable`, owned by F-449 stage 4.)
-	ikKind := InternalKeyNUMS
-	if ik >= 0 {
-		ikKind = InternalKeySlot
+	// THE ONE DECISION SITE (md-codec compose/tr.rs, F-449 stage 2): no path
+	// supplies a real key, so the request selects which unspendable key. A
+	// real key always wins -- the request then has nothing to select, and
+	// Composed.UnspendableRequestUnmet says so.
+	ikKind := InternalKeySlot
+	if ik < 0 {
+		switch unspendable {
+		case UnspendableLiana:
+			ikKind = InternalKeyLianaUnspendable
+		default:
+			ikKind = InternalKeyNUMS
+		}
 	}
 	tree := node{tag: tagTr, body: trBody{ik: ikKind, keyIndex: 0, tree: spine}}
 	exp := experimentalMarks(list, func(i int) bool { return m == 1 && i != ik && list.Paths[i].isBareMulti() })

@@ -2,7 +2,6 @@ package md
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 
@@ -20,18 +19,21 @@ import (
 func TestLianaKeyDependsOnTheLeafKeysNotTheTree(t *testing.T) {
 	var keys [][65]byte
 	for _, name := range []string{"keyed_tr_liana_kofn_recovery", "keyed_tr_liana_nested_two_recoveries"} {
-		d, err := Reassemble(vectorChunksFor(t, name))
+		chunks := vectorChunksFor(t, name)
+		d, err := Reassemble(chunks)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		leaves, err := lianaLeafPubkeys(d)
+		var occ []uint8
+		collectKeyOccurrences(*d.tree.body.(trBody).tree, &occ)
+		if len(occ) != 4 {
+			t.Fatalf("%s: %d leaf-key occurrences, want 4", name, len(occ))
+		}
+		k, err := lianaKeyOverOwnKeys(chunks, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if len(leaves) != 4 {
-			t.Fatalf("%s: %d leaf-key occurrences, want 4", name, len(leaves))
-		}
-		keys = append(keys, lianaUnspendableKey(leaves))
+		keys = append(keys, k)
 	}
 	if keys[0] != keys[1] {
 		t.Errorf("the two trees derive different internal keys:\n  %x\n  %x", keys[0], keys[1])
@@ -51,26 +53,49 @@ func TestLianaReductionRefusesANearMiss(t *testing.T) {
 	if err := json.Unmarshal(vectorRecordFor(t, name), &rec); err != nil {
 		t.Fatal(err)
 	}
-	d, err := Reassemble(vectorChunksFor(t, name))
-	if err != nil {
-		t.Fatal(err)
-	}
+	chunks := vectorChunksFor(t, name)
 	body, _, _ := strings.Cut(rec.Chains["0"].Descriptor, "#")
-	if _, err := reduceLianaInternalKey("0", body, d); err != nil {
+	if _, err := reduceLianaInternalKey("0", body, chunks); err != nil {
 		t.Fatalf("control: the genuine record is refused: %v", err)
 	}
-	leaves, err := lianaLeafPubkeys(d)
+	// The same four keys REVERSED: each key moves to the mirrored placeholder,
+	// so the one key walk (@0..@3, one occurrence each) feeds the recipe the
+	// reversed leaf list.
+	near, err := lianaKeyOverOwnKeys(chunks, func(i uint8) uint8 { return 3 - i })
 	if err != nil {
 		t.Fatal(err)
 	}
-	slices.Reverse(leaves)
-	near := lianaUnspendableKey(leaves)
 	nearKey := hdkeychain.NewExtendedKey(chaincfg.MainNetParams.HDPublicKeyID[:],
 		near[32:], near[:32], []byte{0, 0, 0, 0}, 0, 0, false)
 	rest := strings.TrimPrefix(body, "tr(")
 	_, after, _ := strings.Cut(rest, "/")
 	forged := "tr(" + nearKey.String() + "/" + after
-	if _, err := reduceLianaInternalKey("0", forged, d); err == nil {
+	if _, err := reduceLianaInternalKey("0", forged, chunks); err == nil {
 		t.Fatal("a recipe output over a DIFFERENT leaf order was accepted as this wallet's internal key")
 	}
+}
+
+// lianaKeyOverOwnKeys is LianaUnspendableKeyFor over a keyed card's own
+// Pubkeys-TLV keys, read out by ExpandWalletPolicyChunks -- the route the
+// device's keyed-card consent takes. move, when non-nil, seats the key of
+// placeholder move(i) at @i, which builds a near-miss over the same keys.
+func lianaKeyOverOwnKeys(chunks []string, move func(uint8) uint8) ([65]byte, error) {
+	_, keys, err := ExpandWalletPolicyChunks(chunks)
+	if err != nil {
+		return [65]byte{}, err
+	}
+	own := map[uint8][65]byte{}
+	for _, k := range keys {
+		if k.XpubPresent {
+			own[k.Index] = k.Xpub
+		}
+	}
+	xpubs := own
+	if move != nil {
+		xpubs = map[uint8][65]byte{}
+		for i := range own {
+			xpubs[i] = own[move(i)]
+		}
+	}
+	return LianaUnspendableKeyFor(chunks, xpubs)
 }

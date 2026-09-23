@@ -37,7 +37,31 @@ const (
 	// KeyPathSpendable — a real key can spend directly, WITHOUT satisfying any
 	// leaf. This is the condition a leaf-only summary would have hidden.
 	KeyPathSpendable
+	// KeyPathLianaUnspendable — wire kind 1 (F-449): Liana's unspendable xpub,
+	// derived from the leaf keys (SPEC §2). Script paths only, exactly as
+	// KeyPathNUMS, and a DIFFERENT WALLET from the same tree at KeyPathNUMS:
+	// different addresses, different ids. Named as md-codec 0.47.0 names it
+	// (policy_shape.rs KeyPathKind::LianaUnspendable), not the spec's earlier
+	// "NumsXpub". APPENDED, so the three older values keep their numbers.
+	KeyPathLianaUnspendable
 )
+
+// keyPathOf is the ONE mapping from a taproot internal key to its KeyPathKind,
+// shared by policyShape and summarize so the inspect screen and the consent
+// screen cannot disagree about which kind a card carries. ok=false for a kind
+// this port has no name for: the caller must treat the policy as one it cannot
+// describe, never guess a neighbouring kind (SPEC §7a row 1).
+func keyPathOf(ik InternalKeyKind) (KeyPathKind, bool) {
+	switch ik {
+	case InternalKeySlot:
+		return KeyPathSpendable, true
+	case InternalKeyNUMS:
+		return KeyPathNUMS, true
+	case InternalKeyLianaUnspendable:
+		return KeyPathLianaUnspendable, true
+	}
+	return KeyPathNone, false
+}
 
 // Branch is one independently satisfiable spend path: a tapscript leaf, or the
 // whole script for wsh/sh.
@@ -123,11 +147,13 @@ func policyShape(tree node) PolicyShape {
 		if !ok {
 			return PolicyShape{}
 		}
-		if b.isNums() {
-			s.KeyPath = KeyPathNUMS
-		} else {
-			s.KeyPath = KeyPathSpendable
+		kp, known := keyPathOf(b.ik)
+		if !known {
+			// THE HONESTY CONTRACT, applied to the key path: a summary that
+			// named a kind it does not know would describe a different wallet.
+			return PolicyShape{}
 		}
+		s.KeyPath = kp
 		if b.tree != nil {
 			walkTapTree(*b.tree, 1, &s)
 		}
