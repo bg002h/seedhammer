@@ -226,6 +226,46 @@ func composerCopyLianaKeyPath() string {
 		"different wallet with different addresses."
 }
 
+// composerCopyUnspendableLead is §0b's COPY, the half common to both rows: the
+// two rows are DIFFERENT WALLETS, and the choice cannot be undone once cut.
+// SHORT, because composerPickScreen draws the lead as a header on every page,
+// and a long one pushes a row off the first page (the hash-kind screen's
+// lesson, TestComposerHashKindScreenDrawsAllFourRows).
+func composerCopyUnspendableLead() string {
+	return "Which key path? The two are DIFFERENT WALLETS, with different " +
+		"addresses. It cannot be changed after engraving."
+}
+
+// composerCopyUnspendableRowNUMS is §0b's first row, and the first-entry
+// default: the wallet every earlier firmware built.
+func composerCopyUnspendableRowNUMS() string {
+	return "NUMS point: Bitcoin Core imports it. Liana and Nunchuk do not."
+}
+
+// composerCopyUnspendableRowLiana is §0b's second row. The coordinators are
+// the ones composerCopyLianaKeyPath names, measured the same way.
+func composerCopyUnspendableRowLiana() string {
+	return "Liana key: Liana (v15.0) and Bitcoin Core import it. Nunchuk only by chance."
+}
+
+// composerCopyLianaKeyDropped is §0b RESET's signal: a kind-1 choice the
+// predicate no longer admits is dropped, and the operator is told which fact
+// moved. composerStubDelta's cause-free banner is not enough alone (§0b).
+func composerCopyLianaKeyDropped(cause string) string {
+	return "LIANA KEY DROPPED\n" + cause + " This policy is back on the NUMS " +
+		"key path: its Template-ID and addresses are not the ones the Liana " +
+		"key gave."
+}
+
+// composerCopyLianaUnmet is the refusal composerCompose raises when a Liana
+// choice composed a real key path instead (SPEC §6 row 3). Unreachable through
+// the flow -- the reset drops such a choice first -- and worded for the day it
+// is not.
+func composerCopyLianaUnmet() string {
+	return "The Liana key was chosen, but this policy has a real key path, " +
+		"so there is no unspendable key to choose. Go back to the key path screen."
+}
+
 // composerCopyMixedLockBases is the fable review r0 lens-2 I-2 notice, in the
 // register of §8g's Liana line: one sentence naming the wallet that refuses
 // and one naming the way round it.

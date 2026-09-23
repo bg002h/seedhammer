@@ -28,6 +28,13 @@ type composerState struct {
 	// value md.Compose lowers. The GUI never builds a descriptor itself.
 	list md.PathList
 
+	// unspendable is the operator's §0b key-path choice (F-449 stage 4). The
+	// zero value is md.UnspendableNums, the wallet every earlier firmware
+	// built. It is set ONLY by composerUnspendableStep, which also resets it
+	// whenever §0b's predicate stops admitting it, so it is never carried into
+	// a shape that cannot use it.
+	unspendable md.UnspendableKind
+
 	// bound is the payload's now: record (§6a, C24): a LOWER bound on the
 	// present, affecting echoes and refusals only, never an encoded operand.
 	bound composerBound

@@ -65,6 +65,16 @@ func composerCopyTable() []composerCopyRow {
 		// stays the diff target.
 		{"composerCopyLianaKeyPath", "8y", composerCopyLianaKeyPath(),
 			"KEY PATH: NONE (LIANA KEY) Spends use the script paths only. The key path is Liana's unspendable key, computed from this wallet's own keys. Liana (as of v15.0) and Bitcoin Core import this form. Nunchuk imports it only when the keys happen to be in sorted order. The same paths with the NUMS key are a different wallet with different addresses."},
+		{"composerCopyUnspendableLead", "8y", composerCopyUnspendableLead(),
+			"Which key path? The two are DIFFERENT WALLETS, with different addresses. It cannot be changed after engraving."},
+		{"composerCopyUnspendableRowNUMS", "8y", composerCopyUnspendableRowNUMS(),
+			"NUMS point: Bitcoin Core imports it. Liana and Nunchuk do not."},
+		{"composerCopyUnspendableRowLiana", "8y", composerCopyUnspendableRowLiana(),
+			"Liana key: Liana (v15.0) and Bitcoin Core import it. Nunchuk only by chance."},
+		{"composerCopyLianaUnmet", "8y", composerCopyLianaUnmet(),
+			"The Liana key was chosen, but this policy has a real key path, so there is no unspendable key to choose. Go back to the key path screen."},
+		{"composerCopyLianaKeyDropped", "8y", composerCopyLianaKeyDropped("Path 1 is one key with no lock, so it became the key path, and there is no unspendable key to choose."),
+			"LIANA KEY DROPPED Path 1 is one key with no lock, so it became the key path, and there is no unspendable key to choose. This policy is back on the NUMS key path: its Template-ID and addresses are not the ones the Liana key gave."},
 		{"composerCopyMixedLockBases", "8g", composerCopyMixedLockBases(),
 			"MIXED LOCK BASES Some paths lock by block height and others by time. Nunchuk will refuse this wallet; Bitcoin Core imports it. Taproot accepts both, because it checks each path on its own."},
 		// §8x is the fable review r0 lens-5 I-1/I-2 addition: one consent
@@ -457,8 +467,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// nine applies, in Liana's own order of refusal.
 	// 87 SINCE F-449 STAGE 4 TASK 5 added §8y's kind-1 key-path line: the
 	// §8f body is false for kind 1 about Nunchuk, so it could not be reused.
-	if declared != 87 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 87 -- "+
+	// 92 SINCE TASK 6 added the key-path choice screen's lead and two rows,
+	// the RESET signal that names which fact dropped a Liana choice, and the
+	// unmet-request refusal composerCompose raises (R0 m1).
+	if declared != 92 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 92 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }
