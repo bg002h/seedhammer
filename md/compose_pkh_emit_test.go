@@ -152,12 +152,12 @@ func TestVerifyWrappedMultiAFoldsIntoNumEqualVerify(t *testing.T) {
 		}
 		keys[i] = k
 	}
-	_, isNUMS, leaves, err := EmitTapLeavesChunks(chunks, keys)
+	_, ik, leaves, err := EmitTapLeavesChunks(chunks, keys)
 	if err != nil {
 		t.Fatalf("EmitTapLeavesChunks: %v", err)
 	}
-	if !isNUMS || len(leaves) != 3 {
-		t.Fatalf("isNUMS=%v leaves=%d, want NUMS with three leaves", isNUMS, len(leaves))
+	if ik != InternalKeyNUMS || len(leaves) != 3 {
+		t.Fatalf("ik=%v leaves=%d, want NUMS with three leaves", ik, len(leaves))
 	}
 	folded := 0
 	for i, l := range leaves {
@@ -199,7 +199,7 @@ func TestPkhTapLeafEmitsTheHash160Form(t *testing.T) {
 			hasMultipath: true,
 			multipath:    []alternative{{hardened: false, value: 0}, {hardened: false, value: 1}},
 		},
-		tree: node{tag: tagTr, body: trBody{isNums: true, keyIndex: 0, tree: &leaf}},
+		tree: node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, keyIndex: 0, tree: &leaf}},
 	}
 	chunks, err := split(d)
 	if err != nil {
@@ -209,12 +209,12 @@ func TestPkhTapLeafEmitsTheHash160Form(t *testing.T) {
 	for i := range xonly {
 		xonly[i] = byte(i + 1)
 	}
-	_, isNUMS, leaves, err := EmitTapLeavesChunks(chunks, map[uint8][]byte{0: xonly})
+	_, ik, leaves, err := EmitTapLeavesChunks(chunks, map[uint8][]byte{0: xonly})
 	if err != nil {
 		t.Fatalf("EmitTapLeavesChunks: %v", err)
 	}
-	if !isNUMS || len(leaves) != 1 {
-		t.Fatalf("isNUMS=%v leaves=%d, want NUMS with one leaf", isNUMS, len(leaves))
+	if ik != InternalKeyNUMS || len(leaves) != 1 {
+		t.Fatalf("ik=%v leaves=%d, want NUMS with one leaf", ik, len(leaves))
 	}
 	want := append([]byte{opDUP, opHASH160, 0x14}, btcaddr.Hash160(xonly)...)
 	want = append(want, opEQUALVERIFY, opCHECKSIG)

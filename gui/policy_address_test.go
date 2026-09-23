@@ -125,7 +125,16 @@ func TestEveryKeyedVectorReachesAnAddress(t *testing.T) {
 	// Shapes this device still cannot derive. EXPLICIT rather than tolerated: a
 	// test that lets an undeliverable shape pass quietly is how "display only"
 	// outlives the reason for it. Adding a name here must be a deliberate act.
-	stillUnsupported := map[string]string{}
+	stillUnsupported := map[string]string{
+		// F-449 stage 3 ships the codec half (md decodes kind 1 and reports it
+		// three-state); the device's kind-1 DERIVATION is stage 4 (SPEC §7a.2).
+		// Until then SPEC §7a.3 requires NO address rather than the NUMS
+		// branch's addresses of a different wallet -- and the F-613 mirror
+		// below proves no deriver produces one. Stage 4 deletes both entries:
+		// this test FAILS, naming them, the day the device derives kind 1.
+		"keyed_tr_liana_kofn_recovery":         "Liana-unspendable internal key: device derivation is F-449 stage 4",
+		"keyed_tr_liana_nested_two_recoveries": "Liana-unspendable internal key: device derivation is F-449 stage 4",
+	}
 
 	// Shapes this device CAN derive and DECLINES to (F-531). A separate map
 	// from the one above because the two are different facts and collapsing

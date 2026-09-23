@@ -254,7 +254,7 @@ func TestPinnedKeyReuseVectorsAreTheShapeTheyClaim(t *testing.T) {
 				t.Fatalf("the pin is not a taproot policy (%T); F-533 is a taproot rule",
 					d.tree.body)
 			}
-			if b.isNums {
+			if b.isNums() {
 				t.Fatal("the pin's internal key is the NUMS H-point, so there is no " +
 					"placeholder to reuse and the shape is not the one F-533 refuses")
 			}

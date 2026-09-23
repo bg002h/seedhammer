@@ -108,7 +108,7 @@ func walkCollectFirst(n node, seen []bool, firstOccurrences *[]uint8) {
 	case trBody:
 		// SPEC §7: is_nums=true → internal key is the NUMS H-point, not a
 		// placeholder reference; skip registration.
-		if !b.isNums {
+		if !b.isNums() {
 			if int(b.keyIndex) < len(seen) && !seen[b.keyIndex] {
 				seen[b.keyIndex] = true
 				*firstOccurrences = append(*firstOccurrences, b.keyIndex)
@@ -143,8 +143,8 @@ func remapIndices(n node, perm []uint8) node {
 	case keyArgBody:
 		return node{tag: n.tag, body: keyArgBody{index: perm[b.index]}}
 	case trBody:
-		nb := trBody{isNums: b.isNums, keyIndex: b.keyIndex}
-		if !b.isNums {
+		nb := trBody{ik: b.ik, keyIndex: b.keyIndex}
+		if !b.isNums() {
 			nb.keyIndex = perm[b.keyIndex]
 		}
 		if b.tree != nil {
@@ -218,7 +218,7 @@ func checkPlaceholderBounds(n node, max uint8) error {
 			return errPlaceholderRange
 		}
 	case trBody:
-		if !b.isNums && b.keyIndex >= max {
+		if !b.isNums() && b.keyIndex >= max {
 			return errPlaceholderRange
 		}
 		if b.tree != nil {
@@ -320,7 +320,7 @@ func cloneNode(n node) node {
 	case multiKeysBody:
 		return node{tag: n.tag, body: multiKeysBody{k: b.k, indices: cloneSlice(b.indices)}}
 	case trBody:
-		nb := trBody{isNums: b.isNums, keyIndex: b.keyIndex}
+		nb := trBody{ik: b.ik, keyIndex: b.keyIndex}
 		if b.tree != nil {
 			t := cloneNode(*b.tree)
 			nb.tree = &t

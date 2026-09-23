@@ -139,7 +139,7 @@ func TestWriteNodeSortedMultiBitCost(t *testing.T) {
 	// Tag(6) + (k-1)(5) + (n-1)(5) + 3×kiw(2) = 22 bits.
 	n := node{tag: tagSortedMulti, body: multiKeysBody{k: 2, indices: []uint8{0, 1, 2}}}
 	var w bitWriter
-	if err := writeNode(&w, n, 2); err != nil {
+	if err := writeNode(&w, n, 2, wfRedesignVersion); err != nil {
 		t.Fatalf("writeNode: %v", err)
 	}
 	if w.bitLen() != 22 {
@@ -151,7 +151,7 @@ func TestWriteNodeKeyArgN1ZeroBits(t *testing.T) {
 	// tree.rs:336 — at n=1, kiw=0, key-arg emits zero bits: Tag(6)+0 = 6.
 	n := node{tag: tagPkK, body: keyArgBody{index: 0}}
 	var w bitWriter
-	if err := writeNode(&w, n, 0); err != nil {
+	if err := writeNode(&w, n, 0, wfRedesignVersion); err != nil {
 		t.Fatalf("writeNode: %v", err)
 	}
 	if w.bitLen() != 6 {
@@ -161,9 +161,9 @@ func TestWriteNodeKeyArgN1ZeroBits(t *testing.T) {
 
 func TestWriteNodeTrNumsSuppressesKiw(t *testing.T) {
 	// tree.rs:693 — tr(NUMS) at any kiw: Tag(6)+is_nums(1)+has_tree(1) = 8.
-	n := node{tag: tagTr, body: trBody{isNums: true}}
+	n := node{tag: tagTr, body: trBody{ik: InternalKeyNUMS}}
 	var w bitWriter
-	if err := writeNode(&w, n, 2); err != nil {
+	if err := writeNode(&w, n, 2, wfRedesignVersion); err != nil {
 		t.Fatalf("writeNode: %v", err)
 	}
 	if w.bitLen() != 8 {

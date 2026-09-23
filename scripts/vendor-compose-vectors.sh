@@ -24,7 +24,8 @@ clean=true; [ -z "$(git -C "$SRC" status --porcelain -- crates/md-codec/tests/ve
 # md/testdata/compose_refusal_vectors.provenance.json. Without the exclusion
 # this selects 177 files against a pin of 176 and trips
 # md/compose_vectors_pin_test.go.
-mapfile -t files < <(cd "$VEC" && ls | grep -E '^(keyed_|compose_)' | grep -vE '^compose_refusal_' | sort)
+# liana_* (F-449 stage 3): the keyless kind-1 twin of nums_taproot.
+mapfile -t files < <(cd "$VEC" && ls | grep -E '^(keyed_|compose_|liana_)' | grep -vE '^compose_refusal_' | sort)
 [ "${#files[@]}" -gt 0 ] || { echo "no compose_* vectors in $VEC" >&2; exit 2; }
 for f in "${files[@]}"; do cp "$VEC/$f" "$DST/$f"; done
 python3 - "$PIN" "$commit" "$clean" "$DST" "${files[@]}" <<'PY'

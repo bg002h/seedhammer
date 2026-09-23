@@ -196,7 +196,7 @@ func DuplicateKeySlot(tree node) (uint8, DuplicateKind) {
 		// @N two different key expressions (use-site is per-@N, with only
 		// strictly-ascending per-idx overrides), so that shape is not
 		// BIP-388-forbidden here and derives correctly.
-		if !b.isNums {
+		if !b.isNums() {
 			var counts [256]int
 			countKeySlots(*b.tree, &counts)
 			if counts[b.keyIndex] > 0 {
@@ -339,7 +339,7 @@ func countKeySlots(n node, counts *[256]int) {
 		// !isNums for the same reason as DuplicateKeySlot's own arm (SPEC §7):
 		// a NUMS internal key is the H-point, not a reference to a slot, and
 		// keyIndex is a meaningless zero there.
-		if !b.isNums {
+		if !b.isNums() {
 			counts[b.keyIndex]++
 		}
 		if b.tree != nil {

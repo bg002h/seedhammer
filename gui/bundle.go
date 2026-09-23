@@ -203,6 +203,10 @@ const (
 	bundleChunkProgress                             // a chunk added; card still incomplete
 	bundleCardComplete                              // a chunked card completed + verified
 	bundleDuplicate                                 // a chunk/card already captured
+	// bundleUnsupportedMD1Version: a well-formed md1 at a wire version this
+	// firmware does not read (SPEC §6a) -- NOT bundleDropped, whose message is
+	// false about it.
+	bundleUnsupportedMD1Version
 )
 
 // bundleGatherer accumulates distinct verified cards. Chunked cards are keyed by
@@ -213,6 +217,9 @@ type bundleGatherer struct {
 	mkSets map[uint32]*mk1Gatherer // reuse UNCHANGED
 	mdSets map[uint32]*md1Gatherer // reuse UNCHANGED
 	cards  []bundleCard            // completed + verified, in completion order
+	// refusedMD1Version: the wire version the last bundleUnsupportedMD1Version
+	// card declared, for the operator message.
+	refusedMD1Version uint8
 }
 
 // offer classifies one scanned object and routes it. A card is added to cards
@@ -231,6 +238,12 @@ func (g *bundleGatherer) offer(obj any) bundleOfferStatus {
 	case clsChunkedMD1:
 		return g.offerChunkedMD1(csid, str)
 	default:
+		if hasMDPrefix(str) {
+			if v, ok := md1StringVersionRefusal(str); ok {
+				g.refusedMD1Version = v
+				return bundleUnsupportedMD1Version
+			}
+		}
 		return bundleDropped
 	}
 }
@@ -244,6 +257,10 @@ func (g *bundleGatherer) offerStandaloneMD1(str string) bundleOfferStatus {
 	}
 	tpl, err := md.Decode(str)
 	if err != nil {
+		if v, ok := md1VersionRefusal(err); ok {
+			g.refusedMD1Version = v
+			return bundleUnsupportedMD1Version
+		}
 		return bundleDropped
 	}
 	g.cards = append(g.cards, bundleCard{

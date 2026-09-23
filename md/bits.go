@@ -1,8 +1,15 @@
-// Package md decodes single-string md1 (descriptor) constellation strings into
-// a human-readable BIP-388 template. md1 is PUBLIC; no secret handling. Wire
-// format: descriptor-mnemonic/crates/md-codec @ 0.42.0 (decode_md1_string path).
-// Chunked md1 is detected and refused (ErrChunkedUnsupported); reassembly +
-// wallet-policy xpub-expansion are out of scope (ledger #10).
+// Package md is the SeedHammer fork's Go port of the md1 (descriptor)
+// constellation codec. md1 is PUBLIC; no secret handling.
+//
+// PROVENANCE PIN (Rust-primary rule). The wire format -- versions {4, 8}, the
+// taproot internal key's three states and kind bit -- and the identity hashes
+// track descriptor-mnemonic/crates/md-codec 0.47.0 (descriptor-mnemonic
+// cf35d61a, tag descriptor-mnemonic-md-cli-v0.19.0), with the kind-1 vectors
+// vendored from descriptor-mnemonic 430ea478. Known lags, each with a
+// follow-up: pathless shared origins (F-166); md-codec's compose `--unspendable`
+// selection and SPEC §6's kind-1 mint refusals (F-654). compose.go carries its
+// own, older pin (md-codec::compose at 66bdf2f4). Vendored corpora are pinned
+// per file in md/testdata/*.provenance.json.
 package md
 
 import "errors"

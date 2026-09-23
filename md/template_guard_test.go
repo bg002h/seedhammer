@@ -33,7 +33,7 @@ func trNumsSortedMultiAGuard() *descriptor {
 		n:        3,
 		pathDecl: pathDecl{n: 3, shared: &o},
 		useSite:  useSitePath{hasMultipath: true, multipath: []alternative{{value: 0}, {value: 1}}},
-		tree:     node{tag: tagTr, body: trBody{isNums: true, keyIndex: 0, tree: &leaf}},
+		tree:     node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, keyIndex: 0, tree: &leaf}},
 	}
 }
 
@@ -45,7 +45,7 @@ func trNumsMultiAGuard() *descriptor {
 		n:        3,
 		pathDecl: pathDecl{n: 3, shared: &o},
 		useSite:  useSitePath{hasMultipath: true, multipath: []alternative{{value: 0}, {value: 1}}},
-		tree:     node{tag: tagTr, body: trBody{isNums: true, keyIndex: 0, tree: &leaf}},
+		tree:     node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, keyIndex: 0, tree: &leaf}},
 	}
 }
 

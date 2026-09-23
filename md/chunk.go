@@ -75,7 +75,7 @@ func (h ChunkHeader) write(w *bitWriter) error {
 }
 
 // readChunkHeader reads a 37-bit chunk header from r (chunk.rs:67-85). Returns
-// errWireVersion if the 4-bit version != WF_REDESIGN_VERSION, and
+// a *WireVersionError if the 4-bit version is outside {4, 8}, and
 // errChunkFlagMissing if the chunked-flag is clear. This is the post-discriminator
 // parse: callers MUST gate it behind the syms[0]&1 bit-0 probe (I-3).
 func readChunkHeader(r *bitReader) (ChunkHeader, error) {
@@ -84,8 +84,8 @@ func readChunkHeader(r *bitReader) (ChunkHeader, error) {
 		return ChunkHeader{}, err
 	}
 	version := uint8(v)
-	if version != wfRedesignVersion {
-		return ChunkHeader{}, errWireVersion
+	if !isSupportedVersion(version) {
+		return ChunkHeader{}, &WireVersionError{Got: version}
 	}
 	chunked, err := r.readBool()
 	if err != nil {
@@ -155,7 +155,7 @@ func split(d *descriptor) ([]string, error) {
 
 		var w bitWriter
 		hdr := ChunkHeader{
-			Version:     wfRedesignVersion,
+			Version:     d.wireVersion(), // chunk.rs:280 -- never a constant
 			Chunked:     true,
 			ChunkSetID:  csid,
 			TotalChunks: count,

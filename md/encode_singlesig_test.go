@@ -279,7 +279,7 @@ func TestEncodeSingleSigTrBody(t *testing.T) {
 	if !ok {
 		t.Fatalf("tr body type %T, want trBody", d.tree.body)
 	}
-	if tb.isNums {
+	if tb.isNums() {
 		t.Error("tr is_nums: got true, want false")
 	}
 	if tb.tree != nil {

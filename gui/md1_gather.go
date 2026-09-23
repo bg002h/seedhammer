@@ -25,11 +25,18 @@ type md1Gatherer struct {
 	total  int
 	setID  uint32
 	primed bool
+	// refusedVersion: the wire version the last gatherUnsupportedVersion
+	// chunk declared, for the operator message.
+	refusedVersion uint8
 }
 
 func (g *md1Gatherer) offer(s string) gatherStatus {
 	h, err := md.ParseChunkHeader(s)
 	if err != nil {
+		if v, ok := md1VersionRefusal(err); ok {
+			g.refusedVersion = v
+			return gatherUnsupportedVersion
+		}
 		return gatherIgnored
 	}
 	if !g.primed {
@@ -87,7 +94,13 @@ func (g *md1Gatherer) collected() []string {
 // exactly what it was.
 func md1GatherFlow(ctx *Context, th *Colors, first string) bool {
 	g := &md1Gatherer{}
-	g.offer(first) // first came from a chunked md1 mdmkText; primes the set.
+	// first came from a chunked md1 mdmkText; it primes the set -- unless its
+	// version is one this firmware does not read, when there is no set to
+	// gather and "Captured 0 of 0" would be a screen about nothing.
+	if g.offer(first) == gatherUnsupportedVersion {
+		showError(ctx, th, "md1 descriptor", md1VersionMessage(g.refusedVersion))
+		return false
+	}
 	syswPrimeCard(ctx, g)
 	if g.complete() {
 		gatheredDescriptorFlow(ctx, th, g.collected())
@@ -120,6 +133,8 @@ func md1GatherFlow(ctx *Context, th *Colors, first string) bool {
 					msg = "Already captured that chunk."
 				case gatherIgnored:
 					msg = "Not an md1 descriptor chunk."
+				case gatherUnsupportedVersion:
+					msg = md1VersionMessage(g.refusedVersion)
 				}
 			}
 		default:

@@ -2,6 +2,7 @@ package md
 
 import (
 	"errors"
+	"fmt"
 	"math/bits"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -18,8 +19,27 @@ import (
 // of multi-part md1 descriptors is out of scope for T2c (ledger #10).
 var ErrChunkedUnsupported = errors.New("md: chunked md1 not supported")
 
+// ErrUnsupportedWireVersion matches (via errors.Is) every refusal of a
+// well-formed md1 whose 4-bit wire version is outside the set this build
+// reads. The concrete error is a *WireVersionError naming the version, so a
+// caller can say WHICH version rather than "not an md1" (SPEC §6a).
+var ErrUnsupportedWireVersion = errors.New("md: unsupported wire version")
+
+// WireVersionError is the concrete unsupported-version refusal. Got is the
+// version the header DECLARES -- an observation, not a claim that the card is
+// intact or that any tool ever wrote it (F-643: a BCH mis-correction beyond
+// capacity can land on any header value).
+type WireVersionError struct{ Got uint8 }
+
+func (e *WireVersionError) Error() string {
+	return fmt.Sprintf("md: wire version %d is not one this build reads (accepted: %d, %d)",
+		e.Got, wfRedesignVersion, wfUnspendableVersion)
+}
+
+// Is makes errors.Is(err, ErrUnsupportedWireVersion) true.
+func (e *WireVersionError) Is(target error) bool { return target == ErrUnsupportedWireVersion }
+
 var (
-	errWireVersion      = errors.New("md: wire version mismatch")
 	errTagOutOfRange    = errors.New("md: tag out of range")
 	errKGreaterThanN    = errors.New("md: threshold k greater than n")
 	errDepthExceeded    = errors.New("md: decode recursion depth exceeded")
@@ -112,10 +132,38 @@ type multiKeysBody struct { // Multi / SortedMulti / MultiA / SortedMultiA
 	indices []uint8
 }
 type trBody struct { // Tr
-	isNums   bool
+	// ik is the internal key's kind (port of md-codec tree.rs InternalKey).
+	// keyIndex is meaningful ONLY when ik == InternalKeySlot. The zero value
+	// is InternalKeySlot, which is what the pre-refactor `isNums: false`
+	// zero value meant, so a literal that omits ik is unchanged in meaning.
+	ik       InternalKeyKind
 	keyIndex uint8
 	tree     *node
 }
+
+// isNums reports the WIRE bit is_nums: true for every internal key that is
+// not a placeholder slot (NUMS or Liana-unspendable). It is the bit, not the
+// kind -- a caller that needs to tell the two unspendable kinds apart must
+// switch on ik, never on this.
+func (b trBody) isNums() bool { return b.ik != InternalKeySlot }
+
+// InternalKeyKind is a taproot internal key's three states -- the port of
+// md-codec's `tree::InternalKey` (md-codec 0.47.0, SPEC_liana_unspendable
+// _internal_key §3f). Exported because EmitTapLeavesChunks and
+// TapLeavesChunks return it: a two-state bool cannot say "Liana-unspendable",
+// and reading kind 1 as NUMS derives a DIFFERENT WALLET's addresses (§7a).
+type InternalKeyKind uint8
+
+const (
+	// InternalKeySlot -- a real, spendable key at a placeholder slot.
+	InternalKeySlot InternalKeyKind = iota
+	// InternalKeyNUMS -- the BIP-341 NUMS H point, raw x-only. Wire kind 0.
+	InternalKeyNUMS
+	// InternalKeyLianaUnspendable -- Liana's unspendable xpub, derived from the
+	// tap tree's leaf keys (SPEC §2). Wire kind 1; exists only at wire version 8.
+	InternalKeyLianaUnspendable
+)
+
 type keyArgBody struct{ index uint8 }
 type hash256Body [32]byte
 type hash160Body [20]byte
@@ -297,9 +345,17 @@ func readUseSitePath(r *bitReader) (useSitePath, error) {
 	return useSitePath{hasMultipath: hasMP, multipath: alts, wildcardHardened: wild}, nil
 }
 
-// ─── Header (port of header.rs:38-50). 5 bits; version must == 4. ────────────
+// ─── Header (port of header.rs:26-56). 5 bits; version ∈ {4, 8}. ─────────────
 
-const wfRedesignVersion = 4
+const (
+	wfRedesignVersion    = 4 // header.rs WF_REDESIGN_VERSION
+	wfUnspendableVersion = 8 // header.rs WF_UNSPENDABLE_VERSION (F-449)
+)
+
+// isSupportedVersion is header.rs is_supported_version: exactly {4, 8}.
+func isSupportedVersion(v uint8) bool {
+	return v == wfRedesignVersion || v == wfUnspendableVersion
+}
 
 type header struct {
 	version        uint8
@@ -313,8 +369,8 @@ func readHeader(r *bitReader) (header, error) {
 	}
 	divergent := (raw>>4)&1 != 0
 	version := uint8(raw & 0b1111)
-	if version != wfRedesignVersion {
-		return header{}, errWireVersion
+	if !isSupportedVersion(version) {
+		return header{}, &WireVersionError{Got: version}
 	}
 	return header{version: version, divergentPaths: divergent}, nil
 }
@@ -323,11 +379,13 @@ func readHeader(r *bitReader) (header, error) {
 
 const maxDecodeDepth = 128
 
-func readNode(r *bitReader, kiw uint8) (node, error) {
-	return readNodeDepth(r, kiw, 0)
+// readNode reads one node. wireVersion is the version the header declared:
+// the Tr arm reads a kind bit only at version 8 (tree.rs read_node).
+func readNode(r *bitReader, kiw uint8, wireVersion uint8) (node, error) {
+	return readNodeDepth(r, kiw, wireVersion, 0)
 }
 
-func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
+func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (node, error) {
 	if depth >= maxDecodeDepth {
 		return node{}, errDepthExceeded
 	}
@@ -344,41 +402,41 @@ func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
 		}
 		b = keyArgBody{index: uint8(idx)}
 	case tagSh, tagWsh, tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
-		child, err := readNodeDepth(r, kiw, depth+1)
+		child, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
 		b = childrenBody{children: []node{child}}
 	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI:
-		l, err := readNodeDepth(r, kiw, depth+1)
+		l, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
-		r2, err := readNodeDepth(r, kiw, depth+1)
+		r2, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
 		b = childrenBody{children: []node{l, r2}}
 	case tagAndOr:
-		a, err := readNodeDepth(r, kiw, depth+1)
+		a, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
-		bb, err := readNodeDepth(r, kiw, depth+1)
+		bb, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
-		c, err := readNodeDepth(r, kiw, depth+1)
+		c, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
 		b = childrenBody{children: []node{a, bb, c}}
 	case tagTapTree:
-		l, err := readNodeDepth(r, kiw, depth+1)
+		l, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
-		r2, err := readNodeDepth(r, kiw, depth+1)
+		r2, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 		if err != nil {
 			return node{}, err
 		}
@@ -422,7 +480,7 @@ func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
 		}
 		children := make([]node, 0, count)
 		for i := 0; i < count; i++ {
-			c, err := readNodeDepth(r, kiw, depth+1)
+			c, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 			if err != nil {
 				return node{}, err
 			}
@@ -430,9 +488,24 @@ func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
 		}
 		b = variableBody{k: k, children: children}
 	case tagTr:
+		// is_nums(1) | [kind(1) iff is_nums && v==8] | [key_index(kiw) iff
+		// !is_nums] | has_tree(1) | [tree] -- tree.rs read_node's Tr arm.
 		isNums, err := r.readBool()
 		if err != nil {
 			return node{}, err
+		}
+		ik := InternalKeySlot
+		if isNums {
+			ik = InternalKeyNUMS
+			if wireVersion == wfUnspendableVersion {
+				kind, err := r.readBool()
+				if err != nil {
+					return node{}, err
+				}
+				if kind { // SPEC §3d: kind bit 1 = Liana unspendable, 0 = NUMS.
+					ik = InternalKeyLianaUnspendable
+				}
+			}
 		}
 		var keyIndex uint8
 		if !isNums {
@@ -448,13 +521,13 @@ func readNodeDepth(r *bitReader, kiw uint8, depth uint8) (node, error) {
 		}
 		var sub *node
 		if hasTree {
-			child, err := readNodeDepth(r, kiw, depth+1)
+			child, err := readNodeDepth(r, kiw, wireVersion, depth+1)
 			if err != nil {
 				return node{}, err
 			}
 			sub = &child
 		}
-		b = trBody{isNums: isNums, keyIndex: keyIndex, tree: sub}
+		b = trBody{ik: ik, keyIndex: keyIndex, tree: sub}
 	case tagAfter, tagOlder:
 		v, err := r.read(32)
 		if err != nil {
@@ -841,7 +914,7 @@ func decodePayload(b []byte, totalBits int) (*descriptor, error) {
 	}
 	// kiw = ⌈log₂(n)⌉ = 32 - leadingZeros(n-1).
 	kiw := uint8(32 - bits.LeadingZeros32(uint32(pd.n)-1))
-	tree, err := readNode(r, kiw)
+	tree, err := readNode(r, kiw, h.version)
 	if err != nil {
 		return nil, err
 	}
@@ -954,7 +1027,7 @@ func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
 			}
 		}
 	case trBody:
-		if !b.isNums {
+		if !b.isNums() {
 			if int(b.keyIndex) >= len(seen) {
 				return errNUMSConflict
 			}
@@ -1279,7 +1352,7 @@ func classifyPolicy(tree node) (PolicyKind, int, int) {
 			// classification locally robust — a NUMS-keypath-only tr (no @i
 			// referenced) is already rejected by validatePlaceholderUsage before
 			// summarize, but we never claim a single-key policy for is_nums here.
-			if !b.isNums && b.tree == nil {
+			if !b.isNums() && b.tree == nil {
 				return PolicySingle, 0, 0 // tr(@N) key-path only
 			}
 		}

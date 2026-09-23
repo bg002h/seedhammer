@@ -211,3 +211,35 @@ Two gates keep the pins honest, both in `md/f533_pinned_vectors_test.go`:
 fall back to `vectors/`. Reading `testdata/vectors/<name>.phrase.txt` directly
 works today and breaks on the re-vendor; that was F-614, and
 `md/policy_shape_test.go` was the last place it survived.
+
+### Wire kind 1 (F-449 stage 3)
+
+The primary's first vectors whose taproot internal key is Liana's unspendable
+xpub (wire version 8, kind bit 1), vendored from descriptor-mnemonic
+`430ea478`:
+
+| vector | what it is for |
+| --- | --- |
+| `liana_taproot` | `nums_taproot`'s kind-1 twin (same tree, same path) and the **only single-string v8 card**; listed in `singleStringVectorNames` for byte and string parity. |
+| `keyed_tr_liana_kofn_recovery` | `keyed_compose_preset_kofn_recovery`'s twin (same body, keys and fingerprints): the identity-distinctness pair of `TestKind0AndKind1TwinsNeverShareAnIdentity`. |
+| `keyed_tr_liana_nested_two_recoveries` | the F-640 nested shape Liana accepts, over the same four keys in the same order: the structure-independence pin (`TestLianaKeyDependsOnTheLeafKeysNotTheTree`). |
+
+`scripts/vendor-compose-vectors.sh`'s selector widened from `keyed_|compose_`
+to `keyed_|compose_|liana_`, and `isComposeVectorFile` in
+`md/compose_vectors_pin_test.go` widened with it. Without the second change
+`liana_taproot`'s files would sit in the directory with no directory-scan
+coverage (measured: the pin test did not flag them).
+
+`liana_cases.json` is the Rust primary's copy of Liana's own golden xpubs
+(SPEC §8.1), with its own pin `liana_cases.provenance.json`, written by
+`scripts/vendor-liana-cases.sh`; `md/liana_test.go` checks the sha256 and
+asserts exactly nine cases.
+
+Regenerate with the descriptor-mnemonic path given **explicitly** -- both
+scripts default to `$HERE/../descriptor-mnemonic`, which from a worktree is a
+sibling that does not exist:
+
+```bash
+scripts/vendor-compose-vectors.sh /scratch/code/shibboleth/descriptor-mnemonic
+scripts/vendor-liana-cases.sh /scratch/code/shibboleth/descriptor-mnemonic
+```

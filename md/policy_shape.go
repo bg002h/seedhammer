@@ -123,7 +123,7 @@ func policyShape(tree node) PolicyShape {
 		if !ok {
 			return PolicyShape{}
 		}
-		if b.isNums {
+		if b.isNums() {
 			s.KeyPath = KeyPathNUMS
 		} else {
 			s.KeyPath = KeyPathSpendable

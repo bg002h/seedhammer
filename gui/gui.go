@@ -2784,6 +2784,10 @@ func mdmkFlow(ctx *Context, th *Colors, s mdmkText) {
 					// condition — not a fixed line — anchors this arm.
 					md1GatherFlow(ctx, th, str)
 				default:
+					if v, ok := md1VersionRefusal(err); ok {
+						showError(ctx, th, "md1 descriptor", md1VersionMessage(v))
+						break
+					}
 					showError(ctx, th, "md1 descriptor", "Can't decode this descriptor.")
 				}
 			}

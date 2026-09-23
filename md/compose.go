@@ -958,7 +958,14 @@ func lowerTr(list PathList, declared []*SlotOrigin) (Composed, error) {
 		}
 		spine = &acc
 	}
-	tree := node{tag: tagTr, body: trBody{isNums: ik < 0, keyIndex: 0, tree: spine}}
+	// ik < 0: no path became the internal key, so it is the NUMS point.
+	// (Stage 3 ports no Liana selection into the composer; that is the port
+	// of md-codec's `--unspendable`, owned by F-449 stage 4.)
+	ikKind := InternalKeyNUMS
+	if ik >= 0 {
+		ikKind = InternalKeySlot
+	}
+	tree := node{tag: tagTr, body: trBody{ik: ikKind, keyIndex: 0, tree: spine}}
 	exp := experimentalMarks(list, func(i int) bool { return m == 1 && i != ik && list.Paths[i].isBareMulti() })
 	return finishComposed(list, declared, tree, slots, ik, exp)
 }

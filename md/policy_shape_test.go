@@ -177,7 +177,7 @@ func TestPolicyShapeRefusesAnUnknownTag(t *testing.T) {
 	// makes it a stand-in for "a tag this walk has not been taught".
 	tree := node{tag: tagWsh, body: childrenBody{children: []node{{
 		tag:  tagTr,
-		body: trBody{isNums: true, keyIndex: 0},
+		body: trBody{ik: InternalKeyNUMS, keyIndex: 0},
 	}}}}
 	s := policyShape(tree)
 	if s.Complete {

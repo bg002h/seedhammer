@@ -50,7 +50,7 @@ func WalletDescriptorTemplateId(d *descriptor) ([16]byte, error) {
 		return [16]byte{}, err
 	}
 	// (b) tree bits (identity.rs:78).
-	if err := writeNode(&w, d.tree, width); err != nil {
+	if err := writeNode(&w, d.tree, width, d.wireVersion()); err != nil { // SPEC §3e
 		return [16]byte{}, err
 	}
 	// (c) the UseSitePathOverrides TLV ENTRY, iff present (identity.rs:79-98).

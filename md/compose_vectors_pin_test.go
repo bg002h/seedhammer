@@ -83,6 +83,13 @@ var composeVectorNames = []string{
 	"keyed_wsh_sortedmulti_2of3",
 	"keyed_wsh_thresh",
 	"keyed_wsh_timelock_hashlock",
+	// WIRE KIND 1, 50 -> 53 (F-449 stage 3). The primary's first vectors whose
+	// taproot internal key is Liana's unspendable xpub: two keyed (conformance
+	// records, so the keyed gates enrol them) and one keyless single-string
+	// twin of nums_taproot (the only version-8 SINGLE-string card).
+	"keyed_tr_liana_kofn_recovery",
+	"keyed_tr_liana_nested_two_recoveries",
+	"liana_taproot",
 }
 
 // isComposeVectorFile: the pinned corpus's file names, and nothing else in the
@@ -103,7 +110,8 @@ var composeVectorNames = []string{
 // hardcoded prefix would have let any compose_refusal_*.json in unchecked,
 // which is the hole this scan exists to close.
 func isComposeVectorFile(name string) bool {
-	if !strings.HasPrefix(name, "compose_") && !strings.HasPrefix(name, "keyed_") {
+	if !strings.HasPrefix(name, "compose_") && !strings.HasPrefix(name, "keyed_") &&
+		!strings.HasPrefix(name, "liana_") {
 		return false
 	}
 	return !composeRefusalPinnedNames()[name]
@@ -130,13 +138,14 @@ func TestComposeVectorsMatchTheirProvenancePin(t *testing.T) {
 	if p.Vectors != len(composeVectorNames) {
 		t.Fatalf("pin says %d vectors, this test knows %d", p.Vectors, len(composeVectorNames))
 	}
-	// 46 keyed vectors carry five files, 4 unkeyed carry four: 246
-	// (176 + 14x5 = 246, and 36 + 14 = 50 names).
+	// 48 keyed vectors carry five files, 5 unkeyed carry four: 260
+	// (48x5 + 5x4 = 260, and 50 + 3 = 53 names; F-449 stage 3 added two keyed
+	// kind-1 vectors and the keyless liana_taproot).
 	// The 29th keyed_compose is keyed_compose_wsh_timelock_hashlock, the composer's own
 	// three-path wsh policy with both timelock kinds and a hashlock; 30-32 are
 	// the per-kind hashlock presets added by SPEC_hashlock_kinds §10.
-	if len(p.Files) != 246 {
-		t.Fatalf("pin lists %d files, want 246", len(p.Files))
+	if len(p.Files) != 260 {
+		t.Fatalf("pin lists %d files, want 260", len(p.Files))
 	}
 	pinned := map[string]bool{}
 	seen := map[string]bool{}

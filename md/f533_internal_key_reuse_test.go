@@ -19,7 +19,11 @@ import "testing"
 
 // trInternal builds tr(internal, tree), choosing NUMS or a placeholder.
 func trInternal(isNums bool, keyIndex uint8, tree *node) node {
-	return node{tag: tagTr, body: trBody{isNums: isNums, keyIndex: keyIndex, tree: tree}}
+	ik := InternalKeySlot
+	if isNums {
+		ik = InternalKeyNUMS
+	}
+	return node{tag: tagTr, body: trBody{ik: ik, keyIndex: keyIndex, tree: tree}}
 }
 
 func tapLeafKey(slot uint8) node {
