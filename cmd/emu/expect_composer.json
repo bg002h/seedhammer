@@ -67,5 +67,14 @@
     ],
     "templateId": "e0863d3ccac31a64d3b5e14b85ccd6c0",
     "templateStub": "e0863d3c"
+  },
+  "liana": {
+    "entries": 1,
+    "numsTemplateId": "8107216456de60d05e57f7fe268824d8",
+    "strings": [
+      "md13ls8aqqxq6tvyyykjmpprj6tvyy495kcgfwtsqrq0zjqgsexd9dcqqqv65q3cm0m0nz2h7w9"
+    ],
+    "templateId": "f99cc42e1ff68bae546c4d1070e5963f",
+    "templateStub": "f99cc42e"
   }
 }

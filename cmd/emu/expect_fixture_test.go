@@ -59,12 +59,24 @@ func TestShotsComposerExpectFixtureCoversEveryFieldTheWalkReads(t *testing.T) {
 	var all struct {
 		Keyed   map[string]map[string]json.RawMessage `json:"keyed"`
 		Keyless map[string]json.RawMessage            `json:"keyless"`
+		Liana   map[string]json.RawMessage            `json:"liana"`
 	}
 	if err := json.Unmarshal(blob, &all); err != nil {
 		t.Fatalf("expect_composer.json does not parse: %v", err)
 	}
 
-	// The keyed arm drives both forms and reads EVERY field.
+	// F-449 stage 4's liana arm reads ONE field no other arm has: the NUMS
+	// twin's Template-ID, which it asserts the stub screen does NOT show. It is
+	// named here, so "the keyed arm reads every field" stays a checked claim
+	// about every OTHER field rather than a rule the new arm quietly broke.
+	lianaOnly := map[string]bool{"numsTemplateId": true}
+	for f := range lianaOnly {
+		if !seen[f] {
+			t.Errorf("%q is exempted as liana-only but the walk no longer reads it", f)
+		}
+	}
+
+	// The keyed arm drives both forms and reads every field but those.
 	for _, form := range []string{"A", "B"} {
 		got, ok := all.Keyed[form]
 		if !ok {
@@ -72,9 +84,19 @@ func TestShotsComposerExpectFixtureCoversEveryFieldTheWalkReads(t *testing.T) {
 			continue
 		}
 		for _, f := range fields {
+			if lianaOnly[f] {
+				continue
+			}
 			if _, ok := got[f]; !ok {
 				t.Errorf("keyed form %s is missing %q, which shots_composer.js reads", form, f)
 			}
+		}
+	}
+
+	// The liana arm, like the key-less one, composes no keys: its five fields.
+	for _, f := range []string{"templateId", "templateStub", "numsTemplateId", "entries", "strings"} {
+		if _, ok := all.Liana[f]; !ok {
+			t.Errorf("the liana arm is missing %q", f)
 		}
 	}
 

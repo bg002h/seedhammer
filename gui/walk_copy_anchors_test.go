@@ -209,6 +209,7 @@ var notComposerCopy = map[string]string{
 	"FROM PAYLOAD":                             "screen title, menu row, computed summary or another program's copy",
 	"Keep this payload loaded?":                "screen title, menu row, computed summary or another program's copy",
 	"Keyless template - no addresses.":         "screen title, menu row, computed summary or another program's copy",
+	"Template has no keys - no addresses.":     "noAddressLines (wallet_policy.go), shared with the Wallet Policy program; not composer copy",
 	"Keys loaded: 2, plus 1 seed.":             "screen title, menu row, computed summary or another program's copy",
 	"Leave unseated":                           "screen title, menu row, computed summary or another program's copy",
 	"Load Payload":                             "screen title, menu row, computed summary or another program's copy",

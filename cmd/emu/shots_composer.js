@@ -273,6 +273,11 @@ const ENGRAVE_HANDLERS = [
   { name: "engrave-done", match: "Engravingcompletedsuccessfully", act: "confirm" },
   { name: "choose-variant", match: "Chooseengraving", act: "confirm" },
   { name: "bundle-engraved", match: "Bundleengraved", act: "confirm" },
+  // F-544 (fork 5971ad3, 2026-09-16) ends every composer run with the restore
+  // document, AFTER the bundle modal and BEFORE the door. This list predates it,
+  // so from that commit on every arm STALLED here -- measured at the F-449
+  // stage-3 base, where nothing ran this walk. Its checkmark leaves it.
+  { name: "restore-doc", match: "RestoreDoc", act: "confirm" },
 ];
 
 const DOOR_ROW = "Buildanewpolicy";
@@ -500,7 +505,7 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
         "expect_composer.json with capture_composer.py --emit-expect");
     }
     const all = await res.json();
-    expect = arm === "keyless" ? all.keyless : all.keyed[form];
+    expect = arm === "keyless" ? all.keyless : arm === "liana" ? all.liana : all.keyed[form];
     if (!expect) {
       throw new Error(`expect_composer.json has no entry for arm=${arm} form=${form}`);
     }
@@ -563,7 +568,11 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
     must(consent.joined, "KEY PATH: NONE (NUMS)", "the consent's key-path line");
     must(consent.joined, `Template-ID: ${expect.templateId}`, "the consent's Template-ID");
     must(consent.joined, `mk1 stub (template): ${expect.templateStub}`, "the consent's stub");
-    must(consent.joined, "Keyless template - no addresses.", "the no-addresses line");
+    // "Template has no keys", not "Keyless template": the composed template
+    // carries a Keys entry per slot (origins, no xpub), so noAddressLines takes
+    // its !allSlotsHaveXpub arm. Measured at the F-449 stage-3 base, where the
+    // old needle failed.
+    must(consent.joined, "Template has no keys - no addresses.", "the no-addresses line");
     must(consent.joined, "Verify off-device.", "the verify-off-device line");
 
     await tap(CONFIRM, 500);
@@ -605,6 +614,96 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
       digests: tail.digests, needlesProven: proven,
       matched: { templateId: expect.templateId, templateStub: expect.templateStub,
                  strings: flat },
+    };
+  }
+
+  if (arm === "liana") {
+    // F-449 stage 4, SPEC_liana_unspendable_internal_key §0b on the emulator:
+    // the key-path CHOICE, reached BY TOUCH, placed before the stub screen,
+    // seeded from the current value on re-entry, and the Liana-key template
+    // engraved byte for byte equal to `md compose --unspendable liana`. No
+    // payload, as the keyless arm: the template alone is the artifact, and
+    // the device-vs-Liana ADDRESS leg is TestDeviceDerivesLianasOwnAddresses-
+    // ForKind1 (a keyed composition needs four seats this payload cannot fill).
+    await bootAndChoosePayload(shotURL, taken, "none");
+    await goTo("Wallet Policy");
+    await tap(CONFIRM, 450);
+    await waitFor("Build a new policy");
+    await chooseRow(1, "Which script?", "Build a new policy");
+    await chooseRow(0, "Start from?", "Taproot (tr)");
+    // Start from?: row 0 Build my own paths, 1 plain-multisig,
+    // 2 simple-timelocked-inheritance, 3 kofn-recovery.
+    await chooseRow(3, "Add a spend path", "kofn-recovery");
+    const pathList = window.shScreen();
+    must(pathList, "Path 1: 2-of-3", "the kofn-recovery primary");
+
+    // PLACEMENT: after Done comes the key-path choice, not the stub screen.
+    // Two paths, so no key-order question sits between them.
+    const nRows = window.shTargets().length;
+    await chooseRow(nRows - 1, "Which key path?", "Done");
+    const choice = window.shScreen();
+    mustNot(choice, "Template-ID", "the stub screen drew before the key-path choice");
+    must(choice, "DIFFERENT WALLETS", "the choice's different-wallets sentence");
+    must(choice, "NUMS point", "the NUMS row");
+    must(choice, "Liana key", "the Liana row");
+    // THE FIRST-PAGE GATE, on the frame the operator sees: both rows tappable.
+    if (window.shTargets().length !== 2) {
+      throw new Error(`the key-path screen offers ${window.shTargets().length} tappable ` +
+        `row(s) on its first page, want 2.\nScreen: ${JSON.stringify(choice)}`);
+    }
+    taken.push(await screenShot(shotURL, "l01-key-path.png"));
+    await chooseRow(1, "Template-ID", "Liana key");
+    let stub = await readAllPages(shotURL, "l02-stub-p");
+    taken.push(...stub.names);
+    must(stub.joined, `Template-ID: ${expect.templateId}`, "the Liana Template-ID");
+    mustNot(stub.joined, `Template-ID: ${expect.numsTemplateId}`, "the NUMS twin's id");
+    proven.push("the stub screen shows the kind chosen BEFORE it (placement)");
+
+    // RE-ENTRY: Back to the path list, Done again, and press straight through.
+    // The screen must reopen on the Liana row, so the id must not move.
+    await tap(BACK, 450);
+    await waitFor("Add a spend path");
+    const nRows2 = window.shTargets().length;
+    await chooseRow(nRows2 - 1, "Which key path?", "Done (again)");
+    await tap(CONFIRM, 450);
+    await waitFor("Template-ID");
+    stub = await readAllPages(shotURL, "l03-stub-again-p");
+    taken.push(...stub.names);
+    must(stub.joined, `Template-ID: ${expect.templateId}`,
+      "pressing through the re-entered choice changed the wallet");
+    proven.push("re-entry opens on the current kind");
+
+    await tap(CONFIRM, 450);
+    await waitFor("Seat keys into this template?");
+    await chooseRow(0, "Review", "Engrave a key-less template");
+    const consent = await readAllPages(shotURL, "l04-consent-p");
+    taken.push(...consent.names);
+    must(consent.joined, "KEY PATH: NONE (LIANA KEY)", "the kind-1 key-path line");
+    mustNot(consent.joined, "KEY PATH: NONE (NUMS)", "the kind-0 line on a kind-1 wallet");
+    mustNot(consent.joined, "OUTSIDE LIANA'S MODEL", "the Liana notice on a shape Liana imports");
+    must(consent.joined, `Template-ID: ${expect.templateId}`, "the consent's Template-ID");
+
+    await tap(CONFIRM, 500);
+    await waitFor("Nothing outside this device");
+    window.shPress(...CONFIRM);
+    await sleep(HOLD_MS);
+    window.shRelease(...CONFIRM);
+    await waitFor("No slot is seated");
+    await tap(CONFIRM, 450);
+    const censusScreen = await waitFor("Plates To Cut");
+    must(censusScreen, "This engraves 1 plate.", "the census claim");
+    taken.push(await screenShot(shotURL, "l05-census.png"));
+    const claim = censusClaimOf(censusScreen);
+    await tap(CONFIRM, 500);
+    const tail = await runEngraveTail({ shotURL, prefix: "l06-",
+      variant: { rows: ["TEXT + QR", "TEXT ONLY", "QR ONLY"], take: 0 } });
+    taken.push(...tail.shots);
+    const flat = compareEngraved(tail.census, claim, expect, "the Liana-key template plate");
+    return {
+      arm, shots: taken, elapsedSec: Math.round((performance.now() - t0) / 1000),
+      consentPages: consent.pages.length, censusClaim: claim, engraved: flat,
+      needlesProven: proven,
+      matched: { templateId: expect.templateId, templateStub: expect.templateStub, strings: flat },
     };
   }
 
@@ -850,11 +949,18 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
   must(modePick, "Full", "the full-mode row (asked because a seed-seated slot exists)");
   await chooseRow(1, "Plates To Cut", "Watch-only (keys)");
 
-  const censusScreen = window.shScreen();
+  // THE CENSUS IS PAGED, and composerReadScreen WITHHOLDS its checkmark until
+  // the last page has been laid out once. Form B's five lines plus F-497's scope
+  // line run to a second page, so a bare CONFIRM on page 0 did nothing and the
+  // engrave tail stalled on "Plates To Cut" -- measured at the F-449 stage-3
+  // base. readAllPages pages to the end and wraps, which arms the checkmark.
+  taken.push(await screenShot(shotURL, `c12-census-${form}.png`));
+  const census = await readAllPages(shotURL, `c12-census-${form}-p`);
+  taken.push(...census.names);
+  const censusScreen = census.joined;
   for (const line of (expect.censusLines || [])) {
     must(censusScreen, line, "the census screen");
   }
-  taken.push(await screenShot(shotURL, `c12-census-${form}.png`));
   const claim = censusClaimOf(censusScreen);
 
   // (20) The engrave loop, and the byte comparison.
