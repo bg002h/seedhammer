@@ -257,6 +257,13 @@ func walletPolicyConsentLines(md1 []string, keyCards []mk.Card) ([]string, error
 				"but one of them holds two seats.", a, b, tpl.N)
 	}
 
+	// SPEC §7a.3's ENGRAVE HALF: a keyed taproot policy whose key-path kind
+	// this firmware cannot name is refused before consent, not engraved
+	// without its proof. Scoped to KEYED cards: a key-less template (D3/D4)
+	// engraves without an address on purpose, and this is not that.
+	if len(keys) > 0 && md1KeyPathUnknown(tpl) {
+		return nil, errors.New("This firmware cannot derive this policy's taproot key path, so it cannot prove the addresses.")
+	}
 	lines = append(lines, md1Summary(tpl)...)
 	lines = append(lines, walletPolicyAddressLines(md1, tpl, keys)...)
 	return lines, nil
@@ -452,4 +459,12 @@ func seatRefusalMessage(err error) error {
 				"can't tell them apart. It declares no fingerprints.")
 	}
 	return errors.New("Couldn't match the key cards to this policy.")
+}
+
+// md1KeyPathUnknown reports a taproot root whose internal-key kind md could not
+// name (md.rootKeyPath returns KeyPathNone for one). No decoder yields such a
+// kind today -- versions {4, 8} admit three -- so this is the refusal for the
+// day a fourth kind exists (SPEC §7a.3), pinned by a constructed Template.
+func md1KeyPathUnknown(tpl md.Template) bool {
+	return tpl.Root == md.ScriptTr && tpl.KeyPath == md.KeyPathNone
 }

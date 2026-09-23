@@ -200,9 +200,30 @@ func composerCopyNUMS() string {
 	return "KEY PATH: NONE (NUMS)\n" +
 		"Spends use the script paths only. Bitcoin Core imports this form. " +
 		"Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a " +
-		"tr policy whose first path is a single key. Liana and BIP-388 signers " +
-		"need an unspendable xpub instead (see F-449), which is a different " +
-		"wallet with different addresses."
+		"tr policy whose first path is a single key. Liana needs its own " +
+		"unspendable key instead, which this device offers where Liana can " +
+		"import the policy; that is a different wallet with different addresses."
+}
+
+// composerCopyLianaKeyPath is §8f's sibling for wire kind 1 (F-449 stage 4,
+// SPEC §7's print-site arm): the key-path line a Liana-key policy shows at
+// consent. It must NOT reuse §8f, whose Nunchuk sentence is FALSE for kind 1
+// some of the time (SPEC §7, fable M-5): libnunchuk re-renders the key path
+// with the PR-1746 recipe and compares, so it accepts a kind-1 descriptor
+// exactly when the leaf keys already sit in sorted, unique order -- 1 in 2 for
+// two keys, 1 in 24 for four -- and then imports the same wallet.
+//
+// "as of Liana v15.0" is F-633's remedy applied to a NEW claim: a present-tense
+// statement about third-party software names the release it was measured on.
+// Bitcoin Core: measured 2026-09-23, receive 0..2 equal to Liana's own
+// (design/evidence/f449-stage4/).
+func composerCopyLianaKeyPath() string {
+	return "KEY PATH: NONE (LIANA KEY)\n" +
+		"Spends use the script paths only. The key path is Liana's unspendable " +
+		"key, computed from this wallet's own keys. Liana (as of v15.0) and " +
+		"Bitcoin Core import this form. Nunchuk imports it only when the keys " +
+		"happen to be in sorted order. The same paths with the NUMS key are a " +
+		"different wallet with different addresses."
 }
 
 // composerCopyMixedLockBases is the fable review r0 lens-2 I-2 notice, in the
@@ -252,7 +273,7 @@ func composerCopyMixedLockBases() string {
 // only place that order is written down.
 func composerCopyOutsideLianaModel(class string) string {
 	return "OUTSIDE LIANA'S MODEL\n" +
-		"Liana takes one unlocked path, at least one path locked by older in " +
+		"Liana (as of v15.0) takes one unlocked path, at least one path locked by older in " +
 		"blocks, and no hash. This policy: " + class + ". Bitcoin Core imports it."
 }
 

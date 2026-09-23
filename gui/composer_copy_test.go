@@ -58,7 +58,13 @@ func composerCopyTable() []composerCopyRow {
 		// claim was measured FALSE, 0 of 7 shapes, by running libnunchuk
 		// 2.1.1. Filed as a §8 amendment so this table stays the diff target.
 		{"composerCopyNUMS", "8f", composerCopyNUMS(),
-			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core imports this form. Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a tr policy whose first path is a single key. Liana and BIP-388 signers need an unspendable xpub instead (see F-449), which is a different wallet with different addresses."},
+			"KEY PATH: NONE (NUMS) Spends use the script paths only. Bitcoin Core imports this form. Nunchuk cannot import a NUMS policy at all: for Nunchuk, use wsh, or a tr policy whose first path is a single key. Liana needs its own unspendable key instead, which this device offers where Liana can import the policy; that is a different wallet with different addresses."},
+		// §8y is F-449 stage 4 (SPEC_liana_unspendable_internal_key §0b and
+		// §7): the kind-1 key-path line, the choice screen's lead and two
+		// rows, and the RESET signal. Filed as a §8 amendment so this table
+		// stays the diff target.
+		{"composerCopyLianaKeyPath", "8y", composerCopyLianaKeyPath(),
+			"KEY PATH: NONE (LIANA KEY) Spends use the script paths only. The key path is Liana's unspendable key, computed from this wallet's own keys. Liana (as of v15.0) and Bitcoin Core import this form. Nunchuk imports it only when the keys happen to be in sorted order. The same paths with the NUMS key are a different wallet with different addresses."},
 		{"composerCopyMixedLockBases", "8g", composerCopyMixedLockBases(),
 			"MIXED LOCK BASES Some paths lock by block height and others by time. Nunchuk will refuse this wallet; Bitcoin Core imports it. Taproot accepts both, because it checks each path on its own."},
 		// §8x is the fable review r0 lens-5 I-1/I-2 addition: one consent
@@ -68,7 +74,7 @@ func composerCopyTable() []composerCopyRow {
 		// tell them only after. The example below is the demo payload's own
 		// class -- a plain multisig has no recovery path at all.
 		{"composerCopyOutsideLianaModel", "8x", composerCopyOutsideLianaModel("no locked path"),
-			"OUTSIDE LIANA'S MODEL Liana takes one unlocked path, at least one path locked by older in blocks, and no hash. This policy: no locked path. Bitcoin Core imports it."},
+			"OUTSIDE LIANA'S MODEL Liana (as of v15.0) takes one unlocked path, at least one path locked by older in blocks, and no hash. This policy: no locked path. Bitcoin Core imports it."},
 		{"composerCopySameSeedThreshold", "8g", composerCopySameSeedThreshold([]uint8{1, 2}, 2, 3),
 			"SAME SEED, SAME PATH Slots @1 and @2 are the same seed. This path's 2-of-3 can be satisfied by one person. Liana will refuse it."},
 		{"composerCopySameSeedBelow", "8g", composerCopySameSeedBelow([]uint8{1, 2}, 3),
@@ -449,8 +455,10 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// at §8g) before this row. No existing body could carry it -- §8f and §8g
 	// each name ONE class unconditionally, and this one names whichever of
 	// nine applies, in Liana's own order of refusal.
-	if declared != 86 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 86 -- "+
+	// 87 SINCE F-449 STAGE 4 TASK 5 added §8y's kind-1 key-path line: the
+	// §8f body is false for kind 1 about Nunchuk, so it could not be reused.
+	if declared != 87 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 87 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }
