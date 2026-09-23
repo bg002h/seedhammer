@@ -96,6 +96,8 @@ func (s *bundleGatherScreen) feedback(status bundleOfferStatus) string {
 		return "Already captured that card."
 	case bundleDropped:
 		return "Not an md1/mk1 card."
+	case bundleUnsupportedMD1Version:
+		return md1VersionMessage(s.g.refusedMD1Version)
 	default: // bundleChunkProgress — shown via the tally, no message.
 		return ""
 	}

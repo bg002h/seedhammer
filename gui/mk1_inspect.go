@@ -37,6 +37,10 @@ const (
 	gatherForeign                     // valid mk1 but a different chunk set
 	gatherDup                         // chunk index already captured
 	gatherAdded                       // new chunk added
+	// gatherUnsupportedVersion: a well-formed md1 chunk whose wire version this
+	// firmware does not read (SPEC §6a). NOT gatherIgnored, whose message --
+	// "Not an md1 descriptor chunk." -- is false about such a card.
+	gatherUnsupportedVersion
 )
 
 // mk1Gatherer accumulates mk1 chunk strings toward a complete set. Pure (no
