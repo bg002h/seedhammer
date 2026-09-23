@@ -118,6 +118,17 @@ func TestKeyedConformanceAgreesWithRust(t *testing.T) {
 				t.Errorf("%s: wallet_descriptor_template_id\n  go:   %s\n  rust: %s",
 					name, hex.EncodeToString(tid[:]), want)
 			}
+			// md1_encoding_id: the ONE id that hashes the header, so the only
+			// one that sees the wire VERSION (identity.rs:45). Parsed since R3
+			// and never asserted; measured 48 of 48 records agreeing before
+			// this assertion was added (F-449 stage 3).
+			eid, err := computeEncodingID(d)
+			if err != nil {
+				t.Fatalf("%s: computeEncodingID: %v", name, err)
+			}
+			if got := hex.EncodeToString(eid[:]); got != rec.Md1EncodingID {
+				t.Errorf("%s: md1_encoding_id\n  go:   %s\n  rust: %s", name, got, rec.Md1EncodingID)
+			}
 			if rec.WalletPolicyID == rec.WalletDescriptorTemplateID {
 				t.Errorf("%s: the two ids are EQUAL in the record — comparing the "+
 					"wrong one against a coordinator would silently appear to match", name)
@@ -369,6 +380,24 @@ func assertDescriptorsAgree(t *testing.T, name string, rec keyedConformanceRecor
 			t.Errorf("chain %s: BIP-380 checksum #%s is wrong for the descriptor body", chain, sum)
 		}
 
+		// F-449 stage 3: a wire-kind-1 card renders its internal key as an
+		// ORIGIN-LESS xpub, which descriptorKeyRe (bracket-anchored) never
+		// matches, so D1' would compare a raw xpub against the template's
+		// marker. Reduce it to the marker ONLY on full byte equality with the
+		// Go port's own recipe over the same card.
+		if strings.HasPrefix(rec.Template, lianaTemplatePrefix) {
+			d, err := Reassemble(chunks)
+			if err != nil {
+				t.Fatalf("%s: Reassemble: %v", name, err)
+			}
+			reducedBody, err := reduceLianaInternalKey(chain, body, d)
+			if err != nil {
+				t.Errorf("chain %s: %v", chain, err)
+				continue
+			}
+			body = reducedBody
+		}
+
 		matches := descriptorKeyRe.FindAllStringSubmatchIndex(body, -1)
 		if len(matches) == 0 {
 			t.Errorf("chain %s: no [origin]xkey in the descriptor — a keyed vector renders at "+
@@ -510,6 +539,58 @@ func assertDescriptorsAgree(t *testing.T, name string, rec keyedConformanceRecor
 	for _, idx := range missing {
 		t.Errorf("the Go port's @%d carries an xpub that appears in no chain descriptor of the record", idx)
 	}
+}
+
+// lianaTemplatePrefix is how a wire-kind-1 template opens (md-codec
+// nums.rs LIANA_UNSPENDABLE_MARKER inside tr()).
+const lianaTemplatePrefix = "tr(UNSPENDABLE(liana),"
+
+// reduceLianaInternalKey rewrites a rendered kind-1 descriptor's leading
+// `tr(<xpub>/<chain>/*,` to `tr(UNSPENDABLE(liana),`, and REFUSES unless every
+// clause holds:
+//   - the key derives at <chain>/* -- SPEC §2 step 6, 0/i and 1/i in every
+//     port, whatever the wallet's use-site;
+//   - it is a MAINNET xpub at depth 0, parent 0, child 0 (§2 steps 4-5; every
+//     vendored record is mainnet);
+//   - its 65 bytes EQUAL lianaUnspendableKey over d's own leaf keys.
+//
+// The last clause is FULL byte equality, never "the pubkey is H": a structural
+// match accepts a valid recipe output computed over a DIFFERENT leaf set, and
+// a positive-only corpus cannot tell the two apart (SPEC §8.10) --
+// TestLianaReductionRefusesANearMiss is the input that separates them.
+func reduceLianaInternalKey(chain, body string, d *descriptor) (string, error) {
+	rest, ok := strings.CutPrefix(body, "tr(")
+	if !ok {
+		return "", fmt.Errorf("a kind-1 record's descriptor does not open with tr(: %.24s…", body)
+	}
+	xkey, after, ok := strings.Cut(rest, "/")
+	if !ok {
+		return "", fmt.Errorf("no derivation suffix after the internal key")
+	}
+	suffix := chain + "/*,"
+	if !strings.HasPrefix(after, suffix) {
+		return "", fmt.Errorf("the internal key derives at /%.8s…, want /%s", after, suffix)
+	}
+	if !strings.HasPrefix(xkey, "xpub") {
+		return "", fmt.Errorf("the internal key %.12s… is not a mainnet xpub", xkey)
+	}
+	parsed, err := parseExtendedKey(xkey)
+	if err != nil {
+		return "", err
+	}
+	if parsed.depth != 0 || parsed.parentFP != 0 || parsed.child != 0 {
+		return "", fmt.Errorf("the internal key is depth %d parent %08x child %d, want 0/0/0",
+			parsed.depth, parsed.parentFP, parsed.child)
+	}
+	leaves, err := lianaLeafPubkeys(d)
+	if err != nil {
+		return "", err
+	}
+	if want := lianaUnspendableKey(leaves); parsed.material != want {
+		return "", fmt.Errorf("the internal key is not the recipe over this card's leaves\n"+
+			"  record: %x\n  go:     %x", parsed.material, want)
+	}
+	return lianaTemplatePrefix + strings.TrimPrefix(after, suffix), nil
 }
 
 // parsedExtendedKey is the part of a serialised BIP-32 extended key this gate

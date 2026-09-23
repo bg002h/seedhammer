@@ -164,7 +164,7 @@ func TestDecodeNegative(t *testing.T) {
 				w.writeHeader(false, 3)
 				return w.bytes()
 			},
-			wantErr: errWireVersion,
+			wantErr: ErrUnsupportedWireVersion,
 		},
 		{
 			// Root tag = 0x3F extension prefix → consumes 4-bit subcode, rejects.

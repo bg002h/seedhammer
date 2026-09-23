@@ -15,7 +15,7 @@
   ],
   "repo": "descriptor-mnemonic",
   "remote": "git@github.com:bg002h/descriptor-mnemonic.git",
-  "commit": "b2c5d69384327265da239dc13502727c8f9645fb",
+  "commit": "430ea478d89cc278469b2138129ab2b3b3f86744",
   "repo_clean_when_recorded": true,
   "path": "crates/md-codec/tests/vectors",
   "files": [
@@ -784,6 +784,46 @@
       "sha256": "e8388e61aa6b2c3c74f1964c4befb76ec308b6ed3a51ef3850adc847f86d7e00"
     },
     {
+      "name": "keyed_tr_liana_kofn_recovery.bytes.hex",
+      "sha256": "051d2375b7c343edbe359817c70b6fffd9c219daed90bebddbda9d35d8e77c63"
+    },
+    {
+      "name": "keyed_tr_liana_kofn_recovery.conformance.json",
+      "sha256": "ab3f988cf842eb60a55e4f8f217911cc1999c9d443016234f74bd8c13b57cfc9"
+    },
+    {
+      "name": "keyed_tr_liana_kofn_recovery.descriptor.json",
+      "sha256": "c7ee0e0345ab4b3f2389200c1593e3b3a9edbec15dae7bd07f637d7057de4afd"
+    },
+    {
+      "name": "keyed_tr_liana_kofn_recovery.phrase.txt",
+      "sha256": "d82cea494f04f23ef9bd59573ba7b76ac6eecd177a27bc38c542fd22857f7138"
+    },
+    {
+      "name": "keyed_tr_liana_kofn_recovery.template",
+      "sha256": "3dbe47a155ae7853061649e6ed0037f1ce0d0c71285b285011d671b3272cb952"
+    },
+    {
+      "name": "keyed_tr_liana_nested_two_recoveries.bytes.hex",
+      "sha256": "1298e307702dcabb2f27b23937af2a18e532ab8c98555c714c1ba50876ea1780"
+    },
+    {
+      "name": "keyed_tr_liana_nested_two_recoveries.conformance.json",
+      "sha256": "1836a0af9db7e5cff44b60a36b9797fe9aa08465da308dcf5faec594140cd6e8"
+    },
+    {
+      "name": "keyed_tr_liana_nested_two_recoveries.descriptor.json",
+      "sha256": "61f9e45785dafa4ef8854d09657198a6758b9ceef4f253642f14b9af901d31a5"
+    },
+    {
+      "name": "keyed_tr_liana_nested_two_recoveries.phrase.txt",
+      "sha256": "c506d68071985c1fda209bf523c0f77a02956cbbd4c1729323432b9f65d304bf"
+    },
+    {
+      "name": "keyed_tr_liana_nested_two_recoveries.template",
+      "sha256": "f480daf3a93f67728dc758a62ad8753615ab3f7514fb3e0e76ae004b63c4dc49"
+    },
+    {
       "name": "keyed_tr_multi_a.bytes.hex",
       "sha256": "fd3066643cf27d319672b102c54736431b82d21045671f2e1ac5ae980e0f3de5"
     },
@@ -1002,9 +1042,25 @@
     {
       "name": "keyed_wsh_timelock_hashlock.template",
       "sha256": "5a0ea759595c67394db29210805bc321b2d5993da2ac321bbc3359eb589a97fa"
+    },
+    {
+      "name": "liana_taproot.bytes.hex",
+      "sha256": "2adcd9d57e8ff5d7945b182bd769ffea8448cac1a47dc1af89aa2f9502f7f9fe"
+    },
+    {
+      "name": "liana_taproot.descriptor.json",
+      "sha256": "c8ba3b9ef7289fd64468004980ddc3adb182a3dbeaa57542b966c932d318be5b"
+    },
+    {
+      "name": "liana_taproot.phrase.txt",
+      "sha256": "d3185f30572a299a4508be1fd73b47eb33414692b86f59b8be22dd23fa1e48fd"
+    },
+    {
+      "name": "liana_taproot.template",
+      "sha256": "21711eea7d2f555bf8c007746ceceb68f2e069725945f804af9b762f3b195e37"
     }
   ],
-  "file_count": 246,
-  "vectors": 50,
-  "recorded_at": "2026-09-20"
+  "file_count": 260,
+  "vectors": 53,
+  "recorded_at": "2026-09-23"
 }

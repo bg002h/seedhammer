@@ -26,7 +26,42 @@ var (
 	errDivergentCount    = errors.New("md: divergent path count != n")
 	errPathDeclNMismatch = errors.New("md: pathDecl.n != descriptor.n")
 	// errOverrideOrder is reused from md.go.
+	// errLianaNeedsVersion8: a Liana-unspendable internal key reached a write
+	// at a version below 8, where it has no kind bit (SPEC §3d).
+	errLianaNeedsVersion8 = errors.New("md: Liana-unspendable internal key needs wire version 8")
 )
+
+// wireVersion is the MINIMUM wire version that can express d's tree -- port of
+// md-codec encode.rs Descriptor::wire_version (SPEC §3d/§3e): 8 iff some Tr
+// node anywhere carries a Liana-unspendable internal key, else 4. Every writer
+// of tree bits takes its version from here, the identity hashes included, so
+// two wallets that differ only in the internal-key kind never share an id.
+func (d *descriptor) wireVersion() uint8 {
+	if needsV8(d.tree) {
+		return wfUnspendableVersion
+	}
+	return wfRedesignVersion
+}
+
+func needsV8(n node) bool {
+	switch b := n.body.(type) {
+	case trBody:
+		return b.ik == InternalKeyLianaUnspendable || (b.tree != nil && needsV8(*b.tree))
+	case childrenBody:
+		for _, c := range b.children {
+			if needsV8(c) {
+				return true
+			}
+		}
+	case variableBody:
+		for _, c := range b.children {
+			if needsV8(c) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // kiw = ⌈log₂(n)⌉ = 32 - leadingZeros(n-1), clamped to 0 at n ∈ {0,1}
 // (encode.rs:37-41; mirrors the decoder's md.go:842 computation, using
@@ -156,14 +191,19 @@ const maxAltCount = 9
 
 // writeNode encodes a node: the 6-bit TAG is written FIRST on EVERY arm
 // (R0-I1), then the body. keyIndexWidth is the per-@N index field width (kiw).
-func writeNode(w *bitWriter, n node, keyIndexWidth uint8) error {
+//
+// wireVersion is the version this write targets (tree.rs write_node): the Tr
+// arm writes a kind bit only at version 8. Callers pass
+// descriptor.wireVersion(), NEVER a constant -- the identity hashes included
+// (SPEC §3e: at version 4 the two unspendable kinds hash identically).
+func writeNode(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) error {
 	writeTag(w, n.tag)
 	switch b := n.body.(type) {
 	case keyArgBody:
 		w.write(uint64(b.index), int(keyIndexWidth))
 	case childrenBody:
 		for _, c := range b.children {
-			if err := writeNode(w, c, keyIndexWidth); err != nil {
+			if err := writeNode(w, c, keyIndexWidth, wireVersion); err != nil {
 				return err
 			}
 		}
@@ -181,7 +221,7 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8) error {
 		w.write(uint64(b.k-1), 5)
 		w.write(uint64(len(b.children)-1), 5)
 		for _, c := range b.children {
-			if err := writeNode(w, c, keyIndexWidth); err != nil {
+			if err := writeNode(w, c, keyIndexWidth, wireVersion); err != nil {
 				return err
 			}
 		}
@@ -202,14 +242,25 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8) error {
 			w.write(uint64(idx), int(keyIndexWidth))
 		}
 	case trBody:
-		// is_nums 1b; if !is_nums key_index@kiw; has_tree 1b; optional subtree.
+		// is_nums 1b; [kind 1b iff is_nums && v==8]; if !is_nums key_index@kiw;
+		// has_tree 1b; optional subtree.
 		w.write(uint64(b2u(b.isNums())), 1)
+		if b.isNums() {
+			if wireVersion == wfUnspendableVersion {
+				w.write(uint64(b2u(b.ik == InternalKeyLianaUnspendable)), 1)
+			} else if b.ik == InternalKeyLianaUnspendable {
+				// Kind 1 has no representation below version 8; writing it
+				// would silently emit a NUMS wallet. Fail closed (Rust
+				// debug_asserts the same state at tree.rs write_node).
+				return errLianaNeedsVersion8
+			}
+		}
 		if !b.isNums() {
 			w.write(uint64(b.keyIndex), int(keyIndexWidth))
 		}
 		w.write(uint64(b2u(b.tree != nil)), 1)
 		if b.tree != nil {
-			if err := writeNode(w, *b.tree, keyIndexWidth); err != nil {
+			if err := writeNode(w, *b.tree, keyIndexWidth, wireVersion); err != nil {
 				return err
 			}
 		}
@@ -402,9 +453,10 @@ func encodePayload(d *descriptor) ([]byte, int, error) {
 		return nil, 0, errPathDeclNMismatch
 	}
 
+	version := dc.wireVersion()
 	var w bitWriter
 	writeHeader(&w, header{
-		version:        wfRedesignVersion,
+		version:        version,
 		divergentPaths: dc.pathDecl.divergent != nil,
 	})
 	if err := writePathDecl(&w, dc.pathDecl); err != nil {
@@ -414,7 +466,7 @@ func encodePayload(d *descriptor) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	width := kiw(dc.pathDecl.n)
-	if err := writeNode(&w, dc.tree, width); err != nil {
+	if err := writeNode(&w, dc.tree, width, version); err != nil {
 		return nil, 0, err
 	}
 	if err := writeTLVSection(&w, dc.tlv, width); err != nil {

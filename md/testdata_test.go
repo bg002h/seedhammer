@@ -41,6 +41,9 @@ var singleStringVectorNames = []string{
 	// back and watch it fail.
 	"tr_with_leaf",
 	"nums_taproot",
+	// nums_taproot's wire-kind-1 twin (F-449 stage 3): same tree and path,
+	// Liana's unspendable internal key -- the only single-string v8 card.
+	"liana_taproot",
 	"single_string_boundary",
 }
 
@@ -296,11 +299,22 @@ func buildNode(t *testing.T, jn jsonNode) node {
 			IsNums   bool      `json:"is_nums"`
 			KeyIndex uint8     `json:"key_index"`
 			Tree     *jsonNode `json:"tree"`
+			// md-cli/2 (md-cli 0.18.0+): "liana_unspendable" or ABSENT.
+			UnspendableKind *string `json:"unspendable_kind"`
 		}
 		mustJSON(t, jn.Body.Data, &d)
 		tb := trBody{ik: InternalKeySlot, keyIndex: d.KeyIndex}
 		if d.IsNums {
 			tb.ik = InternalKeyNUMS
+		}
+		if d.UnspendableKind != nil {
+			// An unknown value is a vector this loader cannot represent; guessing
+			// NUMS would build a DIFFERENT wallet and the parity test would blame
+			// the encoder.
+			if *d.UnspendableKind != "liana_unspendable" || !d.IsNums {
+				t.Fatalf("Tr: unspendable_kind %q with is_nums=%v is not representable", *d.UnspendableKind, d.IsNums)
+			}
+			tb.ik = InternalKeyLianaUnspendable
 		}
 		if d.Tree != nil {
 			sub := buildNode(t, *d.Tree)

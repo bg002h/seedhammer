@@ -39,7 +39,7 @@ func WalletPolicyId(d *descriptor) ([16]byte, error) {
 	// Leading segment: the placeholder-form tree bytes only (writeNode), NOT
 	// encode_payload — no header/path_decl/use_site/TLV (identity.rs:179-182).
 	var treeW bitWriter
-	if err := writeNode(&treeW, dc.tree, width); err != nil {
+	if err := writeNode(&treeW, dc.tree, width, dc.wireVersion()); err != nil { // SPEC §3e
 		return [16]byte{}, err
 	}
 	preimage := append([]byte(nil), treeW.intoBytes()...)
