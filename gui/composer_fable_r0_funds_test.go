@@ -138,8 +138,16 @@ func TestFableTwoKeylessPathsAgreeWithTheHostOracle(t *testing.T) {
 	if err != nil {
 		t.Skip("md is not on PATH; the literal table in TestFableRedTwoKeylessPathsAreRefused still runs")
 	}
+	// F-669: md-cli 0.20.0 refuses a policy no known coordinator imports (a
+	// keyless wsh path is one) unless --md-only is given. `admit` means "the
+	// composer admits it", so pass the flag wherever this md knows it.
+	// Older md (<= 0.19.0) rejects the unknown flag, so detect it first.
+	base := []string{"compose", "--wrapper", "wsh", "--experimental"}
+	if help, _ := exec.Command(bin, "compose", "--help").CombinedOutput(); strings.Contains(string(help), "--md-only") {
+		base = append(base, "--md-only")
+	}
 	for _, c := range fableKeylessCases(t) {
-		args := []string{"compose", "--wrapper", "wsh", "--experimental"}
+		args := append([]string(nil), base...)
 		for _, p := range c.args {
 			args = append(args, "--path", p)
 		}
