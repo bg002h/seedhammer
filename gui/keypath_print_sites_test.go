@@ -45,7 +45,7 @@ func lianaKofnChunks(t *testing.T, kind md.UnspendableKind) []string {
 func TestEveryKeyPathPrintSiteNamesTheLianaKind(t *testing.T) {
 	chunks := lianaKofnChunks(t, md.UnspendableLiana)
 
-	consent, err := composerConsentLinesFor(chunks, nil, 0)
+	consent, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

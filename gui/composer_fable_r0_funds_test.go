@@ -305,7 +305,7 @@ func TestFableRedConsentNamesThresholdOfLockedMulti(t *testing.T) {
 			t.Fatalf("%s: %v", tc.what, err)
 		}
 		listed, kp := composerListedPaths(list)
-		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		lines, err := composerConsentLinesFor(chunks, listed, kp, false)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.what, err)
 		}
@@ -379,7 +379,7 @@ func TestFableKeylessPathNamesTheImportConsequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, kp := composerListedPaths(list)
-	lines, err := composerConsentLinesFor(chunks, listed, kp)
+	lines, err := composerConsentLinesFor(chunks, listed, kp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestFableKeylessPathNamesTheImportConsequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	plisted, pkp := composerListedPaths(plain)
-	plines, err := composerConsentLinesFor(pchunks, plisted, pkp)
+	plines, err := composerConsentLinesFor(pchunks, plisted, pkp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestFableMixedLockBasesUnderWshAreNoticed(t *testing.T) {
 			t.Fatalf("%s: %v", tc.what, err)
 		}
 		listed, kp := composerListedPaths(tc.list)
-		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		lines, err := composerConsentLinesFor(chunks, listed, kp, false)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.what, err)
 		}
@@ -967,7 +967,7 @@ func TestFableOutsideLianaModelNamesTheFirstClass(t *testing.T) {
 			t.Fatalf("%s: chunks: %v", tc.what, err)
 		}
 		listed, kp := composerListedPaths(tc.list)
-		lines, err := composerConsentLinesFor(chunks, listed, kp)
+		lines, err := composerConsentLinesFor(chunks, listed, kp, false)
 		if err != nil {
 			t.Fatalf("%s: consent: %v", tc.what, err)
 		}

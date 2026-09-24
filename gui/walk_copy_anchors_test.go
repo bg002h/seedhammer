@@ -86,6 +86,9 @@ func TestEmulatorWalksQuoteCopyThatStillExists(t *testing.T) {
 	for n := 1; n <= 3; n++ {
 		corpus = append(corpus, normalizeDrawn(composerCopyPreimagePlateHeading(n)))
 	}
+	// §8g at the liana-same-seed arm's seating (F-671): one seed in all three
+	// of kofn-recovery's path-1 slots, a 2-of-3.
+	corpus = append(corpus, normalizeDrawn(composerCopySameSeedThreshold([]uint8{0, 1, 2}, 2, 3)))
 	// ROW BUILDERS, WHICH ARE NOT composerCopy* BODIES AND WERE THE GATE'S HOLE.
 	// The whole-diff review found two walk assertions this gate could not see --
 	// `hash 1` (the picker row, now `sha256 1 ...`) and `hash <digest>` (the

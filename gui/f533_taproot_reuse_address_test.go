@@ -113,7 +113,7 @@ func TestF533SurfacesSayWhyThereIsNoAddress(t *testing.T) {
 					"IMPORTS: %q", want)
 			}
 
-			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 			if err != nil {
 				t.Fatalf("composerConsentLinesFor: %v", err)
 			}

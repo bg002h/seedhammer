@@ -89,7 +89,7 @@ func TestComposerMeasureSection13Numbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	consent, err := composerConsentLinesFor(chunks2, nil, 0)
+	consent, err := composerConsentLinesFor(chunks2, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

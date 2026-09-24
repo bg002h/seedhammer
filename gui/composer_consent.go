@@ -154,7 +154,16 @@ func composerBranchLines(b md.Branch, pathNo int, sole bool) []string {
 //
 // `listed[i]` is the operator's path number for branch i; `keyPathNo` names
 // the path §5 extracted as the taproot internal key, or 0.
-func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]string, error) {
+//
+// `lianaRefusesSeating` is composerLianaRefusesSeating(st) (F-671), and it is
+// the ONE fact on this surface that is not read from the md1: which seed sits
+// in which slot is an operator fact, and md1 answers it only as per-slot
+// fingerprints. It is still the md1's fact by the time this runs, because
+// composerSelfCheck has just compared every decoded slot's fingerprint and the
+// decoded shape against the composition and refuses on any difference. It is
+// passed, not re-derived here, so the rule that says "Liana will refuse it" on
+// the mapping review is the rule that withholds "Liana imports this form" here.
+func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int, lianaRefusesSeating bool) ([]string, error) {
 	shape, err := md.PolicyShapeChunks(chunks)
 	if err != nil {
 		return nil, err
@@ -215,7 +224,16 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int) ([]st
 		// SPEC §7's kind-1 arm. Without it this switch printed NOTHING for a
 		// Liana-key policy -- the key-path fact silently absent from the one
 		// screen that consents to steel (fable M-3).
-		lines = append(lines, composerCopyLianaKeyPath())
+		//
+		// AND ITS LIANA CLAIM IS CONDITIONAL ON THE SEATING (F-671). One seed
+		// at two slots of one path is a wallet Liana v15.0 refuses; the
+		// mapping review says so, and this body used to say Liana imports it
+		// a few screens later.
+		if lianaRefusesSeating {
+			lines = append(lines, composerCopyLianaKeyPathSameSeed())
+		} else {
+			lines = append(lines, composerCopyLianaKeyPath())
+		}
 	}
 
 	id, kind, err := md.FormAwareIdChunks(chunks)
