@@ -3,6 +3,7 @@ package gui
 import (
 	"image"
 	"image/color"
+	"slices"
 	"testing"
 
 	"seedhammer.com/gui/assets"
@@ -279,5 +280,64 @@ func TestComposerPagedGeometryProbeCanSeeInk(t *testing.T) {
 	if _, _, hit := inkUnderNavOps(t, dims, []op.Op{lbl.Offset(image.Pt(8, 120))}); hit {
 		t.Errorf("the scanner reports ink under a button for a label drawn at the left " +
 			"margin, so it is not reading the button rectangles")
+	}
+}
+
+// TestComposerPickerRowsShareALeftEdge pins the picker's row alignment: every
+// option row on a page starts at the same x. On the §0b key-path screen the
+// one-line NUMS row was centred on its own while the wrapped Liana row ran
+// flush left, so the two options did not line up (operator report,
+// 2026-09-23). Measured on the panel raster, not on the layout's intent.
+func TestComposerPickerRowsShareALeftEdge(t *testing.T) {
+	p := newPlatform()
+	p.display = sh2DisplaySize
+	ctx := NewContext(p)
+	dims := sh2DisplaySize
+	lead, rows := composerCopyUnspendableLead(), composerUnspendableRows()
+	page := append([]string{lead, ""}, rows...)
+	const rowBase = composerPickRowBase
+
+	// alignFrom >= 0 measures the picker's real layout; -1 is the old
+	// per-row centring, kept only as the control below.
+	leftEdges := func(alignFrom int) []int {
+		var body []op.Op
+		var shown int
+		if alignFrom >= 0 {
+			body, shown, _ = composerPickPageLayout(ctx, &descriptorTheme, dims, lead, rows, -1)
+		} else {
+			body, shown, _ = composerPageLinesAligned(ctx, &descriptorTheme, dims, page, 0, -1, -1)
+		}
+		if shown < len(page) {
+			t.Fatalf("the key-path page drew %d of %d lines; this test needs both rows on one page", shown, len(page))
+		}
+		var edges []int
+		for i := rowBase; i < len(page); i++ {
+			ink := rasterInk(dims, body[i])
+			left := -1
+			for y := range ink {
+				for x, on := range ink[y] {
+					if on && (left < 0 || x < left) {
+						left = x
+					}
+				}
+			}
+			if left < 0 {
+				t.Fatalf("row %d drew no ink", i-rowBase)
+			}
+			edges = append(edges, left)
+		}
+		return edges
+	}
+	// Glyph side bearings differ by a pixel or two between first letters.
+	const slack = 3
+	spread := func(e []int) int { return slices.Max(e) - slices.Min(e) }
+
+	if got := leftEdges(rowBase); spread(got) > slack {
+		t.Errorf("the key-path rows start at x=%v; they must share one left edge (within %dpx)", got, slack)
+	}
+	// The control: centring each row on its own is what the operator saw, and
+	// this test must see it too, or it proves nothing.
+	if got := leftEdges(-1); spread(got) <= slack {
+		t.Errorf("control: per-row centring gave edges %v, the same edge; the test cannot tell the two layouts apart", got)
 	}
 }

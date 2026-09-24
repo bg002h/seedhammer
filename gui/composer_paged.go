@@ -78,6 +78,21 @@ func composerTextBand(dims image.Point) (left, width int) {
 //
 // sel is the highlighted row's absolute index, or -1 for a read-only screen.
 func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []string, start, sel int) ([]op.Op, int, []image.Rectangle) {
+	return composerPageLinesAligned(ctx, th, dims, lines, start, sel, -1)
+}
+
+// composerPageLinesAligned is composerPageLines with the lines from index
+// `alignFrom` on laid out as ONE BLOCK: every such line starts at the same x,
+// and the block as a whole is centred in the band. A negative alignFrom centres
+// each line on its own, as composerPageLines always has.
+//
+// WHY A PICKER NEEDS IT. Centring each row on its own made a list of options
+// look ragged whenever one row fitted on a line and another wrapped: on the
+// §0b key-path screen the one-line NUMS row sat indented while the wrapped
+// Liana row sat flush left (operator report, 2026-09-23). Options are a list,
+// and a list reads down a common left edge. The block is still centred, so a
+// picker of short rows ("sha256", "ripemd160") stays in the middle of the band.
+func composerPageLinesAligned(ctx *Context, th *Colors, dims image.Point, lines []string, start, sel, alignFrom int) ([]op.Op, int, []image.Rectangle) {
 	contentTop := leadingSize + 8
 	contentBottom := dims.Y - leadingSize
 	// ─── ONE BAND, AND EVERYTHING USES IT (W-3) ─────────────────────────────
@@ -107,6 +122,17 @@ func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []strin
 	// a glyph never sits flush against a button it is not part of.
 	bandLeft, lineWidth := composerTextBand(dims)
 	bandRight := bandLeft + lineWidth
+	// The block's width is the widest line the CALLER passed from alignFrom
+	// on, drawn or not. The picker passes the rows from its current page start
+	// onward, so on a multi-page list the edge can move a little between pages;
+	// rows on the same page always share it.
+	blockW := -1
+	if alignFrom >= 0 {
+		for i := alignFrom; i < len(lines); i++ {
+			_, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, lines[i])
+			blockW = max(blockW, sz.X)
+		}
+	}
 	body := make([]op.Op, 0, len(lines))
 	bands := make([]image.Rectangle, 0, len(lines))
 	shown := 0
@@ -126,6 +152,9 @@ func composerPageLines(ctx *Context, th *Colors, dims image.Point, lines []strin
 		// Centred in the BAND, not on the panel: centring on the panel is what
 		// pushed a wide line's right half under the column.
 		pos := image.Pt(bandLeft+(lineWidth-sz.X)/2, y)
+		if alignFrom >= 0 && i >= alignFrom {
+			pos.X = bandLeft + (lineWidth-blockW)/2
+		}
 		if i == sel {
 			bg := image.Rectangle{Max: sz}
 			bg.Min.X -= buttonPadX
@@ -279,6 +308,25 @@ func composerPickScreen(ctx *Context, th *Colors, title, lead string, rows []str
 	return composerPickScreenFrom(ctx, th, title, lead, rows, 0)
 }
 
+// composerPickRowBase is the number of lines above a picker's first row on
+// every page: the lead and its spacer.
+const composerPickRowBase = 2
+
+// composerPickPageLayout lays out ONE picker page: the lead, a spacer, then
+// `rows` (the rows from the page's start onward) aligned as one block, so the
+// options share a left edge. `sel` is relative to rows[0]; pass -1 for none.
+// It is the only layout the picker draws, and
+// TestComposerPickerRowsShareALeftEdge measures it, so the test sees exactly
+// what the screen draws.
+func composerPickPageLayout(ctx *Context, th *Colors, dims image.Point, lead string, rows []string, sel int) ([]op.Op, int, []image.Rectangle) {
+	page := append([]string{lead, ""}, rows...)
+	hl := -1
+	if sel >= 0 {
+		hl = sel + composerPickRowBase
+	}
+	return composerPageLinesAligned(ctx, th, dims, page, 0, hl, composerPickRowBase)
+}
+
 // composerPickScreenFrom is composerPickScreen opening on a given row.
 //
 // FOR A BACK LEG THAT MUST NOT FORGET (SPEC_hashlock_kinds §7.1: "Back from the
@@ -335,9 +383,8 @@ func composerPickScreenFrom(ctx *Context, th *Colors, title, lead string, rows [
 			return sel, true
 		}
 		dims := ctx.Platform.DisplaySize()
-		page := append([]string{lead, ""}, lines[start:]...)
-		const rowBase = 2 // the header and its spacer, redrawn on every page
-		pageOps, drawn, bands := composerPageLines(ctx, th, dims, page, 0, sel-start+rowBase)
+		const rowBase = composerPickRowBase
+		pageOps, drawn, bands := composerPickPageLayout(ctx, th, dims, lead, lines[start:], sel-start)
 		shown := drawn - rowBase
 		if shown < 1 {
 			// A header that fills the frame would leave no room for a row and
