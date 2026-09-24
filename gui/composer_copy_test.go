@@ -65,6 +65,13 @@ func composerCopyTable() []composerCopyRow {
 		// stays the diff target.
 		{"composerCopyLianaKeyPath", "8y", composerCopyLianaKeyPath(),
 			"KEY PATH: NONE (LIANA KEY) Spends use the script paths only. The key path is Liana's unspendable key, computed from this wallet's own keys. Liana (as of v15.0) and Bitcoin Core import this form. Nunchuk imports it only when the keys happen to be in sorted order. The same paths with the NUMS key are a different wallet with different addresses."},
+		// F-671: the two same-seed variants, drawn when
+		// composerLianaRefusesSeating fires (one seed at two slots of one
+		// path, which Liana v15.0 refuses).
+		{"composerCopyLianaKeyPathSameSeed", "8y", composerCopyLianaKeyPathSameSeed(),
+			"KEY PATH: NONE (LIANA KEY) Spends use the script paths only. The key path is Liana's unspendable key, computed from this wallet's own keys. SAME SEED, SAME PATH: one seed fills more than one slot of one path, so Liana will refuse it. Bitcoin Core imports this form. Nunchuk imports it only when the keys happen to be in sorted order. The same paths with the NUMS key are a different wallet with different addresses."},
+		{"composerCopyUnspendableRowLianaSameSeed", "8y", composerCopyUnspendableRowLianaSameSeed(),
+			"Liana key: Bitcoin Core imports it. SAME SEED, SAME PATH: Liana will refuse it."},
 		{"composerCopyUnspendableLead", "8y", composerCopyUnspendableLead(),
 			"Which key path? The two options below are DIFFERENT WALLETS, with different addresses. It cannot be changed after engraving."},
 		{"composerCopyUnspendableRowNUMS", "8y", composerCopyUnspendableRowNUMS(),
@@ -470,8 +477,11 @@ func TestComposerCopyTableCoversEveryBody(t *testing.T) {
 	// 92 SINCE TASK 6 added the key-path choice screen's lead and two rows,
 	// the RESET signal that names which fact dropped a Liana choice, and the
 	// unmet-request refusal composerCompose raises (R0 m1).
-	if declared != 92 {
-		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 92 -- "+
+	// 94 SINCE F-671 added §8y's same-seed variants of the key-path line and
+	// the Liana row: both Liana claims were false for a wallet seated with one
+	// seed twice in a path, which the mapping review already warned about.
+	if declared != 94 {
+		t.Errorf("composer_copy.go declares %d bodies, the plan and the table know 94 -- "+
 			"if that is deliberate, update both", declared)
 	}
 }

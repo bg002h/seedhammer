@@ -356,7 +356,7 @@ func TestComposerConsentNumbersPathsAsTheOperatorListedThem(t *testing.T) {
 		}
 		listed = append(listed, i+1)
 	}
-	lines, err := composerConsentLinesFor(chunks, listed, internal+1)
+	lines, err := composerConsentLinesFor(chunks, listed, internal+1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -851,7 +851,7 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -877,7 +877,7 @@ func TestComposerConsentRestatesTheHashRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	chunks2, _ := c2.Chunks()
-	lines2, err := composerConsentLinesFor(chunks2, nil, 0)
+	lines2, err := composerConsentLinesFor(chunks2, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1737,7 +1737,7 @@ func TestComposerConsentHashRuleNamesTheKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1818,7 +1818,7 @@ func TestUnsortedMarkIgnoresNoHashlockKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	chunks, _ := c.Chunks()
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1844,7 +1844,7 @@ func TestUnsortedMarkIgnoresNoHashlockKind(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 			if err != nil {
 				t.Fatal(err)
 			}

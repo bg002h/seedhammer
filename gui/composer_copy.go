@@ -226,6 +226,25 @@ func composerCopyLianaKeyPath() string {
 		"different wallet with different addresses."
 }
 
+// composerCopyLianaKeyPathSameSeed is composerCopyLianaKeyPath for a wallet
+// SEATED so that Liana refuses it (F-671): one seed at two slots inside one
+// path, the case the Key-mapping review names with §8g. Liana v15.0 refuses
+// that wallet ("derived from the same origin as another key present in the
+// same spending path"; design/agent-reports/e2e-live-site-wallets.md D-1), so
+// the consent must not say Liana imports it. The refusal is stated in §8g's
+// own words -- its heading and its last sentence -- so the two screens read as
+// one fact. Chosen by composerLianaRefusesSeating, the same predicate that
+// puts §8g on the mapping review; there is no second copy of the rule.
+func composerCopyLianaKeyPathSameSeed() string {
+	return "KEY PATH: NONE (LIANA KEY)\n" +
+		"Spends use the script paths only. The key path is Liana's unspendable " +
+		"key, computed from this wallet's own keys. SAME SEED, SAME PATH: one " +
+		"seed fills more than one slot of one path, so Liana will refuse it. Bitcoin Core " +
+		"imports this form. Nunchuk imports it only when the keys happen to be in " +
+		"sorted order. The same paths with the NUMS key are a different wallet " +
+		"with different addresses."
+}
+
 // composerCopyUnspendableLead is §0b's COPY, the half common to both rows: the
 // two rows are DIFFERENT WALLETS, and the choice cannot be undone once cut.
 // SHORT, because composerPickScreen draws the lead as a header on every page,
@@ -246,6 +265,16 @@ func composerCopyUnspendableRowNUMS() string {
 // the ones composerCopyLianaKeyPath names, measured the same way.
 func composerCopyUnspendableRowLiana() string {
 	return "Liana key: Liana (v15.0) and Bitcoin Core import it. Nunchuk only by chance."
+}
+
+// composerCopyUnspendableRowLianaSameSeed is the second row when the seating
+// already holds one seed at two slots of one path (F-671): reachable on
+// re-entry, since Back from the stub, the mapping review and the consent all
+// return through this screen with the seating kept. The Liana claim above is
+// false for that wallet, so this row states the refusal in §8g's own words.
+// SHORT, for the same first-page reason as the lead.
+func composerCopyUnspendableRowLianaSameSeed() string {
+	return "Liana key: Bitcoin Core imports it. SAME SEED, SAME PATH: Liana will refuse it."
 }
 
 // composerCopyLianaKeyDropped is §0b RESET's signal: a kind-1 choice the

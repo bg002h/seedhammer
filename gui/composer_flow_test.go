@@ -30,7 +30,7 @@ func TestComposerConsentLinesDescribeEveryPathFromTheDecodedMd1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatalf("composerConsentLines: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestComposerConsentMarksTheExperimentalForms(t *testing.T) {
 		t.Fatalf("md.Compose: %v", err)
 	}
 	chunks, _ := c.Chunks()
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestComposerConsentMarksTheExperimentalForms(t *testing.T) {
 		t.Fatalf("md.Compose: %v", err)
 	}
 	chunks2, _ := c2.Chunks()
-	lines2, err := composerConsentLinesFor(chunks2, nil, 0)
+	lines2, err := composerConsentLinesFor(chunks2, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestComposerConsentMarksTheExperimentalForms(t *testing.T) {
 		t.Fatalf("md.Compose: %v", err)
 	}
 	chunks3, _ := c3.Chunks()
-	lines3, err := composerConsentLinesFor(chunks3, nil, 0)
+	lines3, err := composerConsentLinesFor(chunks3, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestComposerNUMSNoteFiresOnlyForATaprootFallback(t *testing.T) {
 		t.Fatalf("md.Compose: %v", err)
 	}
 	chunks, _ := c.Chunks()
-	lines, err := composerConsentLinesFor(chunks, nil, 0)
+	lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestComposerNUMSNoteFiresOnlyForATaprootFallback(t *testing.T) {
 		t.Fatalf("md.Compose: %v", err)
 	}
 	chunks2, _ := c2.Chunks()
-	lines2, err := composerConsentLinesFor(chunks2, nil, 0)
+	lines2, err := composerConsentLinesFor(chunks2, nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestComposerKeylessTemplateDecodesOnTheDevice(t *testing.T) {
 			seen[o] = true
 		}
 		// And the consent surface reads it.
-		if _, err := composerConsentLinesFor(chunks, nil, 0); err != nil {
+		if _, err := composerConsentLinesFor(chunks, nil, 0, false); err != nil {
 			t.Errorf("wrapper %v: composerConsentLines: %v", w, err)
 		}
 	}
@@ -544,7 +544,7 @@ func TestConsentNamesTheScript(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 			if err != nil {
 				t.Fatalf("composerConsentLinesFor: %v", err)
 			}
@@ -618,7 +618,7 @@ func TestConsentWarnsOnDuplicateKeys(t *testing.T) {
 			if kind != tc.want {
 				t.Fatalf("the predicate says %v (@%d), want %v; %s", kind, slot, tc.want, tc.core)
 			}
-			lines, err := composerConsentLinesFor(chunks, nil, 0)
+			lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 			if err != nil {
 				t.Fatalf("composerConsentLinesFor: %v", err)
 			}
@@ -707,7 +707,7 @@ func TestEveryAddressSurfaceCarriesTheDuplicateWarning(t *testing.T) {
 	})
 
 	t.Run("composer consent", func(t *testing.T) {
-		lines, err := composerConsentLinesFor(chunks, nil, 0)
+		lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 		if err != nil {
 			t.Fatalf("composerConsentLinesFor: %v", err)
 		}

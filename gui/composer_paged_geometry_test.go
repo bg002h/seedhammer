@@ -293,7 +293,7 @@ func TestComposerPickerRowsShareALeftEdge(t *testing.T) {
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
 	dims := sh2DisplaySize
-	lead, rows := composerCopyUnspendableLead(), composerUnspendableRows()
+	lead, rows := composerCopyUnspendableLead(), composerUnspendableRows(&composerState{})
 	page := append([]string{lead, ""}, rows...)
 	const rowBase = composerPickRowBase
 

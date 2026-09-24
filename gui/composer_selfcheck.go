@@ -242,7 +242,7 @@ func composerConsentFlow(ctx *Context, th *Colors, st *composerState, chunks []s
 		return false
 	}
 	listed, keyPathNo := composerListedPaths(st.list)
-	lines, err := composerConsentLinesFor(checked, listed, keyPathNo)
+	lines, err := composerConsentLinesFor(checked, listed, keyPathNo, composerLianaRefusesSeating(st))
 	if err != nil {
 		showError(ctx, th, "Review", composerCopySelfCheckFailed())
 		return false

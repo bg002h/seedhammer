@@ -707,6 +707,95 @@ export async function run({ shotURL = "http://127.0.0.1:8732", arm = "keyed",
     };
   }
 
+  if (arm === "liana-same-seed") {
+    // F-671 on the emulator: the live-site defect's own seating. The composer
+    // payload's seed (b8688df1) seated into EVERY slot of a Liana-key
+    // kofn-recovery wallet -- three of them inside path 1's 2-of-3, which Liana
+    // v15.0 refuses ("derived from the same origin as another key present in
+    // the same spending path"). The mapping review says so (§8g), and the
+    // consent must not then say Liana imports this form. The key-path choice,
+    // re-entered with the seating kept, must not say it either.
+    //
+    // A COPY WALK, NOT AN ENGRAVE: it stops after the re-entered key-path
+    // choice. The Liana-key engrave is the `liana` arm's comparison.
+    await bootAndChoosePayload(shotURL, taken, "composer");
+    await loadComposerPayload(shotURL, taken, expect);
+    await goTo("Wallet Policy");
+    await tap(CONFIRM, 450);
+    await waitFor("Build a new policy");
+    await chooseRow(1, "Which script?", "Build a new policy");
+    await chooseRow(0, "Start from?", "Taproot (tr)");
+    await chooseRow(3, "Add a spend path", "kofn-recovery");
+    must(window.shScreen(), "Path 1: 2-of-3", "the kofn-recovery primary");
+    const nRows = window.shTargets().length;
+    await chooseRow(nRows - 1, "Which key path?", "Done");
+    const first = window.shScreen();
+    // CONTROL: nothing is seated yet, so the row's claim stands here.
+    must(first, "Liana key: Liana (v15.0) and Bitcoin Core import it.",
+      "the unseated Liana row");
+    taken.push(await screenShot(shotURL, "s01-key-path-unseated.png"));
+    await chooseRow(1, "Template-ID", "Liana key");
+    await readAllPages(shotURL, "s02-stub-p");
+    await tap(CONFIRM, 500);
+
+    // Seating: two key records are loaded, so the pick list draws at once.
+    // Slot @0 takes "Type a seed" -> FROM PAYLOAD -> the payload's seed; then
+    // every slot takes that seed, which is row 2 (the two key records stay
+    // unused above it).
+    const seat0 = await waitFor("Slot @0");
+    must(seat0, "Type a seed", "slot @0's type-a-seed row");
+    await chooseRow(2, "Where from?", "Type a seed");
+    await chooseRow(0, "Source: the systemwide payload", "FROM PAYLOAD");
+    await tap(CONFIRM, 500);
+    await waitFor("Add a BIP-39 passphrase?");
+    await chooseRow(0, "(any slots)", "Skip the passphrase");
+    for (const [slot, next] of [[0, "Slot @1"], [1, "Slot @2"], [2, "Slot @3"], [3, "Key mapping"]]) {
+      must(window.shScreen(), "seed 1", `slot @${slot}'s seed row`);
+      await chooseRow(2, next, `the seed into slot @${slot}`);
+    }
+
+    const mapping = await readAllPages(shotURL, "s03-mapping-p");
+    taken.push(...mapping.names);
+    must(mapping.joined, "SAME SEED, SAME PATH", "§8g's same-seed heading");
+    must(mapping.joined, "Slots @0, @1 and @2 are the same seed.", "§8g's slots");
+    must(mapping.joined, "Liana will refuse it.", "§8g's Liana sentence");
+    await tap(CONFIRM, 500);
+    await waitFor("Policy-ID");
+    await readAllPages(shotURL, "s04-stub2-p");
+    await tap(CONFIRM, 500);
+    await waitFor("Review");
+    const consent = await readAllPages(shotURL, "s05-consent-p");
+    taken.push(...consent.names);
+    must(consent.joined, "KEY PATH: NONE (LIANA KEY)", "the kind-1 key-path line");
+    mustNot(consent.joined, "Liana (as of v15.0) and Bitcoin Core import this form",
+      "F-671: the consent claims Liana imports a wallet the mapping review says it refuses");
+    must(consent.joined, "SAME SEED, SAME PATH: one seed fills more than one slot of one " +
+      "path, so Liana will refuse it.", "the consent's refusal sentence");
+    proven.push("the consent withholds the Liana claim for a same-seed seating");
+
+    // RE-ENTRY with the seating kept: Back from the consent is the path list.
+    await tap(BACK, 500);
+    await waitFor("Add a spend path");
+    const nRows2 = window.shTargets().length;
+    await chooseRow(nRows2 - 1, "Which key path?", "Done (again)");
+    const again = window.shScreen();
+    mustNot(again, "Liana (v15.0) and Bitcoin Core import it",
+      "F-671: the re-entered key-path choice claims Liana imports a same-seed seating");
+    must(again, "Liana key: Bitcoin Core imports it. SAME SEED, SAME PATH: Liana will refuse it.",
+      "the same-seed Liana row");
+    if (window.shTargets().length !== 2) {
+      throw new Error(`the re-entered key-path screen offers ${window.shTargets().length} ` +
+        `tappable row(s) on its first page, want 2.\nScreen: ${JSON.stringify(again)}`);
+    }
+    taken.push(await screenShot(shotURL, "s06-key-path-same-seed.png"));
+    proven.push("the re-entered key-path choice withholds the Liana claim");
+    return {
+      arm, shots: taken, elapsedSec: Math.round((performance.now() - t0) / 1000),
+      consentPages: consent.pages.length, censusClaim: 0, needlesProven: proven,
+      matched: { consent: consent.joined },
+    };
+  }
+
   // ─── The KEYED arm ─────────────────────────────────────────────────────────
   await bootAndChoosePayload(shotURL, taken, "composer");
   await loadComposerPayload(shotURL, taken, expect);

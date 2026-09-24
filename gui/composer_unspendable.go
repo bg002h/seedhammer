@@ -84,8 +84,17 @@ func composerUnspendableFires(st *composerState) (bool, composerUnspendableDrop)
 // ROW) is that a default of "Liana" would silently change the wallet for an
 // operator who pressed through, so the first-entry default is the wallet
 // every earlier firmware built.
-func composerUnspendableRows() []string {
-	return []string{composerCopyUnspendableRowNUMS(), composerCopyUnspendableRowLiana()}
+//
+// THE LIANA ROW'S CLAIM IS CONDITIONAL ON THE SEATING (F-671). On first entry
+// nothing is seated; on re-entry the seating is kept, and a seed at two slots
+// of one path is a wallet Liana refuses -- composerLianaRefusesSeating, the
+// rule the mapping review's §8g warning uses, decides which row is drawn.
+func composerUnspendableRows(st *composerState) []string {
+	liana := composerCopyUnspendableRowLiana()
+	if composerLianaRefusesSeating(st) {
+		liana = composerCopyUnspendableRowLianaSameSeed()
+	}
+	return []string{composerCopyUnspendableRowNUMS(), liana}
 }
 
 var composerUnspendableKinds = []md.UnspendableKind{md.UnspendableNums, md.UnspendableLiana}
@@ -113,7 +122,7 @@ func composerUnspendableStep(ctx *Context, th *Colors, st *composerState) bool {
 			initial = i
 		}
 	}
-	sel, ok := composerPickScreenFrom(ctx, th, "Key path", composerCopyUnspendableLead(), composerUnspendableRows(), initial)
+	sel, ok := composerPickScreenFrom(ctx, th, "Key path", composerCopyUnspendableLead(), composerUnspendableRows(st), initial)
 	if !ok {
 		return false
 	}

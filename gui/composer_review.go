@@ -188,6 +188,18 @@ func composerSharedSeedInPath(st *composerState) []composerSharedSeed {
 	return out
 }
 
+// composerLianaRefusesSeating is THE rule behind every "Liana will refuse it"
+// this device prints about a seating (F-671): one seed at two or more slots
+// inside one path, which Liana v15.0 refuses as "derived from the same origin
+// as another key present in the same spending path". It is
+// composerSharedSeedInPath, the finder that puts §8g on the mapping review,
+// asked only whether it found anything -- so the screens that must not claim
+// Liana imports this wallet (the consent's key-path body, the key-path
+// choice's Liana row) cannot disagree with the screen that says it will not.
+func composerLianaRefusesSeating(st *composerState) bool {
+	return len(composerSharedSeedInPath(st)) > 0
+}
+
 // composerSharedSeedBody picks between §8g's two bodies: the FIRST when the
 // shared slots REACH the threshold (one person can satisfy the path alone),
 // the second otherwise (they hold some of what it needs).

@@ -200,7 +200,7 @@ func TestRepeatedSeatRefusalStillWarns(t *testing.T) {
 			})
 
 			t.Run("composer consent", func(t *testing.T) {
-				lines, err := composerConsentLinesFor(chunks, nil, 0)
+				lines, err := composerConsentLinesFor(chunks, nil, 0, false)
 				if err != nil {
 					t.Fatalf("composerConsentLinesFor: %v", err)
 				}
@@ -396,7 +396,7 @@ func TestKeylessRepeatedSeatTemplateIsNotSilent(t *testing.T) {
 	assertCarriesWarning(t, lines, want, "the Engrave Wallet Policy consent")
 	assertShowsNoAddress(t, lines, "the Engrave Wallet Policy consent")
 
-	consent, err := composerConsentLinesFor(chunks, nil, 0)
+	consent, err := composerConsentLinesFor(chunks, nil, 0, false)
 	if err != nil {
 		t.Fatalf("composerConsentLinesFor: %v", err)
 	}
