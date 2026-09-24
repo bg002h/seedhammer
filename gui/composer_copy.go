@@ -232,7 +232,7 @@ func composerCopyLianaKeyPath() string {
 // and a long one pushes a row off the first page (the hash-kind screen's
 // lesson, TestComposerHashKindScreenDrawsAllFourRows).
 func composerCopyUnspendableLead() string {
-	return "Which key path? The two are DIFFERENT WALLETS, with different " +
+	return "Which key path? The two options below are DIFFERENT WALLETS, with different " +
 		"addresses. It cannot be changed after engraving."
 }
 

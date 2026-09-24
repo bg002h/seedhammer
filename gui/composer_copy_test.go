@@ -66,7 +66,7 @@ func composerCopyTable() []composerCopyRow {
 		{"composerCopyLianaKeyPath", "8y", composerCopyLianaKeyPath(),
 			"KEY PATH: NONE (LIANA KEY) Spends use the script paths only. The key path is Liana's unspendable key, computed from this wallet's own keys. Liana (as of v15.0) and Bitcoin Core import this form. Nunchuk imports it only when the keys happen to be in sorted order. The same paths with the NUMS key are a different wallet with different addresses."},
 		{"composerCopyUnspendableLead", "8y", composerCopyUnspendableLead(),
-			"Which key path? The two are DIFFERENT WALLETS, with different addresses. It cannot be changed after engraving."},
+			"Which key path? The two options below are DIFFERENT WALLETS, with different addresses. It cannot be changed after engraving."},
 		{"composerCopyUnspendableRowNUMS", "8y", composerCopyUnspendableRowNUMS(),
 			"NUMS point: Bitcoin Core imports it. Liana and Nunchuk do not."},
 		{"composerCopyUnspendableRowLiana", "8y", composerCopyUnspendableRowLiana(),
