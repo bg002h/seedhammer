@@ -101,7 +101,9 @@ if [ "${1:-}" = "-update" ]; then
     -run '^TestAssembledMd1MatchesThePrimaryByteForByte$' ./gui/ -update 2>&1)
   rc=$?
   printf '%s\n' "$mint_out"
-  if ! printf '%s\n' "$mint_out" | grep -q '^=== RUN   TestAssembledMd1MatchesThePrimaryByteForByte$'; then
+  # Here-string, not `printf | grep -q` (F-695): the RUN line is first, so on
+  # long output grep exits early and a SIGPIPE'd printf fails the pipeline.
+  if ! grep -q '^=== RUN   TestAssembledMd1MatchesThePrimaryByteForByte$' <<<"$mint_out"; then
     echo
     echo "::error::the mint test never executed, so no golden was written"
     rc=1
