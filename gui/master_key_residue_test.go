@@ -38,8 +38,9 @@ const (
 		"31f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04"
 )
 
-// TestDeriveMasterKeyZeroesTheBIP39Seed pins `defer wipeBytes(seed)`
-// (gui/gui.go, deriveMasterKey).
+// TestDeriveMasterKeyZeroesTheBIP39Seed pins the seed wipe deriveMasterKey
+// relies on: `defer clear(seed)` in bip32.MasterKey since F-702 F5 moved the
+// derivation there (before that, `defer wipeBytes(seed)` in gui/gui.go).
 //
 // HOW IT KNOWS IT IS LOOKING AT THE RIGHT MEMORY. deriveSeedHook hands over the
 // seed slice VALUE, and a Go slice value carries the pointer to its backing
@@ -89,7 +90,7 @@ func TestDeriveMasterKeyZeroesTheBIP39Seed(t *testing.T) {
 	for i, b := range captured {
 		if b != 0 {
 			t.Fatalf("byte %d of the 64-byte BIP-39 seed is still %#02x after deriveMasterKey "+
-				"returned: `defer wipeBytes(seed)` did not run, and a full seed-equivalent "+
+				"returned: the seed wipe in bip32.MasterKey did not run, and a full seed-equivalent "+
 				"buffer is live on the heap (F-94)", i, b)
 		}
 	}
@@ -138,7 +139,7 @@ func TestDeriveSeedPinFailsWhenTheSeedIsNotWiped(t *testing.T) {
 }
 
 // TestMasterFingerprintForZeroesTheMasterPrivateKey pins `defer mk.Zero()`
-// (gui/gui.go, masterFingerprintFor).
+// (bip32.MasterFingerprint, which masterFingerprintFor calls since F-702 F5).
 //
 // HOW IT KNOWS IT IS LOOKING AT THE RIGHT MEMORY. hdkeychain.ExtendedKey.Zero
 // zeroes k.key, k.pubKey, k.chainCode and k.parentFP in place and only then
