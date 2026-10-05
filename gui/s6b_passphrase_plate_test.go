@@ -193,6 +193,7 @@ func TestPassphrasePlateOfferGate(t *testing.T) {
 // reimplemented: that file's own comment records why the raster harness
 // matters here -- under plain runUI the same plate took 12x the frames.
 func TestPassphrasePlateOfferReachableFromTheOrchestrator(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()
 		p := newPlatform()

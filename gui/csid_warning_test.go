@@ -613,6 +613,7 @@ func TestBundleCSIDNoteSilentOnCleanTwin(t *testing.T) {
 // no separate modal is shown for the mismatch itself -- exactly one "Verify
 // Failed" screen appears, carrying both the seed-mismatch text AND the marker.
 func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	row := csidPinnedRow(t)
 	// An unrelated but real, decodable md1 -- content is irrelevant here since
 	// the mk1 leg alone guarantees disagreement; it only needs to satisfy
@@ -680,6 +681,7 @@ func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
 // for the same live path -- silence extends to the note too, not merely to
 // the absence of a separate modal.
 func TestSingleSigVerifyCSIDNoteSilentOnCleanTwinLive(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	row := csidCleanTwinRow(t)
 	unrelated, _, _, _, err := deriveSingleSigBundle(abandonAboutMnemonic(), "",
 		&chaincfg.MainNetParams, singleSigPath(84), md.ScriptWpkh)

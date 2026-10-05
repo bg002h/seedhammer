@@ -63,6 +63,7 @@ func arrowPoints(ctx *Context) (left, right image.Point) {
 // op.Input hit area, or navigation bound only to button events -- the title never
 // changes and this fails.
 func TestStartScreenPagerTouchable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
@@ -119,6 +120,7 @@ func TestStartScreenPagerTouchLeftWraps(t *testing.T) {
 // back to the start. A partially-wired pager -- one arrow live, or a wrap that
 // skips an entry -- passes the single-step tests above but fails here.
 func TestStartScreenPagerTouchReachesEveryProgram(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })

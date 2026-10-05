@@ -112,6 +112,7 @@ func s5PolicyPair(t *testing.T) (engravedMd1, otherMd1, otherPlate []string, slo
 // with a refusal that says what happened -- the operator is holding plates from
 // a different wallet, and no amount of re-presenting these ones will fix it.
 func TestVerifyRefusesPlatesFromADifferentPolicy(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	engravedMd1, otherMd1, otherPlate, slot := s5PolicyPair(t)
 	records := append(append([]string(nil), otherMd1...), otherPlate...)
 
@@ -141,6 +142,7 @@ func TestVerifyRefusesPlatesFromADifferentPolicy(t *testing.T) {
 //
 // Without it, "refuse everything" satisfies the test above.
 func TestVerifyStillPassesItsOwnPolicy(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	_, otherMd1, otherPlate, slot := s5PolicyPair(t)
 	records := append(append([]string(nil), otherMd1...), otherPlate...)
 
@@ -242,6 +244,7 @@ func s5DriveVerifyTwoSeeds(t *testing.T, records []string, expected []int, engra
 // that seed -- correctly -- and must then REPORT the partial verify rather than
 // walking out over two plates it did check and one it did not.
 func TestVerifyReportsIncompleteAfterAMidLoopRefusal(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	records := append([]string(nil), md1...)
 	for _, p := range plates {

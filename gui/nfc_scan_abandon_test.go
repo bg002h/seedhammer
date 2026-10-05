@@ -37,6 +37,7 @@ func (r *unstoppableReader) Close() error { return r.closeErr }
 // The regression: stop() must RETURN. Before the fix it blocked forever joining
 // a goroutine that was parked in Read.
 func TestStopScannerAbandonsAReaderThatWillNotStop(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	r := &unstoppableReader{
 		release:  make(chan struct{}),
 		entered:  make(chan struct{}),
@@ -101,6 +102,7 @@ func TestStopScannerJoinsAReaderThatStops(t *testing.T) {
 // Unreachable on the device today (-scheduler tasks has no yield point between
 // the closer check and the reading send), so this is a regression pin.
 func TestStopScannerJoinTimeoutArmAbandons(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	r := &unstoppableReader{
 		release: make(chan struct{}),
 		entered: make(chan struct{}),

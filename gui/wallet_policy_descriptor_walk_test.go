@@ -126,6 +126,7 @@ func TestS2ContainerRecordClassifiesAsADescriptor(t *testing.T) {
 // is §4.7-admitted, so it can never be that shape; a scan-door-keyed classifier
 // would have made it reachable from one line of text.
 func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	synctest.Test(t, func(t *testing.T) {
 		session, _ := s2DescriptorSession(t)
 		e := newEngraver()
@@ -198,6 +199,7 @@ func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *tes
 // "Couldn't read the wallet policy from the payload." instead -- a wallet the
 // operator can see on the host, refused at the machine.
 func TestWalkWalletPolicyRendersARecordWithLeadingWhitespace(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	synctest.Test(t, func(t *testing.T) {
 		_, record := s2DescriptorSession(t)
 		padded := " " + record

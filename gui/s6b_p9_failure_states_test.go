@@ -215,6 +215,7 @@ func TestSingleSigEngraveReOffersTheVerify(t *testing.T) {
 // ms1 hand-typing is needed, keeping this cheap -- no real engrave, no
 // synctest raster harness).
 func TestSingleSigVerifyRetryProducesAnHonestStatusVerifiedOnRetryLine(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	opts := s6aSingleSigOpts{watchOnly: true}
 	b := s6aSingleSigBundle(t, opts)
 

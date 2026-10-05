@@ -60,6 +60,7 @@ import (
 // cards, so extractReadbackMd1AndMk1s's `len(md1) == 0` arm fires -- the exact
 // "a plate could not be read or accounted for" state the follow-up names.
 func TestVerifyReoffersOnAnUnaccountableReadback(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	_, md1, plate, idx := s5OneSlotReadback(t)
 	p := newPlatform()
 	p.display = sh2DisplaySize

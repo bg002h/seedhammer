@@ -198,6 +198,7 @@ func driveWipeResidency(t *testing.T, vector string, parkFor func(drv *reentryDr
 // buffer is asserted residue-free with real seed words having been rendered
 // into it.
 func TestWipeZeroesEveryPinnedBufferAtRunLevel(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	t.Run("vectorA-parked-on-seed-screen", func(t *testing.T) {
 		c, firstCtx := driveWipeResidency(t, "A", func(drv *reentryDriver) []reentryStep {
 			return []reentryStep{

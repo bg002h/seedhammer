@@ -10,6 +10,7 @@ import "testing"
 // also exercises the start-screen layout for the new program (layoutMainPlates
 // must have a case for it or it panics). qaProgram stays out of the carousel.
 func TestEngraveSingleSigProgramNavigable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })

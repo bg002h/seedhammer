@@ -108,6 +108,7 @@ func s5DriveVerifyStopAfterOneSeed(t *testing.T, records []string, expected []in
 // outstanding. On a 3-of-4, @0's plate belongs to a different wallet and the
 // wallet needs it.
 func TestVerifyIncompleteDoesNotCallAForeignPlateChecked(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	if len(plates) != 3 {
 		t.Fatalf("Trace B engraved %d plate(s), want 3", len(plates))
@@ -182,6 +183,7 @@ func TestVerifyIncompleteDoesNotCallAForeignPlateChecked(t *testing.T) {
 // still report Verify Incomplete, and the number in it must be the number of
 // plates the comparator matched, with the outstanding slot named.
 func TestVerifyIncompleteReportsWhatTheComparatorMatched(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	records := append([]string(nil), md1...)
 	for _, p := range plates {
@@ -424,6 +426,7 @@ func s5DriveVerifyFirstSeedRefused(t *testing.T, records []string, expected []in
 // remedy was shown, and it must still abandon. Without that row, `correctable =
 // true` at the top of the function passes every other row here.
 func TestVerifyRetriesAfterACorrectableFirstSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, ms1s := s5TraceBEngraved(t, true)
 	records := append([]string(nil), md1...)
 	for _, p := range plates {
@@ -689,6 +692,7 @@ func s5TraceBFullReadback(t *testing.T) (records, md1 []string, ms1A, ms1B strin
 // makes an empty string land in the leg, which is a hard "ms1 presence mismatch"
 // at bundle/verify.go against a derived leg that carries one.
 func TestVerifyFullModeTwoSeedsReportsTheFullSuccess(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	records, md1, ms1A, ms1B := s5TraceBFullReadback(t)
 	last, res := s5DriveVerifyFullTwoSeeds(t, records, []int{0, 1, 2}, md1,
 		fixtureMasterA, ms1A, fixtureMasterB, ms1B, false)
@@ -723,6 +727,7 @@ func TestVerifyFullModeTwoSeedsReportsTheFullSuccess(t *testing.T) {
 // path the next screen is the restore document, with 2 of 3 plates checked and
 // no way for the operator to know.
 func TestVerifyFullModeBackAtTheSecondMs1ReportsIncomplete(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	records, md1, ms1A, ms1B := s5TraceBFullReadback(t)
 	last, res := s5DriveVerifyFullTwoSeeds(t, records, []int{0, 1, 2}, md1,
 		fixtureMasterA, ms1A, fixtureMasterB, ms1B, true /* Back at the 2nd ms1 */)
@@ -760,6 +765,7 @@ func TestVerifyFullModeBackAtTheSecondMs1ReportsIncomplete(t *testing.T) {
 // this lands on the INCOMPLETE path -- where, before this fold, the comparator
 // never ran and a wrong ms1 would have been reported as two plates checked.
 func TestVerifyFullModeBindsEachMs1ToItsOwnSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	records, md1, ms1A, ms1B := s5TraceBFullReadback(t)
 	if ms1A == ms1B {
 		t.Fatal("the two ms1 shares are equal, so swapping them changes nothing")

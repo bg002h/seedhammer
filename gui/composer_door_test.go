@@ -81,6 +81,7 @@ func TestComposerDoorCountsIgnoreClassesThatAreNotKeys(t *testing.T) {
 // conditional choice: "From payload" appears only when the loaded payload
 // holds a Descriptor or an md1/mk1 record.
 func TestComposerDoorOffersFromPayloadOnlyWhenThePayloadHasOne(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	for _, tc := range []struct {
 		name    string
 		session *syswSession

@@ -84,6 +84,7 @@ func TestErrorScreenIgnoresAReleaseItNeverSawPressed(t *testing.T) {
 // plate screen, back out to "Bundle Incomplete" -- then ONE press of BACK must
 // dismiss it and return control, where before the fix thirty did nothing.
 func TestF440BundleIncompleteModalDismissesOnBack(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1CardPayload, f76Md1CardSHA256, wshSortedmultiChunks)
 

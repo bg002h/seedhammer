@@ -921,6 +921,7 @@ func TestMasterFingerprintPassphrase(t *testing.T) {
 }
 
 func TestPassphraseFlow(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	ctx := NewContext(newPlatform())
 	runes(&ctx.Router, "Ab1!")
 	click(&ctx.Router, Button3)
@@ -965,6 +966,7 @@ func TestEngraveFingerprintChoiceMapping(t *testing.T) {
 // would pass even if the arrows had no hit area at all -- see
 // start_screen_touch_test.go's preamble.
 func TestPassphraseProgramReachable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })

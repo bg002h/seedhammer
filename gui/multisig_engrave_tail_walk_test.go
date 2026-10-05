@@ -363,6 +363,7 @@ func s5AssertRetryLoop(t *testing.T, ctx *Context, frame func() (string, bool),
 // nothing about the other -- which is exactly the lesson B5 records about I-12's
 // abort gate, one mechanism over.
 func TestBothEngraveFlowsDriveTheRetryLoop(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	t.Run("supply", func(t *testing.T) {
 		md1 := s5SuppliedTraceBMd1(t)
 		synctest.Test(t, func(t *testing.T) {
@@ -439,6 +440,7 @@ func TestBothEngraveFlowsDriveTheRetryLoop(t *testing.T) {
 // restore document headed "This backup is 17 plates ... If any of them is
 // missing, this backup is incomplete."
 func TestBuildAbortIsTheLastScreenOfTheProgram(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := cosignerCardRecords(t, 4)
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()

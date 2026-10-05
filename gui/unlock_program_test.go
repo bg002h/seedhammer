@@ -173,6 +173,7 @@ func pagerDots(t *testing.T, ctx *Context, lastNav program) int {
 // carousel must be an EIGHT-program lap, and the ninth entry must not appear on
 // any frame of it.
 func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -220,6 +221,7 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 // programs, the ninth is the new entry, and the other eight are all still
 // reachable in order (the regression the const-to-runtime bound can cause).
 func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.payload = payloadReaderFor(t, "E")
@@ -271,6 +273,7 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 // It is also the ONLY test that proves the bytes uiFlow PROBED are the bytes
 // the flow receives: the digest on screen is computed from them.
 func TestUnlockPayloadEntrySelectable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.payload = payloadReaderFor(t, "E")
@@ -368,6 +371,7 @@ func (r *countingReader) Read() ([]byte, error) {
 // the GUI's lifetime is ~14% of free heap, and the menu only needs to know
 // whether MNEMBLOB is there.
 func TestStartupProbesWithoutReadingTheRegion(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	var reads, probes int
 	r := &countingReader{inner: payloadReaderFor(t, "D"), reads: &reads, probes: &probes}
 	p := newPlatform()

@@ -62,6 +62,7 @@ func s5DriveVerifyToPassphrase(t *testing.T, records []string, expected []int,
 //
 // Back must return to the seed entry instead.
 func TestVerifyBackAtPassphraseDoesNotSkipIt(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	records := append([]string(nil), md1...)
 	for _, pl := range plates {
@@ -103,6 +104,7 @@ func TestVerifyBackAtPassphraseDoesNotSkipIt(t *testing.T) {
 // resumed entry WITHOUT retyping anything, and requires the flow to arrive back
 // at the passphrase prompt. It can only do that if the words were still there.
 func TestVerifyBackAtPassphraseKeepsTheSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	records := append([]string(nil), md1...)
 	for _, pl := range plates {

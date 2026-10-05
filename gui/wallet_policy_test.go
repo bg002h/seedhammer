@@ -187,6 +187,7 @@ func TestWalletPolicyRefusesAnAmbiguousSupply(t *testing.T) {
 // walletPolicyFlow directly — calling the flow proves the flow runs, which is
 // the one thing that was never in doubt.
 func TestWalletPolicyProgramIsNavigableAndOpens(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	frame, drawer, quit := runUITouch(ctx, func() { uiFlow(ctx, "test") })
 	defer quit()

@@ -23,6 +23,7 @@ import (
 // re-verify passphrase prompt. `passphrase` is in scope at
 // gui/singlesig_verify.go:108-112; the failure site is what used to be :182.
 func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	// The plates on the bench: a WATCH-ONLY bare-seed engrave. watchOnly skips
 	// the ms1 hand-type step, which this gate does not need.
 	opts := s6aSingleSigOpts{watchOnly: true}

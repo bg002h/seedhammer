@@ -106,6 +106,7 @@ func assertScrubbed(t *testing.T, exit string, seen []bip39.Mnemonic) {
 // scrub site (`defer reg.scrub()` in buildMultisigPolicyFlow): every subtest
 // below must go red, which is what proves each of them is looking.
 func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := scrubFixtureRecords(t)
 
 	// EXIT 1: the passphrase prompt's own Back, the first exit that exists after
@@ -310,6 +311,7 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 // The typed route is driven here rather than the payload one, because it is the
 // route with the most screens: source picker, word-count picker, word entry.
 func TestSeedEntryScreensNameTheirSlot(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	// A payload with a card and a PASSPHRASE but no ClassMnemonic: the seed must
 	// be typed, and the passphrase source picker still appears.
 	records := append(cosignerCardRecords(t, 1), "pass:6162616e646f6e2061626f7574")

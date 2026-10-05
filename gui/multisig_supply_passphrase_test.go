@@ -259,6 +259,7 @@ func s5SupplyPassphraseWalk(t *testing.T) (modeScreen, restoreDoc string) {
 // TestSupplyPassphraseRunTellsTheOperatorWhatIsMissing is C-3's arm, and both
 // halves of it are funds-bearing.
 func TestSupplyPassphraseRunTellsTheOperatorWhatIsMissing(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	modeScreen, restoreDoc := s5SupplyPassphraseWalk(t)
 	t.Logf("engrave-mode screen: %q", modeScreen)
 	t.Logf("restore doc: %q", restoreDoc)

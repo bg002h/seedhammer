@@ -193,6 +193,7 @@ func f671ConsentForSeedEverywhere(t *testing.T) (mapping, consent string) {
 // assertions fail (the Liana claim is back); the mapping assertion is the
 // control that the walk reached the seating the claim is about.
 func TestComposerConsentDoesNotClaimLianaImportsASameSeedWallet(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	mapping, consent := f671ConsentForSeedEverywhere(t)
 
 	m := normalizeDrawn(mapping)

@@ -6,6 +6,7 @@ import "testing"
 // reachable by navigating Right from the start screen, is titled, and that the
 // start-screen layout does not panic("invalid page") for any navigable program.
 func TestEngraveXpubProgramNavigable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })

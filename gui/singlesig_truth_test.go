@@ -998,6 +998,7 @@ func s6aSingleSigWalk(t *testing.T, opts s6aSingleSigOpts) s6aSingleSigRun {
 // learn that a third spending factor was ever in play, and no plate in the set
 // can be made to yield it.
 func TestSingleSigPassphraseRunTellsTheOperatorWhatIsMissing(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	run := s6aSingleSigWalk(t, s6aSingleSigOpts{passphrase: true})
 	t.Logf("the passphrased single-sig run cut %d plate(s)", run.plates)
 	t.Logf("engrave-mode screen: %q", run.mode)
@@ -1059,6 +1060,7 @@ func TestSingleSigPassphraseRunTellsTheOperatorWhatIsMissing(t *testing.T) {
 // buildPassphraseInventoryLines directly, as its prior art does -- this walk
 // cuts no plates and so never reaches a restore document.
 func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var mode string
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
@@ -1117,6 +1119,7 @@ func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
 // NO ENGRAVER IS NEEDED: Back at the FIRST plate's style picker is
 // bundleEngrave's set-level abort, and nothing has been cut at that point.
 func TestSingleSigAbortIsTheLastScreenOfTheProgram(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())
 		done := false
@@ -1178,6 +1181,7 @@ func TestSingleSigAbortIsTheLastScreenOfTheProgram(t *testing.T) {
 // first -- which is also what makes the "remove the census call" mutation fail
 // with the engrave picker's own text rather than with a bare timeout.
 func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())
 		frame, quit := runUI(ctx, func() {
@@ -1260,6 +1264,7 @@ func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
 // is present AND the other absent, so swapping either call site's argument fails
 // on both halves rather than on a needle that happens to survive.
 func TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	const (
 		oneSubject  = "The seed you entered"
 		manySubject = "Every seed you entered"
@@ -1980,6 +1985,7 @@ func s6aSingleSigFullVerify(t *testing.T) verifyRecord {
 // slot covers every key, records 0, and would let this test pass while observing
 // the clause's PRESENT arm never once.
 func TestVerifyPassLineNamesCosignersOnlyWhereThereAreSome(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	msRec, policyKeys := s6aMultisigFullOneSlotVerify(t)
 	if msRec.pass == nil {
 		t.Fatal("the multisig verify passed on screen and recorded no pass, so the " +
@@ -2067,6 +2073,7 @@ func TestVerifyPassLineNamesCosignersOnlyWhereThereAreSome(t *testing.T) {
 // Back before the device read anything, which is a false statement about the
 // device's own behaviour.
 func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	opts := s6aSingleSigOpts{watchOnly: true} // no ms1 to type on any arm
 	b := s6aSingleSigBundle(t, opts)
 	foreign := func(t *testing.T) []string {
@@ -2210,6 +2217,7 @@ func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
 // operator is asked to present anything, which observes nothing about any plate
 // and must therefore write neither bit.
 func TestMultisigVerifyRecordsWhatItObserved(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	t.Run("comparator-disagreed", func(t *testing.T) {
 		_, md1, _, slot := s5OneSlotReadback(t)
 		m, err := bip39.ParseMnemonic(fixtureMasterA)

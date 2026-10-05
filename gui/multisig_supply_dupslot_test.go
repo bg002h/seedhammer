@@ -170,6 +170,7 @@ func TestSupplyTailCollapsesByteIdenticalPlates(t *testing.T) {
 // obligation list the tail actually returned, through the REAL gatherer -- which
 // is where the second identical card disappears.
 func TestSupplyDuplicateSlotVerifiesItsOwnOutput(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1 := s5DuplicateSlotMd1(t)
 	m, keys, matched := s5DupSlotPremise(t, md1)
 

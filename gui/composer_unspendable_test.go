@@ -234,6 +234,7 @@ func TestComposerLianaKeyDroppedFits(t *testing.T) {
 // Mutation: moving composerUnspendableStep below composerTemplateChunksFor
 // makes the first stub screen show the NUMS id.
 func TestComposerKeyPathChoiceIsPlacedBeforeTheChunks(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	list := composerTrPreset(t, "kofn-recovery")
 	idOf := func(kind md.UnspendableKind) string {
 		c, err := md.ComposeWithUnspendable(list, make([]*md.SlotOrigin, 4), kind)

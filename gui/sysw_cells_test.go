@@ -71,6 +71,7 @@ func TestBackupWalletTakesACodex32SecretFromThePayload(t *testing.T) {
 // Taking it must SKIP the keyboard: a flow that offered the payload and then
 // asked for typing anyway would have served the cell in appearance only.
 func TestTheSeamPassphraseComesFromThePayloadWithoutTyping(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	// `pass:` is a RESERVED prefix and its body is lowercase hex (§5.3.1) --
 	// "abandon about", which contains the space EPD §6.4 forbids raw.
 	const (
@@ -124,6 +125,7 @@ func TestTheSeamPassphraseComesFromThePayloadWithoutTyping(t *testing.T) {
 // syswOffer's shape strictly additive: a machine with no payload, and an
 // operator who says no, both get exactly what they got before.
 func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -165,6 +167,7 @@ func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
 //     The seam is not: buildCosignerSource is the one place that answers "where
 //     does a cosigner key come from", with payload as phase 1's only answer.
 func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	// A complete, non-chunked md1: it decodes on its own, so the gatherer counts
 	// it immediately rather than waiting for chunks that will never be scanned.
 	const md1 = "md1yqpqqxqq8xtwhw4xwn4qh"

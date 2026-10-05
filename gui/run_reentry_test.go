@@ -491,6 +491,7 @@ func driveSealedPayloadReentry(t *testing.T, cfg reentryConfig) {
 // -- if one combination hangs and another does not, the differing axis is where
 // the bug lives.
 func TestRunSealedPayloadReentryAfterWipe(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	for _, tc := range []struct {
 		name string
 		cfg  reentryConfig

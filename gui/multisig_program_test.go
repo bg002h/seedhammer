@@ -7,6 +7,7 @@ import "testing"
 // bound (a further Right wraps to backupWallet), has a NON-BLANK title, and does
 // not panic on render (layoutMainPlates must have its case). qaProgram stays out.
 func TestEngraveMultisigProgramNavigable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })

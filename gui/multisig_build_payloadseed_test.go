@@ -38,6 +38,7 @@ func payloadWithSeedAndCards(t *testing.T, nCards int, seedPhrase string) []stri
 // taken, the acceptance surface is shown, and the build proceeds on a seed no
 // keyboard entered.
 func TestBuildTakesTheSelfSeedFromThePayload(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	// masterC as the self seed against cards B@0 and C@0 would collide (C@0 IS
 	// masterC at the shared origin), so the self seed here is masterA and the
 	// cards are B@0 + C@0 — Trace A exactly.
@@ -153,6 +154,7 @@ func TestBuildTakesTheSelfSeedFromThePayload(t *testing.T) {
 // The emulator drives the identical shape and reaches the identical screen; this
 // is the fast guard for it.
 func TestBuildRefusesDuplicateOnAPayloadSourcedSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := payloadWithSeedAndCards(t, 1, fixtureMasterA) // card A@0 + master A
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())

@@ -199,6 +199,7 @@ func TestFableSpecKeyOrderSurvivesBackFromTheStubScreen(t *testing.T) {
 // passphrase question. Measured: what the flow does instead, and the
 // fingerprint that then reaches the mapping review.
 func TestFableSpecBackOnThePassphraseKeyboardIsADecline(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -1022,6 +1023,7 @@ func TestFableKeyThenSeedThenBackReachesThePlannerAsShown(t *testing.T) {
 // moment they are entered -- so declining there has to undo the registration
 // or the bare seed stays a source and is offered for seating.
 func TestFableSpecBackOnThePassphraseQuestionUnRegistersTheSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize

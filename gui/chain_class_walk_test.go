@@ -77,6 +77,7 @@ import (
 // SECRET MATERIAL (record 0 (BIP-39 mnemonic))" -- so the two ends of the chain
 // warn about one fact, and ingest() asserts the device's half.
 func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var words int
 	var art string
 	synctest.Test(t, func(t *testing.T) {
@@ -412,6 +413,7 @@ func TestChainFreeTextFromAMePackedPayloadToATextPlate(t *testing.T) {
 // instead of secret[:n] would put a stale tail on the plate, and no unit test
 // of ppBuildPlate can see that).
 func TestChainPassphraseFromAMePackedPayloadToAPasswordPlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var gotSecret []byte
 	var gotSeedFP, gotCombinedFP string
 	var gotQR, captured bool
@@ -536,6 +538,7 @@ type chainMdMkStep struct {
 // is SKIP, USE, USE over the roster and SKIP, SKIP, USE, USE over this blob. A
 // tap sequence carried across from the other file selects A@1 instead.
 func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var art string
 	var census []string
 	synctest.Test(t, func(t *testing.T) {

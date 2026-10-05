@@ -146,6 +146,7 @@ type buildWalkStep struct {
 // the KEYBOARD, rasterising every screen from the template picker to the
 // engrave-style picker, and completes the engrave.
 func TestBuildWalkTypedSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := cosignerCardRecords(t, 4) // A@0, B@0, C@0, A@1 — the delivered set
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()

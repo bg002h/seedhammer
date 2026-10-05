@@ -36,6 +36,7 @@ var ftProgramTitles = []string{
 // Touch, not synthesized ButtonEvents: five of six programs were once
 // unreachable on hardware while every button-driven pager test passed.
 func TestEngraveTextProgramNavigableByTouch(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -146,6 +147,7 @@ func TestStartScreenFitsAtNinePagerDots(t *testing.T) {
 // proves it is in the carousel and the flow tests drive it directly; without
 // this, the feature ships with a dead menu item and a fully green suite.
 func TestEngraveTextProgramSelectable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)

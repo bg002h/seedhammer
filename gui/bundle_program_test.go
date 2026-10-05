@@ -11,6 +11,7 @@ import "testing"
 // start-screen layout for the new program (layoutMainPlates must have a case or
 // it panics, R0-I-A).
 func TestEngraveBundleProgramNavigable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })
