@@ -165,6 +165,43 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 		})
 	})
 
+	// EXIT 1b (recheck n-2): Back ON the passphrase step itself -- the
+	// question in the default build, the notice under the Refugium profile.
+	// Either way askBIP39Passphrase reports !ok, seedPassphraseStep discards
+	// the seed it just registered, and the flow is then backed out entirely:
+	// the seed must be scrubbed. Runs in both builds.
+	t.Run("Back on the passphrase step", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var seen []bip39.Mnemonic
+			buildMultisigSeedHook = func(m bip39.Mnemonic) { seen = append(seen, m) }
+			defer func() { buildMultisigSeedHook = nil }()
+			ctx := NewContext(newPlatform())
+			ctx.sysw = sessionHolding(records...)
+			done := false
+			frame, quit := runUI(ctx, func() {
+				buildMultisigPolicyFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			buildDriveToSeed(t, ctx, frame)
+			click(&ctx.Router, Button1) // Back, on the question or the notice
+			frame()
+			if c, ok := pumpUntil(frame, ppQuestion, 4); ok {
+				t.Fatalf("Back did not leave the passphrase step; got %q", c)
+			}
+			for i := 0; i < 32 && !done; i++ {
+				click(&ctx.Router, Button1)
+				for j := 0; j < 4 && !done; j++ {
+					frame()
+				}
+			}
+			if !done {
+				t.Fatal("the flow did not return after backing out")
+			}
+			assertScrubbed(t, "Back on the passphrase step", seen)
+		})
+	})
+
 	// EXIT 2: a GATE FAIL screen. This is the exit S4 creates, and the one with
 	// the most seeds live behind it.
 	t.Run("the gate FAIL screen", func(t *testing.T) {

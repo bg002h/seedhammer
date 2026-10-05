@@ -159,7 +159,12 @@ func f671ConsentForSeedEverywhere(t *testing.T) (mapping, consent string) {
 		if got, ok = pumpUntil(frame, ppQuestion, 32); !ok {
 			t.Fatalf("no passphrase question.\nLast frame: %q", got)
 		}
-		f671TapRow(t, ctx, frame, drawer, 0) // Skip
+		if refugiumProfile {
+			// The notice has no rows; its forward target acknowledges it.
+			tapNavSlot(t, ctx, drawer(), Button3)
+		} else {
+			f671TapRow(t, ctx, frame, drawer, 0) // Skip
+		}
 
 		for slot := 0; slot < 4; slot++ {
 			want := "Slot @" + string(rune('0'+slot))
@@ -193,7 +198,6 @@ func f671ConsentForSeedEverywhere(t *testing.T) (mapping, consent string) {
 // assertions fail (the Liana claim is back); the mapping assertion is the
 // control that the walk reached the seating the claim is about.
 func TestComposerConsentDoesNotClaimLianaImportsASameSeedWallet(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	mapping, consent := f671ConsentForSeedEverywhere(t)
 
 	m := normalizeDrawn(mapping)

@@ -81,7 +81,6 @@ func TestComposerDoorCountsIgnoreClassesThatAreNotKeys(t *testing.T) {
 // conditional choice: "From payload" appears only when the loaded payload
 // holds a Descriptor or an md1/mk1 record.
 func TestComposerDoorOffersFromPayloadOnlyWhenThePayloadHasOne(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	for _, tc := range []struct {
 		name    string
 		session *syswSession
@@ -105,8 +104,10 @@ func TestComposerDoorOffersFromPayloadOnlyWhenThePayloadHasOne(t *testing.T) {
 				if got := uiContains(content, "From payload"); got != tc.want {
 					t.Errorf("From payload offered = %v, want %v.\nFrame: %q", got, tc.want, content)
 				}
-				if !uiContains(content, "Scan cards") {
-					t.Errorf("the door does not offer the NFC route.\nFrame: %q", content)
+				// The NFC route is offered exactly where a scan is: never
+				// under the Refugium profile, which reads no tag (F7 §4.2).
+				if got := uiContains(content, "Scan cards"); got != !refugiumProfile {
+					t.Errorf("Scan cards offered = %v, want %v.\nFrame: %q", got, !refugiumProfile, content)
 				}
 			})
 		})

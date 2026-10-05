@@ -84,7 +84,6 @@ func TestErrorScreenIgnoresAReleaseItNeverSawPressed(t *testing.T) {
 // plate screen, back out to "Bundle Incomplete" -- then ONE press of BACK must
 // dismiss it and return control, where before the fix thirty did nothing.
 func TestF440BundleIncompleteModalDismissesOnBack(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1CardPayload, f76Md1CardSHA256, wshSortedmultiChunks)
 
@@ -92,17 +91,17 @@ func TestF440BundleIncompleteModalDismissesOnBack(t *testing.T) {
 	defer quit()
 
 	// (0) THE COMPOSER'S DOOR, which is now the first screen in every
-	// state (SPEC_wallet_policy_composer §7a). "Scan cards" is index 0, so
-	// one Down selects "From payload", which is the route this walk takes.
+	// state (SPEC_wallet_policy_composer §7a). "From payload" is the route
+	// this walk takes, picked by label: "Scan cards" heads the door only
+	// where a scan is offered.
 	if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
 		t.Fatal("the composer door never drew")
 	}
-	click(&ctx.Router, Down)
-	click(&ctx.Router, Button3)
-	if got, ok := pumpUntil(frame, "Cards from where?", 24); !ok {
-		t.Fatalf("the door never drew.\nLast frame: %q", got)
+	for range composerDoorRow(t, ctx, "From payload") {
+		click(&ctx.Router, Down)
 	}
-	click(&ctx.Router, Button3) // FROM PAYLOAD
+	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 24)
 	if got, ok := pumpUntil(frame, "md1 descriptors: 1", 64); !ok {
 		t.Fatalf("the card did not assemble.\nLast frame: %q", got)
 	}

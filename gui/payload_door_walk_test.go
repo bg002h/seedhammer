@@ -136,7 +136,6 @@ func f76NFCPlatform() *testPlatform {
 // J2, re-run. Wallet Policy, a payload holding all six chunks of one good md1
 // card: measured "md1 descriptors: 0" before the fix.
 func TestF76WalletPolicyCountsACompleteMd1CardFromThePayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1CardPayload, f76Md1CardSHA256, wshSortedmultiChunks)
 
@@ -144,20 +143,19 @@ func TestF76WalletPolicyCountsACompleteMd1CardFromThePayload(t *testing.T) {
 	defer quit()
 
 	// (0) THE COMPOSER'S DOOR, which is now the first screen in every
-	// state (SPEC_wallet_policy_composer §7a). "Scan cards" is index 0, so
-	// one Down selects "From payload", which is the route this walk takes.
+	// state (SPEC_wallet_policy_composer §7a). "From payload" is the route
+	// this walk takes, picked by label: "Scan cards" heads the door only
+	// where a scan is offered.
 	if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
 		t.Fatal("the composer door never drew")
 	}
-	click(&ctx.Router, Down)
-	click(&ctx.Router, Button3)
-	got, ok := pumpUntil(frame, "Cards from where?", 16)
-	if !ok {
-		t.Fatalf("the md1 card offer never drew.\nLast frame: %q", got)
+	for range composerDoorRow(t, ctx, "From payload") {
+		click(&ctx.Router, Down)
 	}
-	click(&ctx.Router, Button3) // FROM PAYLOAD, row 0
+	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
 
-	got, ok = pumpUntil(frame, "md1 descriptors: 1", 64)
+	got, ok := pumpUntil(frame, "md1 descriptors: 1", 64)
 	if !ok {
 		t.Errorf("the payload's SIX chunks assembled into no card at the Wallet "+
 			"Policy door (J2 measured `md1 descriptors: 0`).\nLast frame: %q", got)
@@ -166,20 +164,15 @@ func TestF76WalletPolicyCountsACompleteMd1CardFromThePayload(t *testing.T) {
 
 // J2BUNDLE, re-run: the same payload at Engrave Bundle's door.
 func TestF76BundleCountsACompleteMd1CardFromThePayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1CardPayload, f76Md1CardSHA256, wshSortedmultiChunks)
 
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "Cards from where?", 16)
-	if !ok {
-		t.Fatalf("the md1 card offer never drew.\nLast frame: %q", got)
-	}
-	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
 
-	got, ok = pumpUntil(frame, "md1 descriptors: 1", 64)
+	got, ok := pumpUntil(frame, "md1 descriptors: 1", 64)
 	if !ok {
 		t.Errorf("Engrave Bundle counted no md1 card from a payload holding all "+
 			"six chunks (J2BUNDLE measured 0).\nLast frame: %q", got)
@@ -189,7 +182,6 @@ func TestF76BundleCountsACompleteMd1CardFromThePayload(t *testing.T) {
 // FU2, re-run: a 2-chunk mk1 KEY card, measured "mk1 keys: 0" from the payload
 // against "mk1 keys: 1" for the same chunks seeded directly.
 func TestF76BundleCountsACompleteMk1CardFromThePayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	want := mk1CardA(t)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Mk1CardPayload, f76Mk1CardSHA256, want)
@@ -197,13 +189,9 @@ func TestF76BundleCountsACompleteMk1CardFromThePayload(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "Cards from where?", 16)
-	if !ok {
-		t.Fatalf("the mk1 card offer never drew.\nLast frame: %q", got)
-	}
-	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
 
-	got, ok = pumpUntil(frame, "mk1 keys: 1", 64)
+	got, ok := pumpUntil(frame, "mk1 keys: 1", 64)
 	if !ok {
 		t.Errorf("the payload's TWO mk1 chunks assembled into no key card "+
 			"(FU2 measured `mk1 keys: 0`; the all-seeded control measured 1)."+
@@ -291,24 +279,19 @@ func TestF76InspectKeyCompletesFromThePayload(t *testing.T) {
 // that can still reach this refusal once the door is fixed. On a reader-less
 // machine the only route is a re-pack, and the message must name it.
 func TestF76IncompletePayloadGetsTheRepackAdvice(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1PartialPayload, f76Md1PartialSHA256, wshSortedmultiChunks[:5])
 
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	got, ok := pumpUntil(frame, "Cards from where?", 16)
-	if !ok {
-		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
-	}
-	click(&ctx.Router, Button3)
-	if got, ok = pumpUntil(frame, "md1 descriptors: 0", 32); !ok {
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
+	if got, ok := pumpUntil(frame, "md1 descriptors: 0", 32); !ok {
 		t.Fatalf("a 5-of-6 payload must NOT assemble a card.\nLast frame: %q", got)
 	}
 	click(&ctx.Router, Button3) // Done
 
-	got, ok = pumpUntil(frame, "me sysw pack", 32)
+	got, ok := pumpUntil(frame, "me sysw pack", 32)
 	if !ok {
 		t.Errorf("a payload genuinely missing a chunk was not told to re-pack."+
 			"\nLast frame: %q", got)
@@ -356,17 +339,13 @@ func TestF76IncompletePayloadNamesBothRoutesOnAnNFCMachine(t *testing.T) {
 // The complete-in-payload case must never reach that message at all. Same door,
 // same button, a payload holding every chunk: Done PROCEEDS.
 func TestF76CompletePayloadNeverSeesTheIncompleteRefusal(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	ctx := NewContext(f76Platform())
 	ctx.sysw = f76Session(t, f76Md1CardPayload, f76Md1CardSHA256, wshSortedmultiChunks)
 
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	if got, ok := pumpUntil(frame, "Cards from where?", 16); !ok {
-		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
-	}
-	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
 	if got, ok := pumpUntil(frame, "md1 descriptors: 1", 64); !ok {
 		t.Fatalf("the card did not assemble.\nLast frame: %q", got)
 	}
@@ -388,7 +367,6 @@ func TestF76CompletePayloadNeverSeesTheIncompleteRefusal(t *testing.T) {
 // plate, and it validates through the BCH checksum on the way in. Priming from
 // memory must therefore go through offer(), not around it.
 func TestF76ACorruptedChunkInThePayloadIsStillRefused(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	corrupt := make([]string, len(wshSortedmultiChunks))
 	copy(corrupt, wshSortedmultiChunks)
 	// One symbol, in the middle of the last chunk's body: enough to break the
@@ -421,10 +399,7 @@ func TestF76ACorruptedChunkInThePayloadIsStillRefused(t *testing.T) {
 	frame, quit := runUI(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 	defer quit()
 
-	if got, ok := pumpUntil(frame, "Cards from where?", 16); !ok {
-		t.Fatalf("the card offer never drew.\nLast frame: %q", got)
-	}
-	click(&ctx.Router, Button3)
+	takePayloadOffer(t, ctx, frame, "Cards from where?", 16)
 	got, ok := pumpUntil(frame, "md1 descriptors: 0", 32)
 	if !ok {
 		t.Fatalf("a set with a corrupted chunk ASSEMBLED A CARD -- priming went "+

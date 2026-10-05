@@ -126,7 +126,6 @@ func TestS2ContainerRecordClassifiesAsADescriptor(t *testing.T) {
 // is §4.7-admitted, so it can never be that shape; a scan-door-keyed classifier
 // would have made it reachable from one line of text.
 func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	synctest.Test(t, func(t *testing.T) {
 		session, _ := s2DescriptorSession(t)
 		e := newEngraver()
@@ -144,28 +143,35 @@ func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *tes
 		// lead names the wallet policy rather than a card, which is the whole
 		// point of the second offer.
 		// (0) THE COMPOSER'S DOOR, which is now the first screen in every
-		// state (SPEC_wallet_policy_composer §7a). "Scan cards" is index 0, so
-		// one Down selects "From payload", which is the route this walk takes.
+		// state (SPEC_wallet_policy_composer §7a). "From payload" is the route
+		// this walk takes, picked by label: "Scan cards" heads the door only
+		// where a scan is offered.
 		if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
 			t.Fatal("the composer door never drew")
 		}
-		click(&ctx.Router, Down)
+		for range composerDoorRow(t, ctx, "From payload") {
+			click(&ctx.Router, Down)
+		}
 		click(&ctx.Router, Button3)
-		got, ok := pumpUntil(frame, "Wallet policy from where?", 16)
-		if !ok {
-			t.Fatalf("the Descriptor offer never drew.\nLast frame: %q", got)
-		}
-		if !uiContains(got, "FROM PAYLOAD") {
-			t.Errorf("the offer does not name the payload route.\nFrame: %q", got)
-		}
+		// Under the Refugium profile syswChoose takes the payload without
+		// drawing the offer, so (1) and (2) are the default build's alone.
+		if !refugiumProfile {
+			got, ok := pumpUntil(frame, "Wallet policy from where?", 16)
+			if !ok {
+				t.Fatalf("the Descriptor offer never drew.\nLast frame: %q", got)
+			}
+			if !uiContains(got, "FROM PAYLOAD") {
+				t.Errorf("the offer does not name the payload route.\nFrame: %q", got)
+			}
 
-		// (2) FROM PAYLOAD. ChoiceScreen opens on index 0 because the payload
-		// holds the class; Button3 confirms.
-		click(&ctx.Router, Button3)
+			// (2) FROM PAYLOAD. ChoiceScreen opens on index 0 because the payload
+			// holds the class; Button3 confirms.
+			click(&ctx.Router, Button3)
+		}
 
 		// (3) THE SCREEN. This is the first time in the tree that
 		// admits(progWalletPolicy, ClassDescriptor) has led anywhere.
-		got, ok = pumpUntil(frame, "Engrave Descriptor", 64)
+		got, ok := pumpUntil(frame, "Engrave Descriptor", 64)
 		if !ok {
 			t.Fatalf("the walk never reached DescriptorScreen.\nLast frame: %q", got)
 		}
@@ -199,7 +205,6 @@ func TestWalkWalletPolicyFromAPackedDescriptorRecordToTheDescriptorScreen(t *tes
 // "Couldn't read the wallet policy from the payload." instead -- a wallet the
 // operator can see on the host, refused at the machine.
 func TestWalkWalletPolicyRendersARecordWithLeadingWhitespace(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	synctest.Test(t, func(t *testing.T) {
 		_, record := s2DescriptorSession(t)
 		padded := " " + record
@@ -220,19 +225,18 @@ func TestWalkWalletPolicyRendersARecordWithLeadingWhitespace(t *testing.T) {
 		defer quit()
 
 		// (0) THE COMPOSER'S DOOR, which is now the first screen in every
-		// state (SPEC_wallet_policy_composer §7a). "Scan cards" is index 0, so
-		// one Down selects "From payload", which is the route this walk takes.
+		// state (SPEC_wallet_policy_composer §7a). "From payload" is the route
+		// this walk takes, picked by label: "Scan cards" heads the door only
+		// where a scan is offered.
 		if _, ok := pumpUntil(frame, "Build a new policy", 16); !ok {
 			t.Fatal("the composer door never drew")
 		}
-		click(&ctx.Router, Down)
-		click(&ctx.Router, Button3)
-		got, ok := pumpUntil(frame, "Wallet policy from where?", 16)
-		if !ok {
-			t.Fatalf("the Descriptor offer never drew.\nLast frame: %q", got)
+		for range composerDoorRow(t, ctx, "From payload") {
+			click(&ctx.Router, Down)
 		}
 		click(&ctx.Router, Button3)
-		got, ok = pumpUntil(frame, "Engrave Descriptor", 64)
+		takePayloadOffer(t, ctx, frame, "Wallet policy from where?", 16)
+		got, ok := pumpUntil(frame, "Engrave Descriptor", 64)
 		if !ok {
 			t.Fatalf("a record the classifier ADMITTED did not reach the screen.\n"+
 				"Last frame: %q", got)

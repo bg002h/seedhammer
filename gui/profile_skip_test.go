@@ -77,3 +77,33 @@ func shownTitles(titles []string) []string {
 	}
 	return out
 }
+
+// composerDoorRow is the index of the composer door's row labelled label, in
+// THIS build and session (recheck I-2r): drivers pick door rows by label,
+// because the profile drops "Scan cards" from the head of the door.
+func composerDoorRow(t testing.TB, ctx *Context, label string) int {
+	t.Helper()
+	choices, _ := composerDoorRows(ctx)
+	for i, c := range choices {
+		if c == label {
+			return i
+		}
+	}
+	t.Fatalf("the composer door has no %q row: %q", label, choices)
+	return -1
+}
+
+// takePayloadOffer answers a payload offer ("Cards from where?") with its
+// FROM PAYLOAD row in the default build. Under the Refugium profile syswChoose
+// takes the payload without drawing the offer (there is nothing to choose
+// against), so there is nothing to wait for or press (recheck I-2r).
+func takePayloadOffer(t testing.TB, ctx *Context, frame func() (string, bool), needle string, frames int) {
+	t.Helper()
+	if refugiumProfile {
+		return
+	}
+	if got, ok := pumpUntil(frame, needle, frames); !ok {
+		t.Fatalf("the payload offer %q never drew.\nLast frame: %q", needle, got)
+	}
+	click(&ctx.Router, Button3) // FROM PAYLOAD, row 0
+}
