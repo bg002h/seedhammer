@@ -1,0 +1,29 @@
+# Generator for backup/testdata/ms1_seedqr_vectors.json (F-702 F5).
+#
+# NOT part of any workspace (the empty [workspace] table below), and nothing in
+# the firmware build reads it. The vector file's ms1 column comes from the Rust
+# primary (ms-codec), and its entropy, SeedQR-digit and QR-width columns come
+# from crates that are not the Go code under test, so the Go test that reads
+# the file never checks the Go encoder against itself. The exact command is in
+# ../ms1_seedqr_vectors.provenance.json. Cargo.lock is committed; target/ is not.
+[package]
+name = "ms1-seedqr-vectors-gen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Unlicense"
+
+[workspace]
+
+[dependencies]
+# The Rust primary for ms1, pinned to the rev mnemonic-engrave pins
+# (crates/me-cli/Cargo.toml). 0.10.0 is not on crates.io.
+ms-codec = { git = "https://github.com/bg002h/mnemonic-secret", rev = "e5dff6f9c2b7ae7dc02a4a137e7322abab32211e" }
+# rust-bip39: words <-> entropy, checksum, and the English wordlist index.
+bip39 = "2"
+# QR version/width at error-correction level M, for the width column.
+qrcode = { version = "0.14", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"

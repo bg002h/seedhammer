@@ -1,0 +1,65 @@
+{
+  "file": "backup/testdata/ms1_seedqr_vectors.json",
+  "purpose": "F-702 F5: vectors for backup.EngraveSeedStringSeedQR (ms1 plate with a Standard SeedQR). Read by backup/ms1_seedqr_test.go.",
+  "rule": "No column is produced by the Go code under test (codex32.EncodeMS1, seedqr.QR, the vendored qr.Encode). The Go test checks those against this file.",
+  "generator": {
+    "path": "backup/testdata/gen",
+    "language": "Rust",
+    "lockfile": "backup/testdata/gen/Cargo.lock (committed)",
+    "command": "cd backup/testdata/gen && cargo run --locked -- <trezor-vectors.json> > ../ms1_seedqr_vectors.json",
+    "toolchain_used": "rustc 1.97.0 (2d8144b78 2026-07-07), cargo 1.97.0; output reproduced byte for byte with --locked",
+    "checks_it_makes": [
+      "the Trezor file's sha256 equals the value below, else it refuses",
+      "every mnemonic parses as English BIP-39 with a valid checksum (rust-bip39)",
+      "Trezor rows: rust-bip39's entropy equals Trezor's published entropy",
+      "SeedSigner rows: the computed digit stream equals SeedSigner's published one",
+      "every QR width is at most 33"
+    ]
+  },
+  "columns": {
+    "words": "verbatim from the source row",
+    "entropy": "rust-bip39 Mnemonic::to_entropy (Trezor rows: also equal to Trezor's entropy column)",
+    "ms1": "ms-codec encode(Tag::ENTR, &Payload::Entr(entropy))",
+    "seedqr": "each word's index in rust-bip39's English wordlist, %04d, concatenated (SeedSigner rows: also equal to SeedSigner's published digit stream)",
+    "qr_width_m": "qrcode crate QrCode::with_error_correction_level(digits, EcLevel::M).width()"
+  },
+  "sources": [
+    {
+      "name": "ms-codec (Rust primary for ms1)",
+      "repo": "https://github.com/bg002h/mnemonic-secret",
+      "rev": "e5dff6f9c2b7ae7dc02a4a137e7322abab32211e",
+      "version": "0.10.0 (not on crates.io; the rev mnemonic-engrave's crates/me-cli/Cargo.toml pins)",
+      "api": "ms_codec::encode(Tag::ENTR, &Payload::Entr(Vec<u8>)) -> Result<String>"
+    },
+    {
+      "name": "rust-bip39",
+      "crate": "bip39",
+      "version": "2.2.2 (crates.io, see Cargo.lock)"
+    },
+    {
+      "name": "qrcode",
+      "crate": "qrcode",
+      "version": "0.14.1 (crates.io, default features off, see Cargo.lock)"
+    },
+    {
+      "name": "SeedSigner SeedQR specification",
+      "url": "https://raw.githubusercontent.com/SeedSigner/seedsigner/b2199c68b475eab0035b863b156f149757a1b4a6/docs/seed_qr/README.md",
+      "branch": "dev",
+      "rev": "b2199c68b475eab0035b863b156f149757a1b4a6",
+      "sha256": "44fe1a3232b5b60f2c4aa6a74a74025fbda69df4d1e4d452e95ccac0b7011a3c",
+      "used": "the worked example (vacuum ... nuclear) and Test Vectors 1-9: words and Standard SeedQR digit streams, copied verbatim into backup/testdata/gen/seedsigner_rows.json",
+      "rows": ["seedsigner-example", "seedsigner-tv1", "seedsigner-tv2", "seedsigner-tv3", "seedsigner-tv4", "seedsigner-tv5", "seedsigner-tv6", "seedsigner-tv7", "seedsigner-tv8", "seedsigner-tv9"]
+    },
+    {
+      "name": "BIP-39 English test vectors (Trezor python-mnemonic)",
+      "url": "https://raw.githubusercontent.com/trezor/python-mnemonic/b57a5ad77a981e743f4167ab2f7927a55c1e82a8/vectors.json",
+      "branch": "master",
+      "rev": "b57a5ad77a981e743f4167ab2f7927a55c1e82a8",
+      "sha256": "fa3b937b7cff9c9b8ecd3aa011faeb8d6dd67993174b72326e83f4de8fdb30f8",
+      "fetch": "curl -sSfL -o vectors.json <url>",
+      "used": "the \"english\" array's 12- and 24-word rows (indices 0-3, 12, 15, 18, 21 and 8-11, 14, 17, 20, 23); 15/18-word rows skipped. Rows are named trezor-english-<index>-<words>. Not committed; the generator checks its sha256."
+    }
+  ],
+  "row_count": 26,
+  "generated": "2026-10-05"
+}

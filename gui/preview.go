@@ -18,9 +18,12 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/backup"
 	"seedhammer.com/bip39"
+	"seedhammer.com/codex32"
 	"seedhammer.com/engrave"
+	"seedhammer.com/font/constant"
 )
 
 // PreviewOpts are the knobs cmd/plateview exposes. Zero values give each
@@ -101,6 +104,7 @@ var previewBuilders = map[string]func(engrave.Params, PreviewOpts) (Preview, err
 	// trigger constants they name (Refugium plan F7 §4.1).
 	"freetext":   freeTextPreview,
 	"seed":       seedPreview,
+	"ms1seedqr":  ms1SeedQRPreview,
 	"passphrase": passphrasePreview,
 }
 
@@ -200,6 +204,40 @@ func seedPreview(params engrave.Params, o PreviewOpts) (Preview, error) {
 		return Preview{}, err
 	}
 	p, err := engraveSeed(params, m, 0)
+	if err != nil {
+		return Preview{}, err
+	}
+	return Preview{Plate: p, HasQR: true}, nil
+}
+
+// ms1SeedQRPreview renders the ms1 plate with a Standard SeedQR (F-702 F5)
+// for previewSeed, with its fingerprint row and the ms1 id as its title,
+// through backup.EngraveSeedStringSeedQR -- the function a flow will call.
+func ms1SeedQRPreview(params engrave.Params, o PreviewOpts) (Preview, error) {
+	m, err := previewMnemonic()
+	if err != nil {
+		return Preview{}, err
+	}
+	ent := m.Entropy()
+	ms1, err := codex32.EncodeMS1(ent)
+	wipeBytes(ent)
+	if err != nil {
+		return Preview{}, err
+	}
+	mfp, err := masterFingerprintFor(m, &chaincfg.MainNetParams, "")
+	if err != nil {
+		return Preview{}, err
+	}
+	side, err := backup.EngraveSeedStringSeedQR(params, backup.SeedString{
+		Title:             "entr",
+		Seed:              ms1,
+		MasterFingerprint: mfp,
+		Font:              constant.Font,
+	}, m)
+	if err != nil {
+		return Preview{}, err
+	}
+	p, err := toPlate(side, params)
 	if err != nil {
 		return Preview{}, err
 	}
