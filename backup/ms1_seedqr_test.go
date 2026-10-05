@@ -280,6 +280,29 @@ func TestEngraveSeedStringSeedQRRefusals(t *testing.T) {
 	outOfRange := append(bip39.Mnemonic(nil), m...)
 	outOfRange[3] = bip39.NumWords
 
+	// An index aliased past the wordlist that still passes m.Valid():
+	// Valid builds the entropy as ent*2048|w, so adding 2048 to a word whose
+	// predecessor is odd changes neither entropy nor checksum. Only the range
+	// check refuses it; without that check the plate would carry the right
+	// ms1 string beside a SeedQR of other indices.
+	aliased := append(bip39.Mnemonic(nil), m...)
+	aliasAt := -1
+	for i := 1; i < len(aliased); i++ {
+		if aliased[i-1]%2 == 1 {
+			aliasAt = i
+			break
+		}
+	}
+	if aliasAt < 0 {
+		t.Fatal("no word with an odd predecessor to alias")
+	}
+	aliased[aliasAt] += bip39.NumWords
+	if !aliased.Valid() {
+		t.Fatal("control: the aliased mnemonic must pass Valid, or this case proves nothing")
+	}
+	aliasedPlate := good
+	aliasedPlate.MasterFingerprint = 0
+
 	threeWords := bip39.Mnemonic{0, 0, 0}
 
 	cases := []struct {
@@ -292,6 +315,7 @@ func TestEngraveSeedStringSeedQRRefusals(t *testing.T) {
 		{"wrong-fingerprint", wrongFP, m, errSeedQRFingerprint},
 		{"bad-checksum", good, bad, errSeedQRInvalidMnemonic},
 		{"word-out-of-range", good, outOfRange, errSeedQRInvalidMnemonic},
+		{"word-aliased-past-wordlist", aliasedPlate, aliased, errSeedQRInvalidMnemonic},
 		{"three-words", good, threeWords, errSeedQRInvalidMnemonic},
 		{"no-words", good, nil, errSeedQRInvalidMnemonic},
 		{"string-of-another-seed", seedQRPlateFor(t, "seedsigner-tv2"), m, errSeedQRDisagree},
@@ -350,4 +374,24 @@ func TestEngraveSeedStringSeedQRWipesTheEntropy(t *testing.T) {
 			t.Fatalf("entropy byte %d is still %#02x after the call returned", i, b)
 		}
 	}
+}
+
+// TestEngraveSeedStringSeedQRRefusesKelvinSign pins the byte-for-byte string
+// comparison. KELVIN SIGN (U+212A) folds to ASCII 'k' under strings.ToLower, so
+// a folded comparison would admit a plate string the engraver cannot cut.
+func TestEngraveSeedStringSeedQRRefusesKelvinSign(t *testing.T) {
+	for _, v := range loadMS1SeedQRVectors(t) {
+		plate, m := seedQRPlate(t, v)
+		low := strings.ToLower(plate.Seed)
+		i := strings.IndexByte(low, 'k')
+		if i < 0 {
+			continue
+		}
+		plate.Seed = low[:i] + "\u212a" + low[i+1:]
+		if _, err := EngraveSeedStringSeedQR(params, plate, m); !errors.Is(err, errSeedQRDisagree) {
+			t.Fatalf("%s: got %v, want errSeedQRDisagree", v.Name, err)
+		}
+		return
+	}
+	t.Fatal("control: no vector's ms1 string has a 'k' to replace")
 }

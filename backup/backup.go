@@ -203,14 +203,17 @@ var seedQREntropyHook func([]byte)
 //   - unless m is a valid English BIP-39 mnemonic (12, 15, 18, 21 or 24 words
 //     from the wordlist with a correct checksum). bip39.Mnemonic holds English
 //     wordlist indices only, so no other language can reach here;
-//   - unless codex32.EncodeMS1(m.Entropy()) equals plate.Seed, case aside;
+//   - unless codex32.EncodeMS1(m.Entropy()) equals plate.Seed, all lowercase
+//     or all uppercase, byte for byte;
 //   - if plate.MasterFingerprint is non-zero, unless it equals the words' own
 //     master fingerprint with no passphrase. Zero means no fingerprint row;
 //   - if the SeedQR is wider than seedQRMaxSize (no valid length is: 24 words
 //     is 29 modules).
 //
 // Secret copies. Wiped before return: the entropy buffer from m.Entropy(), the
-// []byte digit stream seedqr.QR returns, and, inside the callees, EncodeMS1's
+// []byte digit stream seedqr.QR returns (its final buffer only: seedqr.QR's
+// bytes.Buffer drops a smaller array when it grows, for 24 words after word
+// 16, and that array holding the first indices is not wiped), and, inside the callees, EncodeMS1's
 // payload buffer, the 64-byte BIP-39 seed and the BIP-32 master private key of
 // the fingerprint check (bip32.MnemonicFingerprint). Live and NOT wipeable,
 // left to the garbage collector: the SeedQR digit string (the Go string
@@ -240,7 +243,10 @@ func EngraveSeedStringSeedQR(params engrave.Params, plate SeedString, m bip39.Mn
 	if err != nil {
 		return nil, err
 	}
-	if ms1 != strings.ToLower(plate.Seed) {
+	// Byte for byte against both cases, never strings.ToLower(plate.Seed):
+	// Unicode case folding maps U+212A KELVIN SIGN to ASCII 'k', so a folded
+	// comparison would admit a string the engraver cannot cut.
+	if plate.Seed != ms1 && plate.Seed != strings.ToUpper(ms1) {
 		return nil, errSeedQRDisagree
 	}
 	if plate.MasterFingerprint != 0 {

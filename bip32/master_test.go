@@ -50,7 +50,7 @@ func TestMnemonicFingerprintKnownVector(t *testing.T) {
 	}
 }
 
-// TestMasterKeyWipesTheBIP39Seed pins MasterKey's `defer wipe(seed)`. The
+// TestMasterKeyWipesTheBIP39Seed pins MasterKey's `defer clear(seed)`. The
 // hook hands over the seed slice itself, so the read after the call observes
 // the same backing array the wipe writes; the snapshot taken while it was live
 // must equal the published seed first, or the zero check would prove nothing.
