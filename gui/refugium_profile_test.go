@@ -640,12 +640,20 @@ func TestRefugiumFreeTextSinkDropsTheQRForAnEmbeddedMS1(t *testing.T) {
 		strings.ToUpper(refugiumMS1Vec),
 		"ms10-tests-xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
 		"ms10test sxxxx xxxxx xxxxx xxxxx xxxxx xxxx4 nzvca 9cmcz lw",
+		// Recheck m-1: any keyboard punctuation used as a group separator.
+		refugiumGrouped(".", 5),
+		refugiumGrouped("/", 5),
+		refugiumGrouped(":", 4),
+		refugiumGrouped("_", 4),
+		refugiumGrouped("|", 6),
+		refugiumGrouped(";", 3),
 	} {
 		if f := build(t, text); f.QR != nil {
 			t.Errorf("%q: the plate carries a QR", text)
 		}
 	}
-	for _, text := range []string{"HELLO WORLD", "see the ms1 card", "ms1 plates are text only"} {
+	for _, text := range []string{"HELLO WORLD", "see the ms1 card", "ms1 plates are text only",
+		"ms1: a share. keep it apart / never photograph it"} {
 		if f := build(t, text); f.QR == nil {
 			t.Errorf("%q: the QR was dropped from a text holding no ms1 string", text)
 		}
@@ -658,6 +666,17 @@ func TestRefugiumFreeTextSinkDropsTheQRForAnEmbeddedMS1(t *testing.T) {
 			t.Errorf("%q: the free-text gate let it through", text)
 		}
 	}
+}
+
+// refugiumGrouped is refugiumMS1Vec split into groups of n by sep.
+func refugiumGrouped(sep string, n int) string {
+	var parts []string
+	for v := refugiumMS1Vec; len(v) > 0; {
+		k := min(n, len(v))
+		parts = append(parts, v[:k])
+		v = v[k:]
+	}
+	return strings.Join(parts, sep)
 }
 
 // §4.4, review M-6: Engrave Text, QR chosen BEFORE an ms1 text is typed. The

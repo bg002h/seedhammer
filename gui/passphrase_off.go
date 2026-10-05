@@ -49,6 +49,8 @@ func passphraseOffNoticeFlow(ctx *Context, th *Colors, title string) bool {
 		dims := ctx.Platform.DisplaySize()
 		d, dismissed := s.Layout(ctx, th, dims)
 		if dismissed {
+			// Defensive: Done flips only in ctx.Frame, so it is still false
+			// here; a wipe on the notice leaves through the loop condition.
 			return !ctx.Done
 		}
 		ctx.Frame(op.Layer(d, op.Color(&ctx.B, th.Background)))

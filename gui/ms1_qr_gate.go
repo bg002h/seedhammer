@@ -38,10 +38,16 @@ func isMS1String(s string) bool {
 	return strings.EqualFold(b.String(), "ms1")
 }
 
-// containsMS1String is the FREE-TEXT predicate (review I-1): after the same
-// separators are stripped -- any Unicode space (NBSP included), '-' and ',' --
-// the text contains, ANYWHERE and in either case, the HRP-and-separator `ms1`
-// followed by at least ms1MinDataChars bech32 characters.
+// containsMS1String is the FREE-TEXT predicate (review I-1, recheck m-1): after
+// every rune that is not a letter or a digit is dropped -- spaces (NBSP
+// included), line breaks and any punctuation a share might be grouped with
+// ('-', ',', '.', '/', ':', '_', ...) -- the text contains, ANYWHERE and in
+// either case, the HRP-and-separator `ms1` followed by at least
+// ms1MinDataChars bech32 characters.
+//
+// Known limit: a share broken up by WORDS (a label per line, "Line 2: ...")
+// is not caught when no run of 16 data characters survives; a word with a
+// non-bech32 letter (b, i, o) ends the run.
 //
 // isMS1String only looks at the start, which is exact for the verbatim codec
 // strings the bundle and codex32 producers handle, and wrong for free text: a
@@ -51,7 +57,7 @@ func isMS1String(s string) bool {
 func containsMS1String(s string) bool {
 	var b strings.Builder
 	for _, r := range s {
-		if unicode.IsSpace(r) || r == '-' || r == ',' {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
 			continue
 		}
 		b.WriteRune(unicode.ToLower(r))
