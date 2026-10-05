@@ -7,7 +7,6 @@ import "testing"
 // further Right wraps to backupWallet), has a NON-BLANK title, and does not panic
 // on render (layoutMainPlates must have its case). qaProgram stays out.
 func TestBip85DeriveProgramNavigable(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })
@@ -21,7 +20,7 @@ func TestBip85DeriveProgramNavigable(t *testing.T) {
 	}
 	// Right x6 -> engraveMultisig (engravePassphrase is position 2 and
 	// engraveText position 3).
-	for i := 0; i < 6; i++ {
+	for i := 0; i < carouselRights(engraveMultisig); i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {

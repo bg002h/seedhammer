@@ -77,7 +77,6 @@ import (
 // SECRET MATERIAL (record 0 (BIP-39 mnemonic))" -- so the two ends of the chain
 // warn about one fact, and ingest() asserts the device's half.
 func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var words int
 	var art string
 	synctest.Test(t, func(t *testing.T) {
@@ -118,7 +117,7 @@ func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
 		}
 		w.confirm()
 
-		w.until("Add a BIP-39 passphrase?")
+		w.until(ppQuestion)
 		w.confirm() // Skip is choice 0, and the golden is the bare fingerprint
 
 		w.until("Hold button to start")
@@ -538,7 +537,6 @@ type chainMdMkStep struct {
 // is SKIP, USE, USE over the roster and SKIP, SKIP, USE, USE over this blob. A
 // tap sequence carried across from the other file selects A@1 instead.
 func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var art string
 	var census []string
 	synctest.Test(t, func(t *testing.T) {
@@ -599,7 +597,7 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
 		w.confirm()
 
 		rest := []chainMdMkStep{
-			{"Add a BIP-39 passphrase?", 0, "Skip"},
+			{ppQuestion, 0, "Skip"},
 			{"Key sources", 0, "the slot-source review"},
 			{"Policy stub", 0, "the Policy Review"},
 			{"Which md1?", 0, "the full policy md1"},

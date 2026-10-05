@@ -644,7 +644,7 @@ func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
 		t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // BIP-84 default
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 		t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 	}
 	click(&ctx.Router, Button3) // Skip
@@ -705,7 +705,7 @@ func TestSingleSigVerifyCSIDNoteSilentOnCleanTwinLive(t *testing.T) {
 	driveWords(&ctx.Router, abandonAboutPhrase())
 	pumpUntil(frame, "Wallet Type", 240)
 	click(&ctx.Router, Button3)
-	pumpUntil(frame, "Add a BIP-39 passphrase?", 96)
+	pumpUntil(frame, ppQuestion, 96)
 	click(&ctx.Router, Button3)
 	frame()
 	pumpUntil(frame, "mk1 keys:", 96)

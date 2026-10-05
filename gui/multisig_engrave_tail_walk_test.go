@@ -207,10 +207,10 @@ func s5DriveBuildToEngravePicker(t *testing.T, ctx *Context, frame func() (strin
 	}
 	typeWords(&ctx.Router, frame, fixtureMasterA)
 	for _, s := range []buildWalkStep{
-		{needle: "Add a BIP-39 passphrase?", downs: 0}, // Skip
-		{needle: "Key sources", downs: 0},              // the slot-source review
-		{needle: "Policy stub", downs: 0},              // Policy Review -> continue
-		{needle: "Which md1?", downs: 0},               // Full policy md1
+		{needle: ppQuestion, downs: 0},    // Skip
+		{needle: "Key sources", downs: 0}, // the slot-source review
+		{needle: "Policy stub", downs: 0}, // Policy Review -> continue
+		{needle: "Which md1?", downs: 0},  // Full policy md1
 	} {
 		c, ok := pumpUntil(frame, s.needle, 96)
 		if !ok {
@@ -363,7 +363,6 @@ func s5AssertRetryLoop(t *testing.T, ctx *Context, frame func() (string, bool),
 // nothing about the other -- which is exactly the lesson B5 records about I-12's
 // abort gate, one mechanism over.
 func TestBothEngraveFlowsDriveTheRetryLoop(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	t.Run("supply", func(t *testing.T) {
 		md1 := s5SuppliedTraceBMd1(t)
 		synctest.Test(t, func(t *testing.T) {
@@ -440,7 +439,6 @@ func TestBothEngraveFlowsDriveTheRetryLoop(t *testing.T) {
 // restore document headed "This backup is 17 plates ... If any of them is
 // missing, this backup is incomplete."
 func TestBuildAbortIsTheLastScreenOfTheProgram(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := cosignerCardRecords(t, 4)
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()

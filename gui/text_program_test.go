@@ -36,7 +36,6 @@ var ftProgramTitles = []string{
 // Touch, not synthesized ButtonEvents: five of six programs were once
 // unreachable on hardware while every button-driven pager test passed.
 func TestEngraveTextProgramNavigableByTouch(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -54,8 +53,9 @@ func TestEngraveTextProgramNavigableByTouch(t *testing.T) {
 	_, right := arrowPoints(ctx)
 	// One full lap, ending back at the start: a wrap that skips an entry fails
 	// here even though every single step passes.
-	for i := 1; i <= len(ftProgramTitles); i++ {
-		want := ftProgramTitles[i%len(ftProgramTitles)]
+	titles := shownTitles(ftProgramTitles)
+	for i := 1; i <= len(titles); i++ {
+		want := titles[i%len(titles)]
 		tap(&ctx.Router, drawer(), right)
 		content, ok = frame()
 		if !ok {
@@ -147,7 +147,6 @@ func TestStartScreenFitsAtNinePagerDots(t *testing.T) {
 // proves it is in the carousel and the flow tests drive it directly; without
 // this, the feature ships with a dead menu item and a fully green suite.
 func TestEngraveTextProgramSelectable(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -157,7 +156,7 @@ func TestEngraveTextProgramSelectable(t *testing.T) {
 	h.start(func() { uiFlow(ctx, "test") })
 
 	_, right := arrowPoints(ctx)
-	for range 2 {
+	for range carouselRights(engraveText) {
 		tap(&ctx.Router, h.drawer(), right)
 		h.next("after stepping the pager")
 	}

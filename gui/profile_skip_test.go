@@ -34,3 +34,46 @@ const (
 	// §4.3: a SLIP-39 passphrase ends the recovery.
 	refugiumSkipSLIP39 = "a SLIP-39 passphrase ends the recovery (F7 §4.3)"
 )
+
+// ppQuestion is the passphrase step's needle in THIS build (review I-2): the
+// question in the default build, the notice under the Refugium profile, where
+// askBIP39Passphrase draws it instead. Drivers that only wait for the step and
+// take Skip with Button3 run unchanged in both builds: Button3 is Skip on the
+// question and the acknowledgement on the notice, and both take the
+// no-passphrase branch.
+var ppQuestion = func() string {
+	if refugiumProfile {
+		return "This build takes no BIP-39 passphrase"
+	}
+	return "Add a BIP-39 passphrase?"
+}()
+
+// carouselRights is how many Right steps reach program p from Backup Wallet
+// in THIS build (review I-2): hidden programs take no step, so under the
+// Refugium profile every program after the passphrase program is one Right
+// nearer. Drivers navigate by program with it instead of by a fixed count.
+func carouselRights(p program) int {
+	n := 0
+	for q := backupWallet + 1; q <= p; q++ {
+		if !programHidden(q) {
+			n++
+		}
+	}
+	return n
+}
+
+// shownTitles is a pager-order title list as THIS build draws it: the hidden
+// passphrase program's title dropped under the Refugium profile, the list
+// returned unchanged otherwise.
+func shownTitles(titles []string) []string {
+	if !programHidden(engravePassphrase) {
+		return titles
+	}
+	var out []string
+	for _, s := range titles {
+		if s != "BIP-39 Password" {
+			out = append(out, s)
+		}
+	}
+	return out
+}

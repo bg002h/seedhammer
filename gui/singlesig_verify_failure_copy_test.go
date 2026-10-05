@@ -50,7 +50,7 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 		}
 		click(&ctx.Router, Button3) // BIP-84 default -- matches the engrave
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 		}
 		click(&ctx.Router, Down) // "Add passphrase"
@@ -111,7 +111,7 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 		}
 		click(&ctx.Router, Button3) // BIP-84 default
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip -- NO passphrase entered
@@ -178,7 +178,7 @@ func TestSingleSigVerifyFailedCopyConditionsOnPassphrase(t *testing.T) {
 			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 		}
 		click(&ctx.Router, Button3) // BIP-84 default -- matches the engrave
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip -- the OMISSION under test

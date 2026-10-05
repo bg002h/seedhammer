@@ -146,7 +146,6 @@ type buildWalkStep struct {
 // the KEYBOARD, rasterising every screen from the template picker to the
 // engrave-style picker, and completes the engrave.
 func TestBuildWalkTypedSeed(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	records := cosignerCardRecords(t, 4) // A@0, B@0, C@0, A@1 — the delivered set
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()
@@ -217,10 +216,10 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 
 		// The remaining screens, each with its own raster floor.
 		rest := []buildWalkStep{
-			{needle: "Add a BIP-39 passphrase?", downs: 0}, // Skip
-			{needle: "Key sources", downs: 0},              // S4's slot-source review
-			{needle: "Policy stub", downs: 0},              // Policy Review -> continue
-			{needle: "Which md1?", downs: 0},               // Full policy md1
+			{needle: ppQuestion, downs: 0},    // Skip
+			{needle: "Key sources", downs: 0}, // S4's slot-source review
+			{needle: "Policy stub", downs: 0}, // Policy Review -> continue
+			{needle: "Which md1?", downs: 0},  // Full policy md1
 		}
 		reviewFrame := ""
 		reviewPaged := ""

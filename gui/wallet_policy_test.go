@@ -187,7 +187,6 @@ func TestWalletPolicyRefusesAnAmbiguousSupply(t *testing.T) {
 // walletPolicyFlow directly — calling the flow proves the flow runs, which is
 // the one thing that was never in doubt.
 func TestWalletPolicyProgramIsNavigableAndOpens(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	frame, drawer, quit := runUITouch(ctx, func() { uiFlow(ctx, "test") })
 	defer quit()
@@ -198,7 +197,7 @@ func TestWalletPolicyProgramIsNavigableAndOpens(t *testing.T) {
 	// Wallet Policy sits directly after Engrave Multisig, which is the seventh
 	// entry — so seven right taps from Backup Wallet.
 	var content string
-	for i := 0; i < 7; i++ {
+	for i := 0; i < carouselRights(walletPolicy); i++ {
 		tap(&ctx.Router, drawer(), right)
 		c, ok := frame()
 		if !ok {

@@ -167,7 +167,6 @@ func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
 //     The seam is not: buildCosignerSource is the one place that answers "where
 //     does a cosigner key come from", with payload as phase 1's only answer.
 func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	// A complete, non-chunked md1: it decodes on its own, so the gatherer counts
 	// it immediately rather than waiting for chunks that will never be scanned.
 	const md1 = "md1yqpqqxqq8xtwhw4xwn4qh"
@@ -192,6 +191,10 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 			func(ctx *Context) { buildMultisigPolicyFlow(ctx, &descriptorTheme) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.picker {
+				// The profile draws no source picker (the scan row is gone).
+				skipUnderRefugium(t, refugiumSkipNFC)
+			}
 			p := newPlatform()
 			p.display = sh2DisplaySize
 			ctx := NewContext(p)

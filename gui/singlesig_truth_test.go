@@ -761,7 +761,7 @@ func s6aDriveSingleSigToPolicyForm(t *testing.T, ctx *Context, frame func() (str
 		t.Fatalf("did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // BIP-84 default
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 64); !ok {
 		t.Fatalf("did not reach the passphrase prompt; got %q", c)
 	}
 	if opts.passphrase {
@@ -849,7 +849,7 @@ func s6aDriveSingleSigVerifyOK(t *testing.T, ctx *Context, frame func() (string,
 		t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // the one-tap default, which is what the engrave took
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 		t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 	}
 	click(&ctx.Router, Button3) // Skip
@@ -1060,7 +1060,6 @@ func TestSingleSigPassphraseRunTellsTheOperatorWhatIsMissing(t *testing.T) {
 // buildPassphraseInventoryLines directly, as its prior art does -- this walk
 // cuts no plates and so never reaches a restore document.
 func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var mode string
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
@@ -1119,7 +1118,6 @@ func TestSingleSigBareRunDoesNotCryWolf(t *testing.T) {
 // NO ENGRAVER IS NEEDED: Back at the FIRST plate's style picker is
 // bundleEngrave's set-level abort, and nothing has been cut at that point.
 func TestSingleSigAbortIsTheLastScreenOfTheProgram(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())
 		done := false
@@ -1181,7 +1179,6 @@ func TestSingleSigAbortIsTheLastScreenOfTheProgram(t *testing.T) {
 // first -- which is also what makes the "remove the census call" mutation fail
 // with the engrave picker's own text rather than with a bare timeout.
 func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		ctx := NewContext(newPlatform())
 		frame, quit := runUI(ctx, func() {
@@ -1264,7 +1261,6 @@ func TestSingleSigShowsThePlateCensusBeforeTheEngrave(t *testing.T) {
 // is present AND the other absent, so swapping either call site's argument fails
 // on both halves rather than on a needle that happens to survive.
 func TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipVerify)
 	const (
 		oneSubject  = "The seed you entered"
 		manySubject = "Every seed you entered"
@@ -1298,6 +1294,7 @@ func TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds(t *testing.T) 
 	// watch-only pass line must say NO SECRET WAS COMPARED rather than merely leave
 	// the ms1 clause off. T27 drives the full-mode single-sig pass line.
 	t.Run("single-sig", func(t *testing.T) {
+		skipUnderRefugium(t, refugiumSkipVerify)
 		run := s6aSingleSigWalk(t, s6aSingleSigOpts{watchOnly: true, verify: true})
 		t.Logf("the verified watch-only single-sig run cut %d plate(s)", run.plates)
 		check(t, "single-sig", run.doc, oneSubject, manySubject)
@@ -1340,6 +1337,7 @@ func TestEveryFlowsRestoreDocumentSaysWhatItCheckedAndWhatItHolds(t *testing.T) 
 	// re-offers. Attempt 2 is a clean ABANDON -- the operator walked out of the
 	// gather -- which records nothing at all. Sticky means attempt 1 still decides.
 	t.Run("multisig-supply", func(t *testing.T) {
+		skipUnderRefugium(t, refugiumSkipVerify)
 		doc := s6aSupplyDocWalk(t,
 			s6aVerifyStep{res: verifyIncomplete, adverse: true},
 			s6aVerifyStep{res: verifyAbandoned},
@@ -1566,7 +1564,7 @@ func s6aSupplyDocWalk(t *testing.T, steps ...s6aVerifyStep) string {
 		click(&ctx.Router, Button3) // 12 WORDS
 		frame()
 		driveWords(&ctx.Router, fixtureMasterA)
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 240); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 240); !ok {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Down) // "Add passphrase"
@@ -2129,7 +2127,7 @@ func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
 			t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 		}
 		click(&ctx.Router, Button3) // the one-tap default
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 			t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip
@@ -2217,8 +2215,8 @@ func TestSingleSigVerifyRecordsWhatItObserved(t *testing.T) {
 // operator is asked to present anything, which observes nothing about any plate
 // and must therefore write neither bit.
 func TestMultisigVerifyRecordsWhatItObserved(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipVerify)
 	t.Run("comparator-disagreed", func(t *testing.T) {
+		skipUnderRefugium(t, refugiumSkipVerify)
 		_, md1, _, slot := s5OneSlotReadback(t)
 		m, err := bip39.ParseMnemonic(fixtureMasterA)
 		if err != nil {

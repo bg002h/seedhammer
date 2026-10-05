@@ -184,7 +184,7 @@ func s5SupplyPassphraseWalk(t *testing.T) (modeScreen, restoreDoc string) {
 		// THE PASSPHRASE, taken from the payload rather than typed: syswPassphraseFlow
 		// offers it because the session holds a ClassPassphrase record (SYSW 3.3.2
 		// admits it to this program), which skips the keyboard entirely.
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 240); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 240); !ok {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Down) // "Add passphrase"

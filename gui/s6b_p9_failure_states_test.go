@@ -244,7 +244,7 @@ func TestSingleSigVerifyRetryProducesAnHonestStatusVerifiedOnRetryLine(t *testin
 		t.Fatalf("the first attempt did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // BIP-84 default
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 		t.Fatalf("the first attempt did not reach the passphrase prompt; got %q", c)
 	}
 	click(&ctx.Router, Button3) // Skip
@@ -278,7 +278,7 @@ func TestSingleSigVerifyRetryProducesAnHonestStatusVerifiedOnRetryLine(t *testin
 		t.Fatalf("the retry did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // BIP-84 default
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 		t.Fatalf("the retry did not reach the passphrase prompt; got %q", c)
 	}
 	click(&ctx.Router, Button3) // Skip

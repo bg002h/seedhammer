@@ -173,7 +173,6 @@ func pagerDots(t *testing.T, ctx *Context, lastNav program) int {
 // carousel must be an EIGHT-program lap, and the ninth entry must not appear on
 // any frame of it.
 func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -197,9 +196,10 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 	// A full lap of the UNCONDITIONAL programs: with no payload the last tap
 	// must wrap back to the first program rather than step onto the conditional
 	// Sealed Payload entry.
-	const lap = 11
+	titles := shownTitles(unlockProgramTitles[:len(unlockProgramTitles)-1])
+	lap := len(titles)
 	for i := 1; i <= lap; i++ {
-		want := unlockProgramTitles[i%lap]
+		want := titles[i%lap]
 		tap(&ctx.Router, drawer(), right)
 		content, ok = frame()
 		if !ok {
@@ -212,8 +212,8 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 			t.Fatalf("tap #%d reached the Sealed Payload entry with no payload present: %q", i, content)
 		}
 	}
-	if got := pagerDots(t, ctx, bip85Derive); got != 11 {
-		t.Errorf("the no-payload pager draws %d dots, want 11", got)
+	if got := pagerDots(t, ctx, bip85Derive); got != lap {
+		t.Errorf("the no-payload pager draws %d dots, want %d", got, lap)
 	}
 }
 
@@ -221,7 +221,6 @@ func TestUnlockPayloadInvisibleWithoutAPayload(t *testing.T) {
 // programs, the ninth is the new entry, and the other eight are all still
 // reachable in order (the regression the const-to-runtime bound can cause).
 func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.payload = payloadReaderFor(t, "E")
@@ -237,10 +236,12 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 		t.Fatalf("initial program is not %q; got %q", unlockProgramTitles[0], content)
 	}
 	_, right := arrowPoints(ctx)
-	const lap = 12 // 11 unconditional programs + the conditional Sealed Payload
+	// The unconditional programs + the conditional Sealed Payload.
+	titles := shownTitles(unlockProgramTitles)
+	lap := len(titles)
 	seenUnlock := false
 	for i := 1; i <= lap; i++ {
-		want := unlockProgramTitles[i%lap]
+		want := titles[i%lap]
 		tap(&ctx.Router, drawer(), right)
 		content, ok = frame()
 		if !ok {
@@ -259,8 +260,8 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 	if !seenUnlock {
 		t.Fatal("the Sealed Payload entry was never reached")
 	}
-	if got := pagerDots(t, ctx, unlockPayload); got != 12 {
-		t.Errorf("the payload-present pager draws %d dots, want 10", got)
+	if got := pagerDots(t, ctx, unlockPayload); got != lap {
+		t.Errorf("the payload-present pager draws %d dots, want %d", got, lap)
 	}
 }
 
@@ -273,7 +274,6 @@ func TestUnlockPayloadVisibleWithAPayload(t *testing.T) {
 // It is also the ONLY test that proves the bytes uiFlow PROBED are the bytes
 // the flow receives: the digest on screen is computed from them.
 func TestUnlockPayloadEntrySelectable(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.payload = payloadReaderFor(t, "E")
@@ -284,7 +284,7 @@ func TestUnlockPayloadEntrySelectable(t *testing.T) {
 		t.Fatal("uiFlow produced no frame")
 	}
 	_, right := arrowPoints(ctx)
-	for i := 0; i < 11; i++ {
+	for i := 0; i < carouselRights(unlockPayload); i++ {
 		tap(&ctx.Router, drawer(), right)
 		if _, ok := frame(); !ok {
 			t.Fatalf("no frame after tap #%d", i+1)
@@ -371,7 +371,6 @@ func (r *countingReader) Read() ([]byte, error) {
 // the GUI's lifetime is ~14% of free heap, and the menu only needs to know
 // whether MNEMBLOB is there.
 func TestStartupProbesWithoutReadingTheRegion(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	var reads, probes int
 	r := &countingReader{inner: payloadReaderFor(t, "D"), reads: &reads, probes: &probes}
 	p := newPlatform()
@@ -390,7 +389,7 @@ func TestStartupProbesWithoutReadingTheRegion(t *testing.T) {
 	// navigating.
 	_, right := arrowPoints(ctx)
 	var content string
-	for i := 0; i < 11; i++ {
+	for i := 0; i < carouselRights(unlockPayload); i++ {
 		tap(&ctx.Router, drawer(), right)
 		c, ok := frame()
 		if !ok {

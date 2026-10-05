@@ -6,7 +6,6 @@ import "testing"
 // reachable by navigating Right from the start screen, is titled, and that the
 // start-screen layout does not panic("invalid page") for any navigable program.
 func TestEngraveXpubProgramNavigable(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })
@@ -21,13 +20,16 @@ func TestEngraveXpubProgramNavigable(t *testing.T) {
 	}
 	// Right → engravePassphrase (position 2 of 8), Right → engraveText
 	// (position 3 of 8), then Right → engraveXpub.
-	click(&ctx.Router, Right)
-	content, ok = frame()
-	if !ok {
-		t.Fatal("StartScreen produced no frame after Right")
-	}
-	if !uiContains(content, "BIP-39 Password") {
-		t.Fatalf("engravePassphrase not reachable/titled after Right; got %q", content)
+	// The passphrase program takes no step where it is hidden.
+	if !programHidden(engravePassphrase) {
+		click(&ctx.Router, Right)
+		content, ok = frame()
+		if !ok {
+			t.Fatal("StartScreen produced no frame after Right")
+		}
+		if !uiContains(content, "BIP-39 Password") {
+			t.Fatalf("engravePassphrase not reachable/titled after Right; got %q", content)
+		}
 	}
 	click(&ctx.Router, Right) // engraveText, position 3 of 8
 	if _, ok := frame(); !ok {

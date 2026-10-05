@@ -11,7 +11,6 @@ import "testing"
 // start-screen layout for the new program (layoutMainPlates must have a case or
 // it panics, R0-I-A).
 func TestEngraveBundleProgramNavigable(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, quit := runUI(ctx, func() { m.Flow(ctx, &descriptorTheme) })
@@ -25,13 +24,16 @@ func TestEngraveBundleProgramNavigable(t *testing.T) {
 		t.Fatalf("initial program not Backup Wallet; got %q", content)
 	}
 	// Right → engravePassphrase (position 2 of 8).
-	click(&ctx.Router, Right)
-	content, ok = frame()
-	if !ok {
-		t.Fatal("no frame after Right")
-	}
-	if !uiContains(content, "BIP-39 Password") {
-		t.Fatalf("engravePassphrase not reachable after Right; got %q", content)
+	// The passphrase program takes no step where it is hidden.
+	if !programHidden(engravePassphrase) {
+		click(&ctx.Router, Right)
+		content, ok = frame()
+		if !ok {
+			t.Fatal("no frame after Right")
+		}
+		if !uiContains(content, "BIP-39 Password") {
+			t.Fatalf("engravePassphrase not reachable after Right; got %q", content)
+		}
 	}
 	click(&ctx.Router, Right) // engraveText, position 3 of 8
 	if _, ok := frame(); !ok {

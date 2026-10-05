@@ -538,7 +538,6 @@ func TestDeriveBip85Child_ScrubsPkey(t *testing.T) {
 // returns to the SEED — re-entered holding the words already typed, which is
 // the half that makes "loses nothing" true rather than merely tidy.
 func TestBip85BackStepsBackAndLosesNothing(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()
 		p := newPlatform()

@@ -307,6 +307,11 @@ var reentryCarouselTitles = []string{
 // then onSelect at it.
 func (drv *reentryDriver) addCarouselSteps(session string, onSelect func()) {
 	for _, ti := range reentryCarouselTitles {
+		// The Refugium build hides the passphrase program (F7 §4.3), so the
+		// lap is one tap shorter there; every other title is where it was.
+		if ti == "BIP-39 Password" && programHidden(engravePassphrase) {
+			continue
+		}
 		drv.steps = append(drv.steps, reentryStep{
 			name: session + ": right-tap from " + ti,
 			wait: ti,
@@ -491,7 +496,6 @@ func driveSealedPayloadReentry(t *testing.T, cfg reentryConfig) {
 // -- if one combination hangs and another does not, the differing axis is where
 // the bug lives.
 func TestRunSealedPayloadReentryAfterWipe(t *testing.T) {
-	skipUnderRefugium(t, refugiumSkipNFC)
 	for _, tc := range []struct {
 		name string
 		cfg  reentryConfig
