@@ -11,6 +11,7 @@ import "syscall/js"
 //	shNFC.detach()              emulate a machine with NO reader
 //	shNFC.attach()              give it a reader again (the default)
 //	shNFC.presented()           how many records have crossed the reader
+//	shNFC.delivered()           how many records the machine actually READ
 //
 // presented() is what lets a Build-policy stage gate assert ZERO (F-174). A
 // cosigner gather that completed over the emulated reader is green whether or
@@ -62,6 +63,11 @@ func installNFCAPI(n *nfcSource) {
 		}),
 		"presented": js.FuncOf(func(js.Value, []js.Value) any {
 			return n.presented()
+		}),
+		// delivered() counts reads, not presentations: the Refugium build's
+		// NFC-off walk asserts it stays 0 while presented() rises (F7 §4.2).
+		"delivered": js.FuncOf(func(js.Value, []js.Value) any {
+			return n.delivered()
 		}),
 	}
 	js.Global().Set("shNFC", js.ValueOf(api))

@@ -77,6 +77,15 @@ type nfcSource struct {
 	// driver can zero just before asserting is a gate that always passes.
 	// Reload the page for a fresh walk.
 	presentedCount int
+	// deliveredCount is how many records the MACHINE has taken off the queue
+	// through Read, for the life of the session (Refugium plan F7 §4.2).
+	// presentedCount cannot serve the Refugium build's NFC-off gate: it rises
+	// whenever the page presents, read or not. This one rises only when a
+	// record leaves the queue into a Read -- counted at that moment, so a
+	// record cut off half way by Close still counts, which errs towards "read",
+	// the safe direction for a gate asserting zero. No reset, for
+	// presentedCount's reason.
+	deliveredCount int
 	// detached emulates a machine with NO READER AT ALL, which is a distinct
 	// state from "a reader with no tag on it" and one gui treats differently:
 	// nil is a supported value and the flows offer Back-only where a scan row
@@ -109,6 +118,16 @@ func (n *nfcSource) presented() int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.presentedCount
+}
+
+// delivered reports how many records the machine has read this session.
+//
+// The Refugium walk asserts presented() > 0 and delivered() == 0; the default
+// build's walk is its positive control, delivered() > 0.
+func (n *nfcSource) delivered() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.deliveredCount
 }
 
 // detach and attach switch between a machine with no reader and one with a
@@ -150,6 +169,7 @@ func (n *nfcSource) Read(p []byte) (int, error) {
 		}
 		n.cur, n.queue = n.queue[0], n.queue[1:]
 		n.off = 0
+		n.deliveredCount++
 	}
 	c := copy(p, n.cur[n.off:])
 	n.off += c
