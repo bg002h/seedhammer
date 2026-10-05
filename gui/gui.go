@@ -2083,6 +2083,16 @@ func (s *ChoiceScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 
 func uiFlow(ctx *Context, version string) {
 	th := &descriptorTheme
+	// BEFORE ANYTHING ELSE, in the Refugium build: a platform that could not
+	// turn its tag reader's field off gets one non-secret screen and nothing
+	// more -- no payload offer, no start screen (Refugium plan F7 §4.2). This
+	// runs at the top of every session, so a wipe cannot step past it.
+	if refugiumProfile {
+		if platformNFCFault(ctx.Platform) != nil {
+			nfcFaultScreen(ctx, th)
+			return
+		}
+	}
 	// §10.1 detection. Probed ONCE, here, not per frame: the region cannot
 	// change while the GUI runs (writing it requires picotool and a reboot),
 	// and "absent -> the feature is invisible" is a startup property.
@@ -2146,7 +2156,12 @@ func uiFlow(ctx *Context, version string) {
 		if obj == nil {
 			switch act.prog {
 			case qaProgram:
-				qaEngraveFlow(ctx)
+				// Gated so qaEngraveFlow does not link into the Refugium build
+				// (F7 §4.1, round 3 N-3). No tag reaches it there anyway: the
+				// only producer is the default build's FOREVERLAURA! command.
+				if !refugiumProfile {
+					qaEngraveFlow(ctx)
+				}
 				continue
 			case engraveXpub:
 				deriveXpubFlow(ctx, th)
@@ -2233,7 +2248,7 @@ const scanStatusTimeout = 1 * time.Second
 func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}
 	// The program pager must be driveable by TOUCH, not just by Left/Right
@@ -2260,20 +2275,15 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 				break
 			}
 			if cnt := scan.Object; cnt != nil {
-				switch cnt := cnt.(type) {
-				case debugCommand:
-					switch cmd := cnt.Command; cmd {
-					case "FOREVERLAURA!":
-						return startScreenAction{prog: qaProgram}, true
-					case "lock-boot":
-						m.Status = scanIdle
-						if err := ctx.Platform.LockBoot(); err != nil {
-							log.Printf("lock-boot: %v", err)
-							m.Status = scanFailed
-						}
+				if cmd, ok := cnt.(debugCommand); ok {
+					// The arm lives in a build-tag pair (debugcmd_default.go,
+					// debugcmd_refugium.go) so the Refugium build carries
+					// neither command (Refugium plan F7 §4.1).
+					switch res, act := handleDebugCommand(ctx, m, cmd); res {
+					case debugReturn:
+						return act, true
+					case debugStay:
 						continue
-					default:
-						log.Printf("unknown debug command: %q", cmd)
 					}
 				}
 				return startScreenAction{scan: cnt}, true

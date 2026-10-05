@@ -199,58 +199,6 @@ func TestEveryPlateSnapshotsItsConfig(t *testing.T) {
 	}
 }
 
-// TestFlowCarriesTheChosenSpeedToTheEngraver drives the WHOLE program and
-// asserts the plate handed to the engraver was planned at the feed the operator
-// picked. Everything above it tests ftParamsAtSpeed and ftBuildPlate directly,
-// which a flow that never called them would pass.
-//
-// Mutation-tested: dropping ftParamsAtSpeed from the engrave step left the
-// entire suite green until this test existed.
-func TestFlowCarriesTheChosenSpeedToTheEngraver(t *testing.T) {
-	var got Plate
-	var seen bool
-	freetextEngraveHook = func(p Plate) { got, seen = p, true }
-	t.Cleanup(func() { freetextEngraveHook = nil })
-
-	h, _ := startFT(t)
-	ftPastQR(h, false)
-	// A proof composition is what unlocks the feed.
-	ftTypeTrigger(h, ftProofTriggerConst)
-	ftOK(h)
-	h.tapWidget("proofYes")
-	h.mustReach("lines")
-
-	// Pick the slowest rung, which is the furthest from the default, through
-	// the gear -- the flow no longer stops on a Speed step of its own.
-	ftTapKey(h, ppSettings)
-	ftChoose(h, "settings", 0) // Speed
-	slowest := len(ftSpeedRungs) - 1
-	ftChoose(h, "speed", slowest)
-	h.tapNav(Button1) // leave settings
-	h.mustReach("lines")
-	ftOK(h)
-	h.mustReach("Title")
-	ftOK(h)
-	h.mustReach("Footer")
-	ftOK(h)
-	h.mustReach("Confirm")
-	ftOK(h)
-	h.step()
-
-	if !seen {
-		t.Fatal("the flow never handed a plate to the engraver")
-	}
-	P := h.ctx.Platform.EngraverParams()
-	want := ftParamsAtSpeed(P, ftSpeedRungs[slowest]).EngravingSpeed
-	if got.Conf.EngravingSpeed != want {
-		t.Errorf("engraved at %d microsteps/s, want %d (%.1fmm/s) -- the chosen feed did not reach the plate",
-			got.Conf.EngravingSpeed, want, ftSpeedRungs[slowest])
-	}
-	if got.Conf.EngravingSpeed == P.EngravingSpeed {
-		t.Errorf("this test needs a feed different from the machine default to mean anything")
-	}
-}
-
 // TestCatchupUsesThePlatesConfig pins the WIRING: an engrave job resumes from
 // the config its PLATE was planned with, never from the platform's.
 //

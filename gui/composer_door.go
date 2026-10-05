@@ -124,8 +124,15 @@ func composerDoorFlow(ctx *Context, th *Colors) (composerRoute, bool) {
 		}
 		lead += l
 	}
-	choices := []string{"Scan cards"}
-	routes := []composerRoute{composerRouteScan}
+	// "Scan cards" only where a scan is offered: the Refugium build reads no
+	// tag (F7 §4.2), and "Build a new policy" below is unconditional, so the
+	// door never has fewer than one row.
+	var choices []string
+	var routes []composerRoute
+	if ctx.scanOffered() {
+		choices = append(choices, "Scan cards")
+		routes = append(routes, composerRouteScan)
+	}
 	if composerDoorHasConsumablePolicy(ctx.sysw) {
 		choices = append(choices, "From payload")
 		routes = append(routes, composerRouteFromPayload)

@@ -1,3 +1,8 @@
+//go:build !refugium
+
+// Not built under -tags refugium: the proof triggers this file drives are
+// compiled out of that build (Refugium plan F7 §4.4, prooftriggers_refugium.go).
+
 package gui
 
 import (

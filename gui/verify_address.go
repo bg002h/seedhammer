@@ -17,8 +17,13 @@ import (
 // typing it — then verifies it against the descriptor. Read-only: no
 // engrave/NFC-write/mutation.
 func verifyAddressFlow(ctx *Context, th *Colors, desc *bip380.Descriptor) {
-	cs := &ChoiceScreen{Title: "Verify address", Lead: "Input method", Choices: []string{"Scan", "Type"}}
-	choice, ok := cs.Choose(ctx, th)
+	// Under the Refugium profile there is no scan to offer, and a choice of one
+	// is not drawn (§13 D9's rule): the keyboard is the input method.
+	choice, ok := 1, true
+	if ctx.scanOffered() {
+		cs := &ChoiceScreen{Title: "Verify address", Lead: "Input method", Choices: []string{"Scan", "Type"}}
+		choice, ok = cs.Choose(ctx, th)
+	}
 	if !ok {
 		return
 	}
@@ -74,7 +79,7 @@ func typeAddressFlow(ctx *Context, th *Colors) (string, bool) {
 func scanAddressFlow(ctx *Context, th *Colors) (string, bool) {
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	dims := ctx.Platform.DisplaySize()

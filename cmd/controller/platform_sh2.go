@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"io"
 	"machine"
 	"runtime"
 	"time"
@@ -25,8 +24,6 @@ import (
 	"seedhammer.com/engrave"
 	"seedhammer.com/gui"
 	"seedhammer.com/image/rgb565"
-	"seedhammer.com/nfc/poller"
-	"seedhammer.com/nfc/type5"
 	"seedhammer.com/seal"
 	"seedhammer.com/sysw"
 )
@@ -49,6 +46,9 @@ type Platform struct {
 	lcdDev   *ili9488.Device
 	engraver *engraver
 	nfc      *nfcDev
+	// nfcFault is set by the Refugium build's initNFC when it could not turn
+	// the reader's field off; always nil in the default build.
+	nfcFault error
 	stdin    <-chan gui.Event
 	touch    struct {
 		dev     *ft6x36.Device
@@ -71,13 +71,8 @@ const (
 	// devices.
 	signKeyHash = "c8314536d6af61ac2e62e5991e3e4711629c54696ba8c4af08965a1d319a473b"
 
-	// White label information.
-	otpVolumeLabel  = "SHII"
-	otpRedirectURL  = "https://seedhammer.com/doc/?d=SHII"
-	otpRedirectName = "SeedHammer II Manual"
-	otpModel        = "SeedHammer II"
-	otpBoardID      = "SHII"
-	otpVendor       = "SH"
+	// The white-label OTP strings live with their only writer, in
+	// lockboot_default.go: the Refugium build links no OTP writer (F7 §4.1).
 
 	TOUCH_INT = machine.GPIO13
 	TOUCH_SDA = machine.GPIO14
@@ -303,67 +298,14 @@ func Init() (*Platform, error) {
 	p.touch.ints = make(chan struct{}, 1)
 	p.touch.dev = touch
 
-	nfc := st25r3916.New(mi2c, NFC_INT)
-	p.nfc = newNFCDevice(nfc)
-	// The ST25R3916 is soldered to every board, so the reader is unconditional
-	// here — unlike SyswReader/PayloadReader, which report a REGION that may be
-	// empty. gui reads this bit instead of calling NFCReader(), because calling
-	// NFCReader() to ask whether a reader exists consumes a tag on the emulator
-	// (§13 D9; gui.FeatureNFC says why).
-	p.feats |= gui.FeatureNFC
+	// The reader's setup is a build-tag pair (nfc_default.go, nfc_refugium.go):
+	// the default build reports it and hands it out; the Refugium build turns
+	// the chip's field off once and never touches it again (F7 §4.2).
+	p.initNFC(st25r3916.New(mi2c, NFC_INT))
 	if initHook != nil {
 		initHook(stdin)
 	}
 	return p, nil
-}
-
-type nfcDev struct {
-	*st25r3916.Device
-	trans    *type5.Transceiver
-	iso15693 bool
-}
-
-func newNFCDevice(d *st25r3916.Device) *nfcDev {
-	return &nfcDev{
-		Device: d,
-		trans:  type5.NewTransceiver(d, st25r3916.FIFOSize),
-	}
-}
-
-func (d *nfcDev) SetProtocol(mode poller.Protocol) error {
-	d.iso15693 = false
-	var prot st25r3916.Protocol
-	switch mode {
-	case poller.ISO14443a:
-		prot = st25r3916.ISO14443a
-	case poller.ISO15693:
-		d.iso15693 = true
-		prot = st25r3916.ISO15693
-	default:
-		panic("unsupported mode")
-	}
-	return d.Device.SetProtocol(prot)
-}
-
-func (d *nfcDev) Write(buf []byte) (int, error) {
-	if d.iso15693 {
-		return d.trans.Write(buf)
-	}
-	return d.Device.Write(buf)
-}
-
-func (d *nfcDev) Read(buf []byte) (int, error) {
-	if d.iso15693 {
-		return d.trans.Read(buf)
-	}
-	return d.Device.Read(buf)
-}
-
-func (d nfcDev) ReadCapacity() int {
-	if d.iso15693 {
-		return d.trans.ReadCapacity()
-	}
-	return st25r3916.FIFOSize
 }
 
 func (p *Platform) touchInterrupt(machine.Pin) {
@@ -550,27 +492,12 @@ func (d *defers) Call() error {
 	return derr
 }
 
-func (p *Platform) LockBoot() error {
-	if err := writeOTPValues(); err != nil {
-		return err
-	}
-	if err := otp.EnableSecureBoot(); err != nil {
-		return err
-	}
-	machine.CPUReset()
-	panic("reboot failed")
-}
-
 func (p *Platform) HardwareVersion() string {
 	return "v1." + boardVersion()
 }
 
 func (p *Platform) Features() gui.Features {
 	return p.feats
-}
-
-func (p *Platform) NFCReader() io.ReadCloser {
-	return poller.New(p.nfc)
 }
 
 // PayloadReader returns the real XIP read over the §5 payload region (§10.1).
@@ -716,38 +643,6 @@ func (m *multiplexI2C) Tx(addr uint16, tx, rx []byte) error {
 	bus := <-m.bus
 	err := bus.Tx(addr, tx, rx)
 	m.bus <- bus
-	return err
-}
-
-// writeOTPValues write the white label information and our signing
-// key to OTP memory.
-func writeOTPValues() error {
-	khash, err := hex.DecodeString(signKeyHash)
-	if err != nil {
-		panic(err)
-	}
-	if err := otp.WriteWhiteLabelAddr(otp.FirstUserRow); err != nil {
-		fmt.Printf("label addr err: %v", err)
-	}
-	infos := []struct {
-		Index uint8
-		Value string
-	}{
-		{otp.INDEX_VOLUME_LABEL_STRDEF, otpVolumeLabel},
-		{otp.INDEX_INDEX_HTM_REDIRECT_URL_STRDEF, otpRedirectURL},
-		{otp.INDEX_INDEX_HTM_REDIRECT_NAME_STRDEF, otpRedirectName},
-		{otp.INDEX_INFO_UF2_TXT_MODEL_STRDEF, otpModel},
-		{otp.INDEX_INFO_UF2_TXT_BOARD_ID_STRDEF, otpBoardID},
-		{otp.INDEX_SCSI_INQUIRY_PRODUCT_STRDEF, otpBoardID},
-		{otp.INDEX_SCSI_INQUIRY_VENDOR_STRDEF, otpVendor},
-		{otp.INDEX_SCSI_INQUIRY_VERSION_STRDEF, boardVersion()},
-	}
-	for _, inf := range infos {
-		if err := otp.WriteWhiteLabelString(inf.Index, inf.Value); err != nil {
-			return err
-		}
-	}
-	_, err = otp.AddBootKey(khash)
 	return err
 }
 

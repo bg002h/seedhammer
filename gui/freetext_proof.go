@@ -38,54 +38,10 @@ import (
 //
 // Each pattern fills its plate to 23 of the 24 available body rows -- as much
 // as fits, with one spare row as the margin. See TestProofPatternsFillThePlate.
-const (
-	// ftProofTriggerSH loads the font/sh proof. Kept from the original feature
-	// (the followup, the review and the operator's notes all call it
-	// TEXTPROOF!), and it needs no face in its name: font/sh is the face this
-	// program engraves in unless told otherwise, so TEXTPROOF! proves the TEXT
-	// plate as it normally cuts.
-	ftProofTriggerSH = "TEXTPROOF!"
-
-	// ftProofTriggerConst loads the font/constant proof. Named for the face and
-	// not for the plate, because that is the whole point of it: it borrows the
-	// free-text plate as a rig to qualify the face every OTHER plate is cut in.
-	// The two triggers are the same length and differ from the first character,
-	// so neither is a prefix of the other and a mistyped one matches nothing.
-	ftProofTriggerConst = "CONSTPROOF!"
-
-	// ftProofTriggerBoth loads the MIXED-FACE proof: one plate whose top half
-	// is cut in font/sh and whose bottom half is cut in font/constant, both at
-	// 3.0mm. Named for what it proves rather than for a face, because it proves
-	// both.
-	//
-	// It exists because plates are scarce. A legibility round that has to
-	// qualify both faces costs two plates -- TEXTPROOF! and CONSTPROOF! -- and
-	// this one costs one. It is not a replacement for either: half a plate
-	// holds less than a whole one, so the single-face proofs stay for the
-	// rounds where a face needs the deeper read.
-	//
-	// The three triggers differ from their FIRST character, so none is a prefix
-	// of another and a mistyped one matches nothing.
-	ftProofTriggerBoth = "BOTHPROOF!"
-
-	// The SIZE LADDER, one trigger per side of one plate. Each side carries the
-	// complete 95-character sweep in BOTH faces at every rung it names, so the
-	// pair answers what a render cannot: which glyphs survive as the size drops.
-	//
-	// Two triggers and no bare SIZEPROOF!: the ladder has no default half, and
-	// defaulting would let a slip cut the wrong side onto steel already
-	// engraved. Neither may ever be marked Sizeable, or SIZEPROOF!FRONT4.4
-	// becomes ambiguous against the rung suffix parser -- and the rung the
-	// ladder resolves to is 0, which is what both of ftFitAt's routing rules
-	// depend on.
-	//
-	// The slot after the '!' names the SIDE, per LEXICON_proof_triggers.md: the
-	// root names an axis and the slot holds one kind. It is a side here and a
-	// rung after BOTHPROOF!, which is why this is a second trigger rather than
-	// a value in the first one's slot.
-	ftProofTriggerSizeFront = "SIZEPROOF!FRONT"
-	ftProofTriggerSizeBack  = "SIZEPROOF!BACK"
-)
+//
+// The triggers themselves, and the ftProofs table that names them, live in
+// prooftriggers_default.go: the Refugium build carries none of them (Refugium
+// plan F7 §4.1).
 
 // The building blocks. Shared verbatim by all four patterns so a change to a
 // glyph group changes every plate at once.
@@ -529,68 +485,17 @@ const (
 	ftProofTitleSizeBack  = "BACK 4.4+3.4+3.0"
 )
 
-// ftProofs is every proof the free-text program offers: one per engraving face,
-// the mixed-face plate, and the two sides of the size ladder.
-var ftProofs = []ftProof{
-	{
-		Trigger: ftProofTriggerSH,
-		Plan:    &ftPlanSH,
-		Title:   ftProofTitleSH,
-		Footer:  ftProofFooter,
-		Text:    ftProofTextSH,
-		TextQR:  ftProofTextSHQR,
-	},
-	{
-		Trigger: ftProofTriggerConst,
-		Plan:    &ftPlanConst,
-		Title:   ftProofTitleConst,
-		Footer:  ftProofFooter,
-		Text:    ftProofTextConst,
-		TextQR:  ftProofTextConstQR,
-	},
-	{
-		Trigger:  ftProofTriggerBoth,
-		Plan:     &ftPlanBoth,
-		Sizeable: true,
-		Title:    ftProofTitleBoth,
-		Footer:   ftProofFooter,
-		Text:     ftProofTextBoth,
-		// No QR variant: the pattern needs the whole plate. See
-		// NeedsWholePlate.
-		TextQR: "",
-	},
-	{
-		Trigger: ftProofTriggerSizeFront,
-		Plan:    &ftPlanSizeFront,
-		Side:    "FRONT",
-		Title:   ftProofTitleSizeFront,
-		// No footer: measured, one at the title's 3.8mm rung starts 3.200mm
-		// above where this side's body ends and the fit refuses the plate.
-		Footer: "",
-		Text:   ftProofTextSizeFront,
-		// No QR variant either, and here it is structural rather than a
-		// capacity judgement: FitSized has no parameter for a code, because the
-		// keep-out band is quantised by a single fontSize and a plate that
-		// mixes sizes has none. Empty is what makes the prompted drop apply.
-		TextQR: "",
-	},
-	{
-		Trigger: ftProofTriggerSizeBack,
-		Plan:    &ftPlanSizeBack,
-		Side:    "BACK",
-		Title:   ftProofTitleSizeBack,
-		// 1.600mm short at the title's 3.0mm rung.
-		Footer: "",
-		Text:   ftProofTextSizeBack,
-		TextQR: "",
-	},
-}
-
 // ftProofForTrigger is the trigger lookup, and the only place it lives.
 //
 // typed is the field's ENTIRE contents: an equality test, not a substring
 // search, so "see TEXTPROOF! for details" is just text.
+//
+// proofTriggersEnabled gates it: the Refugium build matches nothing, and its
+// ftProofs table is empty besides (prooftriggers_refugium.go).
 func ftProofForTrigger(typed string) (*ftProof, float32, bool) {
+	if !proofTriggersEnabled {
+		return nil, 0, false
+	}
 	for i := range ftProofs {
 		p := &ftProofs[i]
 		if typed == p.Trigger {

@@ -1,7 +1,11 @@
+//go:build !refugium
+
+// Not built under -tags refugium: its helpers live in freetext_sizeproof_test.go,
+// which drives the proof triggers compiled out of that build (F7 §4.4).
+
 package gui
 
 import (
-	"flag"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,10 +14,6 @@ import (
 	"seedhammer.com/bspline"
 	"seedhammer.com/internal/golden"
 )
-
-// update re-records the goldens in this package. Scope it with -run: a bare
-// `go test ./... -update` also rewrites backup's sixteen, and those are frozen.
-var update = flag.Bool("update", false, "update golden files")
 
 // The two SIZEPROOF! plates as GOLDENS: what closes font/constant's glyph
 // IDENTITY gap.

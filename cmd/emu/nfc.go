@@ -93,6 +93,10 @@ type nfcSource struct {
 	// it is kept as an explicit mode rather than as a side effect of the queue
 	// being empty.
 	detached bool
+	// forced is a Refugium-walk mode (platform_nfc_refugium.go): the Refugium
+	// emulator hands its reader to gui only when this is set. The default
+	// build's platform ignores it -- its reader is always handed out.
+	forced bool
 }
 
 // set queues a record. An empty string clears the queue, which is what
@@ -137,6 +141,21 @@ func (n *nfcSource) detach(off bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.detached = off
+}
+
+// force sets forced; see the field. One-way, like the counters: a walk that
+// could un-force the reader just before asserting would prove nothing.
+func (n *nfcSource) force() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.forced = true
+}
+
+// isForced reports force's mode.
+func (n *nfcSource) isForced() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.forced
 }
 
 // reader hands out the source itself, for the life of the flow that asked.

@@ -98,6 +98,15 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template, engravedWithP
 	if rec == nil {
 		rec = &verifyRecord{}
 	}
+	// The Refugium build reads no card over NFC (F7 §4.2), and a readback may
+	// not come from the payload (§7.4, below), so the plates cannot be read
+	// back here. Said BEFORE the seed is retyped, and recorded as nothing
+	// observed: neither bit is written, so the restore document says the
+	// weakest true thing.
+	if refugiumProfile {
+		showError(ctx, th, "Verify Bundle", verifyReadbackUnavailable)
+		return false
+	}
 	// Re-type the seed (fresh residency) and re-derive deterministically.
 	reMnemonic, ok := seedEntryFlowTypedOnly(ctx, th)
 	if !ok {

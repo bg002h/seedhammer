@@ -770,6 +770,15 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 		return verifyRefused
 	}
 
+	// The Refugium build reads no card over NFC (F7 §4.2), and the readback
+	// may not come from the payload (below), so there is nothing to compare.
+	// Refused before the gather, so the operator is never parked on a reader
+	// that does not exist.
+	if refugiumProfile {
+		showError(ctx, th, "Verify Bundle", verifyReadbackUnavailable)
+		return verifyRefused
+	}
+
 	// Read back the PUBLIC cards over NFC via the T5 gatherer.
 	//
 	// NO PAYLOAD OFFER HERE, deliberately (plan stage 13c). §3.3.2 admits

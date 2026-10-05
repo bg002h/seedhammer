@@ -201,7 +201,7 @@ func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
 	}
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	dims := ctx.Platform.DisplaySize()
@@ -229,7 +229,7 @@ func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
 			}
 		default:
 		}
-		lines := []string{fmt.Sprintf("Captured %d of %d.", len(g.set), g.total), "Scan the next chunk."}
+		lines := []string{fmt.Sprintf("Captured %d of %d.", len(g.set), g.total), ctx.nextChunkLine()}
 		if msg != "" {
 			lines = append(lines, msg)
 		}

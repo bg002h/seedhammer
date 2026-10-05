@@ -12,6 +12,7 @@ import "syscall/js"
 //	shNFC.attach()              give it a reader again (the default)
 //	shNFC.presented()           how many records have crossed the reader
 //	shNFC.delivered()           how many records the machine actually READ
+//	shNFC.forceReader()         Refugium build only: hand gui the reader anyway
 //
 // presented() is what lets a Build-policy stage gate assert ZERO (F-174). A
 // cosigner gather that completed over the emulated reader is green whether or
@@ -68,6 +69,13 @@ func installNFCAPI(n *nfcSource) {
 		// NFC-off walk asserts it stays 0 while presented() rises (F7 §4.2).
 		"delivered": js.FuncOf(func(js.Value, []js.Value) any {
 			return n.delivered()
+		}),
+		// forceReader() makes the Refugium emulator hand gui its reader, so
+		// the walk exercises gui's own NFC gate (F7 §4.2). No effect on the
+		// default build, whose reader is always handed out.
+		"forceReader": js.FuncOf(func(js.Value, []js.Value) any {
+			n.force()
+			return nil
 		}),
 	}
 	js.Global().Set("shNFC", js.ValueOf(api))
