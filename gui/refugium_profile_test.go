@@ -669,9 +669,9 @@ func refugiumGrouped(sep string, n int) string {
 }
 
 // §4.4, review M-6: Engrave Text end to end. The QR step says the build
-// engraves text without a QR and offers only "No QR"; the per-line-label
-// share (the one no ms1 predicate catches) reaches the confirm screen as
-// "QR: no", and the plate built from it carries none.
+// engraves text without a QR and offers only "No QR", and typed text (a short
+// ms1-shaped line) reaches the confirm screen as "QR: no". The walk stops at
+// confirm; the plate builder's own refusal is TestRefugiumFreeTextSinkNeverCutsAQR's.
 func TestRefugiumFreeTextWalkEngravesNoQR(t *testing.T) {
 	h, _ := startFT(t)
 	h.mustReach("QRCode")
