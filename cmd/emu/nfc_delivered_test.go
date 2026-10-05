@@ -95,3 +95,18 @@ func TestADetachedSourceDeliversNothing(t *testing.T) {
 		t.Fatalf("delivered() = %d, want 0", got)
 	}
 }
+
+// noteAsk counts platform reader requests and never resets; the Refugium walk
+// asserts 0 (review M-5).
+func TestAsksCountsReaderRequests(t *testing.T) {
+	var n nfcSource
+	if n.asks() != 0 {
+		t.Fatal("a fresh source reports asks")
+	}
+	n.noteAsk()
+	n.noteAsk()
+	n.set("")
+	if got := n.asks(); got != 2 {
+		t.Fatalf("asks() = %d, want 2", got)
+	}
+}

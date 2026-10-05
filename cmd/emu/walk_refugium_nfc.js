@@ -19,21 +19,23 @@
 // SKIPPED, never loaded: the emulator's default `records` payload holds a
 // `pass:` record, which the Refugium build refuses at load (§4.3).
 //
-// THREE BUILDS, ONE SCRIPT, three verdicts on the same two counters:
+// THREE BUILDS, ONE SCRIPT, three verdicts on three counters:
 //
 //   "default"            positive control. delivered() > 0, first at the start
 //                        screen before the flow is entered: the instrument can
-//                        see a read.
+//                        see a read. readerAsks() > 0: gui asks the platform.
 //   "refugium"           `-tags refugium`. The emulator twin reports no
-//                        FeatureNFC and hands out no reader, so presented() > 0
-//                        and delivered() == 0.
-//   "refugium-attached"  the same build with the reader FORCED attached
-//                        (shNFC.forceReader()), so the platform does hand gui a
-//                        reader and only gui's own gate (startScanner under the
-//                        profile) stands between the tag and a read. Same
-//                        verdict: presented() > 0, delivered() == 0. Without this
-//                        arm the Refugium verdict would hold by the twin's
-//                        construction and say nothing about gui.
+//                        FeatureNFC and hands out no reader: presented() > 0,
+//                        delivered() == 0, readerAsks() == 0.
+//   "refugium-attached"  the same build with the reader FORCED on
+//                        (shNFC.forceReader()), so the platform WOULD hand gui a
+//                        reader if gui asked. Same verdict, and readerAsks() == 0
+//                        is the point: gui's ctx.nfcReader() answers "no reader"
+//                        under the profile without asking the platform at all.
+//                        (Corrected, review M-5: this arm does NOT put a reader
+//                        in front of startScanner, because gui never takes it.
+//                        startScanner's own nil-ing is the second gui layer and
+//                        is pinned by gui's TestRefugiumStartScannerReadsNothing.)
 
 import { keyPoint } from "./walk_trace_b.js";
 
@@ -141,7 +143,7 @@ export async function run(opts = {}) {
   if (!["default", "refugium", "refugium-attached"].includes(build)) {
     throw new Error(`run({build}) needs "default", "refugium" or "refugium-attached", got ${JSON.stringify(build)}`);
   }
-  if (typeof window.shNFC.delivered !== "function") {
+  if (typeof window.shNFC.delivered !== "function" || typeof window.shNFC.readerAsks !== "function") {
     throw new Error("shNFC.delivered is missing - this is a STALE emu.wasm; serve on a fresh port.");
   }
   const refugium = build !== "default";
@@ -156,7 +158,7 @@ export async function run(opts = {}) {
   };
   const note = (where) => {
     out.screens.push(`${where}: ${window.shScreen()}`);
-    out.deliveredAt.push(`${where}: presented=${window.shNFC.presented()} delivered=${window.shNFC.delivered()}`);
+    out.deliveredAt.push(`${where}: presented=${window.shNFC.presented()} delivered=${window.shNFC.delivered()} asks=${window.shNFC.readerAsks()}`);
   };
 
   if (build === "refugium-attached") {
@@ -292,6 +294,13 @@ export async function run(opts = {}) {
 
   out.presented = window.shNFC.presented();
   out.delivered = window.shNFC.delivered();
+  out.readerAsks = window.shNFC.readerAsks();
+  if (refugium && out.readerAsks !== 0) {
+    throw new Error(`${build}: gui asked the platform for a reader ${out.readerAsks} time(s)`);
+  }
+  if (!refugium && out.readerAsks < 1) {
+    throw new Error("default build: gui never asked for a reader, so readerAsks() proves nothing");
+  }
   if (out.presented < 1) throw new Error("nothing was presented, so this walk proves nothing");
   if (refugium && out.delivered !== 0) {
     throw new Error(`${build}: ${out.delivered} record(s) were READ over NFC`);

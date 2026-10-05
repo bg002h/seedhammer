@@ -97,6 +97,12 @@ type nfcSource struct {
 	// emulator hands its reader to gui only when this is set. The default
 	// build's platform ignores it -- its reader is always handed out.
 	forced bool
+	// askCount is how many times the PLATFORM was asked for a reader
+	// (NFCReader), in either build, for the life of the session (Refugium
+	// plan F7 §4.2, review M-5). The Refugium walk asserts it stays 0: gui's
+	// nfcReader() answers "no reader" without asking, so even a forced reader
+	// is never handed over. No reset, for presentedCount's reason.
+	askCount int
 }
 
 // set queues a record. An empty string clears the queue, which is what
@@ -156,6 +162,20 @@ func (n *nfcSource) isForced() bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.forced
+}
+
+// noteAsk records one NFCReader call; both platform twins make it first.
+func (n *nfcSource) noteAsk() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.askCount++
+}
+
+// asks reports how many times gui asked the platform for a reader.
+func (n *nfcSource) asks() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.askCount
 }
 
 // reader hands out the source itself, for the life of the flow that asked.

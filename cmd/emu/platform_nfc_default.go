@@ -42,4 +42,7 @@ func (p *platform) Features() gui.Features { return gui.FeatureNFC }
 // SOURCE, so a flow that called it merely to ask whether a reader exists would
 // take the reader away from the screen that needs it. Ask Features() instead,
 // as derive_xpub.go:156 says at its own site.
-func (p *platform) NFCReader() io.ReadCloser { return p.nfc.reader() }
+func (p *platform) NFCReader() io.ReadCloser {
+	p.nfc.noteAsk()
+	return p.nfc.reader()
+}
