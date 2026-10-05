@@ -391,6 +391,9 @@ type testPlatform struct {
 	// what every platform but the SH2 returns. A test sets it to prove a flow
 	// NEVER opens the reader.
 	nfc func() io.ReadCloser
+	// lockBoot backs LockBoot when set. nil keeps the old panic, so a test that
+	// reaches the OTP writer without meaning to still fails loudly.
+	lockBoot func() error
 }
 
 const (
@@ -469,6 +472,9 @@ func (p *testPlatform) Features() Features {
 }
 
 func (p *testPlatform) LockBoot() error {
+	if p.lockBoot != nil {
+		return p.lockBoot()
+	}
 	panic("not implemented")
 }
 
