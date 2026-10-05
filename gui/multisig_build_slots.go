@@ -887,7 +887,7 @@ func seedPassphraseStep(ctx *Context, th *Colors, reg *seedRegistry, seedID int,
 		Choices: []string{"Skip", "Add passphrase"},
 	}
 	for !ctx.Done {
-		sel, ok := pp.Choose(ctx, th)
+		sel, ok := askBIP39Passphrase(ctx, th, pp)
 		if !ok {
 			reg.discardLast(seedID)
 			return false

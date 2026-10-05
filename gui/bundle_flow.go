@@ -192,7 +192,7 @@ func bundleGatherFlow(ctx *Context, th *Colors, title string) ([]bundleCard, boo
 func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundleCard) ([]bundleCard, bool) {
 	scr := &bundleGatherScreen{
 		g:          &bundleGatherer{},
-		hasReader:  ctx.Platform.Features().Has(FeatureNFC),
+		hasReader:  ctx.nfcAvailable(),
 		hasPayload: ctx.sysw != nil && ctx.sysw.has(sysw.ClassMDMK),
 	}
 	// A payload card enters through the SAME offer() every scanned card does,
@@ -222,7 +222,7 @@ func bundleGatherFlowResume(ctx *Context, th *Colors, title string, prev []bundl
 	ctx.syswBundleSeeds = nil
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	doneBtn := &Clickable{Button: Button3, AltButton: Center}

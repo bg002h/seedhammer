@@ -20,7 +20,7 @@ func TestBip85DeriveProgramNavigable(t *testing.T) {
 	}
 	// Right x6 -> engraveMultisig (engravePassphrase is position 2 and
 	// engraveText position 3).
-	for i := 0; i < 6; i++ {
+	for i := 0; i < carouselRights(engraveMultisig); i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {

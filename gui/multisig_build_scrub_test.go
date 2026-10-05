@@ -74,7 +74,7 @@ func buildDriveToSeed(t *testing.T, ctx *Context, frame func() (string, bool)) {
 	}
 	click(&ctx.Router, Button3)
 	frame()
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 64); !ok {
 		t.Fatalf("the passphrase prompt was not reached; got %q", c)
 	}
 }
@@ -112,6 +112,9 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 	// a seed is live. It is also the exit the shipped `defer` did NOT cover,
 	// because that defer was installed after the passphrase step.
 	t.Run("Back at the passphrase prompt", func(t *testing.T) {
+		// Drives the keyboard behind "Add passphrase", which the profile does
+		// not build; the other exit classes below run under the tag.
+		skipUnderRefugium(t, refugiumSkipPassphrase)
 		synctest.Test(t, func(t *testing.T) {
 			var seen []bip39.Mnemonic
 			buildMultisigSeedHook = func(m bip39.Mnemonic) { seen = append(seen, m) }
@@ -140,7 +143,7 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 			// I-2), so the question has to be answered before the flow
 			// continues. The exit under test is unchanged -- this drives to
 			// the same slot-review Back with the same seed live.
-			if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 32); !ok {
+			if c, ok := pumpUntil(frame, ppQuestion, 32); !ok {
 				t.Fatalf("Back on the keyboard did not re-ask the question; got %q", c)
 			}
 			click(&ctx.Router, Up) // the highlight is still on "Add passphrase"
@@ -159,6 +162,43 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 				t.Fatal("the flow did not return after the slot review's Back")
 			}
 			assertScrubbed(t, "slot-review Back", seen)
+		})
+	})
+
+	// EXIT 1b (recheck n-2): Back ON the passphrase step itself -- the
+	// question in the default build, the notice under the Refugium profile.
+	// Either way askBIP39Passphrase reports !ok, seedPassphraseStep discards
+	// the seed it just registered, and the flow is then backed out entirely:
+	// the seed must be scrubbed. Runs in both builds.
+	t.Run("Back on the passphrase step", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var seen []bip39.Mnemonic
+			buildMultisigSeedHook = func(m bip39.Mnemonic) { seen = append(seen, m) }
+			defer func() { buildMultisigSeedHook = nil }()
+			ctx := NewContext(newPlatform())
+			ctx.sysw = sessionHolding(records...)
+			done := false
+			frame, quit := runUI(ctx, func() {
+				buildMultisigPolicyFlow(ctx, &descriptorTheme)
+				done = true
+			})
+			defer quit()
+			buildDriveToSeed(t, ctx, frame)
+			click(&ctx.Router, Button1) // Back, on the question or the notice
+			frame()
+			if c, ok := pumpUntil(frame, ppQuestion, 4); ok {
+				t.Fatalf("Back did not leave the passphrase step; got %q", c)
+			}
+			for i := 0; i < 32 && !done; i++ {
+				click(&ctx.Router, Button1)
+				for j := 0; j < 4 && !done; j++ {
+					frame()
+				}
+			}
+			if !done {
+				t.Fatal("the flow did not return after backing out")
+			}
+			assertScrubbed(t, "Back on the passphrase step", seen)
 		})
 	})
 
@@ -212,7 +252,7 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 			}
 			click(&ctx.Router, Button3)
 			frame()
-			if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+			if c, ok := pumpUntil(frame, ppQuestion, 64); !ok {
 				t.Fatalf("the passphrase prompt was not reached; got %q", c)
 			}
 			click(&ctx.Router, Button3) // Skip
@@ -310,6 +350,7 @@ func TestBuildFlowScrubsEverySeedOnEveryExit(t *testing.T) {
 // The typed route is driven here rather than the payload one, because it is the
 // route with the most screens: source picker, word-count picker, word entry.
 func TestSeedEntryScreensNameTheirSlot(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	// A payload with a card and a PASSPHRASE but no ClassMnemonic: the seed must
 	// be typed, and the passphrase source picker still appears.
 	records := append(cosignerCardRecords(t, 1), "pass:6162616e646f6e2061626f7574")
@@ -355,7 +396,7 @@ func TestSeedEntryScreensNameTheirSlot(t *testing.T) {
 		driveWords(&ctx.Router, abandonAboutPhrase())
 
 		// THE PASSPHRASE PROMPT.
-		c, ok = pumpUntil(frame, "Add a BIP-39 passphrase?", 96)
+		c, ok = pumpUntil(frame, ppQuestion, 96)
 		if !ok {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}

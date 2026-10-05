@@ -319,6 +319,7 @@ func s5DriveVerifyTolerant(t *testing.T, records []string, expected []int, engra
 // The obligation is what the ENGRAVE cut, never what the readback offered. Any
 // verdict other than "Verify OK" is acceptable here; that one is not.
 func TestVerifyRefusesAPartialReadbackOfAThreePlateBuild(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false) // watch-only: no ms1 either side
 	if len(plates) != 3 {
 		t.Fatalf("Trace B engraved %d plate(s), want 3", len(plates))
@@ -473,6 +474,7 @@ func TestSupplyEngraveTailCutsAPlatePerMatchedSlot(t *testing.T) {
 // shape could only be made to pass by teaching the checker to tolerate the
 // disagreement.
 func TestSupplyEngraveVerifiesItsOwnOutput(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1 := s5SuppliedTraceBMd1(t)
 	m, keys, matched := s5SupplyPremise(t, md1)
 

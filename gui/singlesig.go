@@ -118,7 +118,7 @@ func singleSigInputs(ctx *Context, th *Colors) (
 			step = stepPassphrase
 		case stepPassphrase:
 			ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-			sel, got := ppChoice.Choose(ctx, th)
+			sel, got := askBIP39Passphrase(ctx, th, ppChoice)
 			if !got {
 				step = stepScript
 				continue

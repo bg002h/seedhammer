@@ -62,9 +62,10 @@ func TestRefusesAnUppercaseRecord(t *testing.T) {
 	}
 }
 
-// The irreversible branch. Platform.LockBoot (cmd/controller/platform_sh2.go:545)
+// The irreversible branch. Platform.LockBoot (cmd/controller/lockboot_default.go)
 // does writeOTPValues -> otp.EnableSecureBoot -> machine.CPUReset, reached from
-// gui/gui.go:1672 with the "command: " prefix (gui/scan.go:57) as the only gate.
+// gui/debugcmd_default.go with the "command: " prefix (gui/scan.go) as the only
+// gate.
 //
 // The command sits at INDEX 2 of a 6-record section, not index 0. At index 0
 // the test passes under a loop that validates records[0] and trusts the rest.

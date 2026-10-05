@@ -71,6 +71,7 @@ func TestBackupWalletTakesACodex32SecretFromThePayload(t *testing.T) {
 // Taking it must SKIP the keyboard: a flow that offered the payload and then
 // asked for typing anyway would have served the cell in appearance only.
 func TestTheSeamPassphraseComesFromThePayloadWithoutTyping(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	// `pass:` is a RESERVED prefix and its body is lowercase hex (§5.3.1) --
 	// "abandon about", which contains the space EPD §6.4 forbids raw.
 	const (
@@ -124,6 +125,7 @@ func TestTheSeamPassphraseComesFromThePayloadWithoutTyping(t *testing.T) {
 // syswOffer's shape strictly additive: a machine with no payload, and an
 // operator who says no, both get exactly what they got before.
 func TestDecliningTheSeamPassphraseOfferReachesTheKeyboard(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	ctx := NewContext(p)
@@ -189,6 +191,10 @@ func TestMultisigTakesItsFirstCardFromThePayload(t *testing.T) {
 			func(ctx *Context) { buildMultisigPolicyFlow(ctx, &descriptorTheme) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.picker {
+				// The profile draws no source picker (the scan row is gone).
+				skipUnderRefugium(t, refugiumSkipNFC)
+			}
 			p := newPlatform()
 			p.display = sh2DisplaySize
 			ctx := NewContext(p)

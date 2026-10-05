@@ -38,6 +38,7 @@ import (
 //	1 seed / 2 legs  expectedSlots={0,1}  type A once (fills both) -> legs=2
 //	2 seeds / 2 legs expectedSlots={0,2}  type A, then B           -> legs=2
 func TestMS1ClauseIsCountFreeAcrossSeedAndLegCounts(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, mk1Plates, ms1Plates := s5TraceBEngraved(t, true)
 	if len(mk1Plates) != 3 {
 		t.Fatalf("Trace B engraved %d mk1 plate(s), want 3", len(mk1Plates))

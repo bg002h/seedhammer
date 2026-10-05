@@ -24,6 +24,7 @@ import (
 // walk: the two follow-ups are one door, and F-437 asks to be batched with it.
 
 func TestF437CardDoorsDoNotPromiseTyping(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	for _, tc := range []struct {
 		name string
 		lead string

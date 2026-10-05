@@ -284,7 +284,7 @@ func syswSeedPickerTitled(ctx *Context, th *Colors, title string) (bip39.Mnemoni
 		rows = append(rows, seedSource{"FROM PAYLOAD", srcPayload})
 	}
 	rows = append(rows, seedSource{"TYPE IT", srcTyped})
-	if ctx.Platform.Features().Has(FeatureNFC) {
+	if ctx.nfcAvailable() {
 		rows = append(rows, seedSource{"SCAN", srcNFC})
 	}
 	if len(rows) == 1 {
@@ -340,7 +340,7 @@ func syswSeedPickerTitled(ctx *Context, th *Colors, title string) (bip39.Mnemoni
 //
 // Returns (nil, false) on Back.
 func scanSeedFlow(ctx *Context, th *Colors) (bip39.Mnemonic, bool) {
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	dims := ctx.Platform.DisplaySize()
@@ -424,7 +424,7 @@ func deriveXpubFlow(ctx *Context, th *Colors) {
 	// Optional passphrase.
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+	if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
 		// §3.3.2 admits ClassPassphrase to this program, so the payload is
 		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
 		// syswPassphraseFlow for the two normative rules a shared edit inside

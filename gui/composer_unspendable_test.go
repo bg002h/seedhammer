@@ -262,7 +262,7 @@ func TestComposerKeyPathChoiceIsPlacedBeforeTheChunks(t *testing.T) {
 	// BY TOUCH THROUGHOUT (R0 m2): the SH2 has no directional buttons, so
 	// every row is tapped and every nav press is a tap on the nav slot.
 	h.mustReach("Build a new policy")
-	h.choose(1) // Scan cards, [Build a new policy]
+	h.choose(composerDoorRow(t, ctx, "Build a new policy")) // [Scan cards,] Build a new policy
 	h.mustReach("Which script?")
 	h.choose(0) // [Taproot (tr)]
 	h.mustReach("Start from?")

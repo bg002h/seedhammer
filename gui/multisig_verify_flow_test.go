@@ -180,6 +180,7 @@ func s5DriveVerifyRec(t *testing.T, records []string, expected []int, engravedMd
 // the derive loop restricts itself to it. Every plate still has to be read back
 // and matched.
 func TestVerifyOneSlotRunChecksTheONEPlateItEngraved(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	records, md1, _, slot := s5OneSlotReadback(t)
 	last, _ := s5DriveVerify(t, records, []int{slot}, md1, fixtureMasterA)
 	if !uiContains(last, "Verify OK") {
@@ -197,6 +198,7 @@ func TestVerifyOneSlotRunChecksTheONEPlateItEngraved(t *testing.T) {
 // It must FAIL, and it must NAME the slot -- that is the only thing the operator
 // can act on.
 func TestVerifyStillFailsWhenTheENGRAVEDPlateIsWrong(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	_, md1, _, slot := s5OneSlotReadback(t)
 	m, err := bip39.ParseMnemonic(fixtureMasterA)
 	if err != nil {
@@ -284,6 +286,7 @@ func TestVerifyRefusesAMissingEngravedPolicy(t *testing.T) {
 // only thing that matters: expected {0,1,2} with master A alone covers @0 and
 // @1, which is NOT a pass.
 func TestVerifyBuildShapeChecksEveryEngravedPlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	md1, plates, _ := s5TraceBEngraved(t, false)
 	if len(plates) != 3 {
 		t.Fatalf("Trace B engraved %d plate(s), want 3", len(plates))

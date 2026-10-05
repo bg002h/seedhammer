@@ -13,7 +13,7 @@ func TestPreviewMS1SeedQR(t *testing.T) {
 	if !slices.Contains(PreviewPlates(), "ms1seedqr") {
 		t.Fatalf("PreviewPlates() = %v, want an ms1seedqr entry", PreviewPlates())
 	}
-	pv, err := BuildPreview(proofParams(), "ms1seedqr", PreviewOpts{})
+	pv, err := BuildPreview(newPlatform().EngraverParams(), "ms1seedqr", PreviewOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

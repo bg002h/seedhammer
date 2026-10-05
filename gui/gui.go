@@ -913,7 +913,17 @@ func passphraseFlow(ctx *Context, th *Colors) (string, bool) {
 // belongs to. A passphrase entered against the wrong seed mints a key no row of
 // SPEC 4.3 can catch, because there is no card to cross-check a new-seed slot
 // against.
+//
+// Under the Refugium profile it returns ("", false) without drawing anything
+// (F7 §4.3), so a prompt that was missed still cannot take a passphrase. At
+// every call site false reads as "no passphrase given"; the two that read it
+// otherwise (slip39_polish.go: abort the recovery; multisig_build_slots.go's
+// seedPassphraseStep: ask again) are unreachable under the profile, because
+// the question before them is a notice or a refusal there.
 func passphraseFlowTitled(ctx *Context, th *Colors, title string) (string, bool) {
+	if refugiumProfile {
+		return "", false
+	}
 	kbd := NewPassphraseKeyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
@@ -2072,6 +2082,16 @@ func (s *ChoiceScreen) Draw(ctx *Context, th *Colors, dims image.Point) op.Op {
 
 func uiFlow(ctx *Context, version string) {
 	th := &descriptorTheme
+	// BEFORE ANYTHING ELSE, in the Refugium build: a platform that could not
+	// turn its tag reader's field off gets one non-secret screen and nothing
+	// more -- no payload offer, no start screen (Refugium plan F7 §4.2). This
+	// runs at the top of every session, so a wipe cannot step past it.
+	if refugiumProfile {
+		if platformNFCFault(ctx.Platform) != nil {
+			nfcFaultScreen(ctx, th)
+			return
+		}
+	}
 	// §10.1 detection. Probed ONCE, here, not per frame: the region cannot
 	// change while the GUI runs (writing it requires picotool and a reboot),
 	// and "absent -> the feature is invisible" is a startup property.
@@ -2135,7 +2155,12 @@ func uiFlow(ctx *Context, version string) {
 		if obj == nil {
 			switch act.prog {
 			case qaProgram:
-				qaEngraveFlow(ctx)
+				// Gated so qaEngraveFlow does not link into the Refugium build
+				// (F7 §4.1, round 3 N-3). No tag reaches it there anyway: the
+				// only producer is the default build's FOREVERLAURA! command.
+				if !refugiumProfile {
+					qaEngraveFlow(ctx)
+				}
 				continue
 			case engraveXpub:
 				deriveXpubFlow(ctx, th)
@@ -2165,7 +2190,11 @@ func uiFlow(ctx *Context, version string) {
 				unlockPayloadFlow(ctx, th, payloadReader)
 				continue
 			case engravePassphrase:
-				engravePassphraseFlow(ctx, th)
+				// Unreachable under the profile, which hides the program;
+				// gated anyway (F7 §4.3).
+				if !programHidden(engravePassphrase) {
+					engravePassphraseFlow(ctx, th)
+				}
 				continue
 			case engraveText:
 				engraveTextFlow(ctx, th)
@@ -2222,7 +2251,7 @@ const scanStatusTimeout = 1 * time.Second
 func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	selectBtn := &Clickable{Button: Button3, AltButton: Center}
 	// The program pager must be driveable by TOUCH, not just by Left/Right
@@ -2249,20 +2278,15 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 				break
 			}
 			if cnt := scan.Object; cnt != nil {
-				switch cnt := cnt.(type) {
-				case debugCommand:
-					switch cmd := cnt.Command; cmd {
-					case "FOREVERLAURA!":
-						return startScreenAction{prog: qaProgram}, true
-					case "lock-boot":
-						m.Status = scanIdle
-						if err := ctx.Platform.LockBoot(); err != nil {
-							log.Printf("lock-boot: %v", err)
-							m.Status = scanFailed
-						}
+				if cmd, ok := cnt.(debugCommand); ok {
+					// The arm lives in a build-tag pair (debugcmd_default.go,
+					// debugcmd_refugium.go) so the Refugium build carries
+					// neither command (Refugium plan F7 §4.1).
+					switch res, act := handleDebugCommand(ctx, m, cmd); res {
+					case debugReturn:
+						return act, true
+					case debugStay:
 						continue
-					default:
-						log.Printf("unknown debug command: %q", cmd)
 					}
 				}
 				return startScreenAction{scan: cnt}, true
@@ -2270,15 +2294,26 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 		default:
 		}
 		for prevBtn.Clicked(ctx) {
-			m.prog--
-			if m.prog < 0 {
-				m.prog = m.lastNav()
+			// A hidden program is stepped over in both directions (F7 §4.3).
+			for {
+				m.prog--
+				if m.prog < 0 {
+					m.prog = m.lastNav()
+				}
+				if !programHidden(m.prog) {
+					break
+				}
 			}
 		}
 		for nextBtn.Clicked(ctx) {
-			m.prog++
-			if m.prog > m.lastNav() {
-				m.prog = 0
+			for {
+				m.prog++
+				if m.prog > m.lastNav() {
+					m.prog = 0
+				}
+				if !programHidden(m.prog) {
+					break
+				}
 			}
 		}
 		dims := ctx.Platform.DisplaySize()
@@ -2553,17 +2588,31 @@ func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 // lastNav is a PARAMETER rather than a package constant because the last
 // navigable program is now a runtime value (§10.1): layoutMainPager is a free
 // function and cannot see StartScreen.lastNav().
+//
+// A HIDDEN program (programHidden; the Refugium build's passphrase program)
+// gets no dot, and the dots after it close up, so the filled dot is the
+// page's position among the programs actually shown. With nothing hidden this
+// is exactly one dot per index, as it always was.
 func layoutMainPager(buf *op.Buffer, th *Colors, page, lastNav program) (op.Op, image.Point) {
-	npages := int(lastNav) + 1
+	npages := 0
+	for p := program(0); p <= lastNav; p++ {
+		if !programHidden(p) {
+			npages++
+		}
+	}
 	const space = 4
 	if npages <= 1 {
 		return op.Op{}, image.Point{}
 	}
 	sz := assets.CircleFilled.Bounds().Size()
 	var content op.Op
-	for i := range npages {
+	i := 0
+	for p := program(0); p <= lastNav; p++ {
+		if programHidden(p) {
+			continue
+		}
 		mask := assets.Circle
-		if i == int(page) {
+		if p == page {
 			mask = assets.CircleFilled
 		}
 		content = op.Layer(content,
@@ -2572,8 +2621,16 @@ func layoutMainPager(buf *op.Buffer, th *Colors, page, lastNav program) (op.Op, 
 				op.Mask(buf, mask),
 			).Offset(image.Pt((sz.X+space)*i, 0)),
 		)
+		i++
 	}
 	return content, image.Pt((sz.X+space)*npages-space, sz.Y)
+}
+
+// programHidden reports whether a program is left out of the carousel. Only
+// the Refugium build hides one: the BIP-39 passphrase program, because that
+// build takes no passphrase (Refugium plan F7 §4.3, D4).
+func programHidden(p program) bool {
+	return refugiumProfile && p == engravePassphrase
 }
 
 func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
@@ -2661,7 +2718,14 @@ func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]st
 		Paragraphs []backup.Paragraph
 	}
 	var engravings []textEngraving
-	if len(strs) == 1 {
+	if len(strs) == 1 && noMS1QR(strs[0]) {
+		// The Refugium build offers an ms1 card as text only (F7 §4.4). The
+		// QR exists only in the single-string branch below, so this is where
+		// the gate sits.
+		engravings = []textEngraving{
+			{"TEXT ONLY", []backup.Paragraph{{Text: strs[0]}}},
+		}
+	} else if len(strs) == 1 {
 		qrc, err := qr.Encode(strs[0], qr.L)
 		if err != nil {
 			return nil, nil, err
@@ -2805,7 +2869,7 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 		}
 		// Optional passphrase. Fresh ChoiceScreen each iteration (choice defaults to 0=Skip).
 		ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-		if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+		if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
 			if pass, ok := passphraseFlow(ctx, th); ok && pass != "" {
 				passFp, err := masterFingerprintFor(mnemonic, &chaincfg.MainNetParams, pass)
 				if err != nil {
@@ -2847,7 +2911,7 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 
 func backupSeedStringFlow(ctx *Context, th *Colors, s backup.SeedString) {
 	params := ctx.Platform.EngraverParams()
-	p, err := backup.EngraveSeedString(params, s)
+	p, err := engraveSeedStringPlate(params, s)
 	if err != nil {
 		return
 	}

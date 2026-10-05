@@ -613,6 +613,7 @@ func TestBundleCSIDNoteSilentOnCleanTwin(t *testing.T) {
 // no separate modal is shown for the mismatch itself -- exactly one "Verify
 // Failed" screen appears, carrying both the seed-mismatch text AND the marker.
 func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	row := csidPinnedRow(t)
 	// An unrelated but real, decodable md1 -- content is irrelevant here since
 	// the mk1 leg alone guarantees disagreement; it only needs to satisfy
@@ -643,7 +644,7 @@ func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
 		t.Fatalf("the verify did not reach the wallet-type picker; got %q", c)
 	}
 	click(&ctx.Router, Button3) // BIP-84 default
-	if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 96); !ok {
+	if c, ok := pumpUntil(frame, ppQuestion, 96); !ok {
 		t.Fatalf("the verify did not reach the passphrase prompt; got %q", c)
 	}
 	click(&ctx.Router, Button3) // Skip
@@ -680,6 +681,7 @@ func TestSingleSigVerifyCSIDNoteOnFailureLive(t *testing.T) {
 // for the same live path -- silence extends to the note too, not merely to
 // the absence of a separate modal.
 func TestSingleSigVerifyCSIDNoteSilentOnCleanTwinLive(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipVerify)
 	row := csidCleanTwinRow(t)
 	unrelated, _, _, _, err := deriveSingleSigBundle(abandonAboutMnemonic(), "",
 		&chaincfg.MainNetParams, singleSigPath(84), md.ScriptWpkh)
@@ -703,7 +705,7 @@ func TestSingleSigVerifyCSIDNoteSilentOnCleanTwinLive(t *testing.T) {
 	driveWords(&ctx.Router, abandonAboutPhrase())
 	pumpUntil(frame, "Wallet Type", 240)
 	click(&ctx.Router, Button3)
-	pumpUntil(frame, "Add a BIP-39 passphrase?", 96)
+	pumpUntil(frame, ppQuestion, 96)
 	click(&ctx.Router, Button3)
 	frame()
 	pumpUntil(frame, "mk1 keys:", 96)

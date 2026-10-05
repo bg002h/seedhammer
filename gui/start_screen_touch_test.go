@@ -86,8 +86,8 @@ func TestStartScreenPagerTouchable(t *testing.T) {
 		t.Fatalf("tapping the right arrow did not advance the program; still %q.\n"+
 			"The pager is unreachable by touch, which is the only input SeedHammer II has.", content)
 	}
-	if !uiContains(content, "BIP-39 Password") {
-		t.Fatalf("right arrow should advance to the BIP-39 Password program; got %q", content)
+	if next := shownTitles(ftProgramTitles)[1]; !uiContains(content, next) {
+		t.Fatalf("right arrow should advance to the %s program; got %q", next, content)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestStartScreenPagerTouchReachesEveryProgram(t *testing.T) {
 		"BIP-85",
 		"Backup Wallet", // wraps
 	}
-	for i, title := range want {
+	for i, title := range shownTitles(want) {
 		tap(&ctx.Router, drawer(), right)
 		content, ok := frame()
 		if !ok {

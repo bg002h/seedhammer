@@ -117,7 +117,7 @@ func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
 		}
 		w.confirm()
 
-		w.until("Add a BIP-39 passphrase?")
+		w.until(ppQuestion)
 		w.confirm() // Skip is choice 0, and the golden is the bare fingerprint
 
 		w.until("Hold button to start")
@@ -412,6 +412,7 @@ func TestChainFreeTextFromAMePackedPayloadToATextPlate(t *testing.T) {
 // instead of secret[:n] would put a stale tail on the plate, and no unit test
 // of ppBuildPlate can see that).
 func TestChainPassphraseFromAMePackedPayloadToAPasswordPlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	var gotSecret []byte
 	var gotSeedFP, gotCombinedFP string
 	var gotQR, captured bool
@@ -596,7 +597,7 @@ func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
 		w.confirm()
 
 		rest := []chainMdMkStep{
-			{"Add a BIP-39 passphrase?", 0, "Skip"},
+			{ppQuestion, 0, "Skip"},
 			{"Key sources", 0, "the slot-source review"},
 			{"Policy stub", 0, "the Policy Review"},
 			{"Which md1?", 0, "the full policy md1"},

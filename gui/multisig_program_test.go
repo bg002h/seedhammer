@@ -20,7 +20,7 @@ func TestEngraveMultisigProgramNavigable(t *testing.T) {
 	}
 	// Right x5 -> engraveSingleSig (engravePassphrase is position 2 and
 	// engraveText position 3).
-	for i := 0; i < 5; i++ {
+	for i := 0; i < carouselRights(engraveSingleSig); i++ {
 		click(&ctx.Router, Right)
 		content, ok = frame()
 		if !ok {

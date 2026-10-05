@@ -156,10 +156,15 @@ func f671ConsentForSeedEverywhere(t *testing.T) (mapping, consent string) {
 			t.Fatalf("no source acceptance.\nLast frame: %q", got)
 		}
 		tapNavSlot(t, ctx, drawer(), Button3)
-		if got, ok = pumpUntil(frame, "Add a BIP-39 passphrase?", 32); !ok {
+		if got, ok = pumpUntil(frame, ppQuestion, 32); !ok {
 			t.Fatalf("no passphrase question.\nLast frame: %q", got)
 		}
-		f671TapRow(t, ctx, frame, drawer, 0) // Skip
+		if refugiumProfile {
+			// The notice has no rows; its forward target acknowledges it.
+			tapNavSlot(t, ctx, drawer(), Button3)
+		} else {
+			f671TapRow(t, ctx, frame, drawer, 0) // Skip
+		}
 
 		for slot := 0; slot < 4; slot++ {
 			want := "Slot @" + string(rune('0'+slot))

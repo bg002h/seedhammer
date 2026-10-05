@@ -113,7 +113,7 @@ func TestBuildTakesTheSelfSeedFromThePayload(t *testing.T) {
 		click(&ctx.Router, Button3)
 		frame()
 
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 64); !ok {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip
@@ -180,7 +180,7 @@ func TestBuildRefusesDuplicateOnAPayloadSourcedSeed(t *testing.T) {
 		}
 		click(&ctx.Router, Button3)
 		frame()
-		if c, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 64); !ok {
+		if c, ok := pumpUntil(frame, ppQuestion, 64); !ok {
 			t.Fatalf("the passphrase prompt was not reached; got %q", c)
 		}
 		click(&ctx.Router, Button3) // Skip

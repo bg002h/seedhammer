@@ -142,7 +142,7 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// Optional passphrase.
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+	if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
 		// §3.3.2 admits ClassPassphrase to this program, so the payload is
 		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
 		// syswPassphraseFlow for the two normative rules a shared edit inside

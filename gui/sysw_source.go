@@ -95,7 +95,13 @@ func syswPassphraseFlow(ctx *Context, th *Colors) (string, bool) {
 // the one that matters: unlabelled, the operator cannot tell the second prompt
 // from a repeat of the first, and a passphrase entered against the wrong slot
 // mints a key no SPEC 4.3 row can catch.
+//
+// Under the Refugium profile it returns ("", false) without drawing anything,
+// for passphraseFlowTitled's reason (F7 §4.3).
 func syswPassphraseFlowTitled(ctx *Context, th *Colors, title string) (string, bool) {
+	if refugiumProfile {
+		return "", false
+	}
 	offerTitle, kbdTitle := "Input", "Enter Passphrase"
 	if title != "" {
 		offerTitle, kbdTitle = title, title

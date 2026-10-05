@@ -256,6 +256,7 @@ func TestRecoverSLIP39(t *testing.T) {
 }
 
 func TestRecoverSLIP39Passphrase(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipSLIP39)
 	// Same 2 shares but TYPE "TREZOR" at the passphrase prompt → the canonical
 	// corpus secret (b43c…0864). Proves the SLIP-39 passphrase feeds the
 	// Feistel decrypt and changes the result.
@@ -271,6 +272,7 @@ func TestRecoverSLIP39Passphrase(t *testing.T) {
 }
 
 func TestRecoverSLIP39MultiGroup(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipSLIP39)
 	// group-2of3-over-2of3: GT=2 over 2 groups, each MemberThreshold==2. First
 	// share is group 0 member 0; collect group 0 member 1, group 1 members 0+1.
 	// Exercises the two-level roster + selectForCombine assembly (I1).
@@ -592,6 +594,7 @@ func TestSLIP39PassphrasePromptDistinctFromBIP39(t *testing.T) {
 }
 
 func TestSLIP39RecoveredSeedIsolatedFromBIP39Passphrase(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipSLIP39)
 	// Passphrase isolation: the recovered seed (the words/SeedQR engraved) is
 	// fixed by the SLIP-39 passphrase during recovery and is returned BEFORE
 	// backupWalletFlow runs — so the later BIP-39 (25th-word) passphrase cannot

@@ -157,6 +157,23 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 		compared = true // the open IS the authentication
 	}
 
+	// THE REFUGIUM BUILD REFUSES A PAYLOAD HOLDING A pass: RECORD, WHOLE
+	// (Refugium plan F7 §4.3). After Open, because a sealed payload's records
+	// are visible only once it is open; before load, so no session holding the
+	// secret is ever created. Whole rather than the one record dropped: a
+	// secret this build cannot use never enters a session (sysw.Open has
+	// already decrypted it into Go strings that cannot be wiped, so "never in
+	// RAM" is not on offer), and a payload with a record silently missing is
+	// not the payload the operator packed. This
+	// departs from this flow's rule that nothing here refuses (§13), for that
+	// reason only.
+	if refugiumProfile {
+		if n, found := syswFirstPassphraseRecord(p); found {
+			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
+			return false
+		}
+	}
+
 	// Route 2: the operator compares the displayed digest. [digest-shown]
 	// (§12.4) — shown wherever one EXISTS, that is whenever pub_len > 0, and
 	// nowhere else. At pub_len == 0 the digest is a constant every such payload
@@ -290,4 +307,32 @@ func syswLoadWarnings(s *syswSession) []string {
 		}
 	}
 	return out
+}
+
+// syswFirstPassphraseRecord returns the 1-based position of the first record
+// carrying the `pass:` prefix, counted over the public then the secret section
+// -- the order syswSession.load appends them in.
+//
+// The PREFIX, not sysw.Classify (review M-4): a `pass:` record whose body does
+// not decode classifies as ClassUnknown, yet it is still a passphrase record
+// and still secret, and plan §4.3 refuses "a payload holding a pass: record".
+func syswFirstPassphraseRecord(p *sysw.Payload) (int, bool) {
+	n := 0
+	for _, sec := range [][]string{p.Public, p.Secret} {
+		for _, r := range sec {
+			n++
+			if strings.HasPrefix(r, sysw.PassPrefix) {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// syswPassphraseRecordRefusal names the record by POSITION AND CLASS, never by
+// its contents: ClassPassphrase is secret.
+func syswPassphraseRecordRefusal(position int) string {
+	return fmt.Sprintf("Record %d of this payload is a BIP-39 passphrase (pass:). "+
+		"This build takes no BIP-39 passphrase, so nothing was loaded. "+
+		"Pack the payload again without it.", position)
 }

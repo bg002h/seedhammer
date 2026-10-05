@@ -273,6 +273,7 @@ func TestEngravePassphraseFlowPreloadedAbortReturnsNotCut(t *testing.T) {
 // elsewhere in this package. Against the package's ~430-450s baseline this
 // is a small addition with real margin to Go's 600s per-package default.
 func TestRestoreDocReflectsARealCutPassphrasePlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		e := newEngraver()
 		p := newPlatform()

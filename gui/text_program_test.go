@@ -53,8 +53,9 @@ func TestEngraveTextProgramNavigableByTouch(t *testing.T) {
 	_, right := arrowPoints(ctx)
 	// One full lap, ending back at the start: a wrap that skips an entry fails
 	// here even though every single step passes.
-	for i := 1; i <= len(ftProgramTitles); i++ {
-		want := ftProgramTitles[i%len(ftProgramTitles)]
+	titles := shownTitles(ftProgramTitles)
+	for i := 1; i <= len(titles); i++ {
+		want := titles[i%len(titles)]
 		tap(&ctx.Router, drawer(), right)
 		content, ok = frame()
 		if !ok {
@@ -155,7 +156,7 @@ func TestEngraveTextProgramSelectable(t *testing.T) {
 	h.start(func() { uiFlow(ctx, "test") })
 
 	_, right := arrowPoints(ctx)
-	for range 2 {
+	for range carouselRights(engraveText) {
 		tap(&ctx.Router, h.drawer(), right)
 		h.next("after stepping the pager")
 	}
@@ -166,5 +167,11 @@ func TestEngraveTextProgramSelectable(t *testing.T) {
 	// A needle only the free-text program renders. The passphrase program's QR
 	// step says "machine-readable copy of the passphrase", so "machine-readable"
 	// alone would pass on the wrong flow; this phrase appears nowhere else.
-	h.mustReach("photographs the plate")
+	if refugiumProfile {
+		// The Refugium build's QR step says it engraves text without a QR
+		// (F7 §4.4); no other program draws that lead.
+		h.mustReach("engraves text without a QR")
+	} else {
+		h.mustReach("photographs the plate")
+	}
 }

@@ -242,7 +242,15 @@ const (
 // PAYLOAD FIRST: every caller checks `has(want)` before drawing, so the loaded
 // record is the expected answer and ChoiceScreen opens on index 0. Back still
 // declines, as everywhere else.
+//
+// THE SCAN DECLINE ARM IS NOT OFFERED WHERE NO SCAN IS (Refugium plan F7 §4.2).
+// Then the payload is the only route, a picker of one row is not a choice
+// (§13 D9's rule), and FROM PAYLOAD is taken without drawing it; Back on the
+// gather that follows still leaves.
 func syswChoose(ctx *Context, th *Colors, title, lead, alt string) bool {
+	if alt == syswAltScan && !ctx.scanOffered() {
+		return true
+	}
 	cs := &ChoiceScreen{Title: title, Lead: lead, Choices: []string{"FROM PAYLOAD", alt}}
 	choice, ok := cs.Choose(ctx, th)
 	return ok && choice == 0

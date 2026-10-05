@@ -124,8 +124,26 @@ func composerDoorFlow(ctx *Context, th *Colors) (composerRoute, bool) {
 		}
 		lead += l
 	}
-	choices := []string{"Scan cards"}
-	routes := []composerRoute{composerRouteScan}
+	choices, routes := composerDoorRows(ctx)
+	cs := &ChoiceScreen{Title: "Wallet Policy", Lead: lead, Choices: choices}
+	sel, ok := cs.Choose(ctx, th)
+	if !ok {
+		return composerRouteScan, false
+	}
+	return routes[sel], true
+}
+
+// composerDoorRows is the door's rows and the route each one takes, in order.
+func composerDoorRows(ctx *Context) ([]string, []composerRoute) {
+	// "Scan cards" only where a scan is offered: the Refugium build reads no
+	// tag (F7 §4.2), and "Build a new policy" below is unconditional, so the
+	// door never has fewer than one row.
+	var choices []string
+	var routes []composerRoute
+	if ctx.scanOffered() {
+		choices = append(choices, "Scan cards")
+		routes = append(routes, composerRouteScan)
+	}
 	if composerDoorHasConsumablePolicy(ctx.sysw) {
 		choices = append(choices, "From payload")
 		routes = append(routes, composerRouteFromPayload)
@@ -139,11 +157,5 @@ func composerDoorFlow(ctx *Context, th *Colors) (composerRoute, bool) {
 		choices = append(choices, "Hashlock plates")
 		routes = append(routes, composerRouteHashlockPlates)
 	}
-
-	cs := &ChoiceScreen{Title: "Wallet Policy", Lead: lead, Choices: choices}
-	sel, ok := cs.Choose(ctx, th)
-	if !ok {
-		return composerRouteScan, false
-	}
-	return routes[sel], true
+	return choices, routes
 }

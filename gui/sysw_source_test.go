@@ -31,6 +31,7 @@ func nfcTag(rec string) func() io.ReadCloser {
 // screen D9 deleted still appears. The no-choice case is
 // TestSeedEntrySkipsThePickerWhenThereIsNoChoice.
 func TestSyswSeedPickerOffersScanWithoutAPayload(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.nfc = nfcTag(testSeedPhrase)
@@ -59,6 +60,7 @@ func TestSyswSeedPickerOffersScanWithoutAPayload(t *testing.T) {
 // This is F4's first production firing; before stage 10 nothing constructed
 // srcNFC at all.
 func TestSyswSeedScanAcceptsAMnemonicFromATag(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	want, err := bip39.ParseMnemonic(testSeedPhrase)
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +108,7 @@ func TestSyswSeedScanAcceptsAMnemonicFromATag(t *testing.T) {
 // A scanned seed may be DECLINED at the acceptance screen, and declining must
 // not smuggle it in anyway. Back there returns to the source picker.
 func TestSyswSeedScanDeclineDoesNotAcceptTheSeed(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.nfc = nfcTag(testSeedPhrase)
@@ -140,6 +143,7 @@ func TestSyswSeedScanDeclineDoesNotAcceptTheSeed(t *testing.T) {
 // not seed material, and admitting one here would hand a program a class its
 // §3.3.2 row never granted it — by the back door of "it came off a tag".
 func TestSyswSeedScanRefusesANonSeedTag(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	const desc = "wpkh([00000000/84h/0h/0h]xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj/0/*)"
 	p := newPlatform()
 	p.display = sh2DisplaySize

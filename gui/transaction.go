@@ -313,7 +313,7 @@ func engraveTransactionFlowSeeded(ctx *Context, th *Colors, seed string) {
 		}
 		return
 	}
-	hasReader := ctx.Platform.Features().Has(FeatureNFC)
+	hasReader := ctx.nfcAvailable()
 	if len(cands) == 0 {
 		// R11' -- TWO DISTINCT MESSAGES. The carousel entry is UNCONDITIONAL,
 		// so the most common way to reach it is with NO PAYLOAD AT ALL: a
@@ -747,7 +747,7 @@ func transactionGatherFlow(ctx *Context, th *Colors, seed string) (txCandidate, 
 			return c, true
 		}
 	}
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	dims := ctx.Platform.DisplaySize()

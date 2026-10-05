@@ -121,6 +121,17 @@ jobs:
     # vet rather than build, because it type-checks the package and reports
     # more; it subsumes the compile.
     - run: GOOS=js GOARCH=wasm go vet ./cmd/emu/
+    # THE REFUGIUM BUILD (-tags refugium; Refugium plan F7 §4.5). Its emulator
+    # twin (cmd/emu/platform_nfc_refugium.go) is the same kind of uncompiled-
+    # by-default file the step above exists for, so it is vetted the same way.
+    - run: GOOS=js GOARCH=wasm go vet -tags refugium ./cmd/emu/
+    # gui's suite under the tag. The script enumerates the tagged test list,
+    # runs it in anchored shards, and requires every listed test to PASS or to
+    # step aside through skipUnderRefugium with a named reason; any other SKIP,
+    # a FAIL, or a missing verdict fails the step. The untagged suite is the
+    # `go test ./...` step above. (The emulator walk is not run here: it
+    # engraves three plates in a browser; scripts/emu-refugium-walk.sh.)
+    - run: ./scripts/refugium-tagged-test.sh
   tinygo-device-build:
     # The TinyGo pico-plus2 build of ./cmd/controller compiles the whole
     # gui -> codex32 import graph, so it exercises codex32 (incl. the dormant
@@ -136,4 +147,20 @@ jobs:
         nix_path: nixpkgs=channel:nixos-25.11
     - uses: DeterminateSystems/magic-nix-cache-action@v14
     - name: TinyGo device build (covers codex32) + size & stack report
-      run: nix develop --command tinygo build -size full -print-stacks -o /dev/null -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks ./cmd/controller
+      run: nix develop --command tinygo build -size full -print-stacks -o default.elf -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks ./cmd/controller
+    # The Refugium build (Refugium plan F7 §4.5): the same flags plus the tag.
+    - name: TinyGo device build, -tags refugium
+      run: nix develop --command tinygo build -size short -o refugium.elf -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks -tags refugium ./cmd/controller
+    # The device half of the absence gate: every marker (the lock-boot log
+    # format, the OTP redirect URL, the proof triggers, Poller.Read,
+    # qaEngraveFlow, the OTP write primitives) PRESENT in default.elf and
+    # ABSENT in refugium.elf, and the profile's own notices the other way
+    # round. Allocated sections only, so DWARF cannot match.
+    - name: Refugium ELF marker check
+      run: ./scripts/refugium-elf-check.sh default.elf refugium.elf
+    - uses: actions/upload-artifact@v4
+      with:
+        name: controller-elfs
+        path: |
+          default.elf
+          refugium.elf

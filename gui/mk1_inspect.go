@@ -199,9 +199,15 @@ func mk1GatherFlow(ctx *Context, th *Colors, first string) (mk.Card, bool) {
 	if g.complete() {
 		return decodeGathered(ctx, th, g)
 	}
+	// No reader in this build (Refugium plan F7 §4.2): the payload was the
+	// only source, and it did not finish the set. Say so once and return.
+	if !ctx.scanOffered() {
+		showError(ctx, th, "Inspect key", chunkGatherRefusal(len(g.set), g.total))
+		return mk.Card{}, false
+	}
 	// One loop, one shape, one backoff -- see startScanner (F-126). A nil
 	// reader is handled there and yields a channel that never delivers.
-	scans, stopScanner := startScanner(ctx, ctx.Platform.NFCReader())
+	scans, stopScanner := startScanner(ctx, ctx.nfcReader())
 	defer stopScanner()
 	backBtn := &Clickable{Button: Button1}
 	dims := ctx.Platform.DisplaySize()

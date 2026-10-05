@@ -24,6 +24,7 @@ func (r *eofNFC) Close() error             { return nil }
 // without it ~198,000 in the same window, so any threshold between the two
 // separates them and a tight one would only add flake.
 func TestNFCScannerDoesNotSpinAtEOF(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	r := new(eofNFC)
 	ctx := NewContext(newPlatform())
 	_, stop := startScanner(ctx, r)
@@ -43,6 +44,7 @@ func TestNFCScannerDoesNotSpinAtEOF(t *testing.T) {
 // A reader with something to say is NOT slowed down: the backoff must key on a
 // poll that produced nothing, not on every poll.
 func TestNFCScannerStillDeliversATag(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipNFC)
 	const rec = "text:48656c6c6f"
 	ctx := NewContext(newPlatform())
 	scans, stop := startScanner(ctx, &oneShotNFC{rec: []byte(rec)})

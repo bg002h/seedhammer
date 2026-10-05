@@ -100,18 +100,12 @@ func PreviewPlates() []string {
 }
 
 var previewBuilders = map[string]func(engrave.Params, PreviewOpts) (Preview, error){
-	"textproof":  proofPreview(ftProofTriggerSH),
-	"constproof": proofPreview(ftProofTriggerConst),
-	"bothproof":  proofPreview(ftProofTriggerBoth),
-	// One entry per SIDE. The two sides are two independent plate programs and
-	// an operator flip; rendering them as one image would invent a relationship
-	// the firmware does not have.
-	"sizeproof-front": proofPreview(ftProofTriggerSizeFront),
-	"sizeproof-back":  proofPreview(ftProofTriggerSizeBack),
-	"freetext":        freeTextPreview,
-	"seed":            seedPreview,
-	"ms1seedqr":       ms1SeedQRPreview,
-	"passphrase":      passphrasePreview,
+	// The proof plates are added by preview_proofs_default.go, beside the
+	// trigger constants they name (Refugium plan F7 §4.1).
+	"freetext":   freeTextPreview,
+	"seed":       seedPreview,
+	"ms1seedqr":  ms1SeedQRPreview,
+	"passphrase": passphrasePreview,
 }
 
 // BuildPreview renders the named plate at params.

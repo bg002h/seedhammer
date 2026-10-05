@@ -7,6 +7,7 @@ import (
 	"seedhammer.com/backup"
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
+	"seedhammer.com/engrave"
 	"seedhammer.com/font/constant"
 	"seedhammer.com/gui/assets"
 	"seedhammer.com/seal"
@@ -201,13 +202,8 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 		showError(ctx, th, unlockTitle, "This record is a hashlock preimage, not a seed. It is not engraved as one.")
 		return
 	}
-	id, _, _ := s.Split()
 	params := ctx.Platform.EngraverParams()
-	plan, err := backup.EngraveSeedString(params, backup.SeedString{
-		Title: id,
-		Seed:  s.String(),
-		Font:  constant.Font,
-	})
+	plan, err := unlockCodex32Plan(params, s)
 	if err != nil {
 		showError(ctx, th, unlockTitle, "This record does not fit any plate size.")
 		return
@@ -348,4 +344,18 @@ func unlockEngraveMnemonic(ctx *Context, th *Colors, rec []byte) {
 		defer func() { g.job = nil }()
 	}
 	scr.Engrave(ctx, &engraveTheme)
+}
+
+// unlockCodex32Plan is the sealed-unlock codex32 plate: the share's id as the
+// title, the string itself, the constant font. It goes through
+// engraveSeedStringPlate, so the Refugium build cuts it text only (F7 §4.4);
+// split out of unlockEngraveCodex32 so a test can hold the plate it cuts
+// against backup.EngraveSeedStringTextOnly (review M-6).
+func unlockCodex32Plan(params engrave.Params, s codex32.String) (engrave.Engraving, error) {
+	id, _, _ := s.Split()
+	return engraveSeedStringPlate(params, backup.SeedString{
+		Title: id,
+		Seed:  s.String(),
+		Font:  constant.Font,
+	})
 }

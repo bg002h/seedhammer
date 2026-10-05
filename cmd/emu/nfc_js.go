@@ -11,6 +11,9 @@ import "syscall/js"
 //	shNFC.detach()              emulate a machine with NO reader
 //	shNFC.attach()              give it a reader again (the default)
 //	shNFC.presented()           how many records have crossed the reader
+//	shNFC.delivered()           how many records the machine actually READ
+//	shNFC.readerAsks()          how many times gui asked the platform for a reader
+//	shNFC.forceReader()         Refugium build only: offer gui the reader anyway
 //
 // presented() is what lets a Build-policy stage gate assert ZERO (F-174). A
 // cosigner gather that completed over the emulated reader is green whether or
@@ -62,6 +65,24 @@ func installNFCAPI(n *nfcSource) {
 		}),
 		"presented": js.FuncOf(func(js.Value, []js.Value) any {
 			return n.presented()
+		}),
+		// delivered() counts reads, not presentations: the Refugium build's
+		// NFC-off walk asserts it stays 0 while presented() rises (F7 §4.2).
+		"delivered": js.FuncOf(func(js.Value, []js.Value) any {
+			return n.delivered()
+		}),
+		// readerAsks() counts Platform.NFCReader calls; the Refugium walk
+		// asserts 0 even with the reader forced on (F7 §4.2, review M-5).
+		"readerAsks": js.FuncOf(func(js.Value, []js.Value) any {
+			return n.asks()
+		}),
+		// forceReader() makes the Refugium emulator's NFCReader hand out its
+		// reader IF gui asks. gui does not ask under the profile, which
+		// readerAsks() proves. No effect on the default build, whose reader
+		// is always handed out.
+		"forceReader": js.FuncOf(func(js.Value, []js.Value) any {
+			n.force()
+			return nil
 		}),
 	}
 	js.Global().Set("shNFC", js.ValueOf(api))

@@ -527,7 +527,12 @@ const (
 func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block) (bool, bool) {
 	cs := &ChoiceScreen{Title: "QR Code"}
 	sized := ftSizedBlocks(blocks)
-	if sized {
+	if noFreeTextQR() {
+		// The Refugium build engraves text without a QR (F7 §4.4): the one
+		// answer is the state, as in the sized case below.
+		cs.Lead = ftQRLeadNoQR
+		cs.Choices = []string{"No QR"}
+	} else if sized {
 		cs.Lead = ftQRLeadSized
 		// ONE answer, and it is the state rather than a decision. The prior
 		// opt-in is deliberately NOT carried in here: it is the thing this
@@ -1448,6 +1453,11 @@ var freetextEngraveHook func(p Plate)
 // so the fit path and the build path cannot disagree about what a scanner will
 // return or about which face any row is cut in.
 func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32, passes int) (Plate, error) {
+	// The last sink before the engraver, so no route around the screens above
+	// can cut a QR in the Refugium build (F7 §4.4).
+	if noFreeTextQR() {
+		useQR = false
+	}
 	fitted, err := ftFitAt(params, plan.Blocks(text), title, footer, useQR, size)
 	if err != nil {
 		return Plate{}, err
@@ -1571,6 +1581,12 @@ func engraveTextFlowFrom(ctx *Context, th *Colors, body string, src syswSource) 
 				break
 			}
 			text = s
+			// Defensive: the Refugium build's QR step offers only "No QR"
+			// (F7 §4.4), so a QR here is dropped and said out loud.
+			if useQR && noFreeTextQR() {
+				useQR = false
+				showNotice(ctx, th, "QR Code", ftNoQRNotice)
+			}
 		case ftStepTitle:
 			s, ok := ftLineEntryFlow(ctx, th, "Title", title)
 			if !ok {

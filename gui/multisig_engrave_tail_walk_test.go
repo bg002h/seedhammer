@@ -207,10 +207,10 @@ func s5DriveBuildToEngravePicker(t *testing.T, ctx *Context, frame func() (strin
 	}
 	typeWords(&ctx.Router, frame, fixtureMasterA)
 	for _, s := range []buildWalkStep{
-		{needle: "Add a BIP-39 passphrase?", downs: 0}, // Skip
-		{needle: "Key sources", downs: 0},              // the slot-source review
-		{needle: "Policy stub", downs: 0},              // Policy Review -> continue
-		{needle: "Which md1?", downs: 0},               // Full policy md1
+		{needle: ppQuestion, downs: 0},    // Skip
+		{needle: "Key sources", downs: 0}, // the slot-source review
+		{needle: "Policy stub", downs: 0}, // Policy Review -> continue
+		{needle: "Which md1?", downs: 0},  // Full policy md1
 	} {
 		c, ok := pumpUntil(frame, s.needle, 96)
 		if !ok {

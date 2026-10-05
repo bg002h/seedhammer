@@ -2,6 +2,7 @@ package gui
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -53,8 +54,16 @@ const scannerJoinTimeout = 3 * time.Second
 // says so by returning nil -- and it yields a channel that never delivers, which
 // is exactly what the five call sites relied on when they wrapped the goroutine
 // in `if r != nil`. Callers therefore need no nil check of their own.
+//
+// UNDER THE REFUGIUM PROFILE EVERY READER IS TREATED AS NIL (Refugium plan F7
+// §4.2, D3): the build reads no tag for the whole power cycle, so this is the
+// gui half of a two-layer gate whose other half is the platform reporting no
+// reader at all. Either layer alone keeps the field off.
 func startScanner(ctx *Context, r io.ReadCloser) (chan scanResult, func()) {
 	scans := make(chan scanResult, 1)
+	if refugiumProfile {
+		r = nil
+	}
 	if r == nil {
 		return scans, func() {}
 	}
@@ -142,3 +151,58 @@ func startScanner(ctx *Context, r io.ReadCloser) (chan scanResult, func()) {
 		}
 	}
 }
+
+// nfcReader is the ONLY place gui asks the platform for its tag reader, and
+// nfcAvailable the only place it asks whether one exists (Refugium plan F7
+// §4.2). gui/refugium_build_test.go (TestNFCIsAskedForInOnePlace) fails if NFCReader() or FeatureNFC is
+// named anywhere else in the package's production code.
+//
+// Under the Refugium profile both answer "no reader" without consulting the
+// platform at all.
+func (c *Context) nfcReader() io.ReadCloser {
+	if refugiumProfile {
+		return nil
+	}
+	return c.Platform.NFCReader()
+}
+
+// nfcAvailable reports whether a screen may offer, or ask for, a scan. It keys
+// every scan offer in the package; see nfcReader.
+func (c *Context) nfcAvailable() bool {
+	if refugiumProfile {
+		return false
+	}
+	return c.Platform.Features().Has(FeatureNFC)
+}
+
+// scanOffered keys the scan offers that were NEVER keyed on FeatureNFC
+// (Refugium plan F7 §4.2's floor list, R0 round 2 M-3): verify-address's
+// Scan/Type choice, the composer door's "Scan cards", the "SCAN CARDS" decline
+// arm of the card offer, and the single-card gathers, which refuse instead of
+// asking for "the next chunk" (chunkGatherRefusal).
+//
+// It is false under the profile, where no screen offers or asks for a scan,
+// and TRUE in the default build -- deliberately not nfcAvailable(). These
+// screens drew their offer whatever the platform reported, and decision D1
+// keeps the untagged build's behaviour byte for byte; keying them on the
+// reader would change it on every reader-less platform (gui's testPlatform
+// among them).
+func (c *Context) scanOffered() bool {
+	return !refugiumProfile
+}
+
+// chunkGatherRefusal is what a single-card chunk gather (md1GatherFlow,
+// mk1GatherFlow) says when no scan is offered and the payload did not complete
+// the set (review M-2). It is one screen and the flow returns: plan §4.2's "no
+// flow may wait on a reader that does not exist" rules out the Back-only
+// gather loop the default build would open.
+func chunkGatherRefusal(have, total int) string {
+	return fmt.Sprintf("Captured %d of %d. This build takes the remaining chunks "+
+		"from the payload only; pack the full set.", have, total)
+}
+
+// verifyReadbackUnavailable is what both verify flows say in the Refugium
+// build. A verify readback must come from the plates' own cards, never the
+// payload (§7.4: a readback from the session would compare the engrave source
+// against itself), and this build reads no card over NFC.
+const verifyReadbackUnavailable = "This build reads no cards over NFC, so it cannot read these plates back. Verify on another build."

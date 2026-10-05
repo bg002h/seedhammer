@@ -177,6 +177,26 @@ func EngraveSeedString(params engrave.Params, plate SeedString) (engrave.Engravi
 	return side, nil
 }
 
+// EngraveSeedStringTextOnly is EngraveSeedString's plate with NO QR: the same
+// columns, title and fingerprint, and nothing where the code would be.
+//
+// It exists for the Refugium build, which never engraves a QR of an ms1 string
+// (Refugium plan F7 §4.4, UI spec §4.4). The QR is still ENCODED, and the plate
+// refused exactly where EngraveSeedString refuses, so a share one variant
+// admits the other does too -- seal's MaxEngraveableCodex32Len is derived from
+// that refusal and holds for both. EngraveSeedString itself is unchanged.
+func EngraveSeedStringTextOnly(params engrave.Params, plate SeedString) (engrave.Engraving, error) {
+	seed := strings.ToUpper(plate.Seed)
+	qrc, err := qr.Encode(seed, seedQRLevel)
+	if err != nil {
+		return nil, err
+	}
+	if qrc.Size > seedQRMaxSize {
+		return nil, errors.New("seed too long to engrave QR")
+	}
+	return engraveSeedString(params, plate, nil), nil
+}
+
 var (
 	errSeedQRInvalidMnemonic = errors.New("not a valid English BIP-39 mnemonic")
 	errSeedQRDisagree        = errors.New("ms1 string and words disagree")
@@ -280,6 +300,8 @@ const plateSmallFontSize = 3.
 
 const groupLen = 10
 
+// engraveSeedString lays out a seed-string plate. A nil qrc lays out the same
+// plate with no code (EngraveSeedStringTextOnly).
 func engraveSeedString(params engrave.Params, plate SeedString, qrc *engrave.ConstantQRCmd) engrave.Engraving {
 	pfs := params.F(plateFontSize)
 	constant := engrave.NewConstantStringer(plate.Font, params, pfs)
@@ -298,7 +320,10 @@ func engraveSeedString(params engrave.Params, plate SeedString, qrc *engrave.Con
 		seed := strings.ToUpper(plate.Seed)
 		ngroups := (len(seed) + groupLen - 1) / groupLen
 		endCol1 := min(ngroups, maxCol1)
-		qrsz := qrc.Size * params.StrokeWidth * qrScale
+		qrsz := 0
+		if qrc != nil {
+			qrsz = qrc.Size * params.StrokeWidth * qrScale
+		}
 		col1Height := max(qrsz, pfs*endCol1)
 
 		// Engrave version, mfp and page.
@@ -323,9 +348,11 @@ func engraveSeedString(params engrave.Params, plate SeedString, qrc *engrave.Con
 		stringColumn(off, constant, plate.Font, pfs, seed, groupLen, endCol1, endCol2)
 
 		// Engrave seed QR.
-		qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, qrScale)
-		t.Offset(params.I(60)-qrsz/2, (plateDims.Y-qrsz)/2)
-		qrCmd(t.Yield)
+		if qrc != nil {
+			qrCmd := qrc.Engrave(params.StepperConfig, params.StrokeWidth, qrScale)
+			t.Offset(params.I(60)-qrsz/2, (plateDims.Y-qrsz)/2)
+			qrCmd(t.Yield)
+		}
 
 		{
 			// Engrave bottom of column 2.

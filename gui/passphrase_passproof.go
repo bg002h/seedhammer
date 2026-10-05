@@ -48,19 +48,6 @@ import (
 // All three values below are FIXED FIRMWARE CONSTANTS. Nothing here is read
 // from NFC, from storage, or from any other external source.
 
-// ppPassProofTrigger is the literal that offers the pattern. The trailing '!'
-// mirrors the NFC debugCommand precedent (FOREVERLAURA!, gui/scan.go).
-//
-// Renamed from FONTPROOF! (2026-08-05). The old root named no axis and was
-// distinguished from the free-text program's TEXTPROOF! only by living in
-// another program -- "font" and "text" being near-synonyms, while FONTPROOF!
-// cut in font/constant, the very face CONSTPROOF! proves. That is not
-// theoretical: the operator called the free-text proof "FONTPROOF!" repeatedly,
-// and typing it opened the passphrase program instead. PASSPROOF! names its
-// program and differs from every other root at the first character. See
-// mnemonic-engrave design/LEXICON_proof_triggers.md.
-const ppPassProofTrigger = "PASSPROOF!"
-
 // ppPassProofPassphrase is all 95 printable ASCII, 0x20-0x7E, in codepoint
 // order, one each -- followed by ppPassProofConfusables. It begins with a
 // literal space, which is the point: the plate must show the substituted space
@@ -116,28 +103,7 @@ const (
 		"Passphrase becomes all 95 printable ASCII plus rnm, " +
 		"Seed FP becomes DEAD BEEF, " +
 		"Expected Comb FP becomes CAFE BABE."
-
-	// The declining branch differs by FIELD, and saying otherwise makes the one
-	// prompt in this feature whose entire purpose is honesty tell a small lie.
-	// In the passphrase field, "no" really does continue with PASSPROOF! as the
-	// passphrase. In either fingerprint field it CANNOT: ValidateFingerprint
-	// refuses a non-hex value, so "no" returns to the field with the text still
-	// there. Pinned by TestPassProofNoBranchInFingerprintFieldRefuses, which
-	// asserts the refusal, and by TestPassProofKeepLineMatchesTheField.
-	ppPassProofKeepPassphrase = "Back = no: continue with PASSPROOF! exactly as typed. " +
-		"Any text can be a real passphrase, including this one."
-
-	ppPassProofKeepFingerprint = "Back = no: keep PASSPROOF! in this field. " +
-		"It is not hex, so this field will ask again for 8 hex digits."
 )
-
-// ppPassProofKeep is the declining-branch sentence for a field.
-func ppPassProofKeep(isPassphrase bool) string {
-	if isPassphrase {
-		return ppPassProofKeepPassphrase
-	}
-	return ppPassProofKeepFingerprint
-}
 
 // ppPassProofBody lays out the prompt's text and returns it with its measured
 // size, so TestPassProofPromptFitsPanel can assert it fits the real 480x320
@@ -214,7 +180,7 @@ func ppPassProofNav(noBtn, yesBtn *Clickable) []NavButton {
 // "stay on this screen": the operator has to see what landed before advancing.
 // False means proceed exactly as if the constant were any other string.
 func ppPassProofOffer(ctx *Context, th *Colors, typed string, isPassphrase bool, load func()) bool {
-	if typed != ppPassProofTrigger || load == nil {
+	if !proofTriggersEnabled || !ppIsPassProofTrigger(typed) || load == nil {
 		return false
 	}
 	if !ppPassProofPrompt(ctx, th, isPassphrase) {

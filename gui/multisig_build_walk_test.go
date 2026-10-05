@@ -216,10 +216,10 @@ func TestBuildWalkTypedSeed(t *testing.T) {
 
 		// The remaining screens, each with its own raster floor.
 		rest := []buildWalkStep{
-			{needle: "Add a BIP-39 passphrase?", downs: 0}, // Skip
-			{needle: "Key sources", downs: 0},              // S4's slot-source review
-			{needle: "Policy stub", downs: 0},              // Policy Review -> continue
-			{needle: "Which md1?", downs: 0},               // Full policy md1
+			{needle: ppQuestion, downs: 0},    // Skip
+			{needle: "Key sources", downs: 0}, // S4's slot-source review
+			{needle: "Policy stub", downs: 0}, // Policy Review -> continue
+			{needle: "Which md1?", downs: 0},  // Full policy md1
 		}
 		reviewFrame := ""
 		reviewPaged := ""

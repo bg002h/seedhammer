@@ -199,6 +199,7 @@ func TestFableSpecKeyOrderSurvivesBackFromTheStubScreen(t *testing.T) {
 // passphrase question. Measured: what the flow does instead, and the
 // fingerprint that then reaches the mapping review.
 func TestFableSpecBackOnThePassphraseKeyboardIsADecline(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	synctest.Test(t, func(t *testing.T) {
 		p := newPlatform()
 		p.display = sh2DisplaySize
@@ -222,7 +223,7 @@ func TestFableSpecBackOnThePassphraseKeyboardIsADecline(t *testing.T) {
 		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
 		click(&ctx.Router, Button3)
 		fableTypeSeed(t, ctx, frame)
-		if got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 48); !ok {
+		if got, ok := pumpUntil(frame, ppQuestion, 48); !ok {
 			t.Fatalf("no passphrase question.\nLast frame: %q", got)
 		}
 		click(&ctx.Router, Down) // Skip -> Add passphrase
@@ -248,7 +249,7 @@ func TestFableSpecBackOnThePassphraseKeyboardIsADecline(t *testing.T) {
 		frame()
 		click(&ctx.Router, Button1) // Back, mid-passphrase
 
-		got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 6)
+		got, ok := pumpUntil(frame, ppQuestion, 6)
 		if ok {
 			return // spec behaviour: one screen back
 		}
@@ -433,7 +434,7 @@ func TestFableSpecEngraveModeIsAskedOnlyForSeedDerivedSlots(t *testing.T) {
 		click(&ctx.Router, Down, Down) // Type a seed
 		click(&ctx.Router, Button3)
 		fableTypeSeed(t, ctx, frame)
-		pumpUntil(frame, "Add a BIP-39 passphrase?", 48)
+		pumpUntil(frame, ppQuestion, 48)
 		click(&ctx.Router, Button3) // Skip
 		// Back at @0 with the seed on offer; seat the two key records instead.
 		if got, ok := pumpUntil(frame, "Slot @0", 24); !ok || !uiContains(got, "seed 1") {
@@ -845,7 +846,7 @@ func TestFableKeyThenSeedThenBackReachesThePlannerAsShown(t *testing.T) {
 		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
 		click(&ctx.Router, Button3)
 		fableTypeSeed(t, ctx, frame)
-		pumpUntil(frame, "Add a BIP-39 passphrase?", 48)
+		pumpUntil(frame, ppQuestion, 48)
 		click(&ctx.Router, Button3) // Skip
 		if got, ok = pumpUntil(frame, "Slot @0", 24); !ok || !uiContains(got, "seed 1") {
 			t.Fatalf("no seat prompt with the seed row.\nLast frame: %q", got)
@@ -1045,7 +1046,7 @@ func TestFableSpecBackOnThePassphraseQuestionUnRegistersTheSeed(t *testing.T) {
 		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
 		click(&ctx.Router, Button3)
 		fableTypeSeed(t, ctx, frame)
-		if got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 48); !ok {
+		if got, ok := pumpUntil(frame, ppQuestion, 48); !ok {
 			t.Fatalf("no passphrase question.\nLast frame: %q", got)
 		}
 		click(&ctx.Router, Button1) // Back, ON THE QUESTION: not this seed
@@ -1065,7 +1066,7 @@ func TestFableSpecBackOnThePassphraseQuestionUnRegistersTheSeed(t *testing.T) {
 		click(&ctx.Router, Down, Down) // K1, K2 -> Type a seed
 		click(&ctx.Router, Button3)
 		fableTypeSeed(t, ctx, frame)
-		got, ok := pumpUntil(frame, "Add a BIP-39 passphrase?", 48)
+		got, ok := pumpUntil(frame, ppQuestion, 48)
 		if !ok {
 			t.Fatalf("no passphrase question on the second seed.\nLast frame: %q", got)
 		}

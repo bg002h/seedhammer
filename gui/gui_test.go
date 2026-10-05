@@ -391,6 +391,9 @@ type testPlatform struct {
 	// what every platform but the SH2 returns. A test sets it to prove a flow
 	// NEVER opens the reader.
 	nfc func() io.ReadCloser
+	// lockBoot backs LockBoot when set. nil keeps the old panic, so a test that
+	// reaches the OTP writer without meaning to still fails loudly.
+	lockBoot func() error
 }
 
 const (
@@ -469,6 +472,9 @@ func (p *testPlatform) Features() Features {
 }
 
 func (p *testPlatform) LockBoot() error {
+	if p.lockBoot != nil {
+		return p.lockBoot()
+	}
 	panic("not implemented")
 }
 
@@ -915,6 +921,7 @@ func TestMasterFingerprintPassphrase(t *testing.T) {
 }
 
 func TestPassphraseFlow(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPassphrase)
 	ctx := NewContext(newPlatform())
 	runes(&ctx.Router, "Ab1!")
 	click(&ctx.Router, Button3)
@@ -959,6 +966,7 @@ func TestEngraveFingerprintChoiceMapping(t *testing.T) {
 // would pass even if the arrows had no hit area at all -- see
 // start_screen_touch_test.go's preamble.
 func TestPassphraseProgramReachable(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipCarousel)
 	ctx := NewContext(newPlatform())
 	m := new(StartScreen)
 	frame, drawer, quit := runUITouch(ctx, func() { m.Flow(ctx, &descriptorTheme) })
