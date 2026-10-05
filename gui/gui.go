@@ -306,7 +306,8 @@ func (r *richText) Addf(b *op.Buffer, style text.Style, width int, col color.RGB
 }
 
 // deriveSeedHook hands over the 64-byte BIP-39 seed at the moment it is
-// allocated, immediately AFTER `defer wipeBytes(seed)` is registered, so a test
+// allocated, immediately AFTER `defer clear(seed)` is registered (in
+// bip32.MasterKey, which deriveMasterKey hands this hook to), so a test
 // holds the SAME backing array the defer will zero and can read it after
 // deriveMasterKey returns. nil in production.
 //
@@ -323,30 +324,22 @@ var deriveSeedHook func([]byte)
 // path, so a test can assert the CALLER zeroed it. nil in production.
 //
 // The key is deriveMasterKey's return value, so this function cannot scrub it;
-// both callers do (masterFingerprintFor's `defer mk.Zero()` and SeedScreen's
-// validity probe), and neither was pinned (F-94). One seam covers both because
+// both callers do (masterFingerprintFor through bip32.MasterFingerprint's
+// `defer mk.Zero()`, and SeedScreen's validity probe), and neither was pinned
+// (F-94). One seam covers both because
 // there is exactly one place a master key is derived.
 var deriveMasterKeyHook func(*hdkeychain.ExtendedKey)
 
 func deriveMasterKey(m bip39.Mnemonic, net *chaincfg.Params, password string) (*hdkeychain.ExtendedKey, bool) {
-	seed := bip39.MnemonicSeed(m, password)
-	// The 64-byte BIP-39 seed is seed-equivalent material and this is its only
-	// use. Scrubbed on every exit, matching deriveAccountXpub (derive.go:21).
-	// The returned key is the CALLER's to Zero -- this function cannot, it is
-	// the return value.
-	defer wipeBytes(seed)
-	if deriveSeedHook != nil {
-		deriveSeedHook(seed)
-	}
-	mk, err := hdkeychain.NewMaster(seed, net)
-	// Err is only non-nil if the seed generates an invalid key, or we made a mistake.
-	// According to [0] the odds of encountering a seed that generates
-	// an invalid key by chance is 1 in 2^127.
-	//
-	// [0] https://bitcoin.stackexchange.com/questions/53180/bip-32-seed-resulting-in-an-invalid-private-key
-	if err != nil {
-		// NewMaster returns a nil key with its error, so this is the same
-		// (nil, false) the previous `return mk, err == nil` produced.
+	// The derivation, and the wipe of the 64-byte BIP-39 seed on every exit,
+	// live in bip32.MasterKey so the backup package shares them (F-702 F5).
+	// deriveSeedHook is handed through and fires there, right after the wipe
+	// is deferred, exactly as it did here. The returned key is the CALLER's to
+	// Zero -- this function cannot, it is the return value.
+	mk, ok := bip32.MasterKey(m, net, password, deriveSeedHook)
+	if !ok {
+		// NewMaster rejected the seed (1 in 2^127, see bip32.MasterKey); the
+		// key is nil, the same (nil, false) as before the move.
 		return nil, false
 	}
 	if deriveMasterKeyHook != nil {
@@ -899,18 +892,14 @@ func masterFingerprintFor(m bip39.Mnemonic, network *chaincfg.Params, password s
 	if !ok {
 		return 0, errors.New("failed to derive mnemonic master key")
 	}
-	// The master PRIVATE key is scrubbed on every exit. The fingerprint is a
-	// uint32 computed from the PUBLIC key before any defer runs, so this cannot
-	// race the return value -- the same "capture BEFORE zeroing master" ordering
-	// derive.go:31 spells out. Note derive.go's R0-C1 warning does NOT bite here:
-	// that one is about Neuter ALIASING chainCode/parentFP, and nothing aliased
-	// is serialised after this point.
-	defer mk.Zero()
-	pkey, err := mk.ECPubKey()
-	if err != nil {
-		return 0, err
-	}
-	return bip32.Fingerprint(pkey), nil
+	// The master PRIVATE key is scrubbed on every exit, by
+	// bip32.MasterFingerprint's `defer mk.Zero()` (moved there for F-702 F5).
+	// The fingerprint is a uint32 computed from the PUBLIC key before that
+	// defer runs, so this cannot race the return value -- the same "capture
+	// BEFORE zeroing master" ordering derive.go:31 spells out. Note derive.go's
+	// R0-C1 warning does NOT bite here: that one is about Neuter ALIASING
+	// chainCode/parentFP, and nothing aliased is serialised after this point.
+	return bip32.MasterFingerprint(mk)
 }
 
 // passphraseFlow lets the user enter a BIP-39 passphrase on the PassphraseKeyboard.

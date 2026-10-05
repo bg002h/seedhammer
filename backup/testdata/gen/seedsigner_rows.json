@@ -1,0 +1,55 @@
+{
+  "source": "SeedSigner docs/seed_qr/README.md at b2199c68b475eab0035b863b156f149757a1b4a6 (branch dev); words and Standard SeedQR digit streams copied verbatim",
+  "rows": [
+    {
+      "name": "seedsigner-example",
+      "words": "vacuum bridge buddy supreme exclude milk consider tail expand wasp pattern nuclear",
+      "seedqr": "192402220235174306311124037817700641198012901210"
+    },
+    {
+      "name": "seedsigner-tv1",
+      "words": "attack pizza motion avocado network gather crop fresh patrol unusual wild holiday candy pony ranch winter theme error hybrid van cereal salon goddess expire",
+      "seedqr": "011513251154012711900771041507421289190620080870026613431420201617920614089619290300152408010643"
+    },
+    {
+      "name": "seedsigner-tv2",
+      "words": "atom solve joy ugly ankle message setup typical bean era cactus various odor refuse element afraid meadow quick medal plate wisdom swap noble shallow",
+      "seedqr": "011416550964188800731119157218870156061002561932122514430573003611011405110613292018175411971576"
+    },
+    {
+      "name": "seedsigner-tv3",
+      "words": "sound federal bonus bleak light raise false engage round stock update render quote truck quality fringe palace foot recipe labor glow tortoise potato still",
+      "seedqr": "166206750203018810361417065805941507171219081456140818651401074412730727143709940798183613501710"
+    },
+    {
+      "name": "seedsigner-tv4",
+      "words": "forum undo fragile fade shy sign arrest garment culture tube off merit",
+      "seedqr": "073318950739065415961602009907670428187212261116"
+    },
+    {
+      "name": "seedsigner-tv5",
+      "words": "good battle boil exact add seed angle hurry success glad carbon whisper",
+      "seedqr": "080301540200062600251559007008931730078802752004"
+    },
+    {
+      "name": "seedsigner-tv6",
+      "words": "approve fruit lens brass ring actual stool coin doll boss strong rate",
+      "seedqr": "008607501025021714880023171503630517020917211425"
+    },
+    {
+      "name": "seedsigner-tv7",
+      "words": "dignity utility vacant shiver thought canoe feel multiply item youth actor coyote",
+      "seedqr": "049619221923158517990268067811630950204300210397"
+    },
+    {
+      "name": "seedsigner-tv8",
+      "words": "corn voice scrap arrow original diamond trial property benefit choose junk lock",
+      "seedqr": "038719631547010112530489185713790169032209701051"
+    },
+    {
+      "name": "seedsigner-tv9",
+      "words": "vocal tray giggle tool duck letter category pattern train magnet excite swamp",
+      "seedqr": "196218530783182905421028028912901848107106301753"
+    }
+  ]
+}

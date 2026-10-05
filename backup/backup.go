@@ -8,9 +8,14 @@ import (
 	"math"
 	"strings"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	qr "github.com/seedhammer/kortschak-qr"
+	"seedhammer.com/bip32"
+	"seedhammer.com/bip39"
+	"seedhammer.com/codex32"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/vector"
+	"seedhammer.com/seedqr"
 )
 
 type Seed struct {
@@ -170,6 +175,103 @@ func EngraveSeedString(params engrave.Params, plate SeedString) (engrave.Engravi
 	}
 	side := engraveSeedString(params, plate, qrCmd)
 	return side, nil
+}
+
+var (
+	errSeedQRInvalidMnemonic = errors.New("not a valid English BIP-39 mnemonic")
+	errSeedQRDisagree        = errors.New("ms1 string and words disagree")
+	errSeedQRFingerprint     = errors.New("master fingerprint does not match the words")
+)
+
+// seedQREntropyHook, nil in production, is handed the entropy buffer
+// EngraveSeedStringSeedQR takes from m.Entropy(), right after its wipe is
+// deferred, so a test holds the same backing array and can read it after the
+// call returns.
+var seedQREntropyHook func([]byte)
+
+// EngraveSeedStringSeedQR lays out the ms1 plate with a Standard SeedQR (UI
+// spec §4.4, F-702 F5): the same layout as EngraveSeedString -- the uppercase
+// ms1 string in groups of ten, the fingerprint row and the title -- but the QR
+// holds SeedSigner's Standard SeedQR of the words m (each word's index as four
+// digits, numeric mode), never the ms1 string. EngraveSeedString itself is
+// unchanged; the seal's MaxEngraveableCodex32Len is pinned to it.
+//
+// It is a general layout. Which word counts a caller allows (Refugium's 24, or
+// 12 by override) is the caller's policy, not this function's.
+//
+// It refuses, rather than engrave a plate whose rows could describe two seeds:
+//   - unless m is a valid English BIP-39 mnemonic (12, 15, 18, 21 or 24 words
+//     from the wordlist with a correct checksum). bip39.Mnemonic holds English
+//     wordlist indices only, so no other language can reach here;
+//   - unless codex32.EncodeMS1(m.Entropy()) equals plate.Seed, all lowercase
+//     or all uppercase, byte for byte;
+//   - if plate.MasterFingerprint is non-zero, unless it equals the words' own
+//     master fingerprint with no passphrase. Zero means no fingerprint row;
+//   - if the SeedQR is wider than seedQRMaxSize (no valid length is: 24 words
+//     is 29 modules).
+//
+// Secret copies. Wiped before return: the entropy buffer from m.Entropy(), the
+// []byte digit stream seedqr.QR returns (its final buffer only: seedqr.QR's
+// bytes.Buffer drops a smaller array when it grows, for 24 words after word
+// 16, and that array holding the first indices is not wiped), and, inside the callees, EncodeMS1's
+// payload buffer, the 64-byte BIP-39 seed and the BIP-32 master private key of
+// the fingerprint check (bip32.MnemonicFingerprint). Live and NOT wipeable,
+// left to the garbage collector: the SeedQR digit string (the Go string
+// qr.Encode takes), the qr.Code bitmap the engraving holds, the recomputed ms1
+// string (a Go string), and the inputs themselves -- plate.Seed, and m, which
+// is also the fingerprint check's input -- which are the caller's.
+func EngraveSeedStringSeedQR(params engrave.Params, plate SeedString, m bip39.Mnemonic) (engrave.Engraving, error) {
+	switch len(m) {
+	case 12, 15, 18, 21, 24:
+	default:
+		return nil, errSeedQRInvalidMnemonic
+	}
+	for _, w := range m {
+		if w < 0 || w >= bip39.NumWords {
+			return nil, errSeedQRInvalidMnemonic
+		}
+	}
+	if !m.Valid() {
+		return nil, errSeedQRInvalidMnemonic
+	}
+	entropy := m.Entropy()
+	defer clear(entropy)
+	if seedQREntropyHook != nil {
+		seedQREntropyHook(entropy)
+	}
+	ms1, err := codex32.EncodeMS1(entropy)
+	if err != nil {
+		return nil, err
+	}
+	// Byte for byte against both cases, never strings.ToLower(plate.Seed):
+	// Unicode case folding maps U+212A KELVIN SIGN to ASCII 'k', so a folded
+	// comparison would admit a string the engraver cannot cut.
+	if plate.Seed != ms1 && plate.Seed != strings.ToUpper(ms1) {
+		return nil, errSeedQRDisagree
+	}
+	if plate.MasterFingerprint != 0 {
+		mfp, err := bip32.MnemonicFingerprint(m, &chaincfg.MainNetParams, "")
+		if err != nil {
+			return nil, err
+		}
+		if mfp != plate.MasterFingerprint {
+			return nil, errSeedQRFingerprint
+		}
+	}
+	digits := seedqr.QR(m)
+	qrc, err := qr.Encode(string(digits), seedQRLevel)
+	clear(digits)
+	if err != nil {
+		return nil, err
+	}
+	if qrc.Size > seedQRMaxSize {
+		return nil, errors.New("SeedQR too large to engrave")
+	}
+	qrCmd, err := engrave.ConstantQR(qrc)
+	if err != nil {
+		return nil, err
+	}
+	return engraveSeedString(params, plate, qrCmd), nil
 }
 
 const plateFontSize = 4.1

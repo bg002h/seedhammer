@@ -23,8 +23,16 @@ import (
 // qrGrid is a module grid; g[y][x] is true when the module is black.
 type qrGrid [][]bool
 
-// decodeQR recovers the string encoded in g.
+// decodeQR recovers the string encoded in g, an ECC-L code.
 func decodeQR(t *testing.T, g qrGrid) string {
+	t.Helper()
+	return decodeQRAt(t, g, coding.L)
+}
+
+// decodeQRAt recovers the string encoded in g, a code at error-correction
+// level lvl. The single-block restriction below holds for versions 1-5 at L
+// and for versions 1-3 at M, which covers every Standard SeedQR (V2 and V3).
+func decodeQRAt(t *testing.T, g qrGrid, lvl coding.Level) string {
 	t.Helper()
 	size := len(g)
 	if size < 21 || (size-17)%4 != 0 {
@@ -48,7 +56,7 @@ func decodeQR(t *testing.T, g qrGrid) string {
 	// function patterns, because the format modules encode the mask number.
 	var plan *coding.Plan
 	for m := coding.Mask(0); m <= 7; m++ {
-		p, err := coding.NewPlan(v, coding.L, m)
+		p, err := coding.NewPlan(v, lvl, m)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +66,7 @@ func decodeQR(t *testing.T, g qrGrid) string {
 		}
 	}
 	if plan == nil {
-		t.Fatal("qr: no ECC-L mask reproduces the grid's function patterns")
+		t.Fatalf("qr: no ECC-%v mask reproduces the grid's function patterns", lvl)
 	}
 	if plan.Blocks != 1 {
 		t.Fatalf("qr: %d error-correction blocks; this decoder does not de-interleave", plan.Blocks)

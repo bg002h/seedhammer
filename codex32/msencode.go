@@ -23,12 +23,25 @@ func EncodeMS1(entropy []byte) (string, error) {
 	payload := make([]byte, 0, len(entropy)+1)
 	payload = append(payload, msPrefixEntr)
 	payload = append(payload, entropy...)
+	// payload is a copy of the entropy and this function's own. NewSeed reads
+	// it into the string it builds and keeps no reference, so it is wiped on
+	// every exit (F-702 F5). The returned string cannot be wiped: it is the
+	// caller's, and SECRET.
+	defer clear(payload)
+	if encodeMS1PayloadHook != nil {
+		encodeMS1PayloadHook(payload)
+	}
 	s, err := NewSeed("ms", 0, "entr", 's', payload)
 	if err != nil {
 		return "", err
 	}
 	return s.String(), nil
 }
+
+// encodeMS1PayloadHook hands over EncodeMS1's payload buffer right after its
+// wipe is deferred, so a test holds the same backing array and can read it
+// after the call returns. nil in production.
+var encodeMS1PayloadHook func([]byte)
 
 // EncodeMS1Preimage encodes a hashlock preimage X as the ms1 kind-0x03 plate
 // string: NewSeed("ms", 0, "hash", 's', [0x03‖X]). It is the Go port of
