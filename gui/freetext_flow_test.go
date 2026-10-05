@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"math"
 	"slices"
@@ -316,6 +317,7 @@ func TestFTOverCapacityIsShownNotDropped(t *testing.T) {
 // is offered as an explicit choice -- with the figure computed from a LIVE
 // encode, not from spec 4's geometry column.
 func TestFTRefusalOffersTheQRRatherThanDroppingIt(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipFreeTextQR)
 	h, _ := startFT(t)
 	ftPastQR(h, true)
 	text := strings.Repeat("a", 700)
@@ -386,7 +388,14 @@ func TestFTTitleAndFooterCap(t *testing.T) {
 // forgets everything.
 func TestFTBackPreservesEveryValue(t *testing.T) {
 	h, _ := startFT(t)
-	ftPastQR(h, true)
+	// The QR opt-in is one of the values, where the build offers one: under
+	// the Refugium profile the QR step's one answer is "No QR" (F7 §4.4),
+	// and that is the value Back must keep.
+	qr := 1
+	if refugiumProfile {
+		qr = 0
+	}
+	ftPastQR(h, qr == 1)
 	h.typeString("note")
 	ftOK(h)
 	h.mustReach("Title")
@@ -420,11 +429,11 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 	if !ok {
 		t.Fatal("widget \"qr\" is not a *ChoiceScreen")
 	}
-	if cs.choice != 1 {
-		t.Errorf("the QR opt-in was reset by Back: choice = %d, want 1", cs.choice)
+	if cs.choice != qr {
+		t.Errorf("the QR choice was reset by Back: choice = %d, want %d", cs.choice, qr)
 	}
 	// Forward again: every field is still there.
-	ftChoose(h, "qr", 1)
+	ftChoose(h, "qr", qr)
 	ftPastFaceAndSize(h)
 	h.mustReach("lines")
 	if got := ftKbd(h).Fragment; got != "note" {
@@ -438,6 +447,7 @@ func TestFTBackPreservesEveryValue(t *testing.T) {
 // -- stroke geometry with no text in it -- so nothing can be recovered from the
 // plate itself, hence the hook.
 func TestFTPlateIsWhatWasApproved(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipFreeTextQR)
 	const text = "Dear heir the hardware wallet is in the safe and the PIN is not written down"
 	h, r := startFT(t)
 	ftPastQR(h, true)
@@ -500,6 +510,7 @@ func TestFTPlateIsWhatWasApproved(t *testing.T) {
 // nothing else. Asserted at MODULE level -- a decoder ignoring trailing data
 // would pass while the modules differed.
 func TestFTQREncodesTheTextOnly(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipFreeTextQR)
 	const text = "the note"
 	h, r := startFT(t)
 	ftPastQR(h, true)
@@ -564,6 +575,7 @@ func TestFTNoQRMeansNoCode(t *testing.T) {
 // where it can be: ftBuildPlate must hand EngraveFreeText the very code Fit
 // returned.
 func TestFTBuildPlateEncodesOnce(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipFreeTextQR)
 	const text = "a note that needs a code"
 	var got *qrpkg.Code
 	freetextPlateHook = func(f backup.Fitted) { got = f.QR }
@@ -672,31 +684,36 @@ func TestFTBuiltPlateIsTheFittedComposition(t *testing.T) {
 	const text = "Dear heir the wallet is in the safe and the PIN is not written down at all"
 	P := newPlatform().EngraverParams()
 	for _, useQR := range []bool{false, true} {
-		got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		size, lines, qrc, err := backup.Fit(P, sh.Font, text, "TO MY HEIR", "2026 COPY 1", useQR)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := toPlate(backup.EngraveFreeText(P, sh.Font, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.Duration != want.Duration {
-			t.Errorf("qr=%v: built plate runs %d ticks, the fitted composition %d", useQR, got.Duration, want.Duration)
-		}
-		if g, w := ftSpline(t, got), ftSpline(t, want); !slices.Equal(g, w) {
-			t.Errorf("qr=%v: the built plate is not the fitted composition (%d knots vs %d)", useQR, len(g), len(w))
-		}
-		// And it is NOT the same plate at another size, so the comparison is
-		// not vacuous.
-		other, err := toPlate(backup.EngraveFreeText(P, sh.Font, backup.FontSizes[len(backup.FontSizes)-1], "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
-		if err == nil && slices.Equal(ftSpline(t, got), ftSpline(t, other)) && size != backup.FontSizes[len(backup.FontSizes)-1] {
-			t.Errorf("qr=%v: %.1fmm and %.1fmm produce identical geometry; this test cannot see a size change",
-				useQR, size, backup.FontSizes[len(backup.FontSizes)-1])
-		}
+		t.Run(fmt.Sprintf("qr=%v", useQR), func(t *testing.T) {
+			if useQR {
+				skipUnderRefugium(t, refugiumSkipFreeTextQR)
+			}
+			got, err := ftBuildPlate(P, &ftPlanSH, text, "TO MY HEIR", "2026 COPY 1", useQR, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			size, lines, qrc, err := backup.Fit(P, sh.Font, text, "TO MY HEIR", "2026 COPY 1", useQR)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := toPlate(backup.EngraveFreeText(P, sh.Font, size, "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Duration != want.Duration {
+				t.Errorf("qr=%v: built plate runs %d ticks, the fitted composition %d", useQR, got.Duration, want.Duration)
+			}
+			if g, w := ftSpline(t, got), ftSpline(t, want); !slices.Equal(g, w) {
+				t.Errorf("qr=%v: the built plate is not the fitted composition (%d knots vs %d)", useQR, len(g), len(w))
+			}
+			// And it is NOT the same plate at another size, so the comparison is
+			// not vacuous.
+			other, err := toPlate(backup.EngraveFreeText(P, sh.Font, backup.FontSizes[len(backup.FontSizes)-1], "TO MY HEIR", lines, "2026 COPY 1", qrc), P)
+			if err == nil && slices.Equal(ftSpline(t, got), ftSpline(t, other)) && size != backup.FontSizes[len(backup.FontSizes)-1] {
+				t.Errorf("qr=%v: %.1fmm and %.1fmm produce identical geometry; this test cannot see a size change",
+					useQR, size, backup.FontSizes[len(backup.FontSizes)-1])
+			}
+		})
 	}
 }
 
@@ -761,6 +778,9 @@ func TestFTConfirmCarriesTheSafetyCopy(t *testing.T) {
 			name = "with a QR"
 		}
 		t.Run(name, func(t *testing.T) {
+			if useQR {
+				skipUnderRefugium(t, refugiumSkipFreeTextQR)
+			}
 			h, _ := startFT(t)
 			ftPastQR(h, useQR)
 			h.typeString("hi")
@@ -1057,6 +1077,7 @@ func TestFTConfirmPagesEveryRowExactlyOnce(t *testing.T) {
 // This also pins spec 9's "default off, opt-in only": the initial selection is
 // index 0, so if the order were reversed, OK-without-moving would opt IN.
 func TestFTQRChoiceLabelsBindToMeaning(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipFreeTextQR)
 	for _, tc := range []struct {
 		sel   int
 		label string

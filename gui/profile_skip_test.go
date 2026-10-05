@@ -33,6 +33,8 @@ const (
 	refugiumSkipPassphrase = "the BIP-39 passphrase prompt is a notice and no passphrase is taken (F7 §4.3)"
 	// §4.3: a SLIP-39 passphrase ends the recovery.
 	refugiumSkipSLIP39 = "a SLIP-39 passphrase ends the recovery (F7 §4.3)"
+	// §4.4: Engrave Text offers no QR, for any text.
+	refugiumSkipFreeTextQR = "Engrave Text offers no QR in this build (F7 §4.4)"
 )
 
 // ppQuestion is the passphrase step's needle in THIS build (review I-2): the

@@ -167,5 +167,11 @@ func TestEngraveTextProgramSelectable(t *testing.T) {
 	// A needle only the free-text program renders. The passphrase program's QR
 	// step says "machine-readable copy of the passphrase", so "machine-readable"
 	// alone would pass on the wrong flow; this phrase appears nowhere else.
-	h.mustReach("photographs the plate")
+	if refugiumProfile {
+		// The Refugium build's QR step says it engraves text without a QR
+		// (F7 §4.4); no other program draws that lead.
+		h.mustReach("engraves text without a QR")
+	} else {
+		h.mustReach("photographs the plate")
+	}
 }

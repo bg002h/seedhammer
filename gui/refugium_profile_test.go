@@ -538,20 +538,22 @@ func TestRefugiumMS1CardOffersTextOnly(t *testing.T) {
 	}
 }
 
-// §4.4. Engrave Text: the QR step offers only "No QR" for an ms1 composition,
-// and the plate builder drops a requested QR.
-func TestRefugiumFreeTextMS1HasNoQR(t *testing.T) {
-	const ms1 = "ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"
-	ctx := NewContext(newPlatform())
-	blocks := []backup.Block{{Text: ms1}}
-	frame, quit := runUI(ctx, func() { ftQRChoiceFlow(ctx, &descriptorTheme, true, blocks) })
-	defer quit()
-	c, ok := frame()
-	if !ok {
-		t.Fatal("no QR step drawn")
-	}
-	if !uiContains(c, "never engraves one as a QR") || uiContains(c, "Add QR") {
-		t.Fatalf("the QR step for an ms1 text: %q", c)
+// §4.4, closing recheck m-1 by policy: Engrave Text offers no QR in this
+// build, for ANY composition -- not only one a predicate recognises as ms1.
+// The QR step's one answer is "No QR", even with a prior opt-in carried in.
+func TestRefugiumFreeTextQRStepOffersNoQR(t *testing.T) {
+	for _, text := range append([]string{""}, refugiumFreeTexts...) {
+		ctx := NewContext(newPlatform())
+		blocks := []backup.Block{{Text: text}}
+		frame, quit := runUI(ctx, func() { ftQRChoiceFlow(ctx, &descriptorTheme, true, blocks) })
+		c, ok := frame()
+		quit()
+		if !ok {
+			t.Fatalf("%q: no QR step drawn", text)
+		}
+		if !uiContains(c, "engraves text without a QR") || uiContains(c, "Add QR") {
+			t.Errorf("%q: the QR step offers a QR: %q", text, c)
+		}
 	}
 }
 
@@ -610,60 +612,47 @@ func TestRefugiumAnyPassPrefixedRecordIsFound(t *testing.T) {
 // construction.
 const refugiumMS1Vec = "ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"
 
-// §4.4, review I-1 and M-6: the free-text sink. ftBuildPlate drops a QR the
-// caller asked for when the text CONTAINS an ms1 string anywhere -- a label,
-// a bracket, a list number, a quote or an NBSP in front changes nothing, the
-// QR would still be the secret in one photo. A text that only mentions ms1
-// keeps its QR (positive control), so the gate is not "never a QR".
-func TestRefugiumFreeTextSinkDropsTheQRForAnEmbeddedMS1(t *testing.T) {
-	build := func(t *testing.T, text string) *backup.Fitted {
-		t.Helper()
+// refugiumFreeTexts are compositions Engrave Text must cut WITHOUT a QR under
+// the profile: ms1 strings in every disguise the I-1 and m-1 reviews found
+// (including the per-line label, which no ms1 predicate catches), and texts
+// that hold no secret at all -- the build offers no free-text QR, so there is
+// no positive control in this build. The default build's controls (a QR is
+// still cut there, ms1 or not) are in freetext_qr_build_test.go.
+var refugiumFreeTexts = []string{
+	refugiumMS1Vec,
+	"Share A: " + refugiumMS1Vec,
+	"(" + refugiumMS1Vec + ")",
+	"1. " + refugiumMS1Vec,
+	"\"" + refugiumMS1Vec,
+	strings.ToUpper(refugiumMS1Vec),
+	"ms10-tests-xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
+	"ms10test sxxxx xxxxx xxxxx xxxxx xxxxx xxxx4 nzvca 9cmcz lw",
+	refugiumGrouped(".", 5),
+	refugiumGrouped("/", 5),
+	refugiumGrouped(":", 4),
+	refugiumGrouped("_", 4),
+	"Line 1: ms10testsxxxx\nLine 2: xxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
+	"HELLO WORLD",
+	"see the ms1 card",
+}
+
+// §4.4: the free-text sink. ftBuildPlate cuts no QR in this build even when
+// its caller asks for one, whatever the text.
+func TestRefugiumFreeTextSinkNeverCutsAQR(t *testing.T) {
+	for _, text := range refugiumFreeTexts {
 		var got backup.Fitted
 		seen := false
 		freetextPlateHook = func(f backup.Fitted) { got, seen = f, true }
-		defer func() { freetextPlateHook = nil }()
-		if _, err := ftBuildPlate(ftParamsAtSpeed(engraverParams, 0), &ftPlanSH, text, "", "", true, 0, 0); err != nil {
+		_, err := ftBuildPlate(ftParamsAtSpeed(engraverParams, 0), &ftPlanSH, text, "", "", true, 0, 0)
+		freetextPlateHook = nil
+		if err != nil {
 			t.Fatalf("ftBuildPlate(%q): %v", text, err)
 		}
 		if !seen {
-			t.Fatal("the plate hook never ran")
+			t.Fatalf("%q: the plate hook never ran", text)
 		}
-		return &got
-	}
-	for _, text := range []string{
-		refugiumMS1Vec,
-		"Share A: " + refugiumMS1Vec,
-		"(" + refugiumMS1Vec + ")",
-		"1. " + refugiumMS1Vec,
-		"\"" + refugiumMS1Vec,
-		" " + refugiumMS1Vec,
-		strings.ToUpper(refugiumMS1Vec),
-		"ms10-tests-xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
-		"ms10test sxxxx xxxxx xxxxx xxxxx xxxxx xxxx4 nzvca 9cmcz lw",
-		// Recheck m-1: any keyboard punctuation used as a group separator.
-		refugiumGrouped(".", 5),
-		refugiumGrouped("/", 5),
-		refugiumGrouped(":", 4),
-		refugiumGrouped("_", 4),
-		refugiumGrouped("|", 6),
-		refugiumGrouped(";", 3),
-	} {
-		if f := build(t, text); f.QR != nil {
+		if got.QR != nil {
 			t.Errorf("%q: the plate carries a QR", text)
-		}
-	}
-	for _, text := range []string{"HELLO WORLD", "see the ms1 card", "ms1 plates are text only",
-		"ms1: a share. keep it apart / never photograph it"} {
-		if f := build(t, text); f.QR == nil {
-			t.Errorf("%q: the QR was dropped from a text holding no ms1 string", text)
-		}
-	}
-	// An NBSP (or any other Unicode space) is a separator too. The plate's
-	// font has no glyph for it, so this case is the predicate alone: a
-	// payload text record can carry one even though no keyboard types it.
-	for _, text := range []string{"\u00a0" + refugiumMS1Vec, "Share\u00a0A:\u2009ms10tests\u00a0xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"} {
-		if !noMS1QRText(text) {
-			t.Errorf("%q: the free-text gate let it through", text)
 		}
 	}
 }
@@ -679,19 +668,29 @@ func refugiumGrouped(sep string, n int) string {
 	return strings.Join(parts, sep)
 }
 
-// §4.4, review M-6: Engrave Text, QR chosen BEFORE an ms1 text is typed. The
-// flow drops the QR after the text step and says so.
-func TestRefugiumFreeTextForcedOffQRIsSaid(t *testing.T) {
+// §4.4, review M-6: Engrave Text end to end. The QR step says the build
+// engraves text without a QR and offers only "No QR"; the per-line-label
+// share (the one no ms1 predicate catches) reaches the confirm screen as
+// "QR: no", and the plate built from it carries none.
+func TestRefugiumFreeTextWalkEngravesNoQR(t *testing.T) {
 	h, _ := startFT(t)
-	ftPastQR(h, true)
-	ftSetText(h, "Share A: "+refugiumMS1Vec)
-	ftOK(h)
-	h.mustReach("ms1secretstring")
-	if !uiContains(h.content, "carries no QR") {
-		t.Fatalf("the notice does not say the QR is gone: %q", h.content)
+	h.mustReach("QRCode")
+	if !uiContains(h.content, "engraves text without a QR") || uiContains(h.content, "Add QR") {
+		t.Fatalf("the QR step: %q", h.content)
 	}
-	h.tapNav(Button3)
+	ftChoose(h, "qr", 0)
+	ftPastFaceAndSize(h)
+	h.mustReach("lines")
+	ftSetText(h, "Line 1: ms10testsxxxx")
+	ftOK(h)
 	h.mustReach("Title")
+	ftOK(h)
+	h.mustReach("Footer")
+	ftOK(h)
+	h.mustReach("Confirm")
+	if !uiContains(h.content, "QR: no") || uiContains(h.content, "readable by any camera") {
+		t.Fatalf("the confirm screen: %q", h.content)
+	}
 }
 
 // §4.4, review M-6: the sealed-unlock codex32 plate. unlockEngraveCodex32

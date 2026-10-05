@@ -18,7 +18,7 @@
 #
 # What the tag EXCLUDES is not decided here. A test that cannot hold in the
 # Refugium build either carries `//go:build !refugium` on its file (the proof
-# trigger files; -list omits them) or calls skipUnderRefugium with one of five
+# trigger files; -list omits them) or calls skipUnderRefugium with one of six
 # named reasons (gui/profile_skip_test.go), and is printed below by name. The
 # Refugium-only tests are gui/refugium_profile_test.go.
 #

@@ -527,10 +527,10 @@ const (
 func ftQRChoiceFlow(ctx *Context, th *Colors, prior bool, blocks []backup.Block) (bool, bool) {
 	cs := &ChoiceScreen{Title: "QR Code"}
 	sized := ftSizedBlocks(blocks)
-	if noMS1QRText(backup.CompositionText(blocks)) {
-		// The Refugium build never cuts a QR of an ms1 string (F7 §4.4): the
-		// one answer is the state, as in the sized case below.
-		cs.Lead = ftQRLeadMS1
+	if noFreeTextQR() {
+		// The Refugium build engraves text without a QR (F7 §4.4): the one
+		// answer is the state, as in the sized case below.
+		cs.Lead = ftQRLeadNoQR
 		cs.Choices = []string{"No QR"}
 	} else if sized {
 		cs.Lead = ftQRLeadSized
@@ -1454,8 +1454,8 @@ var freetextEngraveHook func(p Plate)
 // return or about which face any row is cut in.
 func ftBuildPlate(params engrave.Params, plan *ftPlan, text, title, footer string, useQR bool, size float32, passes int) (Plate, error) {
 	// The last sink before the engraver, so no route around the screens above
-	// can cut an ms1 string as a QR in the Refugium build (F7 §4.4).
-	if noMS1QRText(text) {
+	// can cut a QR in the Refugium build (F7 §4.4).
+	if noFreeTextQR() {
 		useQR = false
 	}
 	fitted, err := ftFitAt(params, plan.Blocks(text), title, footer, useQR, size)
@@ -1581,11 +1581,11 @@ func engraveTextFlowFrom(ctx *Context, th *Colors, body string, src syswSource) 
 				break
 			}
 			text = s
-			// "No QR" forced on an ms1 string in the Refugium build (F7 §4.4),
-			// and said out loud: the operator chose a QR before typing.
-			if useQR && noMS1QRText(text) {
+			// Defensive: the Refugium build's QR step offers only "No QR"
+			// (F7 §4.4), so a QR here is dropped and said out loud.
+			if useQR && noFreeTextQR() {
 				useQR = false
-				showNotice(ctx, th, "QR Code", ftMS1NoQRNotice)
+				showNotice(ctx, th, "QR Code", ftNoQRNotice)
 			}
 		case ftStepTitle:
 			s, ok := ftLineEntryFlow(ctx, th, "Title", title)
