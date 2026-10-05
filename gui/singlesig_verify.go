@@ -123,7 +123,7 @@ func singleSigVerifyFlow(ctx *Context, th *Colors, full, template, engravedWithP
 	}
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+	if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
 		if pass, ok := passphraseFlow(ctx, th); ok {
 			passphrase = pass
 		}

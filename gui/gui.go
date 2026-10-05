@@ -924,7 +924,17 @@ func passphraseFlow(ctx *Context, th *Colors) (string, bool) {
 // belongs to. A passphrase entered against the wrong seed mints a key no row of
 // SPEC 4.3 can catch, because there is no card to cross-check a new-seed slot
 // against.
+//
+// Under the Refugium profile it returns ("", false) without drawing anything
+// (F7 §4.3), so a prompt that was missed still cannot take a passphrase. At
+// every call site false reads as "no passphrase given"; the two that read it
+// otherwise (slip39_polish.go: abort the recovery; multisig_build_slots.go's
+// seedPassphraseStep: ask again) are unreachable under the profile, because
+// the question before them is a notice or a refusal there.
 func passphraseFlowTitled(ctx *Context, th *Colors, title string) (string, bool) {
+	if refugiumProfile {
+		return "", false
+	}
 	kbd := NewPassphraseKeyboard(ctx)
 	backBtn := &Clickable{Button: Button1}
 	okBtn := &Clickable{Button: Button3}
@@ -2191,7 +2201,11 @@ func uiFlow(ctx *Context, version string) {
 				unlockPayloadFlow(ctx, th, payloadReader)
 				continue
 			case engravePassphrase:
-				engravePassphraseFlow(ctx, th)
+				// Unreachable under the profile, which hides the program;
+				// gated anyway (F7 §4.3).
+				if !programHidden(engravePassphrase) {
+					engravePassphraseFlow(ctx, th)
+				}
 				continue
 			case engraveText:
 				engraveTextFlow(ctx, th)
@@ -2291,15 +2305,26 @@ func (m *StartScreen) Flow(ctx *Context, th *Colors) (startScreenAction, bool) {
 		default:
 		}
 		for prevBtn.Clicked(ctx) {
-			m.prog--
-			if m.prog < 0 {
-				m.prog = m.lastNav()
+			// A hidden program is stepped over in both directions (F7 §4.3).
+			for {
+				m.prog--
+				if m.prog < 0 {
+					m.prog = m.lastNav()
+				}
+				if !programHidden(m.prog) {
+					break
+				}
 			}
 		}
 		for nextBtn.Clicked(ctx) {
-			m.prog++
-			if m.prog > m.lastNav() {
-				m.prog = 0
+			for {
+				m.prog++
+				if m.prog > m.lastNav() {
+					m.prog = 0
+				}
+				if !programHidden(m.prog) {
+					break
+				}
 			}
 		}
 		dims := ctx.Platform.DisplaySize()
@@ -2574,17 +2599,31 @@ func layoutMainPlates(buf *op.Buffer, page program) (op.Op, image.Point) {
 // lastNav is a PARAMETER rather than a package constant because the last
 // navigable program is now a runtime value (§10.1): layoutMainPager is a free
 // function and cannot see StartScreen.lastNav().
+//
+// A HIDDEN program (programHidden; the Refugium build's passphrase program)
+// gets no dot, and the dots after it close up, so the filled dot is the
+// page's position among the programs actually shown. With nothing hidden this
+// is exactly one dot per index, as it always was.
 func layoutMainPager(buf *op.Buffer, th *Colors, page, lastNav program) (op.Op, image.Point) {
-	npages := int(lastNav) + 1
+	npages := 0
+	for p := program(0); p <= lastNav; p++ {
+		if !programHidden(p) {
+			npages++
+		}
+	}
 	const space = 4
 	if npages <= 1 {
 		return op.Op{}, image.Point{}
 	}
 	sz := assets.CircleFilled.Bounds().Size()
 	var content op.Op
-	for i := range npages {
+	i := 0
+	for p := program(0); p <= lastNav; p++ {
+		if programHidden(p) {
+			continue
+		}
 		mask := assets.Circle
-		if i == int(page) {
+		if p == page {
 			mask = assets.CircleFilled
 		}
 		content = op.Layer(content,
@@ -2593,8 +2632,16 @@ func layoutMainPager(buf *op.Buffer, th *Colors, page, lastNav program) (op.Op, 
 				op.Mask(buf, mask),
 			).Offset(image.Pt((sz.X+space)*i, 0)),
 		)
+		i++
 	}
 	return content, image.Pt((sz.X+space)*npages-space, sz.Y)
+}
+
+// programHidden reports whether a program is left out of the carousel. Only
+// the Refugium build hides one: the BIP-39 passphrase program, because that
+// build takes no passphrase (Refugium plan F7 §4.3, D4).
+func programHidden(p program) bool {
+	return refugiumProfile && p == engravePassphrase
 }
 
 func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
@@ -2826,7 +2873,7 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 		}
 		// Optional passphrase. Fresh ChoiceScreen each iteration (choice defaults to 0=Skip).
 		ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-		if sel, ok := ppChoice.Choose(ctx, th); ok && sel == 1 {
+		if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
 			if pass, ok := passphraseFlow(ctx, th); ok && pass != "" {
 				passFp, err := masterFingerprintFor(mnemonic, &chaincfg.MainNetParams, pass)
 				if err != nil {

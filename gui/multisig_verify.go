@@ -950,7 +950,7 @@ func multisigVerifyFlow(ctx *Context, th *Colors, full bool, expectedSlots []int
 				typed = append(typed, reMnemonic)
 				legState = legStepPassphrase
 			case legStepPassphrase:
-				sel, ok := ppChoice.Choose(ctx, th)
+				sel, ok := askBIP39Passphrase(ctx, th, ppChoice)
 				if !ok {
 					legState = legStepSeed
 					continue

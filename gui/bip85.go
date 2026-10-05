@@ -322,7 +322,7 @@ func bip85DeriveFlow(ctx *Context, th *Colors) {
 		if step == stepPassphrase {
 			// Optional passphrase ON THE MASTER.
 			ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-			sel, ok := ppChoice.Choose(ctx, th)
+			sel, ok := askBIP39Passphrase(ctx, th, ppChoice)
 			if !ok {
 				step = stepSeed // Back → the seed, words intact
 				continue
