@@ -2,6 +2,7 @@ package gui
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -177,7 +178,8 @@ func (c *Context) nfcAvailable() bool {
 // scanOffered keys the scan offers that were NEVER keyed on FeatureNFC
 // (Refugium plan F7 §4.2's floor list, R0 round 2 M-3): verify-address's
 // Scan/Type choice, the composer door's "Scan cards", the "SCAN CARDS" decline
-// arm of the card offer, and the single-card gathers' "Scan the next chunk.".
+// arm of the card offer, and the single-card gathers, which refuse instead of
+// asking for "the next chunk" (chunkGatherRefusal).
 //
 // It is false under the profile, where no screen offers or asks for a scan,
 // and TRUE in the default build -- deliberately not nfcAvailable(). These
@@ -189,17 +191,14 @@ func (c *Context) scanOffered() bool {
 	return !refugiumProfile
 }
 
-// chunksFromPayloadOnly is what a single-card chunk gather says instead of
-// "Scan the next chunk." when no scan is offered: the payload is the only
-// source of the remaining chunks in this build.
-const chunksFromPayloadOnly = "This build takes chunks from the payload only."
-
-// nextChunkLine is the gathers' instruction line, keyed on scanOffered.
-func (c *Context) nextChunkLine() string {
-	if c.scanOffered() {
-		return "Scan the next chunk."
-	}
-	return chunksFromPayloadOnly
+// chunkGatherRefusal is what a single-card chunk gather (md1GatherFlow,
+// mk1GatherFlow) says when no scan is offered and the payload did not complete
+// the set (review M-2). It is one screen and the flow returns: plan §4.2's "no
+// flow may wait on a reader that does not exist" rules out the Back-only
+// gather loop the default build would open.
+func chunkGatherRefusal(have, total int) string {
+	return fmt.Sprintf("Captured %d of %d. This build takes the remaining chunks "+
+		"from the payload only; pack the full set.", have, total)
 }
 
 // verifyReadbackUnavailable is what both verify flows say in the Refugium

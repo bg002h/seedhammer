@@ -150,6 +150,13 @@ func (f sourceFacts) literalHits(needle string) []string {
 // positive control lists the DEFAULT sets the same way and requires each
 // literal and each call there, so a listing that silently matched nothing --
 // or a check that stopped reading -- fails instead of passing.
+//
+// WHAT IT CANNOT SEE (review N-3, measured). A literal is one *ast.BasicLit, so
+// a constant split across a concatenation ("lock-" + "boot") passes here, and a
+// call is matched by name, so a method value (f := otp.AddBootKey; f()) passes
+// too. Do not rely on this gate alone: scripts/refugium-elf-check.sh scans the
+// built Refugium ELF, where Go has folded the constant and the writer's code
+// either links or does not.
 func TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall(t *testing.T) {
 	refugium := readSourceFacts(t, append(
 		fileSet(t, "./gui", "refugium", "tinygo,rp,refugium"),

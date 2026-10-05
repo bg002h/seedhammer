@@ -16,7 +16,7 @@ package gui
 //     hidden.
 //   - No QR of an ms1 string is engraved (§4.4).
 //
-// gui/refugium_split_test.go polices every *_refugium.go file: each has a
+// gui/refugium_build_test.go polices every *_refugium.go file: each has a
 // `X && !refugium` twin and carries none of the forbidden literals.
 
 const refugiumProfile = true

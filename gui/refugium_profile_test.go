@@ -20,11 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"seedhammer.com/backup"
 	"seedhammer.com/bip39"
 	"seedhammer.com/codex32"
 	"seedhammer.com/engrave"
 	"seedhammer.com/font/constant"
+	"seedhammer.com/sysw"
 )
 
 // countingTagReader counts every Read, so "nothing was read" is a number and not
@@ -219,14 +221,47 @@ func TestRefugiumSyswChooseTakesThePayloadWithoutAPicker(t *testing.T) {
 	}
 }
 
-// §4.2, scan offer: the single-card gathers' instruction line.
-func TestRefugiumChunkGathersSayPayloadOnly(t *testing.T) {
-	ctx := NewContext(newPlatform())
-	if got := ctx.nextChunkLine(); got != chunksFromPayloadOnly {
-		t.Fatalf("nextChunkLine() = %q, want %q", got, chunksFromPayloadOnly)
-	}
-	if strings.Contains(strings.ToLower(chunksFromPayloadOnly), "scan") {
-		t.Fatal("the payload-only line still says scan")
+// §4.2, review M-2: a single-card chunk gather the payload does not complete
+// is refused with one screen and returns -- never a gather loop waiting on a
+// reader this build does not have. Control: TestMK1GatherFlowBackNoReader
+// (the default build's Back-only gather).
+func TestRefugiumIncompleteChunkGathersRefuse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(ctx *Context) bool
+		want string
+	}{
+		{"md1", func(ctx *Context) bool { return md1GatherFlow(ctx, &descriptorTheme, wshSortedmultiChunks[0]) },
+			fmt.Sprintf("Captured 1 of %d.", len(wshSortedmultiChunks))},
+		{"mk1", func(ctx *Context) bool { _, ok := mk1GatherFlow(ctx, &descriptorTheme, v1c0); return ok },
+			"Captured 1 of 2."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPlatform()
+			r := &countingTagReader{rec: []byte(wshSortedmultiChunks[1])}
+			p.nfc = func() io.ReadCloser { return r }
+			ctx := NewContext(p)
+			got := true
+			frame, quit := runUI(ctx, func() { got = tc.run(ctx) })
+			defer quit()
+			c, ok := pumpUntil(frame, "pack the full set", 8)
+			if !ok {
+				t.Fatalf("no refusal; got %q", c)
+			}
+			if !uiContains(c, tc.want) || uiContains(c, "Scan the next chunk") {
+				t.Fatalf("refusal text: %q", c)
+			}
+			click(&ctx.Router, Button3)
+			if c, more := frame(); more {
+				t.Fatalf("the gather went on after the refusal: %q", c)
+			}
+			if got {
+				t.Fatal("an incomplete gather reported success")
+			}
+			if r.reads.Load() != 0 {
+				t.Fatal("the reader was read")
+			}
+		})
 	}
 }
 
@@ -260,14 +295,17 @@ func TestRefugiumVerifyFlowsRefuseTheReadback(t *testing.T) {
 	})
 }
 
-// §4.3. Every passphrase prompt is a notice: drawn under the question's title,
-// it answers Skip whatever dismisses it.
+// §4.3. Every passphrase prompt is a notice drawn under the question's title.
+// Acknowledging it is Skip, (0, true); Back on it keeps the question's Back,
+// (0, false), so each site steps back exactly as before (review M-1).
 func TestRefugiumPassphrasePromptIsANotice(t *testing.T) {
-	for _, b := range []Button{Button3, Button1} {
+	for _, tc := range []struct {
+		b      Button
+		wantOK bool
+	}{{Button3, true}, {Button1, false}} {
 		ctx := NewContext(newPlatform())
 		cs := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-		var sel int
-		var ok bool
+		sel, ok := -1, !tc.wantOK
 		frame, quit := runUI(ctx, func() { sel, ok = askBIP39Passphrase(ctx, &descriptorTheme, cs) })
 		content, seen := pumpUntil(frame, "This build takes no BIP-39 passphrase", 8)
 		if !seen {
@@ -277,15 +315,67 @@ func TestRefugiumPassphrasePromptIsANotice(t *testing.T) {
 		if uiContains(content, "Add passphrase") {
 			t.Errorf("the notice still offers Add passphrase: %q", content)
 		}
-		click(&ctx.Router, b)
+		click(&ctx.Router, tc.b)
 		for {
 			if _, more := frame(); !more {
 				break
 			}
 		}
 		quit()
-		if sel != 0 || !ok {
-			t.Errorf("dismissed with %v: got (%d, %v), want (0, true)", b, sel, ok)
+		if sel != 0 || ok != tc.wantOK {
+			t.Errorf("dismissed with %v: got (%d, %v), want (0, %v)", tc.b, sel, ok, tc.wantOK)
+		}
+	}
+}
+
+// review M-1: a session that ends ON the notice is not an acknowledgement.
+func TestRefugiumPassphraseNoticeEndedByDoneIsNotOK(t *testing.T) {
+	ctx := NewContext(newPlatform())
+	ctx.Done = true
+	cs := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
+	if sel, ok := askBIP39Passphrase(ctx, &descriptorTheme, cs); sel != 0 || ok {
+		t.Fatalf("with ctx.Done: got (%d, %v), want (0, false)", sel, ok)
+	}
+}
+
+// review M-1, at the site whose !ok means most: seedPassphraseStep. Back on
+// the notice is "not this seed" -- the seed is un-registered and the step
+// reports a decline -- and acknowledging it keeps the seed, with no
+// passphrase bound.
+func TestRefugiumSeedPassphraseStepKeepsItsBack(t *testing.T) {
+	m, err := bip39.ParseMnemonic(testSeedPhrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		b         Button
+		want      bool
+		wantSeeds int
+	}{{Button3, true, 1}, {Button1, false, 0}} {
+		reg := &seedRegistry{}
+		id, err := reg.add("@0", m, "", &chaincfg.MainNetParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := NewContext(newPlatform())
+		got := !tc.want
+		frame, quit := runUI(ctx, func() { got = seedPassphraseStep(ctx, &descriptorTheme, reg, id, "@0", "Build") })
+		if c, ok := pumpUntil(frame, "This build takes no BIP-39 passphrase", 8); !ok {
+			quit()
+			t.Fatalf("no notice; got %q", c)
+		}
+		click(&ctx.Router, tc.b)
+		for {
+			if _, more := frame(); !more {
+				break
+			}
+		}
+		quit()
+		if got != tc.want || reg.count() != tc.wantSeeds {
+			t.Errorf("%v on the notice: step=%v seeds=%d, want %v and %d", tc.b, got, reg.count(), tc.want, tc.wantSeeds)
+		}
+		if s, ok := reg.at(0); ok && s.Passphrase != "" {
+			t.Errorf("a passphrase was bound: %q", s.Passphrase)
 		}
 	}
 }
@@ -491,3 +581,119 @@ type faultPlatform struct {
 }
 
 func (p *faultPlatform) NFCFault() error { return p.fault }
+
+// review M-4: the refusal keys on the `pass:` PREFIX, so a record whose body
+// does not decode -- which sysw.Classify calls ClassUnknown -- is refused too.
+// It is still a passphrase record, and still secret.
+func TestRefugiumAnyPassPrefixedRecordIsFound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		p    sysw.Payload
+		want int
+	}{
+		{"well-formed, public", sysw.Payload{Public: []string{"text:41", "pass:636f7272"}}, 2},
+		{"undecodable body", sysw.Payload{Public: []string{"pass:zz-not-hex"}}, 1},
+		{"empty body", sysw.Payload{Secret: []string{"pass:"}}, 1},
+		{"secret section, after one public", sysw.Payload{Public: []string{"text:41"}, Secret: []string{"pass:nothex"}}, 2},
+	} {
+		n, ok := syswFirstPassphraseRecord(&tc.p)
+		if !ok || n != tc.want {
+			t.Errorf("%s: got (%d, %v), want (%d, true)", tc.name, n, ok, tc.want)
+		}
+	}
+	if _, ok := syswFirstPassphraseRecord(&sysw.Payload{Public: []string{"text:70617373"}}); ok {
+		t.Error("a text record was taken for a passphrase")
+	}
+}
+
+// refugiumMS1Vec is BIP-93's test vector: a valid ms1 string, public by
+// construction.
+const refugiumMS1Vec = "ms10testsxxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"
+
+// §4.4, review I-1 and M-6: the free-text sink. ftBuildPlate drops a QR the
+// caller asked for when the text CONTAINS an ms1 string anywhere -- a label,
+// a bracket, a list number, a quote or an NBSP in front changes nothing, the
+// QR would still be the secret in one photo. A text that only mentions ms1
+// keeps its QR (positive control), so the gate is not "never a QR".
+func TestRefugiumFreeTextSinkDropsTheQRForAnEmbeddedMS1(t *testing.T) {
+	build := func(t *testing.T, text string) *backup.Fitted {
+		t.Helper()
+		var got backup.Fitted
+		seen := false
+		freetextPlateHook = func(f backup.Fitted) { got, seen = f, true }
+		defer func() { freetextPlateHook = nil }()
+		if _, err := ftBuildPlate(ftParamsAtSpeed(engraverParams, 0), &ftPlanSH, text, "", "", true, 0, 0); err != nil {
+			t.Fatalf("ftBuildPlate(%q): %v", text, err)
+		}
+		if !seen {
+			t.Fatal("the plate hook never ran")
+		}
+		return &got
+	}
+	for _, text := range []string{
+		refugiumMS1Vec,
+		"Share A: " + refugiumMS1Vec,
+		"(" + refugiumMS1Vec + ")",
+		"1. " + refugiumMS1Vec,
+		"\"" + refugiumMS1Vec,
+		" " + refugiumMS1Vec,
+		strings.ToUpper(refugiumMS1Vec),
+		"ms10-tests-xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw",
+		"ms10test sxxxx xxxxx xxxxx xxxxx xxxxx xxxx4 nzvca 9cmcz lw",
+	} {
+		if f := build(t, text); f.QR != nil {
+			t.Errorf("%q: the plate carries a QR", text)
+		}
+	}
+	for _, text := range []string{"HELLO WORLD", "see the ms1 card", "ms1 plates are text only"} {
+		if f := build(t, text); f.QR == nil {
+			t.Errorf("%q: the QR was dropped from a text holding no ms1 string", text)
+		}
+	}
+	// An NBSP (or any other Unicode space) is a separator too. The plate's
+	// font has no glyph for it, so this case is the predicate alone: a
+	// payload text record can carry one even though no keyboard types it.
+	for _, text := range []string{"\u00a0" + refugiumMS1Vec, "Share\u00a0A:\u2009ms10tests\u00a0xxxxxxxxxxxxxxxxxxxxxxxxxx4nzvca9cmczlw"} {
+		if !noMS1QRText(text) {
+			t.Errorf("%q: the free-text gate let it through", text)
+		}
+	}
+}
+
+// §4.4, review M-6: Engrave Text, QR chosen BEFORE an ms1 text is typed. The
+// flow drops the QR after the text step and says so.
+func TestRefugiumFreeTextForcedOffQRIsSaid(t *testing.T) {
+	h, _ := startFT(t)
+	ftPastQR(h, true)
+	ftSetText(h, "Share A: "+refugiumMS1Vec)
+	ftOK(h)
+	h.mustReach("ms1secretstring")
+	if !uiContains(h.content, "carries no QR") {
+		t.Fatalf("the notice does not say the QR is gone: %q", h.content)
+	}
+	h.tapNav(Button3)
+	h.mustReach("Title")
+}
+
+// §4.4, review M-6: the sealed-unlock codex32 plate. unlockEngraveCodex32
+// cuts unlockCodex32Plan, and under the profile that is byte for byte the
+// text-only plate for the SeedString it builds.
+func TestRefugiumUnlockCodex32PlateIsTextOnly(t *testing.T) {
+	s, err := codex32.New(refugiumMS1Vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _, _ := s.Split()
+	got, err := unlockCodex32Plan(engraverParams, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := backup.EngraveSeedStringTextOnly(engraverParams,
+		backup.SeedString{Title: id, Seed: s.String(), Font: constant.Font})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(planBytes(t, got), planBytes(t, want)) {
+		t.Fatal("the unlock codex32 plate is not the text-only plate")
+	}
+}
