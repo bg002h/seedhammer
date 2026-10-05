@@ -2729,7 +2729,14 @@ func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]st
 		Paragraphs []backup.Paragraph
 	}
 	var engravings []textEngraving
-	if len(strs) == 1 {
+	if len(strs) == 1 && noMS1QR(strs[0]) {
+		// The Refugium build offers an ms1 card as text only (F7 §4.4). The
+		// QR exists only in the single-string branch below, so this is where
+		// the gate sits.
+		engravings = []textEngraving{
+			{"TEXT ONLY", []backup.Paragraph{{Text: strs[0]}}},
+		}
+	} else if len(strs) == 1 {
 		qrc, err := qr.Encode(strs[0], qr.L)
 		if err != nil {
 			return nil, nil, err
@@ -2915,7 +2922,7 @@ func backupWalletFlow(ctx *Context, th *Colors, mnemonic bip39.Mnemonic) {
 
 func backupSeedStringFlow(ctx *Context, th *Colors, s backup.SeedString) {
 	params := ctx.Platform.EngraverParams()
-	p, err := backup.EngraveSeedString(params, s)
+	p, err := engraveSeedStringPlate(params, s)
 	if err != nil {
 		return
 	}

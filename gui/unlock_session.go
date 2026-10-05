@@ -203,7 +203,7 @@ func unlockEngraveCodex32(ctx *Context, th *Colors, rec []byte) {
 	}
 	id, _, _ := s.Split()
 	params := ctx.Platform.EngraverParams()
-	plan, err := backup.EngraveSeedString(params, backup.SeedString{
+	plan, err := engraveSeedStringPlate(params, backup.SeedString{
 		Title: id,
 		Seed:  s.String(),
 		Font:  constant.Font,
