@@ -240,15 +240,26 @@ func Init() (*Platform, error) {
 		return nil, fmt.Errorf("data I2C: %w", err)
 	}
 	mi2c := newMultiplexI2C(dataI2C)
-	usbpd := ap33772s.New(mi2c)
-	if err := usbpd.Configure(); err != nil {
-		return nil, err
-	}
 	stdin := make(chan gui.Event)
 	p := &Platform{
 		wakeups: make(chan struct{}, 1),
 		timer:   time.NewTimer(0),
 		stdin:   stdin,
+	}
+	// The reader's setup is a build-tag pair (nfc_default.go, nfc_refugium.go):
+	// the default build reports it and hands it out; the Refugium build turns
+	// the chip's field off once and never touches it again (F7 §4.2).
+	//
+	// FIRST on the data bus, right after the bus itself (review M-3): every
+	// step below can fail Init, and an Init failure ends main before the GUI
+	// -- so in the Refugium build a field a previous image left on would stay
+	// on for the whole power cycle if the write came last. st25r3916.New
+	// touches no register, so in the default build this only moves where the
+	// reader is wired.
+	p.initNFC(st25r3916.New(mi2c, NFC_INT))
+	usbpd := ap33772s.New(mi2c)
+	if err := usbpd.Configure(); err != nil {
+		return nil, err
 	}
 	// Set up engraver pins regardless of whether the
 	// voltage is sufficient.
@@ -298,10 +309,6 @@ func Init() (*Platform, error) {
 	p.touch.ints = make(chan struct{}, 1)
 	p.touch.dev = touch
 
-	// The reader's setup is a build-tag pair (nfc_default.go, nfc_refugium.go):
-	// the default build reports it and hands it out; the Refugium build turns
-	// the chip's field off once and never touches it again (F7 §4.2).
-	p.initNFC(st25r3916.New(mi2c, NFC_INT))
 	if initHook != nil {
 		initHook(stdin)
 	}
