@@ -4,6 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     utils.url = "github:numtide/flake-utils";
+    # The one picotool for sealing: 2.3.1 with the seal --clear fix, pinned in
+    # bg002h/mnemonic-engrave (design/PICOTOOL_PIN.md). Its own nixpkgs is
+    # deliberately not followed, so the store path stays the one recorded there.
+    # picosign stays the final signer: picotool's own seal --sign signature is
+    # wrong about 1 time in 256 (der_to_raw, all versions).
+    mnemonic-engrave.url = "git+https://github.com/bg002h/mnemonic-engrave?ref=master&shallow=1";
   };
 
   outputs =
@@ -11,6 +17,7 @@
       self,
       nixpkgs,
       utils,
+      mnemonic-engrave,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -63,6 +70,8 @@
               vendorHash = "sha256-OO8o/s71jZIypfYZCLT6jwUPyQJ89AKg3DfzTrbrD/A=";
             });
           };
+        # Also what the devShell's `picotool` means: a let binding shadows `with pkgs;`.
+        picotool = mnemonic-engrave.packages.${system}.picotool;
         pkgs = import nixpkgs {
           inherit system;
           overlays = [
@@ -118,7 +127,7 @@
               ${pkgs.tinygo}/bin/tinygo build -o "$WORKDIR/firmware.uf2" -ldflags="-X main.Version=$VERSION" ${tinygo-flags} "$@" ./cmd/controller
               # Sign with a dummy key to convince picotool to create the necessary
               # file structure for signing.
-              ${pkgs.picotool}/bin/picotool seal --sign --clear --quiet "$WORKDIR/firmware.uf2" "$WORKDIR/firmware.signed.uf2" "${dummy_pem}"
+              ${picotool}/bin/picotool seal --sign --clear --quiet "$WORKDIR/firmware.uf2" "$WORKDIR/firmware.signed.uf2" "${dummy_pem}"
               # Clear public key and signature.
               ${pkgs.go}/bin/go run seedhammer.com/cmd/picosign sign -clear "$WORKDIR/firmware.signed.uf2"
 
