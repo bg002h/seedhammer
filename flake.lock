@@ -1,6 +1,43 @@
 {
   "nodes": {
+    "mnemonic-engrave": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1791337984,
+        "narHash": "sha256-4WHZSIzuZCIIQqVu5BXHUJD64qFjo5comyNTzzxlhyI=",
+        "ref": "master",
+        "rev": "3c673b05fabb44a843ec328bea7a7de360a60f72",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/bg002h/mnemonic-engrave"
+      },
+      "original": {
+        "ref": "master",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/bg002h/mnemonic-engrave"
+      }
+    },
     "nixpkgs": {
+      "locked": {
+        "lastModified": 1791048980,
+        "narHash": "sha256-KgItSKML8Xvte0B7/uGnBDsYzSnnKHcOaiUbgWBXLXw=",
+        "ref": "nixos-unstable",
+        "rev": "a7868a727837f3c09cee2ce0ca671c76b1589fed",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/NixOS/nixpkgs"
+      },
+      "original": {
+        "ref": "nixos-unstable",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/NixOS/nixpkgs"
+      }
+    },
+    "nixpkgs_2": {
       "locked": {
         "lastModified": 1779971959,
         "narHash": "sha256-R5nauXyqyfRUFiZycFFZdkF7wl6eaUpPLst35+2nJQY=",
@@ -18,7 +55,8 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
+        "mnemonic-engrave": "mnemonic-engrave",
+        "nixpkgs": "nixpkgs_2",
         "utils": "utils"
       }
     },
