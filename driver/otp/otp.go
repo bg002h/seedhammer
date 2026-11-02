@@ -182,7 +182,7 @@ func ReadWhiteLabelString(idx uint8) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if flags&WHITE_LABEL_ADDR_VALID == 0 || flags|(0b1<<idx) == 0 {
+	if flags&WHITE_LABEL_ADDR_VALID == 0 || flags&(0b1<<idx) == 0 {
 		return "", nil
 	}
 	entry, err := readECCRow(tblRow + uint16(idx))
@@ -250,7 +250,7 @@ func WriteWhiteLabelString(idx uint8, s string) error {
 		}
 		n := entry & 0x7f
 		if utf16 := entry&0x80 != 0; utf16 {
-			switch idx {
+			switch uint8(i) {
 			case INDEX_USB_DEVICE_PRODUCT_STRDEF,
 				INDEX_USB_DEVICE_SERIAL_NUMBER_STRDEF,
 				INDEX_USB_DEVICE_MANUFACTURER_STRDEF:

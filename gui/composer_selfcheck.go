@@ -168,6 +168,14 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 		return fmt.Errorf("self-check: the decoded policy has %d slots, the seating has %d",
 			len(keys), len(st.assigned))
 	}
+	// resolveOrigins' rule for an unseated slot: the wrapper's default at the
+	// lowest account no seated slot (nor an earlier unseated one) holds.
+	takenOrigins := map[string]bool{}
+	for _, a := range st.assigned {
+		if a.src >= 0 {
+			takenOrigins[composerOriginKey(a.origin)] = true
+		}
+	}
 	for i, k := range keys {
 		a := st.assigned[i]
 		if !composerUseSiteIsFixed(k.UseSite) {
@@ -179,6 +187,18 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 			// appeared on an unseated slot would be a key nobody chose.
 			if k.FingerprintPresent {
 				return fmt.Errorf("self-check: unseated slot @%d declares a fingerprint", i)
+			}
+			var want []md.PathComponent
+			for account := uint32(0); ; account++ {
+				want = md.DefaultOrigin(st.list.Wrapper, account)
+				if !takenOrigins[composerOriginKey(want)] {
+					takenOrigins[composerOriginKey(want)] = true
+					break
+				}
+			}
+			if composerOriginKey(originComponents(k.OriginPath)) != composerOriginKey(want) {
+				return fmt.Errorf("self-check: unseated slot @%d declares %s, not the default %s",
+					i, k.OriginPath, composerOriginText(want))
 			}
 			continue
 		}
