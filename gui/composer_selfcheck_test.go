@@ -147,7 +147,7 @@ func TestComposerSelfCheckRefusesAFaultInjectedBuilderOutput(t *testing.T) {
 		{"the decoded md1 puts two slots at ONE origin with no fingerprints",
 			composerCollidingOriginFixture, func(st *composerState, c []string) []string {
 				return c
-			}, "without two distinct fingerprints"},
+			}, "self-check: unseated slot @1 declares m/48h/0h/0h/2h, not the default m/48'/0'/1'/2'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st, chunks := tc.fixture(t)

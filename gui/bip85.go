@@ -333,9 +333,11 @@ func bip85DeriveFlow(ctx *Context, th *Colors) {
 				// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
 				// syswPassphraseFlow for the two normative rules a shared edit inside
 				// passphraseFlow would have broken.
-				if pass, ok := syswPassphraseFlow(ctx, th); ok {
-					passphrase = pass
+				pass, ok := syswPassphraseFlow(ctx, th)
+				if !ok {
+					continue // Back on the keyboard: stay on the question
 				}
+				passphrase = pass
 			}
 			step = stepParams
 			continue

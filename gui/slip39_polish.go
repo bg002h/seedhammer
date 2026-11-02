@@ -287,7 +287,11 @@ func recoverSLIP39Flow(ctx *Context, th *Colors, first slip39words.Share) (bip39
 		Lead:    "SLIP-39 passphrase? (NOT a BIP-39 passphrase) A wrong passphrase silently recovers a different seed.",
 		Choices: []string{"Skip", "Enter passphrase"},
 	}
-	if psel, ok := ppChoice.Choose(ctx, th); ok && psel == 1 {
+	psel, pok := ppChoice.Choose(ctx, th)
+	if !pok {
+		return nil, false
+	}
+	if psel == 1 {
 		// The Refugium build takes no passphrase (F7 §4.3), and skipping this
 		// one would recover a DIFFERENT valid seed, so "yes" ends here.
 		if refugiumProfile {

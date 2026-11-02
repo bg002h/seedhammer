@@ -130,6 +130,9 @@ func partsInner(s String) (*parts, error) {
 	if len(s.s) <= shortCodeMaxLength {
 		checkLen = shortChecksumLen
 	}
+	if len(res) < 6+checkLen {
+		return nil, errInvalidLength
+	}
 	var thres int
 	switch t := res[0]; t {
 	case '0':

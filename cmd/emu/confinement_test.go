@@ -90,10 +90,15 @@ func hasJSBuildTag(src string) bool {
 // here, in two escalating ways that are worth recording because each one looked
 // like an answer:
 //
-//  1. Bare, it fails with "build constraints exclude all Go files" --
-//     cmd/controller is `//go:build tinygo && rp` -- and prints NOTHING. Piped
-//     into a grep for cmd/emu that reads as zero matches, i.e. as a pass. That
-//     is how this confinement was first reported, wrongly.
+//  1. Bare, it no longer fails: main.go is `//go:build tinygo && rp`, but
+//     main_host.go is its exact complement, so a bare build succeeds and
+//     `go run ./cmd/controller` exits 2. On the host the graph is the
+//     host-buildable files only (lockboot_values.go, main_host.go), not the
+//     device's, so it cannot prove absence for the firmware either. Before
+//     main_host.go existed it failed with "build constraints exclude all Go
+//     files" and printed NOTHING, which piped into a grep for cmd/emu reads
+//     as zero matches, i.e. as a pass. That is how this confinement was first
+//     reported, wrongly.
 //  2. With `-tags tinygo,rp` and GOOS=linux GOARCH=arm it prints 255 packages
 //     AND still exits non-zero: TinyGo's `machine` and `device/rp` are not in
 //     the Go stdlib, so the graph is PARTIAL. A partial graph cannot prove

@@ -129,7 +129,7 @@ func parseBlueWalletDescriptor(txt string) (*bip380.Descriptor, error) {
 			if err != nil {
 				return nil, fmt.Errorf("bluewallet: invalid xpub: %q", val)
 			}
-			pub, err := xpub.ECPubKey()
+			_, err = xpub.ECPubKey()
 			if err != nil {
 				return nil, fmt.Errorf("bluewallet: invalid xpub: %q: %v", xpub, err)
 			}
@@ -143,22 +143,35 @@ func parseBlueWalletDescriptor(txt string) (*bip380.Descriptor, error) {
 				// defect 4); the host refuses the same input cleanly.
 				return nil, fmt.Errorf("bluewallet: invalid fingerprint: %q", key)
 			}
-			network, err := bip32.NetworkFor(xpub)
+			_, err = bip32.NetworkFor(xpub)
 			if err != nil {
 				return nil, fmt.Errorf("bluewallet: unknown network: %q", key)
 			}
-			desc.Keys = append(desc.Keys, bip380.Key{
-				Network:           network,
-				MasterFingerprint: binary.BigEndian.Uint32(fp),
-				DerivationPath:    path,
-				KeyData:           pub.SerializeCompressed(),
-				ChainCode:         xpub.ChainCode(),
-				ParentFingerprint: xpub.ParentFingerprint(),
-			})
+			k, err := bip380.ParseKey(path, []byte(val))
+			if err != nil {
+				return nil, fmt.Errorf("bluewallet: invalid xpub: %q", val)
+			}
+			k.MasterFingerprint = binary.BigEndian.Uint32(fp)
+			desc.Keys = append(desc.Keys, k)
 		}
 	}
 	if nkeys != len(desc.Keys) {
 		return nil, fmt.Errorf("bluewallet: expected %d keys, but got %d", nkeys, len(desc.Keys))
+	}
+	if _, ok := seenKeys["Policy"]; !ok {
+		return nil, errors.New("bluewallet: missing Policy header")
+	}
+	if _, ok := seenKeys["Format"]; !ok {
+		return nil, errors.New("bluewallet: missing Format header")
+	}
+	if len(desc.Keys) == 0 {
+		return nil, errors.New("bluewallet: no keys")
+	}
+	if desc.Threshold < 1 || desc.Threshold > len(desc.Keys) {
+		return nil, fmt.Errorf("bluewallet: invalid threshold %d of %d", desc.Threshold, len(desc.Keys))
+	}
+	for i := range desc.Keys {
+		desc.Keys[i].DerivationPath = path
 	}
 	return desc, nil
 }
