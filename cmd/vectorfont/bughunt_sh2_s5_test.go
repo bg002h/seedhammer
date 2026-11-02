@@ -84,6 +84,8 @@ func TestBughuntSh230dRepeatedRelative(t *testing.T) {
 		{"m0,0 l1,0 1,0", bezier.Pt(2, 0)},
 		{"m0,0 h1 1", bezier.Pt(2, 0)},
 		{"m0,0 v1 1", bezier.Pt(0, 2)},
+		{"m0,0 c1,0 1,0 1,0 1,0 1,0 1,0", bezier.Pt(2, 0)},
+		{"m0,0 s1,0 1,0 1,0 1,0", bezier.Pt(2, 0)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.d, func(t *testing.T) {
@@ -91,7 +93,12 @@ func TestBughuntSh230dRepeatedRelative(t *testing.T) {
 			if len(segs) != 3 {
 				t.Fatalf("want 3 segments, got %d: %+v", len(segs), segs)
 			}
-			if got := segs[len(segs)-1].Args[0]; got != tc.want {
+			last := segs[len(segs)-1]
+			got := last.Args[0]
+			if last.Op == SegmentOpCubeTo {
+				got = last.Args[2]
+			}
+			if got != tc.want {
 				t.Errorf("%q ends at %v, want %v", tc.d, got, tc.want)
 			}
 		})
