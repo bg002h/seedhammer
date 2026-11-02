@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/hex"
-	"fmt"
 
 	"seedhammer.com/driver/otp"
 )
@@ -36,7 +35,7 @@ func writeOTPValues(keyHash, version string) error {
 		panic(err)
 	}
 	if err := otpWriteWhiteLabelAddr(otp.FirstUserRow); err != nil {
-		fmt.Printf("label addr err: %v", err)
+		return err
 	}
 	infos := []struct {
 		Index uint8
