@@ -39,7 +39,7 @@ import (
 // The package is `nonstandard_test` (EXTERNAL) deliberately: once §5.2's
 // classifier arm lands, `sysw` imports `nonstandard`, and an internal test
 // importing `sysw` for the sysw_class column would be an import cycle.
-const seamVectorsSHA256 = "ed3706e29fde0ee86e13accd0ecc6492ea2ad9391ff2d911d798d69bb03760f4"
+const seamVectorsSHA256 = "34093bfd3aa8f303670098838ff6fe76c7cb7485199338088f795d9e15b0674b"
 
 const seamVectorsPath = "testdata/descriptor_seam_vectors.json"
 
@@ -70,13 +70,13 @@ type seamRow struct {
 // single-line count move.
 const (
 	wantRows        = 74
-	wantDeviceTrue  = 40
-	wantDeviceFalse = 34
+	wantDeviceTrue  = 29
+	wantDeviceFalse = 45
 	wantCanonical   = 19
 	wantAddress0    = 20
 	wantAddress1    = 5
 	wantWalletID    = 4
-	wantPanicEncode = 2
+	wantPanicEncode = 0
 	wantHostWider   = 3 // §4.6's whitespace rows, and only those
 	// Rows whose `input` is ONE LINE -- the only rows that can BE a record,
 	// because the public section is split on LF (sysw/open.go:67) and a record
