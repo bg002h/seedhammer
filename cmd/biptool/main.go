@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	qr "github.com/seedhammer/kortschak-qr"
 
@@ -59,8 +61,31 @@ type codex32Conf struct {
 	Index     rune
 }
 
+// errOutput marks a failed write of a verb's output to stdout
+// (FIX-sh-go-cli-output-sink, ruling T6).
+var errOutput = errors.New("cannot write the output")
+
+// outputErr wraps a stdout write error in errOutput; nil stays nil.
+func outputErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errOutput, err)
+}
+
 func main() {
-	if err := run(os.Stdout, os.Stdin, os.Args[1:]); err != nil {
+	// A closed pipe returns EPIPE instead of killing the process, so it
+	// only stops the output and the exit code stays the verb's own.
+	signal.Ignore(syscall.SIGPIPE)
+	err := run(os.Stdout, os.Stdin, os.Args[1:])
+	switch {
+	case err == nil:
+	case errors.Is(err, errOutput) && errors.Is(err, syscall.EPIPE):
+		// The reader went away: output stops; the verb itself succeeded.
+	case errors.Is(err, errOutput):
+		fmt.Fprintf(os.Stderr, "biptool: %v\n", err)
+		os.Exit(1)
+	default:
 		fmt.Fprintf(os.Stderr, "biptool: %v\n", err)
 		os.Exit(2)
 	}
@@ -189,7 +214,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		}
 		entLen := (n*11 - n/3) / 8
 		m := bip39.New(seed[:entLen])
-		fmt.Fprintln(stdout, m)
+		if _, err := fmt.Fprintln(stdout, m); err != nil {
+			return outputErr(err)
+		}
 	case "seed":
 		if err := deriveSeedFlags.Parse(args); err != nil {
 			deriveSeedFlags.Usage()
@@ -204,7 +231,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if len(seed) == 0 {
 			return fmt.Errorf("derive: no seed provided")
 		}
-		stdout.Write(seed[:n])
+		if _, err := stdout.Write(seed[:n]); err != nil {
+			return outputErr(err)
+		}
 	case "xpub":
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: xpub derivation path %q does not begin with m/83696968h/32h/", dpath)
@@ -213,7 +242,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return fmt.Errorf("derive: %w", err)
 		}
-		fmt.Fprintln(stdout, xpub)
+		if _, err := fmt.Fprintln(stdout, xpub); err != nil {
+			return outputErr(err)
+		}
 	case "xprv":
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: xprv derivation path %q does not begin with m/83696968h/32h/", dpath)
@@ -221,7 +252,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if !xkey.IsPrivate() {
 			return errors.New("derive: cannot derive a private key from a public key")
 		}
-		fmt.Fprintln(stdout, xkey)
+		if _, err := fmt.Fprintln(stdout, xkey); err != nil {
+			return outputErr(err)
+		}
 	case "pubkey":
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: pubkey derivation path %q does not begin with m/83696968h/32h/", dpath)
@@ -230,7 +263,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%x\n", pkey.SerializeCompressed())
+		if _, err := fmt.Fprintf(stdout, "%x\n", pkey.SerializeCompressed()); err != nil {
+			return outputErr(err)
+		}
 	case "privkey":
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: privkey derivation path %q does not begin with m/83696968h/32h/", dpath)
@@ -239,7 +274,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%x\n", pkey.Serialize())
+		if _, err := fmt.Fprintf(stdout, "%x\n", pkey.Serialize()); err != nil {
+			return outputErr(err)
+		}
 	default:
 		return fmt.Errorf("derive: unknown format %q", f)
 	}
@@ -293,9 +330,16 @@ func genRand(stdout io.Writer) error {
 	if n < 16 {
 		return errors.New("rand: length must be at least 16")
 	}
-	r := io.LimitReader(rand.Reader, int64(n))
-	_, err := io.Copy(stdout, r)
+	_, err := io.Copy(outputWriter{stdout}, io.LimitReader(rand.Reader, int64(n)))
 	return err
+}
+
+// outputWriter marks write errors with errOutput; read errors stay plain.
+type outputWriter struct{ w io.Writer }
+
+func (o outputWriter) Write(p []byte) (int, error) {
+	n, err := o.w.Write(p)
+	return n, outputErr(err)
 }
 
 // genSeed encodes a secret in codex32 form.
@@ -315,7 +359,9 @@ func genSeed(stdout, stderr io.Writer, stdin io.Reader) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, key)
+	if _, err := fmt.Fprintln(stdout, key); err != nil {
+		return outputErr(err)
+	}
 	warnUnengraveable(stderr, key.String())
 	return nil
 }
@@ -391,7 +437,9 @@ func interpolate(stdout io.Writer, stdin io.Reader) error {
 	if shareIdx == 'S' {
 		shareIdx++
 	}
-	fmt.Fprintln(stdout, k)
+	if _, err := fmt.Fprintln(stdout, k); err != nil {
+		return outputErr(err)
+	}
 	return nil
 }
 
