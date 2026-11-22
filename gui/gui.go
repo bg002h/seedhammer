@@ -2642,6 +2642,11 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
 	case codex32.String:
 		return engraveCodex32(ctx, th, scan)
 	case *bip380.Descriptor:
+		// The scan door asks the payload door's use-site conjunct (sweep-1122 EN-Q7); a refused descriptor reads as
+		// "Unknown format", as sysw makes it ClassUnknown.
+		if !sysw.UseSitesOK(scan) {
+			return false
+		}
 		descriptorFlow(ctx, th, scan)
 	case mdmkText:
 		mdmkFlow(ctx, th, scan)

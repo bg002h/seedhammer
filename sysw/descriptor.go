@@ -330,7 +330,7 @@ func admitDescriptor(d *bip380.Descriptor) bool {
 		keyCountOK(d) &&
 		networkOK(d) &&
 		originsOK(d) &&
-		useSitesOK(d) &&
+		UseSitesOK(d) &&
 		keyIdentityOK(d)
 }
 
@@ -431,12 +431,14 @@ func originsOK(d *bip380.Descriptor) bool {
 //
 // Everything else in parsePath's grammar is refused as UNMEASURED, per the
 // closed-set rule -- including the two classes measured BROKEN. A HARDENED
-// use-site component silently derives the UNhardened child, so the device
-// displays addresses for a wallet that cannot exist (hardened derivation from
-// an xpub is impossible). A NON-CONSECUTIVE `<a;b>` parses, and then
+// use-site component cannot be derived from an xpub; package address refuses it
+// (errUnsupported), and before FIX-sh-address-hardened-usesite it derived the UNhardened child and showed
+// addresses that are not the descriptor's (only the xprv holder can derive those).
+// A NON-CONSECUTIVE `<a;b>` parses, and then
 // address.Receive errors `unsupported range path element` while
 // address.Supported still returns true -- conjunct 5's class again.
-func useSitesOK(d *bip380.Descriptor) bool {
+// Exported because the NFC scan door asks this same conjunct (gui engraveObjectFlow, sweep-1122 EN-Q7).
+func UseSitesOK(d *bip380.Descriptor) bool {
 	for _, k := range d.Keys {
 		if !useSiteOK(k.Children) {
 			return false
