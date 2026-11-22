@@ -418,9 +418,13 @@ func TestAWarningThatIsNotF1OffersNoUnload(t *testing.T) {
 		}
 		if uiContains(c, "Keep this payload loaded?") {
 			if refugiumProfile {
-				// S1 14f: in the Refugium build the secret line is on this screen
-				// and KEEP / UNLOAD follows it whenever it is. F2 alone still
-				// offers nothing (the default build's assertion).
+				// S1 14f: in the Refugium build the secret line is on the
+				// warnings screen and KEEP / UNLOAD follows it whenever it is
+				// (review-sh10-s2 M-1: assert the line was there, so an offer
+				// keyed on the wrong flag still fails).
+				if !uiContains(content, "Refugium build: secrets travel only in the Sealed Payload") {
+					t.Fatalf("an unload was offered though the Refugium line was not on the warnings screen; got %q", content)
+				}
 				break
 			}
 			t.Fatalf("an unload was offered for a warning that is not F1; got %q", c)
