@@ -36,7 +36,7 @@ records the device behaviour as measured-broken; address.go:216-219 described it
   **PROPOSED (architect confirms)**: this string. It reaches no screen on any door after S5 (§3), so it is a log/test
   text, not a holder text.
 - **S2.** Hence `Supported(desc)` is false for such a descriptor (singlesig pkh, wpkh, sh(wpkh), tr key path, and
-  sortedmulti when ANY seat carries a hardened step, unless an EARLIER seat already fails with a plain error (a non-consecutive range, §10): `addressAt` returns the first seat's error, so e.g. `wsh(sortedmulti(1,K/<0;2>/*,K/0h/*))` keeps `Supported` true with no address, the §10 class, unchanged here); `Receive`/`Change` return the S1 error on both chains;
+  sortedmulti when ANY seat carries a hardened step, unless an EARLIER seat already fails with a plain error (a non-consecutive range, or any other non-errUnsupported error, §10). `addressAt` returns the first seat's error, so e.g. `wsh(sortedmulti(1,K/<0;2>/*,K/0h/*))` keeps `Supported` true with no address, the §10 class, unchanged here); `Receive`/`Change` return the S1 error on both chains;
   `Find` returns that error with `found == false` (it propagates the first per-index error, address.go:72-76);
   `DeriveChild` (address/taproot_script_path.go:293-295) returns `nil` and the S1 error. No other function changes:
   the taproot script-path derivers call `derivePubKey` and inherit S1.
