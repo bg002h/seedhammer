@@ -35,8 +35,8 @@ base (the lines in the bug-hunt report, made at 9aec7a8, are unchanged in these 
 - **R3 (closed pipe).** SIGPIPE is ignored for the process, so a write to a closed pipe returns EPIPE. An output
   failure whose error is EPIPE prints nothing and exits **0** (every payload write is the verb's last act, so the
   verb's own code is success). This is T6's first clause.
-- **R4 (`rand`).** `rand -n N` reads N bytes from the system random source first (a read failure stays a verb failure:
-  `biptool: <error>`, exit 2), then writes them in one write that R1-R3 govern. A full disk becomes exit 1 with R2's
+- **R4 (`rand`).** `rand -n N` is streamed (N bytes from the system random source, constant memory); a read failure stays a verb
+  failure (`biptool: <error>`, exit 2), and write errors are marked and governed by R1-R3. A full disk becomes exit 1 with R2's
   text (was exit 2, `biptool: write ...`).
 - **R5 (unchanged).** Every other failure keeps its text and exit 2 (`biptool: <error>` / `picosign: <error>`);
   successful output bytes are unchanged. "A verb already failing keeps its code" has no instance here: no verb fails
@@ -74,8 +74,8 @@ evidence, not a patch to copy blindly):
    paths (L37-40 no command, L59-61 unknown command) are unchanged.
 3. biptool: each of L192, L207, L216, L224, L233, L242, L318, L394 becomes `if _, err := <the same call>; err != nil
    { return <helper>(err) }`. L318 returns before `warnUnengraveable` (R1).
-4. biptool `genRand` L296-298: replace the `io.LimitReader` + `io.Copy` with `io.ReadFull` of `rand.Reader` into an
-   N-byte buffer (error returned as is), then one `stdout.Write` whose error goes through the helper (R4).
+4. biptool `genRand` L296-298: keep streaming: `io.Copy(outputWriter{stdout}, io.LimitReader(rand.Reader, int64(n)))`, where
+   `outputWriter.Write` passes write errors through the helper; read errors stay plain (R4).
 5. picosign: L90 becomes `_, err = fmt.Printf(...)`, L115 `_, err = os.Stdout.Write(hash[:])`, each followed by
    `return <helper>(err)` in place of `return nil`.
 
@@ -83,9 +83,10 @@ evidence, not a patch to copy blindly):
 
 New (test function names are the TRACE row names), in the probe diff:
 - cmd/biptool/fix_sh_output_sink_test.go: a `TestMain` that runs `main()` when `BIPTOOL_CHILD=1` (re-exec of the test
-  binary as biptool). The verb set is all nine payload verbs (`rand -n 16`, `seed -id test -seedlen 16`,
-  `interpolate`, `derive seed`, `derive -path m bip39 -words 12`, `derive xpub`, `derive xprv`, `derive pubkey`,
-  `derive privkey`) on a codex32 share of all-zero test entropy (no real key; biptool is mainnet-only, so a signet
+  binary as biptool). The verb set is all nine payload verbs with every flag pinned so the tests do not depend
+  on flag order (`rand -n 16`, `seed -id test -seedlen 16 -threshold 1 -idx S -hrp ms`, `interpolate -idx S`,
+  `derive -path m seed -n 0`, `derive -path m bip39 -words 12`, `derive -path m xpub`, `derive -path m xprv`,
+  `derive -path m pubkey`, `derive -path m privkey`; `-n 0` means all available bytes) on a codex32 share of all-zero test entropy (no real key; biptool is mainnet-only, so a signet
   input is not available).
   - `TestFixShBiptoolWriteFailureReturnsError`: in-process `run` with a writer that rejects every write (ENOSPC) and
     one that accepts one byte then fails (the consultant's prefix writer); each verb, working-writer control first;
@@ -162,6 +163,9 @@ other jobs; no other package imports these two `main` packages. The builder runs
 
 stderr write errors (R6); `picosign sign`'s in-place file write (R6); the other Go dev tools (filed above); the
 firmware (`cmd/controller`) has no stdout.
+
+Known limit: stdout closed (`>&-`) is not detectable. Go's runtime reopens a closed fd 1 on /dev/null before `main`,
+so every payload verb exits 0 with the output going nowhere, the same as `> /dev/null`.
 
 ## 11. How this was checked
 

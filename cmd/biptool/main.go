@@ -330,12 +330,16 @@ func genRand(stdout io.Writer) error {
 	if n < 16 {
 		return errors.New("rand: length must be at least 16")
 	}
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
-		return err
-	}
-	_, err := stdout.Write(buf)
-	return outputErr(err)
+	_, err := io.Copy(outputWriter{stdout}, io.LimitReader(rand.Reader, int64(n)))
+	return err
+}
+
+// outputWriter marks write errors with errOutput; read errors stay plain.
+type outputWriter struct{ w io.Writer }
+
+func (o outputWriter) Write(p []byte) (int, error) {
+	n, err := o.w.Write(p)
+	return n, outputErr(err)
 }
 
 // genSeed encodes a secret in codex32 form.

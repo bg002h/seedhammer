@@ -48,20 +48,20 @@ type fixShVerb struct {
 // is a codex32 share of all-zero test entropy (no real key).
 func fixShVerbs(t *testing.T) []fixShVerb {
 	t.Helper()
-	share, err := execErr(make([]byte, 16), "seed -id test -seedlen 16")
+	share, err := execErr(make([]byte, 16), "seed -id test -seedlen 16 -threshold 1 -idx S -hrp ms")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return []fixShVerb{
 		{"rand", nil, "rand -n 16"},
-		{"seed", make([]byte, 16), "seed -id test -seedlen 16"},
-		{"interpolate", share, "interpolate"},
-		{"derive seed", share, "derive seed"},
+		{"seed", make([]byte, 16), "seed -id test -seedlen 16 -threshold 1 -idx S -hrp ms"},
+		{"interpolate", share, "interpolate -idx S"},
+		{"derive seed", share, "derive -path m seed -n 0"},
 		{"derive bip39", share, "derive -path m bip39 -words 12"},
-		{"derive xpub", share, "derive xpub"},
-		{"derive xprv", share, "derive xprv"},
-		{"derive pubkey", share, "derive pubkey"},
-		{"derive privkey", share, "derive privkey"},
+		{"derive xpub", share, "derive -path m xpub"},
+		{"derive xprv", share, "derive -path m xprv"},
+		{"derive pubkey", share, "derive -path m pubkey"},
+		{"derive privkey", share, "derive -path m privkey"},
 	}
 }
 
@@ -153,5 +153,24 @@ func TestFixShBiptoolOtherErrorUnchanged(t *testing.T) {
 	const want = "biptool: derive: unknown format \"bogus\"\n"
 	if code != 2 || stderr != want {
 		t.Errorf("biptool derive bogus: exit %d stderr %q; want exit 2 stderr %q", code, stderr, want)
+	}
+}
+
+// TestFixShBiptoolSeedFailedWriteNoWarning: after a failed write of the seed
+// line, the unengraveable warning is not printed (FIX R1).
+func TestFixShBiptoolSeedFailedWriteNoWarning(t *testing.T) {
+	v := fixShVerb{"seed dead zone", make([]byte, 50), "seed -id test -seedlen 50 -threshold 1 -idx S -hrp ms"}
+	if _, err := execErr(v.stdin, v.args); err != nil {
+		t.Fatal(err)
+	}
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer full.Close()
+	code, stderr := fixShRunChild(t, v, full)
+	const want = "biptool: cannot write the output: write /dev/stdout: no space left on device\n"
+	if code != 1 || stderr != want {
+		t.Errorf("exit %d stderr %q; want exit 1 stderr %q", code, stderr, want)
 	}
 }
