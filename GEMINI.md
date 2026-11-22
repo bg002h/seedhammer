@@ -47,20 +47,18 @@ go test ./address/... ./backup/... ./bc/... ./bip32/... ./bip380/... ./bip39/...
 
 # TinyGo RP2350 unsigned firmware build (via flake build-firmware or inside `nix develop`)
 nix run .#build-firmware
-# Equivalent manual steps inside `nix develop` (seals load-map Clear 0x20000000->0x20082000, then zeroes dummy sig):
-tinygo build -o build/firmware.uf2 -ldflags="-X main.Version=v0.0.0-bg$(git rev-parse --short HEAD)" \
-  -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks ./cmd/controller
-picotool seal --sign --clear --quiet build/firmware.uf2 build/firmware.signed.uf2 "$DUMMY_PEM"
-go run ./cmd/picosign sign -clear build/firmware.signed.uf2
+# Its steps (tinygo build; patched picotool seal --sign --clear with the flake's own dummy key, which has no shell variable; picosign sign -clear) are in flake.nix:102–136. Do not re-type them; it writes seedhammerii-<version>.uf2 in the current directory.
 
 # Refugium profile TinyGo ELF build + forbidden-symbol ELF gate (inside `nix develop`)
 tinygo build -tags refugium -size short -stack-size 16kb -gc precise -opt 2 -scheduler tasks -target pico-plus2 \
   -ldflags="-X main.Version=v0.0.0-bg$(git rev-parse --short HEAD)" -o build/controller-refugium.elf ./cmd/controller
-./scripts/refugium-elf-check.sh build/controller-refugium.elf
+tinygo build -size short -stack-size 16kb -gc precise -opt 2 -scheduler tasks -target pico-plus2 \
+  -ldflags="-X main.Version=v0.0.0-bg$(git rev-parse --short HEAD)" -o build/controller.elf ./cmd/controller
+./scripts/refugium-elf-check.sh build/controller.elf build/controller-refugium.elf
 
 # Browser WASM emulator (outputs cmd/emu/emu.wasm) & headless SVG/PNG plate preview
 ./cmd/emu/build.sh && python3 -m http.server -d cmd/emu 8080
-go run ./cmd/plateview -plate bothproof -o build/preview.svg
+mkdir -p build && go run ./cmd/plateview -plate bothproof -o build/preview.svg
 ```
 
 ## 5. Firmware Safety & Hardware Guardrails
