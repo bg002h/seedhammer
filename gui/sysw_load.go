@@ -249,14 +249,10 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	}
 	// "Kit Refused" comes after the Payload Warnings screen and its KEEP /
 	// UNLOAD, and is not shown when the holder chose UNLOAD (the session is
-	// gone above). At boot the payload menu follows at once and shows it on
-	// every opening (syswPayloadMenu), so only a load that no menu follows
-	// shows it here.
-	if !atBoot {
-		if kit := kitCards(ctx.sysw); kit.offers && !kit.eligible {
-			kitRefusedScreen(ctx, th, kit)
-		}
-	}
+	// gone above). It is shown by syswPayloadMenu, on every opening, and the
+	// menu follows EVERY load of a payload that offers a kit (boot, the carousel
+	// with nothing loaded, LOAD AGAIN: syswLoadThenMenu), so it shows once per
+	// load on every route and never here.
 	return true
 }
 

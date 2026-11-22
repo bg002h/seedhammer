@@ -40,7 +40,7 @@ import (
 // not the replacement one.
 func syswPayloadMenu(ctx *Context, th *Colors) {
 	if ctx.sysw == nil || !ctx.sysw.loaded {
-		syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+		syswLoadThenMenu(ctx, th)
 		return
 	}
 	// THE KIT DOOR (SPEC_systemwide_payloads.md 14e). Every time this menu opens
@@ -66,7 +66,7 @@ func syswPayloadMenu(ctx *Context, th *Colors) {
 		case 0:
 			kitListFlow(ctx, th)
 		case 1:
-			syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+			syswLoadThenMenu(ctx, th)
 		default:
 			syswUnloadFlow(ctx, th)
 		}
@@ -108,7 +108,18 @@ func syswPayloadMenu(ctx *Context, th *Colors) {
 		syswUnloadFlow(ctx, th)
 		return
 	}
-	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+	syswLoadThenMenu(ctx, th)
+}
+
+// syswLoadThenMenu is the load from the carousel (nothing loaded, or LOAD
+// AGAIN). After a load of a payload that offers a kit, eligible or refused, the
+// payload menu opens at once, as it does at boot (SPEC_systemwide_payloads.md
+// 14e, Brian 2026-11-22): the kit offer must not depend on the route that loaded
+// the payload. A payload with no mr1 candidate returns to the carousel as before.
+func syswLoadThenMenu(ctx *Context, th *Colors) {
+	if syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false) && kitCards(ctx.sysw).offers {
+		syswPayloadMenu(ctx, th)
+	}
 }
 
 // syswPayloadHasTransaction reports whether the loaded payload holds anything

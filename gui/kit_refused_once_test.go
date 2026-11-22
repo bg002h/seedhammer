@@ -3,8 +3,8 @@ package gui
 import "testing"
 
 // S1 14e: "Kit Refused" shows ONCE at every load, after Payload Warnings and its
-// KEEP: at boot (the menu that follows shows it) and at a load from the
-// carousel with nothing loaded (no menu follows, so the load flow shows it).
+// KEEP, on every load route, and the payload menu follows it (Brian 2026-11-22,
+// s1 I-2 option (b): the menu opens after every load of a kit payload).
 func TestKitRefusedOnceAtEveryLoad(t *testing.T) {
 	const sentence = "Record 2 of this payload is not an md1, mk1 or mr1 string (it is: codex32 secret), so this payload is not a kit."
 	for _, boot := range []bool{true, false} {
@@ -17,7 +17,7 @@ func TestKitRefusedOnceAtEveryLoad(t *testing.T) {
 				}
 				return
 			}
-			syswPayloadMenu(ctx, &descriptorTheme) // carousel Load Payload, nothing loaded
+			syswPayloadMenu(ctx, &descriptorTheme) // carousel Load Payload, nothing loaded: the menu follows the load
 		})
 		if boot {
 			pumpUntil(frame, "Load it?", 32)
@@ -50,14 +50,11 @@ func TestKitRefusedOnceAtEveryLoad(t *testing.T) {
 			}
 			if uiContains(c, "It holds") {
 				menu = true
-				break // boot: today's menu follows, once
+				break // today's menu follows, once
 			}
 		}
-		if boot && !menu {
-			t.Errorf("boot: today's menu did not follow Kit Refused")
-		}
-		if !boot && menu {
-			t.Errorf("carousel load: a menu followed the load flow")
+		if !menu {
+			t.Errorf("boot=%v: today's menu did not follow Kit Refused", boot)
 		}
 		quit()
 	}
