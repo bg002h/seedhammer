@@ -33,7 +33,7 @@ records the device behaviour as measured-broken; address.go:216-219 described it
   whatever its `Type` (child, range, wildcard), before deriving anything. The error wraps `errUnsupported`, and its
   text is exactly `hardened use-site path element: unsupported descriptor`. Through `addressAt` the caller sees
   exactly `address: hardened use-site path element: unsupported descriptor` (Receive and Change alike).
-  **PROPOSED (architect confirms)**: this string. It reaches no screen on any door after S5 (§3), so it is a log/test
+  **Confirmed** (architect 2026-11-22, coordinator/agent-reports/architect-sh8-proposed-texts.md): this string. It reaches no screen on any door after S5 (§3), so it is a log/test
   text, not a holder text.
 - **S2.** Hence `Supported(desc)` is false for such a descriptor (singlesig pkh, wpkh, sh(wpkh), tr key path, and
   sortedmulti when ANY seat carries a hardened step, unless an EARLIER seat already fails with a plain error (a non-consecutive range, or any other non-errUnsupported error, §10). `addressAt` returns the first seat's error, so e.g. `wsh(sortedmulti(1,K/<0;2>/*,K/0h/*))` keeps `Supported` true with no address, the §10 class, unchanged here); `Receive`/`Change` return the S1 error on both chains;
@@ -52,7 +52,7 @@ records the device behaviour as measured-broken; address.go:216-219 described it
   (gui/scan.go) does NOT change: it still recognises the tag as a descriptor.
   `engraveObjectFlow` returning false already sets the main screen's status to `scanUnknownFormat`
   (gui/gui.go:2210-2212), which draws the existing text **`Unknown format`** (gui/gui.go:2400-2401). No new text,
-  screen or status. **PROPOSED (architect confirms)**: reusing `Unknown format` for a refused scanned descriptor. It
+  screen or status. **Confirmed** (architect 2026-11-22, coordinator/agent-reports/architect-sh8-proposed-texts.md): reusing `Unknown format` for a refused scanned descriptor. It
   mirrors the payload door, where the same refusal makes the record ClassUnknown and inert
   (sysw/descriptor.go:47-49). Alternative not taken: refusing inside `scanner.Scan` would also change other screens'
   texts for that tag (derive-xpub's seed scan "That tag is not a seed." would become "Unrecognized tag.";
@@ -149,7 +149,7 @@ Command: `CGO_ENABLED=0 go test -count=1 -run 'TestFixSh|TestDerivesSameKeySpell
 | TestFixShHardenedUseSiteRefused, shape 11 `wpkh(K/<0;2>/*h)` | FAIL `change=false: err "address: unsupported range path element" (Is errUnsupported=false), want "address: hardened use-site path element: unsupported descriptor"` and `Supported = true, want false` (an in-loop check fails the same way; only the pre-scan passes) | PASS (pre-scan) |
 | TestFixShDeriveChildRefusesHardened | FAIL `/0h/* change=false: DeriveChild = true <nil>, want nil and errUnsupported` (6 lines) | PASS |
 | TestDerivesSameKeySpellings | FAIL `DerivesSameKey = true, want false -- derivePubKey refuses a hardened use-site step, ...` (3 rows, both orders) | PASS |
-| TestFixShScanDoorRefusesUseSite | FAIL `use-site "/0h/*" (wpkh): engraveObjectFlow = true (descriptor screen opened), want false (Unknown format)`; 22/22 cases | PASS |
+| TestFixShScanDoorRefusesUseSite | FAIL `use-site "/0h/*" (wpkh): engraveObjectFlow = true (descriptor screen opened), want false (Unknown format)`; 33/33 cases | PASS |
 | TestFixShHardenedSpellingDerivesNothing | FAIL `descriptorRepeatsAKey = true, want false ...` and `address.Supported = true, want false ...` (2 rows) | PASS |
 | TestFixShUnhardenedUseSiteUnchanged, TestFixShScanDoorAdmitsClosedSet, TestEverySpellingOfTheSameKeyIsCaught | PASS (controls) | PASS |
 

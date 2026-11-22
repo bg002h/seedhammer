@@ -22,8 +22,9 @@ const fixShScanK = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH
 func fixShScanForms(useSite string) map[string]string {
 	k := fixShScanK + useSite
 	return map[string]string{
-		"wpkh":     "wpkh(" + k + ")",
-		"multisig": "wsh(sortedmulti(1," + k + "," + fixShScanK + "/9/*))",
+		"wpkh":               "wpkh(" + k + ")",
+		"multisig":           "wsh(sortedmulti(1," + k + "," + fixShScanK + "/9/*))",
+		"multisig-last-seat": "wsh(sortedmulti(1," + fixShScanK + "/9/*," + k + "))",
 	}
 }
 

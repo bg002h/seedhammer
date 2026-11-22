@@ -326,7 +326,7 @@ func drawDescriptorScreenDesc(t *testing.T, desc *bip380.Descriptor) string {
 	return out
 }
 
-// ─── review C-1: the four spellings that derive identically ─────────────────
+// ─── review C-1: the two spellings that derive identically ─────────────────
 //
 // The predicate compared the Children STRUCT while address.derivePubKey
 // normalises before deriving, so each row below was a key written two ways that
@@ -335,7 +335,7 @@ func drawDescriptorScreenDesc(t *testing.T, desc *bip380.Descriptor) string {
 // refused fixture produces.
 //
 // EACH ROW IS A SEPARATE BYPASS, so each gets a row rather than one standing in
-// for the family. Three of them differ from the fixture by a single token.
+// for the family. The two hardened spellings moved to TestFixShHardenedSpellingDerivesNothing: they no longer derive.
 func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
 	for _, tc := range []struct {
 		name string
