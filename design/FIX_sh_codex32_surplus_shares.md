@@ -9,8 +9,7 @@ share against the first k) is not taken.
 Author: Claude Opus 5.5 (claude-opus-5-5), 2026-11-22. Base: seedhammer `origin/main` 25abe8e. All anchors are at that
 base. Protocol text: bitcoin/bips master `bip-0093.mediawiki`, fetched 2026-11-22 (sha256 in the author report).
 
-**One point is open (OPEN-1, §3): the threshold-"0" case.** Every other rule below is decided by T34 or is a
-PROPOSED text for the architect to confirm.
+**OPEN-1 ruled (architect-bh-batch34 #33): option (a), k = 1 for threshold "0".** Every PROPOSED text below is confirmed.
 
 ## 1. The defect
 
@@ -39,16 +38,17 @@ PROPOSED text for the architect to confirm.
 
 - **R1 (count).** `Interpolate` refuses a set of more than k shares, where k is the common threshold digit of the set,
   for every target index: `S`, a fresh index, or an index that one of the inputs has. It returns the zero `String` and
-  a new unexported sentinel `errTooManyShares`, text **`too many shares`** (PROPOSED, architect confirms; it follows the
+  a new unexported sentinel `errTooManyShares`, text **`too many shares`** (confirmed, architect-bh-batch34; it follows the
   wording of the existing `insufficient shares` sentinel at codex32/codex32.go:31). No extra share is checked or used.
 - **R2 (precedence).** The existing per-share agreement checks run first, in their order (length, hrp, threshold, id).
   The R1 count check runs right after them (after L217) and before the input-index early return (L221) and the
   repeated-index check (L248). So a set that disagrees still gets its existing error, and a surplus set with a repeated
-  index gets `too many shares` (was `repeated index`). PROPOSED (architect confirms): k is defined only once all
+  index gets `too many shares` (was `repeated index`). Confirmed (architect-bh-batch34): k is defined only once all
   thresholds agree, and the count must come before the early return or R1 misses the target-is-input form.
-- **R3 (threshold "0").** OPEN-1 (§3). Until it is ruled, the builder does not start.
+- **R3 (threshold "0").** For a set whose common threshold digit is "0", k is 1 in R1: one string is a complete set (output unchanged), and two or
+  more strings, identical or not, are refused with `too many shares` at R2's position (ruled OPEN-1 (a), §3).
 - **R4 (Describe).** `codex32.Describe` (codex32/polish.go:26-58) maps `errTooManyShares` to **`too many shares`**
-  (PROPOSED, architect confirms), next to `need more shares` (L54-55). The device cannot reach it (it collects exactly
+  (confirmed, architect-bh-batch34), next to `need more shares` (L54-55). The device cannot reach it (it collects exactly
   k); the case keeps `Describe` total over `Interpolate`'s sentinels so the defence-in-depth branch at
   `gui/codex32_polish.go:207` would not show the generic `invalid`.
 - **R5 (biptool).** No biptool code change. `biptool interpolate` and `biptool derive` (any format) given more than k
@@ -61,7 +61,7 @@ PROPOSED text for the architect to confirm.
 - **R7 (doc comment).** The `Interpolate` doc comment (L188-190) gains one sentence: the set must hold at most k shares
   (exactly k to interpolate a new index), and more than k is refused, per BIP-93. Not holder-visible.
 
-## 3. OPEN-1 (STOP: the rulings do not decide it)
+## 3. OPEN-1 (ruled (a), architect-bh-batch34)
 
 A threshold-"0" string is an unshared secret (BIP-93 L73-74: its index must be `s`; L169-170: its threshold digit is
 otherwise ignored). T34 says "more than k"; read literally with k = 0, every unshared secret is refused, which breaks
@@ -77,7 +77,7 @@ Options:
   repeated-index check moved before the early return for this case only.
 
 **Recommend (a):** it closes the same fault in the same place with the same text, keeps the one-string path, and
-matches BIP-93's reading that an unshared secret is a single string.
+matches BIP-93's reading that an unshared secret is a single string. **Ruled (a).**
 
 ## 4. Changes (by file; for build ordering)
 
@@ -103,8 +103,7 @@ T0a and T0b (the two threshold-0 strings of §1). Each refusal row asserts: retu
 - `TestFixShCodex32SurplusMismatchFirst` (control, R2): A C D N, target `S`: error text `mismatched threshold`.
 - `TestFixShCodex32ExactKUnchanged` (control, R6): A C D, target `S`: `ms13cashsllhdmn9m42vcsamx24zrxgs3qqjzqud4m0d6nln`,
   nil; A C, target `S`: `insufficient shares`; A C D, target `A`: returns A, nil.
-- `TestFixShCodex32Threshold0` (R3; written once OPEN-1 is ruled; for option (a)): T0a alone, target `S`: T0a, nil;
-  T0a T0b and T0b T0a, target `S`: refused.
+- `TestFixShCodex32Threshold0` (R3): T0a alone, target `S`: T0a, nil; T0a T0b, T0b T0a and T0a T0a, target `S`: refused.
 - `TestFixShCodex32DescribeTooMany` (R4): `Describe` of the error from A C D E, target `S`, is `too many shares`.
 - `cmd/biptool/fix_sh_surplus_test.go` `TestFixShBiptoolSurplusShares` (R5), through `execErr` (main_test.go:304):
   stdin A C D X (one per line) for `interpolate -idx s` and for `derive seed`: stdout empty, error text
@@ -121,7 +120,7 @@ assertion, and the probe fails it as expected (`consistent extra changed result:
 |---|---|
 | R1 count, every target | SurplusInconsistent, SurplusConsistent, SurplusTargetIsInput, BiptoolSurplusShares |
 | R2 precedence | SurplusRepeatedIndex, SurplusMismatchFirst |
-| R3 threshold 0 | Threshold0 (after OPEN-1) |
+| R3 threshold 0 | Threshold0 |
 | R4 Describe | DescribeTooMany |
 | R5 biptool text and exit | BiptoolSurplusShares; CLI rows §7 |
 | R6 unchanged | ExactKUnchanged; BIP vectors 2, 3; biptool TestInterpolate; gui subset |
@@ -137,7 +136,7 @@ Library rows, as scratch tests in `codex32/` (removed after the run), `go test -
 | A C D X, E | `ms13casheqqqqqqqqqqqqqqqqqqqqqqqqqqa8zxete8lyl02`, nil | `too many shares` |
 | A C D X, F | `ms13cashfe9jtwc7atzv2556rnhzrrqdvav7vw0ujqgtm4uu`, nil | `too many shares` |
 | A C D D, S | `repeated index` | `too many shares` |
-| T0a T0b, S / T0b T0a, S | T0a, nil / T0b, nil | `too many shares` (option (a)) |
+| T0a T0b, S / T0b T0a, S | T0a, nil / T0b, nil | `too many shares` |
 
 CLI rows, `printf '%s\n' <shares> | biptool <verb>`, binaries built from base and from the probe:
 
@@ -150,7 +149,7 @@ CLI rows, `printf '%s\n' <shares> | biptool <verb>`, binaries built from base an
 | A C D N | interpolate -idx s | `biptool: mismatched threshold`, exit 2 | same |
 | A C | interpolate -idx s | `biptool: insufficient shares`, exit 2 | same |
 | T0a | both | T0a; `00000000000000000000000000000000`; exit 0 | same |
-| T0a T0b | both | T0a; `00000000000000000000000000000000`; exit 0 | `biptool: too many shares`, exit 2 (option (a)) |
+| T0a T0b | both | T0a; `00000000000000000000000000000000`; exit 0 | `biptool: too many shares`, exit 2 |
 
 (`derive seed` writes raw bytes; the author piped it through `xxd -p`.)
 
