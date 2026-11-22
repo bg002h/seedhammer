@@ -40,6 +40,7 @@ func TestRefugiumSecretWarningLine(t *testing.T) {
 	if i < 0 || i+1 >= len(mixed) || mixed[i+1] != refugiumSecretLine {
 		t.Errorf("the line is not directly after F1's SECRET line: %q", mixed)
 	}
+	refugiumSealedWarningCases(t)
 }
 
 func indexOfLine(lines []string, want string) int {
@@ -91,7 +92,8 @@ func loadSealedForWarnings(t *testing.T, vec string, words []string) (content st
 	return c, ctx, frame, drawer, quit
 }
 
-func TestRefugiumSecretWarningLineSealed(t *testing.T) {
+// refugiumSealedWarningCases are TestRefugiumSecretWarningLine's sealed rows.
+func refugiumSealedWarningCases(t *testing.T) {
 	// S-D: sealed, 12-word passphrase, a secret, no flag: the line is the
 	// screen's only line.
 	words := make([]string, 12)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"seedhammer.com/engrave"
+	"seedhammer.com/gui/op"
 	"seedhammer.com/sysw"
 )
 
@@ -199,9 +200,10 @@ func TestKitMenuRefusedShowsReasonThenMenu(t *testing.T) {
 // GUARD: a payload with no mr1 candidate sees today's menu, first and second
 // opening, with neither the offer nor the refusal.
 func TestKitMenuNoMr1Unchanged(t *testing.T) {
-	ctx := NewContext(kitPlatform(nil))
-	ctx.sysw = sessionWith(kitVectorRecords(t, "no-mr1")...)
+	sess := sessionWith(kitVectorRecords(t, "no-mr1")...)
 	for opening := 1; opening <= 2; opening++ {
+		ctx := NewContext(kitPlatform(nil))
+		ctx.sysw = sess
 		frame, _, quit := runUITouch(ctx, func() { syswPayloadMenu(ctx, &descriptorTheme) })
 		content, ok := pumpUntil(frame, "It holds", 32)
 		if !ok {
@@ -362,6 +364,18 @@ func kitSeams(t *testing.T, onePerPlate bool, failLayout bool) *[]kitLayoutCall 
 	return &calls
 }
 
+// kitSelectCard taps list entry n (1-based) on the current frame.
+func kitSelectCard(t *testing.T, ctx *Context, frame func() (string, bool), drawer func() *op.Drawer, n int) {
+	t.Helper()
+	frame()
+	pts := plateHitPoints(ctx, drawer())
+	if len(pts) < n {
+		t.Fatalf("only %d list entries have touch targets, want entry %d", len(pts), n)
+	}
+	tap(&ctx.Router, drawer(), pts[n-1])
+	frame()
+}
+
 // kitCut chooses TEXT ONLY and drives one real engrave to its end, as the other
 // bundle walks do (composerEngraveOnePlate's loop, which this reuses in shape).
 func kitCut(t *testing.T, ctx *Context, frame func() (string, bool), e *testEngraver) {
@@ -390,8 +404,7 @@ func TestKitDoorRun(t *testing.T) {
 			t.Fatalf("no list; got %q", c)
 		}
 		// Start at card 2: Down once, OK.
-		click(&ctx.Router, Down)
-		frame()
+		kitSelectCard(t, ctx, frame, drawer, 2)
 		click(&ctx.Router, Button3)
 		for k := 2; k <= 6; k++ {
 			title := fmt.Sprintf("Card %d of 6 | Plate 1 of 1", k)
@@ -434,11 +447,10 @@ func TestKitDoorRun(t *testing.T) {
 		p, _ := kitRunPlatform()
 		ctx := NewContext(p)
 		ctx.sysw = sessionWith(kitVectorRecords(t, "kit-2of3")...)
-		frame, _, quit := runUITouch(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
+		frame, drawer, quit := runUITouch(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 		defer quit()
 		pumpUntil(frame, "Start at:", 32)
-		click(&ctx.Router, Down)
-		frame()
+		kitSelectCard(t, ctx, frame, drawer, 2)
 		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 2 of 6 | Plate 1 of 2", 64); !ok {
 			t.Fatalf("one-string-per-plate seam: no 2-plate card 2; got %q", c)
@@ -462,11 +474,10 @@ func TestKitDoorStopsAtPlateTwo(t *testing.T) {
 		p, e := kitRunPlatform()
 		ctx := NewContext(p)
 		ctx.sysw = sessionWith(kitVectorRecords(t, "kit-2of3")...)
-		frame, _, quit := runUITouch(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
+		frame, drawer, quit := runUITouch(ctx, func() { bundleFlow(ctx, &descriptorTheme) })
 		defer quit()
 		pumpUntil(frame, "Start at:", 32)
-		click(&ctx.Router, Down)
-		frame()
+		kitSelectCard(t, ctx, frame, drawer, 2)
 		click(&ctx.Router, Button3)
 		if c, ok := pumpUntil(frame, "Card 2 of 6 | Plate 1 of 2", 64); !ok {
 			t.Fatalf("no plate 1; got %q", c)
