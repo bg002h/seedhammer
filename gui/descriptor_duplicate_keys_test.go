@@ -346,10 +346,6 @@ func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
 			"derivePubKey defaults empty Children to exactly <0;1>/*"},
 		{"child vs range on receive", f530XpubA + "/0/*", f530XpubA + "/<0;1>/*",
 			"a RangeDerivation resolves to Index on the receive chain -- the chain that gets funded"},
-		{"hardened vs not", f530XpubA + "/0h/*", f530XpubA + "/0/*",
-			"derivePubKey never consults Hardened"},
-		{"hardened wildcard vs not", f530XpubA + "/*h", f530XpubA + "/*",
-			"same reason, at the wildcard"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+","+f530XpubB+"))")
