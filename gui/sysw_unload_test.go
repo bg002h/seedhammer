@@ -271,6 +271,19 @@ func TestASecretsOnlyPayloadUnloadNamesThePassphraseAsTheOnlyWayBack(t *testing.
 	click(&ctx.Router, Down)              // BACK -> UNLOCK
 	tapNavSlot(t, ctx, drawer(), Button3) // unlock: runs the KDF and opens
 
+	if refugiumProfile {
+		// S1 14f: the Refugium build warns about the secret this sealed payload
+		// holds, and KEEP / UNLOAD follows that screen. KEEP, then the flow under
+		// test goes on exactly as in the default build.
+		if content, ok = pumpUntil(frame, "Payload Warnings", 64); !ok {
+			t.Fatalf("the Refugium warning screen never appeared; got %q", content)
+		}
+		tapNavSlot(t, ctx, drawer(), Button3)
+		if content, ok = pumpUntil(frame, "Keep this payload loaded?", 32); !ok {
+			t.Fatalf("KEEP / UNLOAD does not follow the Refugium line; got %q", content)
+		}
+		click(&ctx.Router, Button3) // KEEP
+	}
 	// pub_len == 0, so `[digest-shown]` (§12.4) shows nothing and the AEAD open
 	// is the ONLY route to [compared] (§12.2) — which is exactly why the unload
 	// confirmation must say the passphrase is the only way back.
@@ -404,6 +417,12 @@ func TestAWarningThatIsNotF1OffersNoUnload(t *testing.T) {
 			break
 		}
 		if uiContains(c, "Keep this payload loaded?") {
+			if refugiumProfile {
+				// S1 14f: in the Refugium build the secret line is on this screen
+				// and KEEP / UNLOAD follows it whenever it is. F2 alone still
+				// offers nothing (the default build's assertion).
+				break
+			}
 			t.Fatalf("an unload was offered for a warning that is not F1; got %q", c)
 		}
 	}
