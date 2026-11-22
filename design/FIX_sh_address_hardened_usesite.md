@@ -36,7 +36,7 @@ records the device behaviour as measured-broken; address.go:216-219 described it
   **PROPOSED (architect confirms)**: this string. It reaches no screen on any door after S5 (§3), so it is a log/test
   text, not a holder text.
 - **S2.** Hence `Supported(desc)` is false for such a descriptor (singlesig pkh, wpkh, sh(wpkh), tr key path, and
-  sortedmulti when ANY seat carries a hardened step); `Receive`/`Change` return the S1 error on both chains;
+  sortedmulti when ANY seat carries a hardened step, unless an EARLIER seat already fails with a plain error (a non-consecutive range, §10): `addressAt` returns the first seat's error, so e.g. `wsh(sortedmulti(1,K/<0;2>/*,K/0h/*))` keeps `Supported` true with no address, the §10 class, unchanged here); `Receive`/`Change` return the S1 error on both chains;
   `Find` returns that error with `found == false` (it propagates the first per-index error, address.go:72-76);
   `DeriveChild` (address/taproot_script_path.go:293-295) returns `nil` and the S1 error. No other function changes:
   the taproot script-path derivers call `derivePubKey` and inherit S1.
@@ -83,7 +83,7 @@ records the device behaviour as measured-broken; address.go:216-219 described it
 
 ## 4. Code changes (builder applies; comments are part of the change)
 
-1. address/address.go:292, first statement in the loop over `children`: S1's check and error.
+1. address/address.go:290, right after `children := effectiveChildren(k)` and before `xpub := k.ExtendedKey()`, a separate loop: `for _, c := range children { if c.Hardened { return nil, fmt.Errorf("hardened use-site path element: %w", errUnsupported) } }`. The derive loop does not change. (A pre-scan, so S1's error wins over a later element's plain error, as S1 says.)
 2. address/address.go:220, first statement of `resolveChild`: return `0, false, false` when `c.Hardened`.
 3. address/address.go:216-219, replace the "NOTE WHAT IS ABSENT" paragraph with exactly:
    `// A HARDENED element is !ok, because derivePubKey refuses it: a hardened step below an extended public key`
@@ -97,12 +97,13 @@ records the device behaviour as measured-broken; address.go:216-219 described it
    ("A HARDENED use-site component silently derives ... impossible).") with exactly:
    `// A HARDENED use-site component cannot be derived from an xpub; package address refuses it`
    `// (errUnsupported), and before FIX-sh-address-hardened-usesite it derived the UNhardened child and showed`
-   `// addresses for a wallet that cannot exist.`
+   `// addresses that are not the descriptor's (only the xprv holder can derive those).`
    and add after the comment's last line:
    `// Exported because the NFC scan door asks this same conjunct (gui engraveObjectFlow, sweep-1122 EN-Q7).`
 6. gui/gui.go:2644, S5's check, with the comment:
    `// The scan door asks the payload door's use-site conjunct (sweep-1122 EN-Q7); a refused descriptor reads as`
    `// "Unknown format", as sysw makes it ClassUnknown.`
+7. gui/descriptor_duplicate_keys.go:32, the comment "Three more spellings did the same." counted the two hardened spellings, which no longer derive: it becomes "One more spelling did the same."
 
 The scratch version of 1, 2, 4's code half, 5's rename and 6 is in `design/FIX_sh_address_hardened_usesite-probe.diff`
 (with the tests of §5); it is evidence, not the patch to copy blindly: its comments are not the §4 texts.
@@ -110,8 +111,8 @@ The scratch version of 1, 2, 4's code half, 5's rename and 6 is in `design/FIX_s
 ## 5. Tests
 
 New (test function names are the TRACE row names):
-- address/fix_sh_hardened_usesite_test.go: `TestFixShHardenedUseSiteRefused` (10 shapes: wpkh `/0h/*`, `/0'/*`,
-  `/*h`, `/*'`, `/0/*h`, `/5h`; pkh `/0h/*`; sh(wpkh) `/*h`; tr `/0h/*`; wsh(sortedmulti(1, K/1/*, K/0h/*)); each: both
+- address/fix_sh_hardened_usesite_test.go: `TestFixShHardenedUseSiteRefused` (11 shapes: wpkh `/0h/*`, `/0'/*`,
+  `/*h`, `/*'`, `/0/*h`, `/5h`; pkh `/0h/*`; sh(wpkh) `/*h`; tr `/0h/*`; wsh(sortedmulti(1, K/1/*, K/0h/*)); wpkh `/<0;2>/*h` (non-consecutive range then wildcard h; the pre-scan row); each: both
   chains error with S1's exact text and `errors.Is(err, errUnsupported)`, `Supported` false, `Find` of
   `tb1qnskw4kf6qevrcyjjd7cnn39uemz9j2cnaxa4u3` not found with an errUnsupported error);
   `TestFixShDeriveChildRefusesHardened` (`/0h/*`, `/*h`, `/5h`, both chains: nil key, errUnsupported);
@@ -144,7 +145,8 @@ Command: `CGO_ENABLED=0 go test -count=1 -run 'TestFixSh|TestDerivesSameKeySpell
 
 | row | expected at base (seen) | expected after the fix (seen on scratch fix) |
 |---|---|---|
-| TestFixShHardenedUseSiteRefused | FAIL; e.g. `change=false: derived "tb1qnskw4kf6qevrcyjjd7cnn39uemz9j2cnaxa4u3", want refusal`, `Supported = true, want false`, `Find = chain 0 index 0 found true err <nil>, want not found and errUnsupported` (wpkh `/0h/*`); 10/10 shapes fail | PASS |
+| TestFixShHardenedUseSiteRefused | FAIL; e.g. `change=false: derived "tb1qnskw4kf6qevrcyjjd7cnn39uemz9j2cnaxa4u3", want refusal`, `Supported = true, want false`, `Find = chain 0 index 0 found true err <nil>, want not found and errUnsupported` (wpkh `/0h/*`); 11/11 shapes fail | PASS |
+| TestFixShHardenedUseSiteRefused, shape 11 `wpkh(K/<0;2>/*h)` | FAIL `change=false: err "address: unsupported range path element" (Is errUnsupported=false), want "address: hardened use-site path element: unsupported descriptor"` and `Supported = true, want false` (an in-loop check fails the same way; only the pre-scan passes) | PASS (pre-scan) |
 | TestFixShDeriveChildRefusesHardened | FAIL `/0h/* change=false: DeriveChild = true <nil>, want nil and errUnsupported` (6 lines) | PASS |
 | TestDerivesSameKeySpellings | FAIL `DerivesSameKey = true, want false -- derivePubKey refuses a hardened use-site step, ...` (3 rows, both orders) | PASS |
 | TestFixShScanDoorRefusesUseSite | FAIL `use-site "/0h/*" (wpkh): engraveObjectFlow = true (descriptor screen opened), want false (Unknown format)`; 22/22 cases | PASS |
