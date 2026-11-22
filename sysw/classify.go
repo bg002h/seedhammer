@@ -67,6 +67,16 @@ func classifyConstellation(record string) Class {
 			return ClassMt
 		}
 	}
+	// mr1 (SPEC_systemwide_payloads.md section 14b): the arm sits directly
+	// after the mt1 arm. A record that BEGINS mr1 in any case and fails a
+	// section 14b check is ClassUnknown with its reason (MrStringReason); it
+	// never falls through to the descriptor arm.
+	if IsMrCandidate(record) {
+		if MrStringReason(record) == "" {
+			return ClassMr
+		}
+		return ClassUnknown
+	}
 	// SPEC_descriptor_input.md §5.2's descriptor record, and it is LAST for the
 	// same reason the Rust primary puts it last (crates/me-cli/src/sysw/mod.rs):
 	// only what would otherwise have fallen through to ClassUnknown can move, so
