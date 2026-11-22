@@ -17,6 +17,8 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"seedhammer.com/picobin"
@@ -33,7 +35,22 @@ var (
 	sigFormat  = signCmd.String("sigfmt", "raw", "signature format ('der', 'raw')")
 )
 
+// errOutput marks a failed write of a verb's output to stdout
+// (FIX-sh-go-cli-output-sink, ruling T6).
+var errOutput = errors.New("cannot write the output")
+
+// outputErr wraps a stdout write error in errOutput; nil stays nil.
+func outputErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errOutput, err)
+}
+
 func main() {
+	// A closed pipe returns EPIPE instead of killing the process, so it
+	// only stops the output and the exit code stays the verb's own.
+	signal.Ignore(syscall.SIGPIPE)
 	if len(os.Args) <= 1 {
 		fmt.Fprintf(os.Stderr, "picosign: specify 'hash' or 'sign' command\n")
 		os.Exit(2)
@@ -60,7 +77,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "picosign: unknown command: %q\n", cmd)
 		os.Exit(2)
 	}
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, errOutput) && errors.Is(err, syscall.EPIPE):
+		// The reader went away: output stops; the verb itself succeeded.
+	case errors.Is(err, errOutput):
+		fmt.Fprintf(os.Stderr, "picosign: %v\n", err)
+		os.Exit(1)
+	default:
 		fmt.Fprintf(os.Stderr, "picosign: %v\n", err)
 		os.Exit(2)
 	}
@@ -87,8 +111,8 @@ func extract() error {
 	if err != nil {
 		return fmt.Errorf("extract: %s: %v", path, err)
 	}
-	fmt.Printf("%x\n", sig)
-	return nil
+	_, err = fmt.Printf("%x\n", sig)
+	return outputErr(err)
 }
 
 // hash dumps the data covered by a firmware image to standard out.
@@ -112,8 +136,8 @@ func hash() error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", path, err)
 	}
-	os.Stdout.Write(hash[:])
-	return nil
+	_, err = os.Stdout.Write(hash[:])
+	return outputErr(err)
 }
 
 // sign replaces the public key and signature of a signed
