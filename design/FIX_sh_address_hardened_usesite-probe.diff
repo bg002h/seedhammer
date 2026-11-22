@@ -1,0 +1,289 @@
+diff --git i/address/address.go w/address/address.go
+index 9367da4..d3bae81 100644
+--- i/address/address.go
++++ w/address/address.go
+@@ -218,6 +218,9 @@ func effectiveChildren(k bip380.Key) []bip380.Derivation {
+ // only in hardening produce the same key, and a comparison that treated them as
+ // different would miss a real duplicate.
+ func resolveChild(c bip380.Derivation, change bool) (id uint32, wildcard, ok bool) {
++	if c.Hardened {
++		return 0, false, false
++	}
+ 	switch c.Type {
+ 	case bip380.ChildDerivation:
+ 		return c.Index, false, true
+@@ -290,6 +293,9 @@ func derivePubKey(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey
+ 	children := effectiveChildren(k)
+ 	xpub := k.ExtendedKey()
+ 	for _, c := range children {
++		if c.Hardened {
++			return nil, fmt.Errorf("hardened use-site path element: %w", errUnsupported)
++		}
+ 		var id uint32
+ 		switch c.Type {
+ 		case bip380.ChildDerivation:
+diff --git i/address/derives_same_key_test.go w/address/derives_same_key_test.go
+index 254c46d..6d8f55e 100644
+--- i/address/derives_same_key_test.go
++++ w/address/derives_same_key_test.go
+@@ -59,10 +59,13 @@ func TestDerivesSameKeySpellings(t *testing.T) {
+ 			[]bip380.Derivation{rangeD(0, 1), wildD(false)}, true,
+ 			"a range resolves to Index on receive -- the chain that gets funded"},
+ 		{"hardened child vs not", []bip380.Derivation{childD(0, true), wildD(false)},
+-			[]bip380.Derivation{childD(0, false), wildD(false)}, true,
+-			"derivePubKey never consults Hardened"},
++			[]bip380.Derivation{childD(0, false), wildD(false)}, false,
++			"derivePubKey refuses a hardened use-site step, so the hardened side derives nothing and cannot collide"},
+ 		{"hardened wildcard vs not", []bip380.Derivation{wildD(true)},
+-			[]bip380.Derivation{wildD(false)}, true, "same reason"},
++			[]bip380.Derivation{wildD(false)}, false, "same reason"},
++		{"hardened both sides", []bip380.Derivation{childD(0, true), wildD(false)},
++			[]bip380.Derivation{childD(0, true), wildD(false)}, false,
++			"neither side derives, as the unsupported range row"},
+ 		{"different fixed child", []bip380.Derivation{childD(0, false), wildD(false)},
+ 			[]bip380.Derivation{childD(1, false), wildD(false)}, false,
+ 			"different child index, different key, on both chains"},
+diff --git i/address/fix_sh_hardened_usesite_test.go w/address/fix_sh_hardened_usesite_test.go
+new file mode 100644
+index 0000000..2821acd
+--- /dev/null
++++ w/address/fix_sh_hardened_usesite_test.go
+@@ -0,0 +1,96 @@
++package address
++
++import (
++	"errors"
++	"testing"
++
++	"seedhammer.com/bip380"
++)
++
++// FIX-sh-address-hardened-usesite (bh-sh-C2, sweep-1122 row 20, ruling T4).
++// A hardened use-site step below an extended PUBLIC key cannot be derived
++// (BIP-32 CKDpub has no hardened case); BIP-380 L82 says `/*h` means hardened
++// children. Deriving the unhardened child instead shows a wrong address.
++
++const fixShK = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH1jbkfNk3iJ9zR65Yw6u3B2QZzpkMSTN4y8Lfm1t44HbpZX7efhZ"
++
++// The address the device showed for wpkh(K/0h/*) at index 0 before the fix: it
++// is the /0/* receive address, so Find "verified" it as the hardened wallet's.
++const fixShK00 = "tb1qnskw4kf6qevrcyjjd7cnn39uemz9j2cnaxa4u3"
++
++const fixShHardenedErr = "address: hardened use-site path element: unsupported descriptor"
++
++func fixShParse(t *testing.T, s string) *bip380.Descriptor {
++	t.Helper()
++	d, err := bip380.Parse(s)
++	if err != nil {
++		t.Fatalf("Parse(%s): %v", s, err)
++	}
++	return d
++}
++
++func TestFixShHardenedUseSiteRefused(t *testing.T) {
++	for _, tc := range []struct{ name, s string }{
++		{"wpkh 0h", "wpkh(" + fixShK + "/0h/*)"},
++		{"wpkh 0 apostrophe", "wpkh(" + fixShK + "/0'/*)"},
++		{"wpkh wildcard h", "wpkh(" + fixShK + "/*h)"},
++		{"wpkh wildcard apostrophe", "wpkh(" + fixShK + "/*')"},
++		{"wpkh 0 then wildcard h", "wpkh(" + fixShK + "/0/*h)"},
++		{"wpkh fixed 5h", "wpkh(" + fixShK + "/5h)"},
++		{"pkh 0h", "pkh(" + fixShK + "/0h/*)"},
++		{"sh-wpkh wildcard h", "sh(wpkh(" + fixShK + "/*h))"},
++		{"tr 0h", "tr(" + fixShK + "/0h/*)"},
++		{"wsh sortedmulti one hardened seat", "wsh(sortedmulti(1," + fixShK + "/1/*," + fixShK + "/0h/*))"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			d := fixShParse(t, tc.s)
++			for _, change := range []bool{false, true} {
++				a, err := addressAt(d, 0, change)
++				if err == nil {
++					t.Errorf("change=%v: derived %q, want refusal", change, a)
++					continue
++				}
++				if !errors.Is(err, errUnsupported) || err.Error() != fixShHardenedErr {
++					t.Errorf("change=%v: err %q (Is errUnsupported=%v), want %q",
++						change, err, errors.Is(err, errUnsupported), fixShHardenedErr)
++				}
++			}
++			if Supported(d) {
++				t.Errorf("Supported = true, want false")
++			}
++			if c, i, found, err := Find(d, fixShK00, 20); found || !errors.Is(err, errUnsupported) {
++				t.Errorf("Find = chain %d index %d found %v err %v, want not found and errUnsupported", c, i, found, err)
++			}
++		})
++	}
++}
++
++// Controls: the closed admitted set still derives, with the literal addresses.
++func TestFixShUnhardenedUseSiteUnchanged(t *testing.T) {
++	for _, tc := range []struct{ d, want string }{
++		{"wpkh(" + fixShK + "/0/*)", fixShK00},
++		{"wpkh(" + fixShK + "/*)", "tb1qhdgyak30llluz36r6lk5ywup5uq0jz0ejkztjl"},
++	} {
++		d := fixShParse(t, tc.d)
++		if a, err := Receive(d, 0); err != nil || a != tc.want {
++			t.Errorf("%s: Receive(0) = %q %v, want %q", tc.d, a, err, tc.want)
++		}
++		if !Supported(d) {
++			t.Errorf("%s: Supported = false, want true", tc.d)
++		}
++	}
++}
++
++// DeriveChild is the exported door into derivePubKey (the md witness-script and
++// taproot script-path emitters use it); it refuses the same steps.
++func TestFixShDeriveChildRefusesHardened(t *testing.T) {
++	for _, s := range []string{"/0h/*", "/*h", "/5h"} {
++		k := fixShParse(t, "wpkh("+fixShK+s+")").Keys[0]
++		for _, change := range []bool{false, true} {
++			pub, err := DeriveChild(k, 0, change)
++			if pub != nil || !errors.Is(err, errUnsupported) {
++				t.Errorf("%s change=%v: DeriveChild = %v %v, want nil and errUnsupported", s, change, pub != nil, err)
++			}
++		}
++	}
++}
+diff --git i/gui/descriptor_duplicate_keys_test.go w/gui/descriptor_duplicate_keys_test.go
+index aefd882..e698bdf 100644
+--- i/gui/descriptor_duplicate_keys_test.go
++++ w/gui/descriptor_duplicate_keys_test.go
+@@ -346,10 +346,6 @@ func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
+ 			"derivePubKey defaults empty Children to exactly <0;1>/*"},
+ 		{"child vs range on receive", f530XpubA + "/0/*", f530XpubA + "/<0;1>/*",
+ 			"a RangeDerivation resolves to Index on the receive chain -- the chain that gets funded"},
+-		{"hardened vs not", f530XpubA + "/0h/*", f530XpubA + "/0/*",
+-			"derivePubKey never consults Hardened"},
+-		{"hardened wildcard vs not", f530XpubA + "/*h", f530XpubA + "/*",
+-			"same reason, at the wildcard"},
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
+ 			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+","+f530XpubB+"))")
+diff --git i/gui/fix_sh_hardened_usesite_test.go w/gui/fix_sh_hardened_usesite_test.go
+new file mode 100644
+index 0000000..f1bbc29
+--- /dev/null
++++ w/gui/fix_sh_hardened_usesite_test.go
+@@ -0,0 +1,85 @@
++package gui
++
++import (
++	"testing"
++
++	"seedhammer.com/address"
++	"seedhammer.com/bip380"
++)
++
++// FIX-sh-address-hardened-usesite, the scan-door half (sweep-1122 EN-Q7): a
++// scanned descriptor reaches the descriptor screen (engraveObjectFlow, the only
++// consumer of a scanned *bip380.Descriptor) only if it passes the same use-site
++// conjunct as the payload door (sysw.UseSitesOK, SPEC_descriptor_input.md §4.7
++// conjunct 7). A refused one returns false, which the main screen reads as
++// "Unknown format" (gui.go scanUnknownFormat), as sysw makes it ClassUnknown.
++//
++// Back is queued first, so a descriptor that wrongly opens the screen backs out
++// and returns true instead of hanging the test.
++
++const fixShScanK = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH1jbkfNk3iJ9zR65Yw6u3B2QZzpkMSTN4y8Lfm1t44HbpZX7efhZ"
++
++func fixShScanForms(useSite string) map[string]string {
++	k := fixShScanK + useSite
++	return map[string]string{
++		"wpkh":     "wpkh(" + k + ")",
++		"multisig": "wsh(sortedmulti(1," + k + "," + fixShScanK + "/9/*))",
++	}
++}
++
++// fixShScanned runs the real scanner over the descriptor text (so the object is
++// what an NFC tag produces), then hands it to the engrave dispatch.
++func fixShScanned(t *testing.T, d string) (opened bool) {
++	t.Helper()
++	obj, err := scanOnce(t, d)
++	desc, ok := obj.(*bip380.Descriptor)
++	if !ok || err != nil {
++		t.Fatalf("scan %s = %T %v, want *bip380.Descriptor (the scanner is unchanged)", d, obj, err)
++	}
++	ctx := NewContext(newPlatform())
++	click(&ctx.Router, Button1)
++	return engraveObjectFlow(ctx, &descriptorTheme, desc)
++}
++
++func TestFixShScanDoorRefusesUseSite(t *testing.T) {
++	for _, us := range []string{
++		"/0h/*", "/0'/*", "/*h", "/*'", "/0/*h", "/5h", // hardened (the defect)
++		"/5", "/0/1", "/0/1/*", "/<0;2>/*", "/<0;1>/5", // outside the closed set
++	} {
++		for form, d := range fixShScanForms(us) {
++			if fixShScanned(t, d) {
++				t.Errorf("use-site %q (%s): engraveObjectFlow = true (descriptor screen opened), want false (Unknown format)", us, form)
++			}
++		}
++	}
++}
++
++func TestFixShScanDoorAdmitsClosedSet(t *testing.T) {
++	for _, us := range []string{"", "/*", "/0/*", "/<0;1>", "/<0;1>/*"} {
++		for form, d := range fixShScanForms(us) {
++			if !fixShScanned(t, d) {
++				t.Errorf("use-site %q (%s): engraveObjectFlow = false, want true (descriptor screen opened, Back)", us, form)
++			}
++		}
++	}
++}
++
++// Moved out of TestEverySpellingOfTheSameKeyIsCaught: a hardened spelling no
++// longer derives, so it no longer repeats a key, and the device shows no address
++// for it at all (address.Supported false), which is the stronger refusal.
++func TestFixShHardenedSpellingDerivesNothing(t *testing.T) {
++	for _, tc := range []struct{ name, a, b string }{
++		{"hardened vs not", f530XpubA + "/0h/*", f530XpubA + "/0/*"},
++		{"hardened wildcard vs not", f530XpubA + "/*h", f530XpubA + "/*"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+","+f530XpubB+"))")
++			if _, _, dup := descriptorRepeatsAKey(desc); dup {
++				t.Errorf("descriptorRepeatsAKey = true, want false: the hardened seat derives no key")
++			}
++			if address.Supported(desc) {
++				t.Errorf("address.Supported = true, want false: a hardened use-site step cannot be derived from an xpub")
++			}
++		})
++	}
++}
+diff --git i/gui/gui.go w/gui/gui.go
+index 0f8b1b8..1bd0a73 100644
+--- i/gui/gui.go
++++ w/gui/gui.go
+@@ -2642,6 +2642,9 @@ func engraveObjectFlow(ctx *Context, th *Colors, obj any) bool {
+ 	case codex32.String:
+ 		return engraveCodex32(ctx, th, scan)
+ 	case *bip380.Descriptor:
++		if !sysw.UseSitesOK(scan) {
++			return false
++		}
+ 		descriptorFlow(ctx, th, scan)
+ 	case mdmkText:
+ 		mdmkFlow(ctx, th, scan)
+diff --git i/sysw/descriptor.go w/sysw/descriptor.go
+index 2c01d62..df570f6 100644
+--- i/sysw/descriptor.go
++++ w/sysw/descriptor.go
+@@ -330,7 +330,7 @@ func admitDescriptor(d *bip380.Descriptor) bool {
+ 		keyCountOK(d) &&
+ 		networkOK(d) &&
+ 		originsOK(d) &&
+-		useSitesOK(d) &&
++		UseSitesOK(d) &&
+ 		keyIdentityOK(d)
+ }
+ 
+@@ -436,7 +436,7 @@ func originsOK(d *bip380.Descriptor) bool {
+ // an xpub is impossible). A NON-CONSECUTIVE `<a;b>` parses, and then
+ // address.Receive errors `unsupported range path element` while
+ // address.Supported still returns true -- conjunct 5's class again.
+-func useSitesOK(d *bip380.Descriptor) bool {
++func UseSitesOK(d *bip380.Descriptor) bool {
+ 	for _, k := range d.Keys {
+ 		if !useSiteOK(k.Children) {
+ 			return false
