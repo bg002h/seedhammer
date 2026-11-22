@@ -213,11 +213,13 @@ func effectiveChildren(k bip380.Key) []bip380.Derivation {
 // It reports !ok for an element derivePubKey would refuse, so a key that cannot
 // derive is never reported as deriving the same thing as another.
 //
-// NOTE WHAT IS ABSENT: Hardened. derivePubKey never consults it -- /0h/* derives
-// the unhardened child and /*h the plain wildcard -- so two spellings differing
-// only in hardening produce the same key, and a comparison that treated them as
-// different would miss a real duplicate.
+// A HARDENED element is !ok, because derivePubKey refuses it: a hardened step below an extended public key
+// cannot be derived, and deriving the unhardened child instead showed a wrong address (bh-sh-C2,
+// FIX-sh-address-hardened-usesite).
 func resolveChild(c bip380.Derivation, change bool) (id uint32, wildcard, ok bool) {
+	if c.Hardened {
+		return 0, false, false
+	}
 	switch c.Type {
 	case bip380.ChildDerivation:
 		return c.Index, false, true
@@ -241,14 +243,15 @@ func resolveChild(c bip380.Derivation, change bool) (id uint32, wildcard, ok boo
 // THE QUESTION A DUPLICATE-KEY RULE MUST ASK, answered here rather than by its
 // caller, because the answer depends on derivePubKey's normalisations and those
 // live in this file. A caller comparing struct fields compares the SPELLING of
-// an expression; four spellings that derive identically compare unequal that
+// an expression; two spellings that derive identically compare unequal that
 // way (F-530 review C-1), and each one walks a refusal that exists to protect
 // funds:
 //
 //	A            vs A/<0;1>/*   the empty default, materialised
 //	A/0/*        vs A/<0;1>/*   equal on the RECEIVE chain, which is the one funded
-//	A/0h/*       vs A/0/*       Hardened is not consulted
-//	A/*h         vs A/*         same
+//
+// A hardened spelling is not in this table: it derives nothing (derivePubKey refuses it), so it is never the
+// same key as anything.
 //
 // EITHER CHAIN, not both. The second row above collides only on receive -- and
 // receive is the chain an operator funds and the chain descriptorAddressFlow
@@ -288,6 +291,13 @@ func DerivesSameKey(a, b bip380.Key) bool {
 
 func derivePubKey(k bip380.Key, index uint32, change bool) (*secp256k1.PublicKey, error) {
 	children := effectiveChildren(k)
+	// A pre-scan, so this error wins over a later element's plain error. A hardened step below an
+	// extended public key cannot be derived (BIP-32 CKDpub has no hardened case).
+	for _, c := range children {
+		if c.Hardened {
+			return nil, fmt.Errorf("hardened use-site path element: %w", errUnsupported)
+		}
+	}
 	xpub := k.ExtendedKey()
 	for _, c := range children {
 		var id uint32

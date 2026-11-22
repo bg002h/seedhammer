@@ -114,6 +114,14 @@ func TestScan(t *testing.T) {
 						t.Fatalf("scanner failed: %v", err)
 					}
 				}
+				if gd, ok := got.(*bip380.Descriptor); ok {
+					if wd, ok := test.Content.(*bip380.Descriptor); ok {
+						if gd.Title != wd.Title || gd.Encode() != wd.Encode() {
+							t.Errorf("scanner decoded\n%s\nexpected\n%s", gd.Encode(), wd.Encode())
+						}
+						break
+					}
+				}
 				if want := test.Content; !reflect.DeepEqual(got, want) {
 					t.Errorf("scanner decoded\n%#v\nexpected\n%#v", got, want)
 				}

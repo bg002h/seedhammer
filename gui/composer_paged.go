@@ -455,10 +455,13 @@ func composerPickScreenFrom(ctx *Context, th *Colors, title, lead string, rows [
 			// key the operator never saw selected. Up/Down already clamp the
 			// page to the cursor (start = sel); this is the same rule applied
 			// the other way.
+			// `shown` was measured for the OLD page; re-measure for the new one.
+			_, nd, _ := composerPickPageLayout(ctx, th, dims, lead, lines[start:], -1)
+			nshown := max(nd-rowBase, 1)
 			if sel < start {
 				sel = start
 			}
-			if sel >= start+shown {
+			if sel >= start+nshown {
 				sel = start
 			}
 			continue

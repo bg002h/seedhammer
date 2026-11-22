@@ -326,7 +326,7 @@ func drawDescriptorScreenDesc(t *testing.T, desc *bip380.Descriptor) string {
 	return out
 }
 
-// ─── review C-1: the four spellings that derive identically ─────────────────
+// ─── review C-1: the two spellings that derive identically ─────────────────
 //
 // The predicate compared the Children STRUCT while address.derivePubKey
 // normalises before deriving, so each row below was a key written two ways that
@@ -335,7 +335,7 @@ func drawDescriptorScreenDesc(t *testing.T, desc *bip380.Descriptor) string {
 // refused fixture produces.
 //
 // EACH ROW IS A SEPARATE BYPASS, so each gets a row rather than one standing in
-// for the family. Three of them differ from the fixture by a single token.
+// for the family. The two hardened spellings moved to TestFixShHardenedSpellingDerivesNothing: they no longer derive.
 func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -346,10 +346,6 @@ func TestEverySpellingOfTheSameKeyIsCaught(t *testing.T) {
 			"derivePubKey defaults empty Children to exactly <0;1>/*"},
 		{"child vs range on receive", f530XpubA + "/0/*", f530XpubA + "/<0;1>/*",
 			"a RangeDerivation resolves to Index on the receive chain -- the chain that gets funded"},
-		{"hardened vs not", f530XpubA + "/0h/*", f530XpubA + "/0/*",
-			"derivePubKey never consults Hardened"},
-		{"hardened wildcard vs not", f530XpubA + "/*h", f530XpubA + "/*",
-			"same reason, at the wildcard"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			desc := loadTestDesc(t, "wsh(sortedmulti(2,"+tc.a+","+tc.b+","+f530XpubB+"))")

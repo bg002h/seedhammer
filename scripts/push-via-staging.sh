@@ -54,7 +54,33 @@
 # re-checked immediately before the final push and the run aborts if it moved --
 # measured 2026-08-16, when two commits landed mid-window and reached the remote
 # with no CI signal at all.
+#
+# OPTIONS ARE REFUSED, NEVER TAKEN AS A BRANCH NAME. On 2026-11-05 a reviewer ran
+# `push-via-staging.sh --help`; `BRANCH="${1:-...}"` took `--help` as the branch
+# and pushed HEAD to origin/ci/staging. `-h`/`--help` anywhere on the command
+# line now prints the usage and exits 0 before any git or network command (so it
+# works outside a repo too); any other argument starting with `-` exits 2, as do
+# two or more arguments; nothing is pushed. Test: coordinator/scripts/test-push-via-staging.sh.
 set -euo pipefail
+
+usage() {
+  cat <<'EOT'
+push-via-staging.sh: pushes HEAD to ci/staging, waits for CI, then pushes the branch.
+    scripts/push-via-staging.sh            # current branch
+    scripts/push-via-staging.sh master     # explicit
+EOT
+}
+for arg in "$@"; do
+  case "$arg" in -h|--help) usage; exit 0 ;; esac
+done
+for arg in "$@"; do
+  case "$arg" in
+    -*) echo "push-via-staging.sh: unknown option '$arg'" >&2; usage >&2; exit 2 ;;
+  esac
+done
+if [ "$#" -gt 1 ]; then
+  echo "push-via-staging.sh: expected at most one branch name" >&2; usage >&2; exit 2
+fi
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -85,6 +111,33 @@ fi
 if [ -n "$(git ls-files --others --exclude-standard)" ]; then
   echo "== note: untracked files present -- NOT blocking, NOT pushed:"
   git ls-files --others --exclude-standard | sed 's/^/     /'
+fi
+# CITATION GATE on changed design docs (blocking; skipped when the repo has no
+# executable scripts/plan-cite-check.sh). Moved here from mnemonic-engrave's
+# retired push-master.sh, which ran it as a blocking step (decided 2026-08-18,
+# mnemonic-engrave design/DoNextList.md #8). It runs HERE, locally, rather than
+# in CI: CI would resolve citations against sibling repos' origin HEAD, while
+# the author wrote against the local sibling state.
+#
+# Scope is CHANGED DOCS ONLY (origin/$BRANCH..HEAD): "a fold is authorship and
+# re-earns the gate". design/agent-reports/ and design/FOLLOWUPS.md are
+# excluded: reports are persisted verbatim and never edited, and FOLLOWUPS.md
+# is an append-only log whose old entries cite line numbers that have since
+# moved, so checking it would bill each new entry for the whole history.
+# COST, STATED: citations inside new FOLLOWUPS entries and reports go unchecked.
+# ALSO UNCHECKED: a branch with no origin/$BRANCH yet (the diff cannot be taken,
+# so no doc is gated); this ritual is for a branch that already exists remotely.
+if [ -x scripts/plan-cite-check.sh ]; then
+  DOCS="$(git diff --name-only --diff-filter=d "origin/$BRANCH..HEAD" -- \
+            'design/*.md' 'design/**/*.md' \
+            ':(exclude)design/agent-reports/**' \
+            ':(exclude)design/FOLLOWUPS.md' 2>/dev/null)" || DOCS=""
+  if [ -n "$DOCS" ]; then
+    echo "== citation gate: $(printf '%s\n' "$DOCS" | wc -l | tr -d ' ') changed doc(s) (agent-reports excluded)"
+    # shellcheck disable=SC2086
+    ./scripts/plan-cite-check.sh $DOCS >&2 \
+      || { echo "FATAL: citation gate failed on changed docs -- fix the citations or qualify the paths" >&2; exit 1; }
+  fi
 fi
 echo "== FREEZE $BRANCH now: no commits until this script finishes"
 

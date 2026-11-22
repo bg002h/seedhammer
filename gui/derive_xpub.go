@@ -235,8 +235,8 @@ func seedEntryFlowTypedOnlyTitled(ctx *Context, th *Colors, title, wordPrefix st
 			return nil, false
 		}
 		mnemonic := emptyBIP39Mnemonic([]int{12, 24}[choice])
-		inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true, titlePrefix: wordPrefix})
-		if !isEmptyMnemonic(mnemonic) {
+		_, confirmed := inputWordsFlow(ctx, th, mnemonic, 0, "", wordEntryOpts{checksumGate: true, titlePrefix: wordPrefix})
+		if confirmed && !isEmptyMnemonic(mnemonic) {
 			return mnemonic, true
 		}
 		// Back out of word entry without finishing -> re-show the count picker.

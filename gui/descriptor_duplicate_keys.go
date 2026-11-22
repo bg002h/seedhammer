@@ -29,7 +29,7 @@ import (
 // two ways, derivePubKey normalises the first into the second, and the struct
 // comparison called them different -- so wsh(sortedmulti(2,A,A/<0;1>/*,B))
 // walked past the refusal and paid out the byte-identical address the refused
-// fixture produces. Three more spellings did the same.
+// fixture produces. One more spelling did the same.
 //
 // The lesson is placement, not arithmetic: the normalisations belong to the
 // deriver, so the equality question does too. Anything here can only ever be a

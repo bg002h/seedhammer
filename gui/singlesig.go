@@ -129,9 +129,11 @@ func singleSigInputs(ctx *Context, th *Colors) (
 				// offered before the keyboard (plan stage 13b). NOT passphraseFlow:
 				// see syswPassphraseFlow for the two normative rules a shared edit
 				// inside passphraseFlow would have broken.
-				if pass, pok := syswPassphraseFlow(ctx, th); pok {
-					passphrase = pass
+				pass, pok := syswPassphraseFlow(ctx, th)
+				if !pok {
+					continue // Back on the keyboard: stay on the question
 				}
+				passphrase = pass
 			}
 			step = stepMode
 		case stepMode:

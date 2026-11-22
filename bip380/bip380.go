@@ -33,6 +33,11 @@ type Key struct {
 	KeyData           []byte
 	ChainCode         []byte
 	ParentFingerprint uint32
+
+	// scratch fix for bug 1: depth and child number of the parsed xpub.
+	xpubMeta        bool
+	xpubDepth       uint8
+	xpubChildNumber uint32
 }
 
 type Derivation struct {
@@ -101,9 +106,13 @@ func (k Key) ExtendedKey() *hdkeychain.ExtendedKey {
 	if len(k.DerivationPath) > 0 {
 		childNum = k.DerivationPath[len(k.DerivationPath)-1]
 	}
+	depth := uint8(len(k.DerivationPath))
+	if k.xpubMeta {
+		depth, childNum = k.xpubDepth, k.xpubChildNumber
+	}
 	return hdkeychain.NewExtendedKey(
 		k.Network.HDPublicKeyID[:],
-		k.KeyData, k.ChainCode, fp[:], uint8(len(k.DerivationPath)),
+		k.KeyData, k.ChainCode, fp[:], depth,
 		childNum, false,
 	)
 }
@@ -339,6 +348,9 @@ func Parse(desc string) (*Descriptor, error) {
 			}
 		}
 	}
+	if r.Type == Singlesig && !r.Script.Singlesig() || r.Type == SortedMulti && r.Script.Singlesig() {
+		return nil, fmt.Errorf("bip380: %v does not take a %v expression", r.Script, r.Type)
+	}
 	var keys []string
 	switch r.Type {
 	case Singlesig:
@@ -351,6 +363,9 @@ func Parse(desc string) (*Descriptor, error) {
 		}
 		r.Threshold = threshold
 		keys = args[1:]
+		if threshold < 1 || threshold > len(keys) {
+			return nil, fmt.Errorf("bip380: multikey threshold %d out of range for %d keys", threshold, len(keys))
+		}
 	}
 	for _, k := range keys {
 		key, err := ParseKey(r.Script.DerivationPath(), []byte(k))
@@ -420,6 +435,7 @@ func ParseKey(impliedPath bip32.Path, enc []byte) (Key, error) {
 	key.ChainCode = xpub.ChainCode()
 	key.KeyData = pub.SerializeCompressed()
 	key.ParentFingerprint = xpub.ParentFingerprint()
+	key.xpubMeta, key.xpubDepth, key.xpubChildNumber = true, xpub.Depth(), xpub.ChildIndex()
 	return key, nil
 }
 

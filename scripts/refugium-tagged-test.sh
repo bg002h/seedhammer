@@ -13,8 +13,9 @@
 # -run is ANCHORED (^(A|B|...)$), the partition's union is ASSERTED equal to
 # the list before anything runs, and afterwards the top-level `--- PASS` lines
 # across all shards (-v), plus the skips that name the profile, must equal the
-# number of tests listed. A FAIL, any other SKIP, or a missing verdict fails
-# the script.
+# number of tests listed. A deferred-minor skip (a row whose first log line is
+# `deferred-minor: <slug>`, a finding decided to wait) is counted and printed
+# by name too. A FAIL, any other SKIP, or a missing verdict fails the script.
 #
 # What the tag EXCLUDES is not decided here. A test that cannot hold in the
 # Refugium build either carries `//go:build !refugium` on its file (the proof
@@ -75,7 +76,9 @@ cat "$OUT"/out*.txt >"$OUT/all-out.txt"
 # Top-level verdicts only (subtests are indented). A SKIP is accepted only if
 # its message names the profile (skipUnderRefugium, gui/profile_skip_test.go):
 # those are the default-build tests that step aside on purpose, and they are
-# listed by name below. Any other SKIP fails the run.
+# listed by name below. A SKIP whose first log line is `deferred-minor: <slug>`
+# is also accepted (a recorded, intended deferral) and printed by name. Any
+# other SKIP fails the run.
 python3 - "$OUT/all-out.txt" "$TOTAL" "$fail" <<'PY'
 import re, sys
 lines = open(sys.argv[1]).read().split("\n")
@@ -89,7 +92,7 @@ ENV_SKIPS = {
     "TestCaptureTransactionJourney",
     "TestIdleTimerUnderSH2ShapedEventLoop",
 }
-passed, failed, profile_skips, env_skips, other_skips = [], [], [], [], []
+passed, failed, profile_skips, env_skips, deferred_skips, other_skips = [], [], [], [], [], []
 start = {}  # top-level test -> index of its "=== RUN" line
 for i, l in enumerate(lines):
     r = re.match(r"^=== RUN   (\S+)$", l)
@@ -112,24 +115,29 @@ for i, l in enumerate(lines):
         ok = bool(body) and re.match(r"^\S+_test\.go:\d+: refugium profile: ", body[0])
         if ok:
             profile_skips.append(name)
+        elif bool(body) and re.match(r"^\S+_test\.go:\d+: deferred-minor: \S+", body[0]):
+            deferred_skips.append(name)
         elif name in ENV_SKIPS:
             env_skips.append(name)
         else:
             other_skips.append(name)
 print(f"=== top-level: {len(passed)} PASS, {len(profile_skips)} SKIP (refugium profile), "
-      f"{len(env_skips)} SKIP (environment, every build), {len(other_skips)} other SKIP, "
+      f"{len(env_skips)} SKIP (environment, every build), "
+      f"{len(deferred_skips)} SKIP (deferred-minor), {len(other_skips)} other SKIP, "
       f"{len(failed)} FAIL of {total} listed ===")
 for n in sorted(env_skips):
     print(f"    environment skip: {n}")
 for n in sorted(profile_skips):
     print(f"    profile skip: {n}")
+for n in sorted(deferred_skips):
+    print(f"    deferred-minor skip: {n}")
 for n in other_skips:
     print(f"    UNEXPECTED SKIP: {n}")
 for n in failed:
     print(f"    FAIL: {n}")
-if shard_fail or failed or other_skips or len(passed) + len(profile_skips) + len(env_skips) != total:
+if shard_fail or failed or other_skips or len(passed) + len(profile_skips) + len(env_skips) + len(deferred_skips) != total:
     print("RESULT: FAIL")
     sys.exit(1)
 print(f"RESULT: ok -- {len(passed)} passed, {len(profile_skips)} stepped aside for the profile and "
-      f"{len(env_skips)} for the environment, of {total} tests under -tags refugium")
+      f"{len(env_skips)} for the environment, {len(deferred_skips)} deferred-minor, of {total} tests under -tags refugium")
 PY

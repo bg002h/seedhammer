@@ -142,14 +142,20 @@ func supplyMultisigPolicyFlow(ctx *Context, th *Colors) {
 	// Optional passphrase.
 	passphrase := ""
 	ppChoice := &ChoiceScreen{Title: "Passphrase", Lead: "Add a BIP-39 passphrase?", Choices: []string{"Skip", "Add passphrase"}}
-	if sel, ok := askBIP39Passphrase(ctx, th, ppChoice); ok && sel == 1 {
+	sel, ok := askBIP39Passphrase(ctx, th, ppChoice)
+	if !ok {
+		return
+	}
+	if sel == 1 {
 		// §3.3.2 admits ClassPassphrase to this program, so the payload is
 		// offered before the keyboard (plan stage 13b). NOT passphraseFlow: see
 		// syswPassphraseFlow for the two normative rules a shared edit inside
 		// passphraseFlow would have broken.
-		if pass, ok := syswPassphraseFlow(ctx, th); ok {
-			passphrase = pass
+		pass, ok := syswPassphraseFlow(ctx, th)
+		if !ok {
+			return
 		}
+		passphrase = pass
 	}
 
 	// (4) CROSS-MATCH the seed to EVERY slot it accounts for (I-1). Refuse on

@@ -37,8 +37,8 @@ func TestShortFingerprintHeaderClassifiesUnknownWithoutPanicking(t *testing.T) {
 }
 
 // The titled zero-key BlueWallet shape, on one line. `parseBlueWalletDescriptor`
-// ACCEPTS it -- Title is non-empty and 0 declared keys equals 0 parsed keys --
-// and the descriptor it produces PANICS Descriptor.Encode (§4.2 defect 1: the
+// refused it before fix-06b/50; the classifier must still fail closed on a hand-built titled zero-key descriptor
+// (Title set, 0 keys). Such a descriptor PANICS Descriptor.Encode (§4.2 defect 1: the
 // zero Script has no arm in encode's switch). DescriptorScreen encodes, so the
 // only thing between this line and a crashed screen is admission refusing it.
 //
@@ -122,13 +122,10 @@ func TestFullOriginYpubDescriptorClassifiesUnknown(t *testing.T) {
 // assertions above run against the real object rather than a hand-built one.
 func titledZeroKey(t *testing.T) *bip380.Descriptor {
 	t.Helper()
-	d, err := nonstandard.OutputDescriptor([]byte("Name: my wallet"))
-	if err != nil {
-		t.Fatalf("the BlueWallet branch no longer accepts a titled zero-key file: %v.\n"+
-			"That is a behaviour change in nonstandard/parse.go, not a test bug -- "+
-			"re-read §4.2 defect 1 before editing this test.", err)
+	if _, err := nonstandard.OutputDescriptor([]byte("Name: my wallet")); err == nil {
+		t.Fatal("fix-06b/50: the BlueWallet branch must refuse a titled zero-key file")
 	}
-	return d
+	return &bip380.Descriptor{Title: "my wallet", Type: bip380.SortedMulti}
 }
 
 // ─── F-530 review C-2: conjunct 8(b) compared spelling ───────────────────────

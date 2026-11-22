@@ -449,6 +449,7 @@ skip:
 					if prevSeg := opt[len(opt)-1]; prevSeg.Op == s.Op {
 						if onSegment(p0, pMinusOne, p1) {
 							opt[len(opt)-1].Args[0] = p1
+							p0 = p1
 							continue skip
 						}
 					}
@@ -612,6 +613,7 @@ func parseSegments(face *Face, d *xml.Decoder, e xml.StartElement, offx, offy in
 					}
 					encode(SegmentOpLineTo, p)
 					newPen = p
+					pen = p
 				}
 				pen = newPen
 				ctrl2 = newPen
@@ -626,6 +628,7 @@ func parseSegments(face *Face, d *xml.Decoder, e xml.StartElement, offx, offy in
 					}
 					encode(SegmentOpLineTo, p)
 					newPen = p
+					pen = p
 				}
 				pen = newPen
 				ctrl2 = newPen
@@ -654,7 +657,10 @@ func parseSegments(face *Face, d *xml.Decoder, e xml.StartElement, offx, offy in
 				if op == 'l' {
 					sop = SegmentOpLineTo
 				}
-				for _, p := range points {
+				for i, p := range points {
+					if rel && i > 0 {
+						p = p.Add(newPen).Sub(pen)
+					}
 					encode(sop, p)
 					newPen = p
 				}
@@ -664,6 +670,10 @@ func parseSegments(face *Face, d *xml.Decoder, e xml.StartElement, offx, offy in
 			case 'c':
 				for i := 0; i < len(points); i += 3 {
 					p1, p2, p3 := points[i], points[i+1], points[i+2]
+					if rel && i > 0 {
+						d := newPen.Sub(pen)
+						p1, p2, p3 = p1.Add(d), p2.Add(d), p3.Add(d)
+					}
 					encode(SegmentOpCubeTo, p1, p2, p3)
 					newPen = p3
 					newCtrl2 = p2
@@ -671,8 +681,12 @@ func parseSegments(face *Face, d *xml.Decoder, e xml.StartElement, offx, offy in
 			case 's':
 				for i := 0; i < len(points); i += 2 {
 					p2, p3 := points[i], points[i+1]
+					if rel && i > 0 {
+						d := newPen.Sub(pen)
+						p2, p3 = p2.Add(d), p3.Add(d)
+					}
 					// Compute p1 by reflecting p2 on to the line that contains pen and p2.
-					p1 := pen.Mul(2).Sub(ctrl2)
+					p1 := newPen.Mul(2).Sub(newCtrl2)
 					encode(SegmentOpCubeTo, p1, p2, p3)
 					newPen = p3
 					newCtrl2 = p2
