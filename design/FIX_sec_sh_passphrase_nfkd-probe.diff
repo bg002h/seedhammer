@@ -1,0 +1,213 @@
+diff --git i/bip39/bip39.go w/bip39/bip39.go
+index ca581c1..87341be 100644
+--- i/bip39/bip39.go
++++ w/bip39/bip39.go
+@@ -15,8 +15,10 @@ import (
+ 	"math/big"
+ 	"sort"
+ 	"strings"
++	"unicode/utf8"
+ 
+ 	"golang.org/x/crypto/pbkdf2"
++	"golang.org/x/text/unicode/norm"
+ )
+ 
+ type Word int
+@@ -266,7 +268,59 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
+ 			sentence = append(sentence, ' ')
+ 		}
+ 	}
+-	return pbkdf2.Key(sentence, []byte("mnemonic"+password), 2048, 64, sha512.New)
++	return pbkdf2.Key(sentence, seedSalt(password), 2048, 64, sha512.New)
++}
++
++// seedSalt returns "mnemonic" followed by the NFKD form of password, as
++// BIP-39 requires. ASCII is its own NFKD form and is copied unchanged.
++// Invalid UTF-8 bytes pass through unchanged. No stream-safe U+034F is
++// inserted (see appendNFKD).
++func seedSalt(password string) []byte {
++	salt := append(make([]byte, 0, len("mnemonic")+len(password)), "mnemonic"...)
++	for i := 0; i < len(password); i++ {
++		if password[i] >= 0x80 {
++			return appendNFKD(salt, password)
++		}
++	}
++	return append(salt, password...)
++}
++
++// appendNFKD appends the NFKD form of s to dst without the Stream-Safe Text
++// Format (UAX #15 s.13) U+034F insertion that norm applies after 30
++// non-starters: each rune is decomposed alone (no single decomposition reaches
++// 30 non-starters), then each run of non-starters is stably sorted by CCC.
++// Invalid UTF-8 bytes pass through unchanged as starters.
++func appendNFKD(dst []byte, s string) []byte {
++	start := len(dst) // start of the current run of non-starters
++	flush := func() {
++		run := []rune(string(dst[start:]))
++		sort.SliceStable(run, func(a, b int) bool {
++			return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
++		})
++		dst = append(dst[:start], string(run)...)
++	}
++	for i := 0; i < len(s); {
++		r, n := utf8.DecodeRuneInString(s[i:])
++		if r == utf8.RuneError && n == 1 {
++			flush()
++			dst = append(dst, s[i])
++			i++
++			start = len(dst)
++			continue
++		}
++		for _, d := range norm.NFKD.String(s[i : i+n]) {
++			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
++				flush()
++				dst = utf8.AppendRune(dst, d)
++				start = len(dst)
++				continue
++			}
++			dst = utf8.AppendRune(dst, d)
++		}
++		i += n
++	}
++	flush()
++	return dst
+ }
+ 
+ func New(entropy []byte) Mnemonic {
+diff --git i/bip39/fix_sec_sh_passphrase_nfkd_test.go w/bip39/fix_sec_sh_passphrase_nfkd_test.go
+new file mode 100644
+index 0000000..9b9878e
+--- /dev/null
++++ w/bip39/fix_sec_sh_passphrase_nfkd_test.go
+@@ -0,0 +1,93 @@
++package bip39
++
++import (
++	"encoding/hex"
++	"strings"
++	"testing"
++	"time"
++)
++
++// FIX sec-sh-passphrase-nfkd (secret row bh1119-sh-i13-passphrase-no-nfkd):
++// BIP-39 derives the seed from the NFKD form of the passphrase. Every expected
++// seed below was computed independently with Python 3 (hashlib.pbkdf2_hmac,
++// unicodedata.normalize("NFKD", p)) on the mnemonic "abandon" x11 + "about".
++// Test inputs only; no real secret.
++
++func nfkdAbandonAbout(t *testing.T) Mnemonic {
++	t.Helper()
++	m, err := ParseMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
++	if err != nil {
++		t.Fatal(err)
++	}
++	return m
++}
++
++func checkNfkdSeed(t *testing.T, m Mnemonic, name, passphrase, want string) {
++	t.Helper()
++	if got := hex.EncodeToString(MnemonicSeed(m, passphrase)); got != want {
++		t.Errorf("%s: MnemonicSeed(%+q) = %s, want %s", name, passphrase, got, want)
++	}
++}
++
++// "café" spelt precomposed (U+00E9) and decomposed (e + U+0301) is one
++// passphrase under NFKD and derives one seed.
++func TestFixSecShPassphraseNfkdComposedEqualsDecomposed(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "af8bbd2566df7b69d926f2b09dfdbd75db6c994a3399b2cc65f928d63e3fd4e61218ee0d15f8c810be4d45e66d47b43c15a5cc753976b1666912377ff7ae9818"
++	checkNfkdSeed(t, m, "precomposed", "café", want)
++	checkNfkdSeed(t, m, "decomposed", "café", want)
++}
++
++// NFKD, not NFD: the compatibility ligature U+FB01 derives the seed of "fi".
++func TestFixSecShPassphraseNfkdCompatibility(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "6f8c92074395505f20fb58dee916a71167cca6b574bcfb870fbbd086931f51a7e1d812948405326fbe13783e989776629a0eb5c4e28468991c79a2e4a56f17d8"
++	checkNfkdSeed(t, m, "ligature", "ﬁ", want)
++	checkNfkdSeed(t, m, "ascii", "fi", want)
++}
++
++// ASCII is its own NFKD form: the published vectors keep their seeds.
++func TestFixSecShPassphraseNfkdAsciiUnchanged(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "empty", "", "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4")
++	checkNfkdSeed(t, m, "TREZOR", "TREZOR", "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e53495531f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04")
++}
++
++// Invalid UTF-8 bytes pass through unchanged; the valid text around them is
++// still normalized.
++func TestFixSecShPassphraseNfkdInvalidUTF8(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "latin1", "caf\xe9", "439aad27d41563beae6cd52b6a2b64ef734193b39b796c4a2620e81f7ad668859ca09ba2f1ddfb521d696dec584d718ea4c046153e557a7f3c6c5e44918ff82c")
++	checkNfkdSeed(t, m, "mixed", "\xffcafé", "f3d30b72b6e7a2c0b44e64bd343ce9afa5c8c88210f92be78cd3da65be6f312b1213aa33ab34859e3d8d8afb092ecd6a6d6a016bc01305d0552321ae5fa43115")
++}
++
++// x/text's norm applies the Stream-Safe Text Format (U+034F after 30
++// non-starters), which is not part of NFKD; the Rust primary and Python do not.
++func TestFixSecShPassphraseNfkdLongCombiningRun(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "31 acutes", "a"+strings.Repeat("\u0301", 31), "5b60cf53d7fd9730cee8e18f0dcf8fbc01e53d9cabfb3ae4aaf9bdd0ac9e58ba4d861773b6065c7ba30ea70157f3f8cee9e73229b7cc4a307e1ce19385a3cb6b")
++	checkNfkdSeed(t, m, "30 acutes + grave-below", "a"+strings.Repeat("\u0301", 30)+"\u0316", "1dfb7d57cac09826e0111bb912a7e9ae1e0529aa12d631ea797c57778729c5f75cbe87712e560ee2681119c44987288ebea09b874b3d90c5b615a94d7114d8b0")
++}
++
++// A long run of non-starters (hostile or Zalgo-style input to a library
++// caller) is normalized in linear-ish time. 25000 pairs of U+0316, U+0301 (50000
++// marks, CCC 220 then 230, so the run needs sorting) took minutes when the helper
++// re-sorted the whole run after every mark (r2 I1); the correct helper takes
++// milliseconds. The 20 s bound is far above that and far below the old cost.
++func TestFixSecShPassphraseNfkdLongRunFast(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "05f77e030fba075675aede1f4363aca589ba7f514390964c72b3e97e313375d08e4fe779b5c2149a6a4342d789a0a2ed8eed92ee6ab8e4531f7777d2e3f3ad01"
++	p := "a" + strings.Repeat("̖́", 25000)
++	done := make(chan string, 1)
++	start := time.Now()
++	go func() { done <- hex.EncodeToString(MnemonicSeed(m, p)) }()
++	select {
++	case got := <-done:
++		t.Logf("50000 marks took %v", time.Since(start))
++		if got != want {
++			t.Errorf("long run: MnemonicSeed = %s, want %s", got, want)
++		}
++	case <-time.After(20 * time.Second):
++		t.Fatal("long run of 50000 marks did not finish within 20s (quadratic appendNFKD)")
++	}
++}
+diff --git i/go.mod w/go.mod
+index 3c62928..1b3a7c3 100644
+--- i/go.mod
++++ w/go.mod
+@@ -14,6 +14,7 @@ require (
+ 	github.com/seedhammer/kortschak-qr v0.3.2
+ 	golang.org/x/crypto v0.52.0
+ 	golang.org/x/image v0.41.0
++	golang.org/x/text v0.37.0
+ 	gonum.org/v1/gonum v0.17.0
+ )
+ 
+@@ -24,5 +25,4 @@ require (
+ 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
+ 	github.com/x448/float16 v0.8.4 // indirect
+ 	golang.org/x/sys v0.45.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
+ )
+diff --git i/passphrase/passphrase.go w/passphrase/passphrase.go
+index 2efddc1..f8f0d49 100644
+--- i/passphrase/passphrase.go
++++ w/passphrase/passphrase.go
+@@ -1,10 +1,11 @@
+ // Package passphrase validates BIP-39 passphrases for engraving.
+ //
+ // The device accepts only printable ASCII. That is NOT a BIP-39 rule -- the
+-// standard permits any string -- it is the boundary within which this
+-// codebase's derivation is provably conformant: bip39.MnemonicSeed performs no
+-// NFKD normalization, which is identity on ASCII and divergent otherwise. See
+-// SPEC_seedhammer_engrave_bip39_password.md D3.
++// standard permits any string -- it is this device's engraving limit
++// (ErrNonASCII). bip39.MnemonicSeed applies BIP-39's NFKD normalization, so a
++// non-ASCII passphrase from a library caller derives the conformant seed.
++// SPEC_seedhammer_engrave_bip39_password.md D3 records the earlier reason (no
++// NFKD), removed by FIX sec-sh-passphrase-nfkd.
+ package passphrase
+ 
+ import "errors"
