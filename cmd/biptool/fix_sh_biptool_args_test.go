@@ -155,3 +155,13 @@ func TestFixShBiptoolArgsControls(t *testing.T) {
 		})
 	}
 }
+
+// R3 (S2) boundary: one byte over the word count's entropy is refused.
+func TestFixShBiptoolArgsLongSeedByOne(t *testing.T) {
+	fixArgsWantRefusal(t, []fixArgsRefusal{
+		{fixArgsZeroShare(t, 17), "derive -path m bip39 -words 12",
+			"biptool: derive: seed is 17 bytes; -words 12 needs exactly 16 bytes\n"},
+		{fixArgsZeroShare(t, 33), "derive -path m bip39 -words 24",
+			"biptool: derive: seed is 33 bytes; -words 24 needs exactly 32 bytes\n"},
+	})
+}
