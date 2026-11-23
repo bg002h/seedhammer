@@ -147,6 +147,7 @@ func TestKitEngraveBackShowsTheChoiceAgain(t *testing.T) {
 // the menu follows each (Brian 2026-11-22, s1 I-2 option (b): adapted from the
 // reviewer's row, which pinned "a load no menu follows").
 func TestKitRefusedAfterLoadAgainAndOnceAtBoot(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	count := func(frames []string) int {
 		return strings.Count(strings.Join(frames, "\n"), "Nothing from this payload")
 	}

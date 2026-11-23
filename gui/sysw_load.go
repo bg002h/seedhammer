@@ -175,6 +175,10 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
 			return false
 		}
+		if n, found := syswFirstSecretRecord(p); found {
+			showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
+			return false
+		}
 	}
 
 	// Route 2: the operator compares the displayed digest. [digest-shown]

@@ -311,6 +311,7 @@ func TestASecretsOnlyPayloadUnloadNamesThePassphraseAsTheOnlyWayBack(t *testing.
 // Driven through the REAL load flow over a real region image, so this fails if
 // the offer is wired to a warning list that never fires.
 func TestF1OffersUnloadWhereItOnceOfferedErase(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	p := newPlatform()
 	p.display = sh2DisplaySize
 	p.sysw = syswRegionFor(t, "S-B") // plaintext, carrying a SECRET class

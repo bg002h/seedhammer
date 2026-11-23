@@ -222,6 +222,7 @@ func kitWithMs1(t *testing.T) []string {
 }
 
 func TestKitRefusedAfterWarnings(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	const sentence = "Record 2 of this payload is not an md1, mk1 or mr1 string (it is: codex32 secret), so this payload is not a kit."
 	run := func(unload bool) (frames []string) {
 		p := kitPlatform(plaintextRegion(t, kitWithMs1(t)...))

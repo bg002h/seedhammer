@@ -77,6 +77,7 @@ import (
 // SECRET MATERIAL (record 0 (BIP-39 mnemonic))" -- so the two ends of the chain
 // warn about one fact, and ingest() asserts the device's half.
 func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	var words int
 	var art string
 	synctest.Test(t, func(t *testing.T) {
@@ -190,6 +191,7 @@ func toLowerASCII(s string) string {
 // with the string the rest of the package uses, and that divergence is a
 // finding rather than a fixture detail.
 func TestChainCodex32FromAMePackedPayloadToAnMs1Plate(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	var words int
 	var art string
 	synctest.Test(t, func(t *testing.T) {
@@ -537,6 +539,7 @@ type chainMdMkStep struct {
 // is SKIP, USE, USE over the roster and SKIP, SKIP, USE, USE over this blob. A
 // tap sequence carried across from the other file selects A@1 instead.
 func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	var art string
 	var census []string
 	synctest.Test(t, func(t *testing.T) {

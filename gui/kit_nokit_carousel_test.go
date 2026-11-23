@@ -5,6 +5,7 @@ import "testing"
 // A payload that offers no kit (no mr1 candidate), loaded from the carousel with
 // nothing loaded, returns to the carousel: no payload menu follows (14e, 14d).
 func TestNoKitPayloadFromCarouselOpensNoMenu(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	ctx := NewContext(kitPlatform(plaintextRegion(t, chainPayloadNamed(t, "chain-codex32").Records...)))
 	frame, drawer, quit := runUITouch(ctx, func() { syswPayloadMenu(ctx, &descriptorTheme) })
 	defer quit()
