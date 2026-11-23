@@ -31,8 +31,8 @@ library gap for integrators (P7).
 - **R2 (exact match).** "Differs" is byte-for-byte string inequality: no case folding, no trimming, no aliases. So
   `"Mainnet"`, `" mainnet"`, `"bitcoin"`, `"TESTNET"`, and `"signet"`/`"regtest"` with a tpub are all refused. Reason:
   Card.Network's documented domain is `"mainnet" | "testnet"` (mk/mk.go:134) and `Decode` can return only those two,
-  so any other non-empty value can never round-trip (T36 "one source of truth"). **PROPOSED reading (architect
-  confirms)**: see §8 Q1 for the signet alternative.
+  so any other non-empty value can never round-trip (T36 "one source of truth"). **Ruled (architect
+  1122-late Q1): refuse; §8 Q1.**
 - **R3 (empty and matching are unchanged).** An empty Network is accepted (T36 decides this; the grader's Q4) and the
   card decodes with the xpub's network. A matching Network encodes exactly as before: no output byte of any accepted
   card changes. A signet-derived key (tpub version) labelled `"testnet"` is a matching card.
@@ -44,7 +44,7 @@ library gap for integrators (P7).
   keeps `errEncodeXpub` / `errEncodeInvariant` (no network can be read from it); stub-count and path errors keep
   priority as today; a mismatch with a bad fingerprint returns `errEncodeNetwork`.
 - **R6 (error text).** `errEncodeNetwork = errors.New("mk: network does not match the xpub version")`, unexported
-  like its siblings at :15-22. **PROPOSED (architect confirms).** The text reaches no screen: every gui caller maps an
+  like its siblings at :15-22. **Ruled (architect 1122-late Q2).** The text reaches no screen: every gui caller maps an
   Encode error to its own fixed screen text, and `cmd/buildpayloadcards` (a dev tool, always mainnet) prints
   `mk.Encode <label>: <err>` only on a failure it cannot hit.
 - **R7 (one source).** The version -> name mapping lives in one helper used by both `reconstructXpub` (Decode) and
@@ -81,8 +81,11 @@ The scratch version is `design/FIX_sh_mk_encode_network-probe.diff` (evidence, n
    (:391-398) uses it and keeps its error text.
 3. mk/encode.go, between :93 and :95: `if card.Network != "" && card.Network != networkOfVersion(compact[0:4])
    { return nil, errEncodeNetwork }`, with a comment naming this FIX, bh-sh-I10 and T36.
-4. Comments that become stale: mk/encode.go:31-38 (Encode doc) gains one sentence: a non-empty Network must equal
-   the xpub version's network, an empty one takes it; mk/mk.go:134 field comment: `// "mainnet" | "testnet"; Decode
+4. Comments that become stale: mk/encode.go:31-38 (Encode doc) gains, after the line `// codex32.ValidMK are the load-bearing correctness gates.`, a `//` line and then these four lines verbatim:
+   `// Card.Network is checked, never serialized: the wire carries only the xpub's`
+   `// version bytes. A non-empty Network must be exactly the name Decode gives those`
+   `// bytes ("mainnet" for an xpub, "testnet" for a tpub, signet and regtest keys`
+   `// included), else Encode returns an error; an empty Network takes the xpub's.` mk/mk.go:134 field comment: `// "mainnet" | "testnet"; Decode
    names it from the xpub version; Encode accepts "" or the matching name`; gui/multisig_derive.go:25 "it is not
    serialized nor verified" becomes "it is not serialized; mk.Encode refuses it if it disagrees with the xpub
    (T36)". gui/composer_cards.go:42 and gui/multisig_derive.go:49 "LABEL only" comments stay true (not serialized).
@@ -120,7 +123,7 @@ mainnet-on-xpub cards).
 TinyGo device build compile `mk`; the change adds no import, so they are expected unchanged; the builder runs them
 or takes green CI on the head.
 
-## 8. Questions for the architect (do not block the build of R1, R3-R7)
+## 8. Questions for the architect (ruled 1122-late: Q1 (a) refuse, Q2 fixed text)
 
 - **Q1 (R2, signet label).** T36 says "disagrees"; Card.Network's domain is two names. Options: (a) exact match, so
   `"signet"`/`"regtest"` with a tpub are refused (written above; round-trip holds; matches mk-codec's two
