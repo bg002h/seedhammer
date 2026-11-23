@@ -251,6 +251,16 @@ func TestKitRefusedAfterWarnings(t *testing.T) {
 			click(&ctx.Router, Down)
 		}
 		click(&ctx.Router, Button3)
+		if unload {
+			if c, ok = pumpUntil(frame, "BACK", 32); !ok {
+				t.Fatalf("no unload confirmation; got %q", c)
+			}
+			click(&ctx.Router, Down, Button3) // UNLOAD, confirmed
+			if c, ok = pumpUntil(frame, "Payload Unloaded", 32); !ok {
+				t.Fatalf("no Payload Unloaded; got %q", c)
+			}
+			click(&ctx.Router, Button3)
+		}
 		for i := 0; i < 24; i++ {
 			c, more := frame()
 			if !more {
