@@ -1,0 +1,299 @@
+diff --git i/gui/chain_class_walk_test.go w/gui/chain_class_walk_test.go
+index 0d0891c..d6b7f23 100644
+--- i/gui/chain_class_walk_test.go
++++ w/gui/chain_class_walk_test.go
+@@ -77,6 +77,7 @@ import (
+ // SECRET MATERIAL (record 0 (BIP-39 mnemonic))" -- so the two ends of the chain
+ // warn about one fact, and ingest() asserts the device's half.
+ func TestChainMnemonicFromAMePackedPayloadToASeedPlate(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	var words int
+ 	var art string
+ 	synctest.Test(t, func(t *testing.T) {
+@@ -190,6 +191,7 @@ func toLowerASCII(s string) string {
+ // with the string the rest of the package uses, and that divergence is a
+ // finding rather than a fixture detail.
+ func TestChainCodex32FromAMePackedPayloadToAnMs1Plate(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	var words int
+ 	var art string
+ 	synctest.Test(t, func(t *testing.T) {
+@@ -537,6 +539,7 @@ type chainMdMkStep struct {
+ // is SKIP, USE, USE over the roster and SKIP, SKIP, USE, USE over this blob. A
+ // tap sequence carried across from the other file selects A@1 instead.
+ func TestChainMdMkFromTheEmulatorsOwnPayloadToFourPlates(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	var art string
+ 	var census []string
+ 	synctest.Test(t, func(t *testing.T) {
+diff --git i/gui/kit_door_test.go w/gui/kit_door_test.go
+index 41862ed..7c6e86e 100644
+--- i/gui/kit_door_test.go
++++ w/gui/kit_door_test.go
+@@ -222,6 +222,7 @@ func kitWithMs1(t *testing.T) []string {
+ }
+ 
+ func TestKitRefusedAfterWarnings(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	const sentence = "Record 2 of this payload is not an md1, mk1 or mr1 string (it is: codex32 secret), so this payload is not a kit."
+ 	run := func(unload bool) (frames []string) {
+ 		p := kitPlatform(plaintextRegion(t, kitWithMs1(t)...))
+diff --git i/gui/kit_extra_test.go w/gui/kit_extra_test.go
+index 22eefa4..7c8a325 100644
+--- i/gui/kit_extra_test.go
++++ w/gui/kit_extra_test.go
+@@ -147,6 +147,7 @@ func TestKitEngraveBackShowsTheChoiceAgain(t *testing.T) {
+ // the menu follows each (Brian 2026-11-22, s1 I-2 option (b): adapted from the
+ // reviewer's row, which pinned "a load no menu follows").
+ func TestKitRefusedAfterLoadAgainAndOnceAtBoot(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	count := func(frames []string) int {
+ 		return strings.Count(strings.Join(frames, "\n"), "Nothing from this payload")
+ 	}
+diff --git i/gui/kit_menu_after_load_test.go w/gui/kit_menu_after_load_test.go
+index c8ae172..95bc556 100644
+--- i/gui/kit_menu_after_load_test.go
++++ w/gui/kit_menu_after_load_test.go
+@@ -43,6 +43,7 @@ func TestKitMenuOpensAfterLoadAgainOfEligibleKit(t *testing.T) {
+ }
+ 
+ func TestKitRefusedOnceThenMenuAfterLoadAgain(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	ctx := NewContext(kitPlatform(plaintextRegion(t, kitWithMs1(t)...)))
+ 	ctx.sysw = sessionWith(kitWithMs1(t)...)
+ 	frame, drawer, quit := runUITouch(ctx, func() { syswPayloadMenu(ctx, &descriptorTheme) })
+diff --git i/gui/kit_nokit_carousel_test.go w/gui/kit_nokit_carousel_test.go
+index 4145bb1..f2a2ea0 100644
+--- i/gui/kit_nokit_carousel_test.go
++++ w/gui/kit_nokit_carousel_test.go
+@@ -5,6 +5,7 @@ import "testing"
+ // A payload that offers no kit (no mr1 candidate), loaded from the carousel with
+ // nothing loaded, returns to the carousel: no payload menu follows (14e, 14d).
+ func TestNoKitPayloadFromCarouselOpensNoMenu(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	ctx := NewContext(kitPlatform(plaintextRegion(t, chainPayloadNamed(t, "chain-codex32").Records...)))
+ 	frame, drawer, quit := runUITouch(ctx, func() { syswPayloadMenu(ctx, &descriptorTheme) })
+ 	defer quit()
+diff --git i/gui/kit_refused_once_test.go w/gui/kit_refused_once_test.go
+index 9d2d1ea..0ecf556 100644
+--- i/gui/kit_refused_once_test.go
++++ w/gui/kit_refused_once_test.go
+@@ -6,6 +6,7 @@ import "testing"
+ // KEEP, on every load route, and the payload menu follows it (Brian 2026-11-22,
+ // s1 I-2 option (b): the menu opens after every load of a kit payload).
+ func TestKitRefusedOnceAtEveryLoad(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	const sentence = "Record 2 of this payload is not an md1, mk1 or mr1 string (it is: codex32 secret), so this payload is not a kit."
+ 	for _, boot := range []bool{true, false} {
+ 		p := kitPlatform(plaintextRegion(t, kitWithMs1(t)...))
+diff --git i/gui/profile_skip_test.go w/gui/profile_skip_test.go
+index ca5557e..46b720f 100644
+--- i/gui/profile_skip_test.go
++++ w/gui/profile_skip_test.go
+@@ -35,6 +35,9 @@ const (
+ 	refugiumSkipSLIP39 = "a SLIP-39 passphrase ends the recovery (F7 §4.3)"
+ 	// §4.4: Engrave Text offers no QR, for any text.
+ 	refugiumSkipFreeTextQR = "Engrave Text offers no QR in this build (F7 §4.4)"
++	// FIX sec-sh-sysw-plaintext-refuse: an unsealed payload holding a secret
++	// class is refused at load, before the digest.
++	refugiumSkipPlaintextSecret = "an unsealed payload holding a secret is refused at load (FIX sec-sh-sysw-plaintext-refuse)"
+ )
+ 
+ // ppQuestion is the passphrase step's needle in THIS build (review I-2): the
+diff --git i/gui/sysw_load.go w/gui/sysw_load.go
+index 791c086..0c3a7f3 100644
+--- i/gui/sysw_load.go
++++ w/gui/sysw_load.go
+@@ -172,6 +172,12 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
+ 			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
+ 			return false
+ 		}
++		if !h.Sealed() {
++			if n, found := syswFirstSecretRecord(p); found {
++				showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
++				return false
++			}
++		}
+ 	}
+ 
+ 	// Route 2: the operator compares the displayed digest. [digest-shown]
+@@ -361,3 +367,27 @@ func syswPassphraseRecordRefusal(position int) string {
+ 		"This build takes no BIP-39 passphrase, so nothing was loaded. "+
+ 		"Pack the payload again without it.", position)
+ }
++
++// syswFirstSecretRecord returns the 1-based position of the first record whose
++// CLASS is secret (sysw.Class.IsSecret), counted over the public then the
++// secret section.
++func syswFirstSecretRecord(p *sysw.Payload) (int, bool) {
++	n := 0
++	for _, sec := range [][]string{p.Public, p.Secret} {
++		for _, r := range sec {
++			n++
++			if sysw.Classify(r).IsSecret() {
++				return n, true
++			}
++		}
++	}
++	return 0, false
++}
++
++// syswPlaintextSecretRefusal names the record by POSITION only, never by its
++// contents.
++func syswPlaintextSecretRefusal(position int) string {
++	return fmt.Sprintf("Record %d of this payload is a secret, and the payload is not sealed. "+
++		"This build takes secrets only in the Sealed Payload, so nothing was loaded. "+
++		"Pack the payload again without it.", position)
++}
+diff --git i/gui/sysw_plaintext_secret_refugium_test.go w/gui/sysw_plaintext_secret_refugium_test.go
+new file mode 100644
+index 0000000..2642154
+--- /dev/null
++++ w/gui/sysw_plaintext_secret_refugium_test.go
+@@ -0,0 +1,121 @@
++//go:build refugium
++
++package gui
++
++import (
++	"fmt"
++	"testing"
++
++	"seedhammer.com/sysw"
++)
++
++// FIX_sec-sh-sysw-plaintext-refuse (rows kitarch-a-s1-sysw-plaintext-secret,
++// kitarch-b-s1-plaintext-secret-admitted, kitarch-c-a1-plaintext-secret-not-refused):
++// the Refugium build refuses, whole and before the digest, an unsealed
++// systemwide payload holding a record whose CLASS is secret.
++
++const plaintextSecretRefusalFmt = "Record %d of this payload is a secret, and the payload is not sealed. " +
++	"This build takes secrets only in the Sealed Payload, so nothing was loaded. " +
++	"Pack the payload again without it."
++
++const plaintextSecretTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
++
++// plaintextSecretLoad drives the real load flow over a plaintext region of
++// `records` and returns the first screen that is the refusal modal, the digest
++// comparison, or the boot prompt's successor, plus the harness.
++func plaintextSecretLoad(t *testing.T, boot bool, records ...string) (first string, ctx *Context, ret *bool, quit func()) {
++	t.Helper()
++	ctx = NewContext(kitPlatform(plaintextRegion(t, records...)))
++	ret = new(bool)
++	frame, _, quit := runUITouch(ctx, func() {
++		*ret = syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), boot)
++	})
++	if boot {
++		if c, ok := pumpUntil(frame, "Load it?", 32); !ok {
++			quit()
++			t.Fatalf("no boot prompt; got %q", c)
++		}
++		click(&ctx.Router, Button3) // LOAD (index 0)
++	}
++	for i := 0; i < 64; i++ {
++		c, more := frame()
++		if !more {
++			break
++		}
++		if uiContains(c, "Compare this against") || uiContains(c, "nothing was loaded") ||
++			uiContains(c, "Nothing was loaded") {
++			return c, ctx, ret, quit
++		}
++	}
++	quit()
++	t.Fatal("neither a refusal nor the digest comparison was drawn")
++	return
++}
++
++// TestKitarchPlaintextSecretRefusedBeforeDigest is RED row R1: every secret
++// class but pass: (which keeps its own refusal), at position 2 behind a public
++// text record, on both load routes.
++func TestKitarchPlaintextSecretRefusedBeforeDigest(t *testing.T) {
++	preimage := composerTestPreimageRecord(t, composerTestPreimageX())
++	for _, tc := range []struct {
++		name   string
++		secret string
++		class  sysw.Class
++	}{
++		{"mnemonic", plaintextSecretTestMnemonic, sysw.ClassMnemonic},
++		{"codex32 secret", refugiumMS1Vec, sysw.ClassCodex32Secret},
++		{"preimage", preimage, sysw.ClassPreimage},
++		{"phrase", composerTestPhraseRecord(sysw.HashlockHardened, hashlockAnchorPhrase), sysw.ClassPhrase},
++	} {
++		if got := sysw.Classify(tc.secret); got != tc.class || !got.IsSecret() {
++			t.Fatalf("INCONCLUSIVE: %s fixture classifies %v, want secret %v", tc.name, got, tc.class)
++		}
++		for _, boot := range []bool{false, true} {
++			c, ctx, ret, quit := plaintextSecretLoad(t, boot, "text:48656c6c6f", tc.secret)
++			want := fmt.Sprintf(plaintextSecretRefusalFmt, 2)
++			if !uiContains(c, want) || uiContains(c, "Compare this against") {
++				t.Errorf("%s boot=%v: want the refusal before any digest; got %q", tc.name, boot, c)
++			}
++			quit()
++			if ctx.sysw != nil || *ret {
++				t.Errorf("%s boot=%v: a session was left (sysw=%v, ret=%v)", tc.name, boot, ctx.sysw != nil, *ret)
++			}
++		}
++	}
++}
++
++// TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord is RED row R2: the
++// position is the FIRST secret record's, 1-based over the whole payload.
++func TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord(t *testing.T) {
++	c, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, refugiumMS1Vec)
++	defer quit()
++	if !uiContains(c, fmt.Sprintf(plaintextSecretRefusalFmt, 1)) {
++		t.Errorf("want Record 1 named; got %q", c)
++	}
++}
++
++// TestKitarchPassRecordRefusalKeepsPrecedence is guard row G1: a payload with
++// a pass: record and another secret shows the pass: refusal, unchanged.
++func TestKitarchPassRecordRefusalKeepsPrecedence(t *testing.T) {
++	c, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, "pass:636f7272")
++	defer quit()
++	if !uiContains(c, syswPassphraseRecordRefusal(2)) || uiContains(c, "is a secret, and the payload is not sealed") {
++		t.Errorf("want the pass: refusal alone; got %q", c)
++	}
++}
++
++// TestKitarchPlaintextWithoutSecretClassStillLoads is guard row G2: a public
++// plaintext payload, and an unconfirmed md1 alone (secret only by
++// [mdmk-decode], not by class), reach the digest comparison as before.
++func TestKitarchPlaintextWithoutSecretClassStillLoads(t *testing.T) {
++	for _, recs := range [][]string{
++		{"text:48656c6c6f"},
++		kitVectorRecords(t, "kit-mk1-alone")[2:3],
++	} {
++		c, _, _, quit := plaintextSecretLoad(t, false, recs...)
++		if !uiContains(c, "Compare this against") {
++			t.Errorf("%q: want the digest comparison; got %q", recs, c)
++		}
++		quit()
++	}
++}
+diff --git i/gui/sysw_unload_test.go w/gui/sysw_unload_test.go
+index 09be9a3..5bb1796 100644
+--- i/gui/sysw_unload_test.go
++++ w/gui/sysw_unload_test.go
+@@ -311,6 +311,7 @@ func TestASecretsOnlyPayloadUnloadNamesThePassphraseAsTheOnlyWayBack(t *testing.
+ // Driven through the REAL load flow over a real region image, so this fails if
+ // the offer is wired to a warning list that never fires.
+ func TestF1OffersUnloadWhereItOnceOfferedErase(t *testing.T) {
++	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
+ 	p := newPlatform()
+ 	p.display = sh2DisplaySize
+ 	p.sysw = syswRegionFor(t, "S-B") // plaintext, carrying a SECRET class
+diff --git i/scripts/refugium-tagged-test.sh w/scripts/refugium-tagged-test.sh
+index 4aee908..69f21c2 100755
+--- i/scripts/refugium-tagged-test.sh
++++ w/scripts/refugium-tagged-test.sh
+@@ -19,7 +19,7 @@
+ #
+ # What the tag EXCLUDES is not decided here. A test that cannot hold in the
+ # Refugium build either carries `//go:build !refugium` on its file (the proof
+-# trigger files; -list omits them) or calls skipUnderRefugium with one of six
++# trigger files; -list omits them) or calls skipUnderRefugium with one of seven
+ # named reasons (gui/profile_skip_test.go), and is printed below by name. The
+ # Refugium-only tests are gui/refugium_profile_test.go.
+ #
