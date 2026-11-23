@@ -1,4 +1,4 @@
-# FIX: biptool derive refuses a misplaced or leftover argument and a seed too short for the word count
+# FIX: biptool refuses a misplaced or leftover argument in every verb, and a seed of the wrong length for the word count
 
 **Small track** (one Opus review round). Grade I. Secret handling (bh-sh-I4: a backup mnemonic not derived from the
 supplied seed alone; `SECRET id=bh1119-sh-i4-biptool-short-seed-padded`; R5 also closes `SECRET id=b34-sh-s1-biptool-verb-leftover-secret`).
@@ -72,7 +72,7 @@ No flag, verb or type is added. No README, manual or doc text mentions biptool's
 ## 4. Code changes (builder applies)
 
 All in `cmd/biptool/main.go`; the scratch version is `design/FIX_sh_biptool_args-probe.diff` (evidence, not a patch to
-copy blindly).
+copy blindly). The probe predates the architect-bh-batch34 fold: its R3 text and ShortSeed expectations are superseded by R3 and §5, and it has no R5, no S2 check and no OtherVerbsLeftover/LongSeed rows.
 
 1. A helper (probe name `noArgsLeft(format string, rest []string) error`) returning nil for an empty `rest`, else
    R1's error naming `rest[0]`. Comment: the flag package stops at the first non-flag, so a misplaced option would be
@@ -152,7 +152,7 @@ TestFixShBiptoolArgsLeftoverArgument.
 `CGO_ENABLED=0 go test -tags oraclelive -run '^$' ./oracle/ ./gui/ ./sysw/ ./cmd/emu/` ; `./scripts/test-32bit.sh` ;
 `GOOS=js GOARCH=wasm go vet ./cmd/emu/` and `-tags refugium` ; `./scripts/refugium-tagged-test.sh` ; both TinyGo
 device builds and `scripts/refugium-elf-check.sh` (CI). Measured on the scratch fix by the author (go1.26.7,
-/scratch/code/shibboleth/.toolchain/go): `go test -v ./cmd/biptool/` ok (16 top-level tests PASS);
+/scratch/code/shibboleth/.toolchain/go): `go test -v ./cmd/biptool/` ok (18 top-level tests PASS);
 `GOARCH=386 go test ./cmd/biptool/` ok; `go vet ./cmd/biptool/` ok; gofmt clean. Not run by the author: the rest of
 `./...` and the other jobs; no other package imports `cmd/biptool`. The builder runs the whole gate.
 
@@ -160,7 +160,7 @@ device builds and `scripts/refugium-elf-check.sh` (CI). Measured on the scratch 
 
 - Toolkit manual: none (no `mr`/`md-cli` text; the manual never mentions biptool).
 - Closes: bh-sh-I3 and bh-sh-I4 with the GREEN merge; the secret-list row `bh1119-sh-i4-biptool-short-seed-padded`
-  closes with it; and the deferred mnemonic-engrave `design/FOLLOWUPS.md` entry `sh-biptool-short-seed` (its RED row
+  closes with it; the secret-list row `b34-sh-s1-biptool-verb-leftover-secret` (R5) closes with it; and the deferred mnemonic-engrave `design/FOLLOWUPS.md` entry `sh-biptool-short-seed` (its RED row
   `TestBughuntSh228Bip39ShortSeed` is un-skipped here). seedhammer has no `design/FOLLOWUPS.md`.
 - Files: none (S1 and S2 ruled into this row, architect-bh-batch34).
 
@@ -169,8 +169,7 @@ device builds and `scripts/refugium-elf-check.sh` (CI). Measured on the scratch 
 - **S1 (same root in the other verbs).** `rand`, `seed` and `interpolate` parse with their own flag sets and also drop
   everything after the first non-flag. Seen on base: `rand extra -n 64` writes 32 bytes, exit 0;
   `interpolate extra -idx D` (BIP-93 vector 2 shares A and C) prints the S share
-  `MS12NAMES6XQGUZTTXKEQNJSJZV4JV3NZ5K3KWGSPHUH6EVW` instead of D, exit 0. (Read, not run: `seed extra -id test ...` fails
-  later on the defaulted `-id`, but `-threshold`/`-idx`/`-hrp` after a stray word are dropped.) Options:
+  `MS12NAMES6XQGUZTTXKEQNJSJZV4JV3NZ5K3KWGSPHUH6EVW` instead of D, exit 0. (The architect ran the seed row; §3 and §6 carry its output.) Options:
   (a) out of this row; file a FOLLOWUPS line (text in the report); (b) extend R1 here: after each verb's `Parse`,
   a leftover argument returns `<verb>: unexpected argument "<arg>"` (e.g. `biptool: rand: unexpected argument "extra"`),
   exit 2, one RED row `TestFixShBiptoolArgsOtherVerbsLeftover` with those three verbs. **Recommend (b):** same root,
@@ -179,8 +178,7 @@ device builds and `scripts/refugium-elf-check.sh` (CI). Measured on the scratch 
   codex32 seed uses the first 16 bytes and exits 0 (seen: 32 zero bytes -> `abandon x11 about`), so the mnemonic does
   not carry the whole seed. On the BIP-85 path the truncation is the BIP-85 rule (entropy = first `entLen` bytes) and
   is correct. Not in the bug report. Options: (a) keep (raw conversion takes a prefix); (b) refuse when there is no
-  BIP-85 path and `len(seed) != entLen`, text e.g. `derive: seed is <len> bytes; -words <n> takes exactly <entLen>`
-  (PROPOSED). **Recommend (b)** as a separate Minor or folded here if the architect prefers: a holder converting a
+  BIP-85 path and `len(seed) != entLen`, text as R3. **Recommend (b)** as a separate Minor or folded here if the architect prefers: a holder converting a
   codex32 backup to words would otherwise get a different secret with exit 0. **Ruled (b).**
 
 ## 11. Out of scope
