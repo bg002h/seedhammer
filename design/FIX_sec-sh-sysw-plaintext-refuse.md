@@ -204,7 +204,7 @@ because the author's TMPDIR was inside the worktree (its tree walk found a live 
 outside the worktree: rc=0. oraclelive compile rc=0; both wasm vets rc=0; `./scripts/test-32bit.sh` rc=0;
 `./scripts/refugium-tagged-test.sh 6` RESULT ok (§6); TinyGo pico-plus2 default and `-tags refugium` builds rc=0
 (refugium 1622040 flash bytes) and `./scripts/refugium-elf-check.sh` "RESULT: ok -- 11 markers present in the default
-ELF and absent in the Refugium ELF". Keep TMPDIR and GOCACHE outside the worktree when re-running. (TinyGo builds and the elf-check were run on the pre-fold probe; the fold e43f6b5 did not re-run them; CI re-earns them. The build on this branch re-ran them: see the PR.)
+ELF and absent in the Refugium ELF". Keep TMPDIR and GOCACHE outside the worktree when re-running. (TinyGo builds and the elf-check were run on the pre-fold probe; the fold e43f6b5 did not re-run them; CI re-earns them. The build on this branch re-ran them on the folded head: both rc=0, refugium 1621968 flash bytes, elf-check "RESULT: ok -- 11 markers present in the default ELF and absent in the Refugium ELF".)
 
 ## 9. Lockstep and FOLLOWUPS
 
