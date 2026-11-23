@@ -35,6 +35,9 @@ const (
 	refugiumSkipSLIP39 = "a SLIP-39 passphrase ends the recovery (F7 §4.3)"
 	// §4.4: Engrave Text offers no QR, for any text.
 	refugiumSkipFreeTextQR = "Engrave Text offers no QR in this build (F7 §4.4)"
+	// FIX sec-sh-sysw-plaintext-refuse: an unsealed payload holding a secret
+	// class is refused at load, before the digest.
+	refugiumSkipPlaintextSecret = "an unsealed payload holding a secret is refused at load (FIX sec-sh-sysw-plaintext-refuse)"
 )
 
 // ppQuestion is the passphrase step's needle in THIS build (review I-2): the

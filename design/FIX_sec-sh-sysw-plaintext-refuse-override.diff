@@ -1,0 +1,248 @@
+diff --git i/gui/sysw_load.go w/gui/sysw_load.go
+index 3fc535f..45338df 100644
+--- i/gui/sysw_load.go
++++ w/gui/sysw_load.go
+@@ -166,10 +166,11 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
+ 	// RAM" is not on offer), and a payload with a record silently missing is
+ 	// not the payload the operator packed. This
+ 	// departs from this flow's rule that nothing here refuses (§13), for that
+-	// reason only. The same block also refuses a payload holding a secret
+-	// class outside a sealed section (FIX sec-sh-sysw-plaintext-refuse): every
+-	// record of a plaintext payload, or a record in a sealed payload's public
+-	// section.
++	// reason only. The same block also refuses, by default, a payload holding a
++	// secret class outside a sealed section (FIX sec-sh-sysw-plaintext-refuse):
++	// every record of a plaintext payload, or a record in a sealed payload's
++	// public section. That refusal alone has an override, LOAD ANYWAY, after
++	// which the payload loads as before and warns (Q3 re-ruled 2026-11-22).
+ 	if refugiumProfile {
+ 		if n, found := syswFirstPassphraseRecord(p); found {
+ 			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
+@@ -177,7 +178,19 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
+ 		}
+ 		if n, found := syswFirstSecretRecord(p); found {
+ 			showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
+-			return false
++			// Refused BY DEFAULT, with an explicit override (Brian 2026-11-22,
++			// Q3 re-ruled "Refuse, with override"). DO NOT LOAD is choice 0 and
++			// therefore the default, as BACK is on the UNLOAD confirmation: the
++			// resting position is the one that loads nothing. Back is DO NOT
++			// LOAD. The answer is not remembered: every load asks again.
++			cs := &ChoiceScreen{
++				Title:   "Unsealed Secret",
++				Lead:    syswPlaintextSecretOverrideLead,
++				Choices: []string{"DO NOT LOAD", "LOAD ANYWAY"},
++			}
++			if choice, ok := cs.Choose(ctx, th); !ok || choice != 1 {
++				return false
++			}
+ 		}
+ 	}
+ 
+@@ -336,7 +349,7 @@ func syswLoadWarnings(s *syswSession) []string {
+ 
+ // syswRefugiumLineShown reports whether the Refugium warning (section 14f) is on
+ // the Payload Warnings screen, so KEEP / UNLOAD follows it (the secret is in a
+-// sealed section here: a secret outside one was refused at load).
++// sealed section, or outside one and loaded by LOAD ANYWAY).
+ func syswRefugiumLineShown(s *syswSession) bool {
+ 	_, ok := syswRefugiumLine(s)
+ 	return ok
+@@ -390,5 +403,11 @@ func syswFirstSecretRecord(p *sysw.Payload) (int, bool) {
+ func syswPlaintextSecretRefusal(position int) string {
+ 	return fmt.Sprintf("Record %d of this payload is a secret, and it is not sealed. "+
+ 		"This build takes secrets only in the Sealed Payload, so nothing was loaded. "+
+-		"Pack the payload again without it.", position)
++		"Pack the payload again without it, or load it anyway on the next screen.", position)
+ }
++
++// syswPlaintextSecretOverrideLead is the override screen's question and its
++// cost: the systemwide session is the non-wiping class (sysw_session.go), and
++// UNLOAD drops it without zeroing it.
++const syswPlaintextSecretOverrideLead = "Load it anyway? Every program can then use its secret. " +
++	"It stays unencrypted in flash until a new payload is written."
+diff --git i/gui/sysw_load_refugium.go w/gui/sysw_load_refugium.go
+index 65db126..008d5cf 100644
+--- i/gui/sysw_load_refugium.go
++++ w/gui/sysw_load_refugium.go
+@@ -4,8 +4,9 @@ package gui
+ 
+ // syswRefugiumLine is SPEC_systemwide_payloads.md 14f: the Refugium build
+ // WARNS, and does not refuse, when a loaded SEALED payload holds a record whose
+-// class is secret by 3.3.1 in its sealed section; a secret outside a sealed
+-// section is refused at load (syswLoadFlow). It is decided by CLASS: an md1/mk1
++// class is secret by 3.3.1 in its sealed section, or outside one when the
++// operator chose LOAD ANYWAY over the refusal at load (syswLoadFlow). It is
++// decided by CLASS: an md1/mk1
+ // record that is secret only because it is unconfirmed does not raise it.
+ func syswRefugiumLine(s *syswSession) (string, bool) {
+ 	for _, r := range s.records {
+diff --git i/gui/sysw_plaintext_secret_refugium_test.go w/gui/sysw_plaintext_secret_refugium_test.go
+index 2e08730..69ac95c 100644
+--- i/gui/sysw_plaintext_secret_refugium_test.go
++++ w/gui/sysw_plaintext_secret_refugium_test.go
+@@ -17,12 +17,18 @@ import (
+ 
+ // FIX_sec-sh-sysw-plaintext-refuse (rows kitarch-a-s1-sysw-plaintext-secret,
+ // kitarch-b-s1-plaintext-secret-admitted, kitarch-c-a1-plaintext-secret-not-refused):
+-// the Refugium build refuses, whole and before the digest, a systemwide
+-// payload holding a secret outside a sealed section: a record whose CLASS is secret.
++// the Refugium build refuses by default, whole and before the digest, a
++// systemwide payload holding a secret outside a sealed section: a record whose
++// CLASS is secret; the operator may load it anyway on an explicit override
++// screen (Q3 re-ruled 2026-11-22).
+ 
+ const plaintextSecretRefusalFmt = "Record %d of this payload is a secret, and it is not sealed. " +
+ 	"This build takes secrets only in the Sealed Payload, so nothing was loaded. " +
+-	"Pack the payload again without it."
++	"Pack the payload again without it, or load it anyway on the next screen."
++
++// The override screen (Q3 re-ruled 2026-11-22, "Refuse, with override").
++const plaintextSecretOverrideLead = "Load it anyway? Every program can then use its secret. " +
++	"It stays unencrypted in flash until a new payload is written."
+ 
+ const plaintextSecretTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+ 
+@@ -82,7 +88,12 @@ func TestKitarchPlaintextSecretRefusedBeforeDigest(t *testing.T) {
+ 			if !uiContains(c, want) || uiContains(c, "Compare this against") {
+ 				t.Errorf("%s boot=%v: want the refusal before any digest; got %q", tc.name, boot, c)
+ 			}
+-			click(&ctx.Router, Button3) // dismiss the refusal; the flow must now return on its own
++			click(&ctx.Router, Button3) // dismiss the refusal; the override screen follows
++			if c2, ok := pumpUntil(frame, plaintextSecretOverrideLead, 64); !ok ||
++				!uiContains(c2, "DO NOT LOAD") || !uiContains(c2, "LOAD ANYWAY") {
++				t.Errorf("%s boot=%v: no override screen after the refusal; got %q", tc.name, boot, c2)
++			}
++			click(&ctx.Router, Button3) // the DEFAULT choice, DO NOT LOAD: the flow must now return on its own
+ 			ended := false
+ 			for i := 0; i < 64; i++ {
+ 				c2, more := frame()
+@@ -91,12 +102,12 @@ func TestKitarchPlaintextSecretRefusedBeforeDigest(t *testing.T) {
+ 					break
+ 				}
+ 				if uiContains(c2, "Compare this against") || uiContains(c2, "Keep this payload loaded?") {
+-					t.Errorf("%s boot=%v: the flow went on past the refusal: %q", tc.name, boot, c2)
++					t.Errorf("%s boot=%v: the flow went on past the default DO NOT LOAD: %q", tc.name, boot, c2)
+ 					break
+ 				}
+ 			}
+ 			if !ended {
+-				t.Errorf("%s boot=%v: the load flow did not return after the refusal was dismissed", tc.name, boot)
++				t.Errorf("%s boot=%v: the load flow did not return after DO NOT LOAD", tc.name, boot)
+ 			}
+ 			quit()
+ 			if ctx.sysw != nil || *ret {
+@@ -247,8 +258,113 @@ func TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused(t *testing.T
+ 			t.Fatalf("a secret in the cleartext section of a sealed payload was not refused; got %q", c)
+ 		}
+ 		if uiContains(c, fmt.Sprintf(plaintextSecretRefusalFmt, 2)) {
++			// Q3 override: LOAD ANYWAY on a sealed payload's public-section
++			// secret loads it, with the 14f line alone (no F1: the header is
++			// sealed) and then KEEP / UNLOAD.
++			click(&ctx.Router, Button3)
++			if c, ok := pumpUntil(frame, plaintextSecretOverrideLead, 64); !ok {
++				t.Fatalf("no override screen; got %q", c)
++			}
++			click(&ctx.Router, Down)
++			click(&ctx.Router, Button3) // LOAD ANYWAY
++			if c, ok := pumpUntil(frame, "Compare this against", 64); !ok {
++				t.Fatalf("LOAD ANYWAY did not reach the digest; got %q", c)
++			}
++			click(&ctx.Router, Button3)
++			c, ok := pumpUntil(frame, "Payload Warnings", 64)
++			if !ok || !uiContains(c, "Refugium build: secrets travel only in the Sealed Payload") ||
++				uiContains(c, "A SECRET is stored unencrypted in flash.") {
++				t.Fatalf("want the 14f line alone after LOAD ANYWAY; got %q", c)
++			}
++			click(&ctx.Router, Button3)
++			if c, ok := pumpUntil(frame, "Keep this payload loaded?", 32); !ok {
++				t.Fatalf("no KEEP / UNLOAD after LOAD ANYWAY; got %q", c)
++			}
+ 			return
+ 		}
+ 	}
+ 	t.Fatal("no refusal drawn")
+ }
++
++// overrideToOutcome drives a refused plaintext load through the override
++// screen with `keys` and reports what the flow then did.
++func overrideToOutcome(t *testing.T, ctx *Context, keys ...Button) (frame func() (string, bool), ret *bool, quit func()) {
++	t.Helper()
++	ret = new(bool)
++	frame, _, quit = runUITouch(ctx, func() {
++		*ret = syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
++	})
++	if c, ok := pumpUntil(frame, fmt.Sprintf(plaintextSecretRefusalFmt, 2), 64); !ok {
++		quit()
++		t.Fatalf("no refusal drawn; got %q", c)
++	}
++	click(&ctx.Router, Button3)
++	if c, ok := pumpUntil(frame, plaintextSecretOverrideLead, 64); !ok {
++		quit()
++		t.Fatalf("no override screen; got %q", c)
++	}
++	click(&ctx.Router, keys...)
++	return frame, ret, quit
++}
++
++// TestKitarchPlaintextSecretLoadAnywayLoadsAndWarns is RED row R8 (Q3
++// override): LOAD ANYWAY goes on to the digest, F1 and the 14f line, and
++// KEEP / UNLOAD; KEEP leaves the payload loaded. A second load of the same
++// payload is refused again: the override is per load, not remembered.
++func TestKitarchPlaintextSecretLoadAnywayLoadsAndWarns(t *testing.T) {
++	ctx := NewContext(kitPlatform(plaintextRegion(t, "text:48656c6c6f", plaintextSecretTestMnemonic)))
++	frame, ret, quit := overrideToOutcome(t, ctx, Down, Button3) // LOAD ANYWAY
++	if c, ok := pumpUntil(frame, "Compare this against", 64); !ok {
++		quit()
++		t.Fatalf("LOAD ANYWAY did not reach the digest comparison; got %q", c)
++	}
++	click(&ctx.Router, Button3) // the digest matched
++	c, ok := pumpUntil(frame, "Payload Warnings", 64)
++	if !ok || !uiContains(c, "A SECRET is stored unencrypted in flash.") ||
++		!uiContains(c, "Refugium build: secrets travel only in the Sealed Payload") {
++		quit()
++		t.Fatalf("want F1 then the 14f line after LOAD ANYWAY; got %q", c)
++	}
++	click(&ctx.Router, Button3)
++	if c, ok := pumpUntil(frame, "Keep this payload loaded?", 32); !ok {
++		quit()
++		t.Fatalf("no KEEP / UNLOAD after LOAD ANYWAY; got %q", c)
++	}
++	click(&ctx.Router, Button3) // KEEP
++	for i := 0; i < 64; i++ {
++		if _, more := frame(); !more {
++			break
++		}
++	}
++	quit()
++	if !*ret || ctx.sysw == nil || !ctx.sysw.loaded {
++		t.Fatalf("LOAD ANYWAY then KEEP left nothing loaded (ret=%v)", *ret)
++	}
++	// Per load only: LOAD AGAIN meets the refusal and the override again.
++	ctx.Done = false
++	_, _, quit2 := overrideToOutcome(t, ctx, Button1)
++	quit2()
++}
++
++// TestKitarchPlaintextSecretOverrideBackLoadsNothing is RED row R9: Back on
++// the override screen is DO NOT LOAD.
++func TestKitarchPlaintextSecretOverrideBackLoadsNothing(t *testing.T) {
++	ctx := NewContext(kitPlatform(plaintextRegion(t, "text:48656c6c6f", plaintextSecretTestMnemonic)))
++	frame, ret, quit := overrideToOutcome(t, ctx, Button1)
++	ended := false
++	for i := 0; i < 64; i++ {
++		c, more := frame()
++		if !more {
++			ended = true
++			break
++		}
++		if uiContains(c, "Compare this against") {
++			t.Errorf("Back on the override screen went on to the digest: %q", c)
++			break
++		}
++	}
++	quit()
++	if !ended || *ret || ctx.sysw != nil {
++		t.Errorf("Back on the override screen: ended=%v ret=%v sysw=%v", ended, *ret, ctx.sysw != nil)
++	}
++}

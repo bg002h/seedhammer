@@ -6,6 +6,7 @@ import "testing"
 // KEEP, on every load route, and the payload menu follows it (Brian 2026-11-22,
 // s1 I-2 option (b): the menu opens after every load of a kit payload).
 func TestKitRefusedOnceAtEveryLoad(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	const sentence = "Record 2 of this payload is not an md1, mk1 or mr1 string (it is: codex32 secret), so this payload is not a kit."
 	for _, boot := range []bool{true, false} {
 		p := kitPlatform(plaintextRegion(t, kitWithMs1(t)...))

@@ -43,6 +43,7 @@ func TestKitMenuOpensAfterLoadAgainOfEligibleKit(t *testing.T) {
 }
 
 func TestKitRefusedOnceThenMenuAfterLoadAgain(t *testing.T) {
+	skipUnderRefugium(t, refugiumSkipPlaintextSecret)
 	ctx := NewContext(kitPlatform(plaintextRegion(t, kitWithMs1(t)...)))
 	ctx.sysw = sessionWith(kitWithMs1(t)...)
 	frame, drawer, quit := runUITouch(ctx, func() { syswPayloadMenu(ctx, &descriptorTheme) })
