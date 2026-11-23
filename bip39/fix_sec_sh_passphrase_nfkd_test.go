@@ -91,3 +91,12 @@ func TestFixSecShPassphraseNfkdLongRunFast(t *testing.T) {
 		t.Fatal("long run of 50000 marks did not finish within 20s (quadratic appendNFKD)")
 	}
 }
+
+// The helper sorts each run of non-starters once, when the run ends, and the
+// sort must be stable: marks of equal CCC keep their order. A run that ends at
+// a starter mid-string must be sorted too (not only the final run).
+func TestFixSecShPassphraseNfkdRunsSortedStably(t *testing.T) {
+	m := nfkdAbandonAbout(t)
+	checkNfkdSeed(t, m, "run ends at a starter", "á̖b", "060defd33aa92ddab214d3daa2a11fc94c66cb05a8ee38d7cb5e0de937b19a9ed459f9d526f6761802908b1d202ea949e59e46adcabed90eab68a5cccd4b3231")
+	checkNfkdSeed(t, m, "equal-CCC marks keep order", "a"+strings.Repeat("́̀", 20)+"̖", "f87169d1f893440f4a201e581e375057941346cb736c5fadda9424b35b1371208b22332a8b628aea4302471bc5c62f7761b96d3ddd2308acc15e5e0acb50bd55")
+}
