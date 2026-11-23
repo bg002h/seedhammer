@@ -1,16 +1,19 @@
 diff --git i/bip39/bip39.go w/bip39/bip39.go
-index ca581c1..ae92dee 100644
+index ca581c1..1ee3cfb 100644
 --- i/bip39/bip39.go
 +++ w/bip39/bip39.go
-@@ -17,6 +17,7 @@ import (
+@@ -15,8 +15,10 @@ import (
+ 	"math/big"
+ 	"sort"
  	"strings"
++	"unicode/utf8"
  
  	"golang.org/x/crypto/pbkdf2"
 +	"golang.org/x/text/unicode/norm"
  )
  
  type Word int
-@@ -266,7 +267,20 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
+@@ -266,7 +268,54 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
  			sentence = append(sentence, ' ')
  		}
  	}
@@ -20,28 +23,63 @@ index ca581c1..ae92dee 100644
 +
 +// seedSalt returns "mnemonic" followed by the NFKD form of password, as
 +// BIP-39 requires. ASCII is its own NFKD form and is copied unchanged.
-+// Invalid UTF-8 bytes pass through unchanged.
++// Invalid UTF-8 bytes pass through unchanged. No stream-safe U+034F is
++// inserted (see appendNFKD).
 +func seedSalt(password string) []byte {
 +	salt := append(make([]byte, 0, len("mnemonic")+len(password)), "mnemonic"...)
 +	for i := 0; i < len(password); i++ {
 +		if password[i] >= 0x80 {
-+			return norm.NFKD.AppendString(salt, password)
++			return appendNFKD(salt, password)
 +		}
 +	}
 +	return append(salt, password...)
++}
++
++// appendNFKD appends the NFKD form of s to dst without the Stream-Safe Text
++// Format (UAX #15 s.13) U+034F insertion that norm applies after 30
++// non-starters: each rune is decomposed alone (no single decomposition reaches
++// 30 non-starters), then each run of non-starters is stably sorted by CCC.
++// Invalid UTF-8 bytes pass through unchanged as starters.
++func appendNFKD(dst []byte, s string) []byte {
++	start := len(dst) // start of the current run of non-starters
++	for i := 0; i < len(s); {
++		r, n := utf8.DecodeRuneInString(s[i:])
++		if r == utf8.RuneError && n == 1 {
++			dst = append(dst, s[i])
++			i++
++			start = len(dst)
++			continue
++		}
++		for _, d := range norm.NFKD.String(s[i : i+n]) {
++			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
++				dst = utf8.AppendRune(dst, d)
++				start = len(dst)
++				continue
++			}
++			dst = utf8.AppendRune(dst, d)
++			run := []rune(string(dst[start:]))
++			sort.SliceStable(run, func(a, b int) bool {
++				return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
++			})
++			dst = append(dst[:start], string(run)...)
++		}
++		i += n
++	}
++	return dst
  }
  
  func New(entropy []byte) Mnemonic {
 diff --git i/bip39/fix_sec_sh_passphrase_nfkd_test.go w/bip39/fix_sec_sh_passphrase_nfkd_test.go
 new file mode 100644
-index 0000000..b18e97b
+index 0000000..9d7dcc1
 --- /dev/null
 +++ w/bip39/fix_sec_sh_passphrase_nfkd_test.go
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,69 @@
 +package bip39
 +
 +import (
 +	"encoding/hex"
++	"strings"
 +	"testing"
 +)
 +
@@ -97,6 +135,14 @@ index 0000000..b18e97b
 +	m := nfkdAbandonAbout(t)
 +	checkNfkdSeed(t, m, "latin1", "caf\xe9", "439aad27d41563beae6cd52b6a2b64ef734193b39b796c4a2620e81f7ad668859ca09ba2f1ddfb521d696dec584d718ea4c046153e557a7f3c6c5e44918ff82c")
 +	checkNfkdSeed(t, m, "mixed", "\xffcafé", "f3d30b72b6e7a2c0b44e64bd343ce9afa5c8c88210f92be78cd3da65be6f312b1213aa33ab34859e3d8d8afb092ecd6a6d6a016bc01305d0552321ae5fa43115")
++}
++
++// x/text's norm applies the Stream-Safe Text Format (U+034F after 30
++// non-starters), which is not part of NFKD; the Rust primary and Python do not.
++func TestFixSecShPassphraseNfkdLongCombiningRun(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "31 acutes", "a"+strings.Repeat("\u0301", 31), "5b60cf53d7fd9730cee8e18f0dcf8fbc01e53d9cabfb3ae4aaf9bdd0ac9e58ba4d861773b6065c7ba30ea70157f3f8cee9e73229b7cc4a307e1ce19385a3cb6b")
++	checkNfkdSeed(t, m, "30 acutes + grave-below", "a"+strings.Repeat("\u0301", 30)+"\u0316", "1dfb7d57cac09826e0111bb912a7e9ae1e0529aa12d631ea797c57778729c5f75cbe87712e560ee2681119c44987288ebea09b874b3d90c5b615a94d7114d8b0")
 +}
 diff --git i/go.mod w/go.mod
 index 3c62928..1b3a7c3 100644

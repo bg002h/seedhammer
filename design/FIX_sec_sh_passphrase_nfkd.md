@@ -26,8 +26,12 @@ The mnemonic sentence needs no normalization: every word comes from `LabelFor` o
 ## 2. Spec delta (rules; §7 maps each to its rows)
 
 - **R1 (NFKD).** `MnemonicSeed(m, password)` uses the salt `"mnemonic"` followed by the NFKD form of `password`
-  (`golang.org/x/text/unicode/norm`, `norm.NFKD`). Equivalent spellings (canonical: U+00E9 vs `e`+U+0301; compatibility:
-  U+FB01 vs `fi`) derive one seed, equal to an independent NFKD computation.
+  (`golang.org/x/text/unicode/norm`, via the helper `appendNFKD`, §4.2). Equivalent spellings (canonical: U+00E9 vs `e`+U+0301; compatibility:
+  U+FB01 vs `fi`) derive one seed, equal to an independent NFKD computation. This includes runs of more than 30
+  non-starters: x/text's Stream-Safe U+034F insertion is not part of NFKD and is not applied (`appendNFKD`). Unicode
+  version: x/text v0.37.0 `norm.Version` is 15.0.0 (the Rust primary's `unicode-normalization` 0.1.25 is 17.0); a
+  character assigned after 15.0 passes through unnormalized, so a passphrase using one can derive a different seed from
+  an implementation on a newer Unicode. BIP-39 pins no version and this cannot be closed here.
 - **R2 (ASCII unchanged).** A passphrase whose bytes are all below 0x80 is its own NFKD form: the salt is the exact
   bytes `"mnemonic"+password`, as at base, without calling `norm` (the ASCII fast path). Every published ASCII vector
   (empty, `TREZOR`) keeps its seed.
@@ -48,13 +52,49 @@ toolkit manual `40-cli-reference/` documents no seedhammer passphrase behaviour)
 
 The scratch version is `design/FIX_sec_sh_passphrase_nfkd-probe.diff` (evidence, applied and reverted by the author).
 
-1. `bip39/bip39.go` import block (L6-20): add `"golang.org/x/text/unicode/norm"` after `"golang.org/x/crypto/pbkdf2"` (L19).
+1. `bip39/bip39.go` import block (L6-20): add `"golang.org/x/text/unicode/norm"` after `"golang.org/x/crypto/pbkdf2"` (L19); add `"unicode/utf8"` after `"strings"` (`"sort"` is already imported).
 2. `bip39/bip39.go:269`: the salt argument becomes a call to a new unexported helper (probe name `seedSalt(password
    string) []byte`, placed after `MnemonicSeed`). The helper allocates one buffer with capacity
    `len("mnemonic")+len(password)` holding `"mnemonic"`; if any byte of `password` is >= 0x80 it returns
-   `norm.NFKD.AppendString(buf, password)`, else `append(buf, password...)`. Doc comment (exact): `seedSalt returns
+   `appendNFKD(buf, password)`, else `append(buf, password...)`. Doc comment (exact): `seedSalt returns
    "mnemonic" followed by the NFKD form of password, as BIP-39 requires. ASCII is its own NFKD form and is copied
-   unchanged. Invalid UTF-8 bytes pass through unchanged.`
+   unchanged. Invalid UTF-8 bytes pass through unchanged. No stream-safe U+034F is inserted (see appendNFKD).`
+   `appendNFKD` is a new unexported helper in `bip39/bip39.go` after `seedSalt` (imports `sort`, `unicode/utf8`,
+   `golang.org/x/text/unicode/norm`); the body is in the probe diff:
+   ```go
+   // appendNFKD appends the NFKD form of s to dst without the Stream-Safe Text
+   // Format (UAX #15 s.13) U+034F insertion that norm applies after 30
+   // non-starters: each rune is decomposed alone (no single decomposition reaches
+   // 30 non-starters), then each run of non-starters is stably sorted by CCC.
+   // Invalid UTF-8 bytes pass through unchanged as starters.
+   func appendNFKD(dst []byte, s string) []byte {
+   	start := len(dst) // start of the current run of non-starters
+   	for i := 0; i < len(s); {
+   		r, n := utf8.DecodeRuneInString(s[i:])
+   		if r == utf8.RuneError && n == 1 {
+   			dst = append(dst, s[i])
+   			i++
+   			start = len(dst)
+   			continue
+   		}
+   		for _, d := range norm.NFKD.String(s[i : i+n]) {
+   			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
+   				dst = utf8.AppendRune(dst, d)
+   				start = len(dst)
+   				continue
+   			}
+   			dst = utf8.AppendRune(dst, d)
+   			run := []rune(string(dst[start:]))
+   			sort.SliceStable(run, func(a, b int) bool {
+   				return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
+   			})
+   			dst = append(dst[:start], string(run)...)
+   		}
+   		i += n
+   	}
+   	return dst
+   }
+   ```
 3. `go.mod`: move `golang.org/x/text v0.37.0` from the indirect block (L27, drop `// indirect`) to the direct block
    after `golang.org/x/image v0.41.0` (L16). No `go.sum` change (`go mod tidy -diff` exit 0 on the probe).
 4. `passphrase/passphrase.go` L3-7, the package doc's second paragraph, becomes (exact):
@@ -68,7 +108,7 @@ The scratch version is `design/FIX_sec_sh_passphrase_nfkd-probe.diff` (evidence,
 
 Secret residue: the salt and `sentence` buffers are not wiped, as at base; that class is owned by the open M row
 `sweep1122-sh-seed-residue-unwiped-class` and is out of scope. The ASCII path makes exactly one salt buffer (no
-growth); the NFKD path may grow it inside `AppendString` (only reachable by a non-ASCII library caller).
+growth); the NFKD path may grow it inside `appendNFKD` (only reachable by a non-ASCII library caller).
 
 ## 5. Tests
 
@@ -85,7 +125,14 @@ independently with Python 3 `hashlib.pbkdf2_hmac("sha512", sentence, b"mnemonic"
 - `TestFixSecShPassphraseNfkdInvalidUTF8` (R3): `"caf\xe9"` -> seed of the raw salt `mnemoniccaf\xe9`
   (`439aad27d41563be...918ff82c`); `"\xffcafé"` -> seed of `mnemonic\xffcafé` (`f3d30b72b6e7a2c0...5fa43115`).
 
-Full 128-hex values are in the probe test file. **Tests that change:** none. Existing seed tests (`bip32/master_test.go`,
+Full 128-hex values are in the probe test file.
+
+- `TestFixSecShPassphraseNfkdLongCombiningRun` (R1, no stream-safe; test file imports `strings`):
+  `"a"+strings.Repeat("\u0301", 31)` ->
+  `5b60cf53d7fd9730cee8e18f0dcf8fbc01e53d9cabfb3ae4aaf9bdd0ac9e58ba4d861773b6065c7ba30ea70157f3f8cee9e73229b7cc4a307e1ce19385a3cb6b`;
+  `"a"+strings.Repeat("\u0301", 30)+"\u0316"` ->
+  `1dfb7d57cac09826e0111bb912a7e9ae1e0529aa12d631ea797c57778729c5f75cbe87712e560ee2681119c44987288ebea09b874b3d90c5b615a94d7114d8b0`.
+  Expected values come from Python NFKD. **Tests that change:** none. Existing seed tests (`bip32/master_test.go`,
 `gui/derive_test.go`, `gui/master_key_residue_test.go`, `gui/gui_test.go`, `backup/`) use ASCII passphrases and pass
 unchanged (§8).
 
@@ -99,6 +146,7 @@ Command: `CGO_ENABLED=0 go test -count=1 -v -run 'TestFixSecShPassphraseNfkd' ./
 | TestFixSecShPassphraseNfkdCompatibility | FAIL: ligature `MnemonicSeed("ﬁ") = e5b3ee632ee9f793...` (`fi` matches) | PASS |
 | TestFixSecShPassphraseNfkdAsciiUnchanged | PASS (control) | PASS |
 | TestFixSecShPassphraseNfkdInvalidUTF8 | FAIL: mixed `MnemonicSeed("\xffcafé") = ff9373f48020e609...` (latin1 matches) | PASS |
+| TestFixSecShPassphraseNfkdLongCombiningRun | FAIL at base, and FAIL with plain `norm.NFKD.AppendString` (U+034F inserted; seed differs from Python) | PASS with `appendNFKD` |
 
 Mutations seen on the probe: `norm.NFD` instead of `norm.NFKD` fails Compatibility; `norm.NFKC` fails
 ComposedEqualsDecomposed and InvalidUTF8.
@@ -107,7 +155,7 @@ ComposedEqualsDecomposed and InvalidUTF8.
 
 | rule | rows |
 |---|---|
-| R1 NFKD, canonical and compatibility | TestFixSecShPassphraseNfkdComposedEqualsDecomposed; TestFixSecShPassphraseNfkdCompatibility |
+| R1 NFKD, canonical and compatibility, no stream-safe | TestFixSecShPassphraseNfkdComposedEqualsDecomposed; TestFixSecShPassphraseNfkdCompatibility; TestFixSecShPassphraseNfkdLongCombiningRun |
 | R2 ASCII unchanged | TestFixSecShPassphraseNfkdAsciiUnchanged; existing TREZOR seed tests in bip32 and gui |
 | R3 invalid UTF-8 passes through | TestFixSecShPassphraseNfkdInvalidUTF8 |
 | R4 unchanged elsewhere | existing `./...` suite; device builds (§8) |
@@ -130,7 +178,8 @@ RAM** (data 32228 -> 51660; the `norm` tables are package variables, which TinyG
 path does not reduce this (the package is linked either way). `-print-stacks` reports every goroutine as recursive
 at base and probe alike (no stack figure to compare). CI has no size gate; the recorded budget (mnemonic-engrave
 `design/STAGED_PLAN_tr_wsh_concrete_descriptors.md` L23: 62 KB = 11.8% static RAM) puts the cost near +3.7% of
-static RAM. The FIX takes the cost so the library is BIP-39-conformant on every target; the alternative (keep `norm`
+static RAM. The figures were measured on the plain-`norm` probe, before `appendNFKD` (r1 I1); the helper adds `sort` and
+`unicode/utf8` use and is not re-measured. **Architect to confirm this budget before the build** (r1 M2). The FIX takes the cost so the library is BIP-39-conformant on every target; the alternative (keep `norm`
 out of the TinyGo build behind a build tag, with a different non-ASCII behaviour on device) is a new edge-case
 decision and is not proposed.
 
@@ -146,5 +195,5 @@ decision and is not proposed.
 ## 10. Evidence
 
 RED and GREEN rows run by the author as in §6. Probe diff `design/FIX_sec_sh_passphrase_nfkd-probe.diff` sha256
-b5eb6e5f6026398200415945ffcb0b98b9afa1de3c20e00571eae4ea4886c21f; it was applied for the GREEN and size runs and
+0b68d3bc3e28e527b613fecea56ab296c93fb6354434caab4e03c08ad497e037; it was applied for the GREEN and size runs and
 reverted. Seed values in §5/§6 are captured from the runs and the Python computation, not written by hand.
