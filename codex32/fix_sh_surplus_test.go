@@ -93,3 +93,34 @@ func TestFixShCodex32DescribeTooMany(t *testing.T) {
 		t.Errorf("Describe = %q, want too many shares", got)
 	}
 }
+
+const (
+	surplusS1 = "ms13cashsqqqqqqqqqqqqqqqqqqqqqqqqqqx5nhqhcj5d4m6"
+	surplusS2 = "ms13cashsqyqqqqqqqqqqqqqqqqqqqqqqqqdy6f23tkz7qdx"
+)
+
+func surplusRepeated(t *testing.T, name string, target rune, ss ...string) {
+	t.Helper()
+	got, err := Interpolate(surplusSet(t, ss...), target)
+	if got != (String{}) {
+		t.Errorf("%s: returned %q, want zero String", name, got.String())
+	}
+	if err == nil || err.Error() != "repeated index" {
+		t.Errorf("%s: err = %v, want repeated index", name, err)
+	}
+}
+
+func TestFixShCodex32RepeatedTargetIndex(t *testing.T) {
+	surplusRepeated(t, "S1 S2", 'S', surplusS1, surplusS2)
+	surplusRepeated(t, "S2 S1", 'S', surplusS2, surplusS1)
+	surplusRepeated(t, "A S1 S2", 'S', surplusA, surplusS1, surplusS2)
+	surplusRepeated(t, "A A -> A", 'A', surplusA, surplusA)
+	got, err := Interpolate(surplusSet(t, surplusS1), 'S')
+	if err != nil || got.String() != surplusS1 {
+		t.Errorf("S1 alone: %q, %v", got.String(), err)
+	}
+	got, err = Interpolate(surplusSet(t, surplusA, surplusS1), 'S')
+	if err != nil || got.String() != surplusS1 {
+		t.Errorf("A S1 -> S: %q, %v", got.String(), err)
+	}
+}

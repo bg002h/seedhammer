@@ -55,19 +55,28 @@ base. Protocol text: bitcoin/bips master `bip-0093.mediawiki`, fetched 2026-11-2
   shares print nothing on stdout, stderr exactly `biptool: too many shares` and a newline, and exit **2** (main.go:88-90,
   the existing generic-failure branch; same shape as `biptool: insufficient shares`).
 - **R6 (unchanged).** Exactly k shares: output unchanged (BIP-93 vectors 2 and 3, biptool `TestInterpolate`). Fewer than
-  k: `insufficient shares` unchanged. A set whose target is one of its inputs and has at most k shares still returns
-  that input (L221-229, untouched). `ConsistentShares` (codex32/polish.go:152) is unchanged: it validates a partial set
-  as it is collected and does not take k.
+  k: `insufficient shares` unchanged. A set whose target is one of its inputs, with at most k shares and no repeated
+  index (R8), still returns that input (L221-229, untouched). `ConsistentShares` (codex32/polish.go:152) is unchanged:
+  it validates a partial set as it is collected and does not take k.
 - **R7 (doc comment).** After the line `// Using the index 'S' will recover the master seed.` (L190), add these lines,
 verbatim:
 ```
 //
 // The set must hold at most k shares, where k is the common threshold digit
-// (k is 1 for an unshared secret, threshold "0"), and exactly k to
-// interpolate an index that no input has. A set of more than k shares is
-// refused, per BIP-93: the number of shares is exactly the threshold.
+// (k is 1 for threshold "0"), and exactly k to interpolate an index that no
+// input has. A set of more than k shares is refused, per BIP-93: the number
+// of shares is exactly the threshold. A set with a repeated index is refused,
+// even when the target is that index.
 ```
 Not holder-visible.
+- **R8 (repeated index; ruled architect-sh12-i1).** Right after R1's count check and before the input-index early
+  return, `Interpolate` refuses a set in which two strings have the same index, for every target, with the existing
+  `errRepeatedIndex`, text **`repeated index`**. BIP-93 L255: "All of the share index values are distinct." This
+  closes two different index-`s` strings with a non-"0" threshold digit (L169-170: a secret's threshold digit is
+  ignored; L346: a k-of-n secret carries digit k), which at 00c353d return the first, exit 0, and any repeated index
+  equal to the target (A A `-idx a` returned A). A surplus set still gets `too many shares` (R2) and a threshold-"0"
+  pair still gets `too many shares` (R3), because the count runs first. A A `-idx s` changes from `insufficient
+  shares` to `repeated index`.
 
 ## 3. OPEN-1 (ruled (a), architect-bh-batch34)
 
@@ -89,7 +98,7 @@ matches BIP-93's reading that an unshared secret is a single string. **Ruled (a)
 
 ## 4. Changes (by file; for build ordering)
 
-Source files this FIX changes: `codex32/codex32.go` (sentinel in the var block L23-38; count check after L217; doc
+Source files this FIX changes: `codex32/codex32.go` (sentinel in the var block L23-38; count check and repeated-index check (R8) after L217; doc
 comment L188-190), `codex32/polish.go` (one `Describe` case after L55). New test files: `codex32/fix_sh_surplus_test.go`,
 `cmd/biptool/fix_sh_surplus_test.go`. No other file. Not touched: `gui/`, `cmd/biptool/main.go`.
 The author's probe is `design/FIX_sh_codex32_surplus_shares-probe.diff` (6 added lines; applies with `git apply --check`
@@ -113,6 +122,10 @@ T0a and T0b (the two threshold-0 strings of §1). Each refusal row asserts: retu
   nil; A C, target `S`: `insufficient shares`; A C D, target `A`: returns A, nil.
 - `TestFixShCodex32Threshold0` (R3): T0a alone, target `S`: T0a, nil; T0a T0b, T0b T0a and T0a T0a, target `S`: refused.
 - `TestFixShCodex32DescribeTooMany` (R4): `Describe` of the error from A C D E, target `S`, is `too many shares`.
+- `TestFixShCodex32RepeatedTargetIndex` (R8): S1 S2, S2 S1, A S1 S2 (target `S`) and A A (target `A`): zero `String`,
+  error text `repeated index`; S1 alone and A S1 (target `S`): S1, nil. S1 `ms13cashsqqqqqqqqqqqqqqqqqqqqqqqqqqx5nhqhcj5d4m6`
+  and S2 `ms13cashsqyqqqqqqqqqqqqqqqqqqqqqqqqdy6f23tkz7qdx` are `NewSeed("ms", 3, "cash", 'S', ...)` from 16 zero bytes and
+  from 0x01 + 15 zero bytes.
 - `cmd/biptool/fix_sh_surplus_test.go` `TestFixShBiptoolSurplusShares` (R5), through `execErr` (main_test.go:304):
   stdin A C D X (one per line) for `interpolate -idx s` and for `derive seed`: stdout empty, error text
   `too many shares`. Exit 2 and the `biptool: ` prefix are `main`'s existing generic branch (seen in §7's CLI rows).
@@ -133,8 +146,11 @@ assertion, and the probe fails it as expected (`consistent extra changed result:
 | R5 biptool text and exit | BiptoolSurplusShares; CLI rows §7 |
 | R6 unchanged | ExactKUnchanged; BIP vectors 2, 3; biptool TestInterpolate; gui subset |
 | R7 doc comment | none (not behaviour) |
+| R8 repeated index | RepeatedTargetIndex; CLI rows §7 |
 
 ## 7. RED rows (run by the author on base 25abe8e; "after" seen on the probe)
+
+These rows were seen at 00c353d ("at base" column) and on the R8 patch, not at 25abe8e.
 
 Library rows, as scratch tests in `codex32/` (removed after the run), `go test -p 2 -count=1 -v ./codex32/`:
 
@@ -146,6 +162,8 @@ Library rows, as scratch tests in `codex32/` (removed after the run), `go test -
 | A C D D, S | `repeated index` | `too many shares` |
 | T0a T0b, S / T0b T0a, S | T0a, nil / T0b, nil | `too many shares` |
 | T0a T0a, S | T0a, nil | `too many shares` |
+| S1 S2, S / S2 S1, S / A S1 S2, S | S1, nil / S2, nil / S1, nil | `repeated index` |
+| A A, A | A, nil | `repeated index` |
 
 CLI rows, `printf '%s\n' <shares> | biptool <verb>`, binaries built from base and from the probe:
 
@@ -159,6 +177,8 @@ CLI rows, `printf '%s\n' <shares> | biptool <verb>`, binaries built from base an
 | A C | interpolate -idx s | `biptool: insufficient shares`, exit 2 | same |
 | T0a | both | T0a; `00000000000000000000000000000000`; exit 0 | same |
 | T0a T0b | both | T0a; `00000000000000000000000000000000`; exit 0 | `biptool: too many shares`, exit 2 |
+| S1 S2 and A S1 S2 | interpolate -idx s; derive seed | S1; `00000000000000000000000000000000`; exit 0 (S2 S1: `01000000000000000000000000000000`) | `biptool: repeated index`, exit 2 |
+| A A | interpolate -idx a / -idx s | A, exit 0 / `biptool: insufficient shares`, exit 2 | `biptool: repeated index`, exit 2 |
 
 (`derive seed` writes raw bytes; the author piped it through `xxd -p`.)
 
