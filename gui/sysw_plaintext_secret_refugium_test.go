@@ -28,7 +28,7 @@ const plaintextSecretRefusalFmt = "Record %d of this payload is a secret, and it
 
 // The override screen (Q3 re-ruled 2026-11-22, "Refuse, with override").
 const plaintextSecretOverrideLead = "Load it anyway? Every program can then use its secret. " +
-	"It stays unencrypted in flash until a new payload is written."
+	"It stays unencrypted in flash until you wipe it from the host."
 
 const plaintextSecretTestMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
@@ -366,5 +366,67 @@ func TestKitarchPlaintextSecretOverrideBackLoadsNothing(t *testing.T) {
 	quit()
 	if !ended || *ret || ctx.sysw != nil {
 		t.Errorf("Back on the override screen: ended=%v ret=%v sysw=%v", ended, *ret, ctx.sysw != nil)
+	}
+}
+
+// TestKitarchLoadAgainDeclineLeavesNothingLoaded is RED row R1c: LOAD AGAIN
+// re-reads the same region (it cannot change while the GUI runs), so after
+// LOAD ANYWAY + KEEP the loaded session holds this very secret. DO NOT LOAD,
+// or Back, on the re-asked override must leave nothing loaded, as the modal
+// says ("so nothing was loaded") and as declining the digest does.
+func TestKitarchLoadAgainDeclineLeavesNothingLoaded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  Button
+	}{{"DO NOT LOAD", Button3}, {"Back", Button1}} {
+		ctx := NewContext(kitPlatform(plaintextRegion(t, "text:48656c6c6f", plaintextSecretTestMnemonic)))
+		frame, ret, quit := overrideToOutcome(t, ctx, Down, Button3) // LOAD ANYWAY
+		for _, s := range []string{"Compare this against", "Payload Warnings", "Keep this payload loaded?"} {
+			if c, ok := pumpUntil(frame, s, 64); !ok {
+				quit()
+				t.Fatalf("%s: setup: no %q; got %q", tc.name, s, c)
+			}
+			click(&ctx.Router, Button3) // the digest matched, acknowledge, KEEP
+		}
+		for i := 0; i < 64; i++ {
+			if _, more := frame(); !more {
+				break
+			}
+		}
+		quit()
+		if !*ret || ctx.sysw == nil || !ctx.sysw.loaded {
+			t.Fatalf("%s: INCONCLUSIVE: LOAD ANYWAY + KEEP left nothing loaded (ret=%v)", tc.name, *ret)
+		}
+		ctx.Done = false
+		frame2, ret2, quit2 := overrideToOutcome(t, ctx, tc.key) // LOAD AGAIN, then decline
+		ended := false
+		for i := 0; i < 64; i++ {
+			if _, more := frame2(); !more {
+				ended = true
+				break
+			}
+		}
+		quit2()
+		if !ended || *ret2 || ctx.sysw != nil {
+			t.Errorf("%s on LOAD AGAIN left a session (ended=%v, ret=%v, sysw=%v); the modal said nothing was loaded",
+				tc.name, ended, *ret2, ctx.sysw != nil)
+		}
+	}
+}
+
+// TestKitarchPlaintextSecretOverrideLabelOrder is RED row R9b: row 0 (the
+// default, what Back selects) is labelled DO NOT LOAD, LOAD ANYWAY is below it.
+func TestKitarchPlaintextSecretOverrideLabelOrder(t *testing.T) {
+	ctx := NewContext(kitPlatform(plaintextRegion(t, "text:48656c6c6f", plaintextSecretTestMnemonic)))
+	frame, _, quit := overrideToOutcome(t, ctx) // no key: stay on the override screen
+	defer quit()
+	c, ok := pumpUntil(frame, plaintextSecretOverrideLead, 64)
+	if !ok {
+		t.Fatalf("override screen not redrawn; got %q", c)
+	}
+	flat := strings.ReplaceAll(strings.ToLower(c), " ", "")
+	a, b := strings.Index(flat, "donotload"), strings.Index(flat, "loadanyway")
+	if a < 0 || b < 0 || a > b {
+		t.Errorf("want DO NOT LOAD before LOAD ANYWAY (row 0 first); indexes %d, %d in %q", a, b, c)
 	}
 }

@@ -177,6 +177,12 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			return false
 		}
 		if n, found := syswFirstSecretRecord(p); found {
+			// A session already loaded here came from this same region (LOAD
+			// AGAIN re-reads it, and it cannot change while the GUI runs), so
+			// it holds this secret: drop it before the modal says "nothing
+			// was loaded", as declining the digest drops one. LOAD ANYWAY
+			// loads it again below.
+			ctx.sysw = nil
 			showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
 			// Refused BY DEFAULT, with an explicit override (Brian 2026-11-22,
 			// Q3 re-ruled "Refuse, with override"). DO NOT LOAD is choice 0 and
@@ -410,4 +416,4 @@ func syswPlaintextSecretRefusal(position int) string {
 // cost: the systemwide session is the non-wiping class (sysw_session.go), and
 // UNLOAD drops it without zeroing it.
 const syswPlaintextSecretOverrideLead = "Load it anyway? Every program can then use its secret. " +
-	"It stays unencrypted in flash until a new payload is written."
+	"It stays unencrypted in flash until you wipe it from the host."

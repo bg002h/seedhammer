@@ -26,7 +26,7 @@ authenticated (`sysw/open.go:44-64`), so the refusal keys on the SECTION, not on
 
 - **R1 (refuse).** Refugium build only. After `sysw.Open` succeeds and after the `pass:` refusal, when any record in the payload's PUBLIC (cleartext) section, which is every record of a
   plaintext payload, has a secret class by `sysw.Classify(r).IsSecret()`, the flow shows the
-  modal of §3, then the override screen of §3; DO NOT LOAD (the default) or Back returns false. Unless LOAD ANYWAY is chosen: no digest screen, no session (`ctx.sysw` is not assigned), no Payload Warnings, no
+  modal of §3, then the override screen of §3; DO NOT LOAD (the default) or Back returns false. Unless LOAD ANYWAY is chosen: no digest screen, no session (`ctx.sysw` is nil from the refusal on: a session an earlier LOAD ANYWAY left, which LOAD AGAIN re-reading the same region would otherwise keep, is dropped before the modal, as declining the digest drops one), no Payload Warnings, no
   KEEP / UNLOAD. Identical on every route into `syswLoadFlow`: boot (`gui/gui.go:2136`, after LOAD), the carousel's
   Load Payload and LOAD AGAIN (`gui/sysw_unload.go:120`); all three are this one function.
 - **R2 (position).** The modal names the FIRST secret record by 1-based position counted over `p.Public` (in a plaintext payload `p.Secret` is always empty,
@@ -47,7 +47,7 @@ authenticated (`sysw/open.go:44-64`), so the refusal keys on the SECTION, not on
   comment (`gui/sysw_load.go:160-169`) argues: `sysw.Open` has already decoded the records into Go strings (not
   wipeable), but no session, picker default or program ever sees them.
 - **R8 (override).** LOAD ANYWAY continues the unchanged flow: digest, session, Payload Warnings with the §14f line (after F1 in a plaintext payload; last and alone of the secret lines in a sealed one), then KEEP / UNLOAD. Nothing about wiping changes (the session is non-wiping, decision 2). The choice is per load and is never remembered.
-- **R9 (default and Back).** On the override screen DO NOT LOAD is choice 0, highlighted and the default (`Initial` left at zero). DO NOT LOAD, or Back (`!ok`), returns false with no further screen and loads nothing.
+- **R9 (default and Back).** On the override screen DO NOT LOAD is choice 0, highlighted and the default (`Initial` left at zero); row 0 is the row labelled DO NOT LOAD. DO NOT LOAD, or Back (`!ok`), returns false with no further screen and leaves nothing loaded, on LOAD AGAIN too (R1).
 
 ## 3. Holder-visible changes (complete list)
 
@@ -66,15 +66,15 @@ Two screens, Refugium build only, in this order. First, one modal via `showError
 Second, the override screen, a `ChoiceScreen`:
 
 - Title: `Unsealed Secret`.
-- Lead: `Load it anyway? Every program can then use its secret. It stays unencrypted in flash until a new payload is written.`
+- Lead: `Load it anyway? Every program can then use its secret. It stays unencrypted in flash until you wipe it from the host.`
 - Choices: `{"DO NOT LOAD", "LOAD ANYWAY"}`, `Initial` left at its zero value, so DO NOT LOAD (index 0) is highlighted and is the
   default (the pattern of `gui/sysw_unload.go:156-167`, "BACK is choice 0 and therefore the DEFAULT").
-- DO NOT LOAD, or Back (`!ok`): `return false`, with no further screen (the modal already said "nothing was loaded").
+- DO NOT LOAD, or Back (`!ok`): `return false`, with no further screen (the modal already said "nothing was loaded"). On LOAD AGAIN after an earlier LOAD ANYWAY and KEEP, the loaded session (the same region, so the same secret) is dropped before the modal is drawn, so the modal is true of the device and DO NOT LOAD or Back leaves nothing loaded; LOAD ANYWAY loads it again. No text changes for this.
 - LOAD ANYWAY (index 1): falls through to the unchanged flow (digest, session, Payload Warnings, KEEP / UNLOAD).
 - Not remembered: the answer lives only in this call, with no field and no state. Boot, Load Payload and LOAD AGAIN each
   ask again.
 
-Both texts are confirmed (agent-reports/architect-sh19-q3-override.md Q1); "without it" stays.
+Both texts are confirmed (agent-reports/architect-sh19-q3-override.md Q1); "without it" stays. The lead's last sentence was "It stays unencrypted in flash until a new payload is written." until the review fold (coordinator agent-reports/architect-sh19-review-qs.md Q2): `me sysw pack` without `--region` writes only the container, and a shorter one leaves the old records in flash (mnemonic-engrave `crates/me-cli/src/sysw/overwrite.rs:8-10`); the new sentence uses the UNLOAD result's "Wipe it from the host." (`gui/sysw_unload.go:178`). Measured with `widget.Labelw` at 480 px: both leads are two lines, 450x44, inside the 44 px lead band.
 
 No other text changes. No exit code (device UI). The §14f line, F1's line and KEEP / UNLOAD are unchanged and still
 shown for sealed payloads (R5) and for unconfirmed-only plaintext payloads (R3).
@@ -87,8 +87,9 @@ shown for sealed payloads (R5) and for unconfirmed-only plaintext payloads (R3).
   the prototype's `gui/sysw_load.go:178-195` (`design/FIX_sec-sh-sysw-plaintext-refuse-override.diff`, hunk at `@@ -177,7 +178,19 @@`): a `ChoiceScreen`
   `cs` with Title `"Unsealed Secret"`, Lead `syswPlaintextSecretOverrideLead` and Choices `[]string{"DO NOT LOAD",
   "LOAD ANYWAY"}`, then `if choice, ok := cs.Choose(ctx, th); !ok || choice != 1 { return false }`.
+- `gui/sysw_load.go`, review fold (architect-sh19-review-qs Q1): directly before that `showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))`, `ctx.sysw = nil` with the comment "A session already loaded here came from this same region (LOAD AGAIN re-reads it, and it cannot change while the GUI runs), so it holds this secret: drop it before the modal says "nothing was loaded", as declining the digest drops one. LOAD ANYWAY loads it again below."
 - `gui/sysw_load.go`, a new const `syswPlaintextSecretOverrideLead` (prototype L410-413), after
-  `syswPlaintextSecretRefusal`: `"Load it anyway? Every program can then use its secret. " + "It stays unencrypted in flash until a new payload is written."`
+  `syswPlaintextSecretRefusal`: `"Load it anyway? Every program can then use its secret. " + "It stays unencrypted in flash until you wipe it from the host."`
   (the §3 lead). `syswPlaintextSecretRefusal`'s text gains the §3 tail, "Pack the payload again without it, or load it
   anyway on the next screen."
 - `gui/sysw_load.go`, two new functions after `syswPassphraseRecordRefusal` (L359-363):
@@ -145,6 +146,10 @@ New file `gui/sysw_plaintext_secret_refugium_test.go` (`//go:build refugium`), c
 - `TestKitarchPlaintextSecretLoadAnywayLoadsAndWarns` (R8): LOAD ANYWAY, digest, F1 and the §14f line, KEEP, `ret` true and a
   session loaded. A second `syswLoadFlow` on the same ctx draws the refusal again.
 - `TestKitarchPlaintextSecretOverrideBackLoadsNothing` (R9): Back on the override screen loads nothing.
+- `TestKitarchLoadAgainDeclineLeavesNothingLoaded` (R1c, review fold Q1): LOAD ANYWAY, digest, Payload Warnings, KEEP; then a second `syswLoadFlow` on the same ctx (LOAD AGAIN), and DO NOT LOAD (subtest 1) or Back (subtest 2) on the override: the flow returns false and `ctx.sysw == nil`.
+- `TestKitarchPlaintextSecretOverrideLabelOrder` (R9b, review s2 I-1): on the override screen "DO NOT LOAD" is drawn before "LOAD ANYWAY", so row 0, the default, carries the DO NOT LOAD label.
+
+The two review-fold rows are verbatim from coordinator agent-reports/architect-sh19-review-qs.md, not from the diffs; the diffs also keep the former lead text, as the record of 19c8dd18.
 
 All test texts, and the changed texts of the existing tests, are taken verbatim from `design/FIX_sec-sh-sysw-plaintext-refuse-override.diff`. The nine
 skipped tests and the skip reason stay as they are: "refused at load" is still the default, and driving them through the
@@ -199,12 +204,18 @@ The same command throughout: `go test -tags refugium -count=1 -run '^TestKitarch
   - `GOOS=js GOARCH=wasm go vet -tags refugium ./cmd/emu/` rc=0.
   - gofmt clean on the changed files. The 3 gofmt hits in gui/transaction*.go exist on 19c8dd18 too.
   - Not run: the full untagged suite, TinyGo and elf-check (the rebuild owes them).
+- **Review fold (architect-sh19-review-qs, on a9a47470), same command:**
+  - RED, a9a47470 with only the test-file changes (`/scratch/cache/arch-sh19-rv/red-all.txt`), rc=1: 6 FAIL (R1, sealed-public, R8, R9 on the changed lead; R1c `DO NOT LOAD on LOAD AGAIN left a session (ended=true, ret=false, sysw=true)` and the same for Back; R9b on the lead), 4 PASS.
+  - RED R9b, plant `Choices: []string{"LOAD ANYWAY", "DO NOT LOAD"}` on a9a47470 (`/scratch/cache/arch-sh19-rv/plant-r9c.txt`): `want DO NOT LOAD before LOAD ANYWAY (row 0 first)`, FAIL.
+  - GREEN (`/scratch/cache/arch-sh19-rv/green.txt`): 10 PASS, `ok seedhammer.com/gui`.
+  - `./scripts/refugium-tagged-test.sh 6`: `RESULT: ok -- 1320 passed, 68 stepped aside for the profile and 2 for the environment, 9 deferred-minor, of 1399 tests under -tags refugium` (`/scratch/cache/arch-sh19-rv/tagged.txt`).
 
 ## 7. Coverage map (rule -> rows)
 
 | Rule | Rows |
 |---|---|
 | R1 refuse, both routes, no session, dismiss-and-drain | TestKitarchPlaintextSecretRefusedBeforeDigest (RED) |
+| R1 a session already loaded is dropped (LOAD AGAIN, then DO NOT LOAD or Back) | TestKitarchLoadAgainDeclineLeavesNothingLoaded (RED) |
 | R1 section-keyed (public section of a sealed payload) | TestKitarchSecretInTheCleartextSectionOfASealedPayload (unit), TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused (RED) |
 | R2 first position | TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord (RED), R1's "Record 2" |
 | R3 class not flag; F1 then KEEP / UNLOAD unchanged | TestKitarchPlaintextWithoutSecretClassStillLoads (guard, incl. the flow to "Keep this payload loaded?") |
@@ -213,7 +224,7 @@ The same command throughout: `go test -tags refugium -count=1 -run '^TestKitarch
 | R6 default unchanged | the untagged suite, incl. the nine changed tests running unskipped (existing) |
 | R7 no session | R1's dismiss-and-drain plus `ctx.sysw == nil` |
 | R8 override loads and warns | TestKitarchPlaintextSecretLoadAnywayLoadsAndWarns, plus the sealed-public flow test |
-| R9 / default is DO NOT LOAD | TestKitarchPlaintextSecretOverrideBackLoadsNothing, plus R1 (P2, P3) |
+| R9 / default is DO NOT LOAD | TestKitarchPlaintextSecretOverrideBackLoadsNothing, TestKitarchPlaintextSecretOverrideLabelOrder (label of row 0; plant R9c), plus R1 (P2, P3) |
 | per load, never remembered | R8's second load (P4) |
 
 ## 8. Gate (the repo's CI jobs, `.github/workflows/test.yml`; run once each to a file and grep it)
@@ -242,9 +253,9 @@ ELF and absent in the Refugium ELF". Keep TMPDIR and GOCACHE outside the worktre
   - §3 third amendment (anchor: "in the Refugium build, a loaded payload (plaintext or sealed) holding a genuinely secret
     class gets one more warning line"), replace the paragraph with: `A third amendment, 2026-11-22 (§14f): **in the Refugium build, a payload holding a genuinely secret class outside a sealed section (any record of a plaintext payload, or one in a sealed payload's public section) is refused at load by default, and loads only if the operator chooses LOAD ANYWAY on an explicit override screen**; a loaded payload holding one (in a sealed section, or loaded anyway) gets one more warning line, which names the Sealed Payload as the only way secrets travel in that build (Brian's Q3 ruling, re-ruled 2026-11-22: refuse, with override). `ClassMr` is not secret and raises no flag but F3.`
   - §14a, the Q3 bullet (anchor: "- Q3: the Refugium build WARNS on a loaded payload"), replace it with: `- Q3 (re-ruled by Brian 2026-11-22, "Refuse, with override"): the Refugium build REFUSES at load, by default, a payload holding a record of a genuinely secret class outside a sealed section (every such record of a plaintext payload, and any in the public section of a sealed one), and loads it only when the operator chooses LOAD ANYWAY (§14f); it WARNS on a loaded payload holding one, in a sealed section (STOP-2, RULED (a): Brian 2026-11-22) or loaded anyway. Decision 6 is unchanged for the default build; §3.3.3 and §14f add the refusal, the override and the warning line.`
-  - §14f first paragraph (anchor: up to "The line:"), replace it with: `In the Refugium build, a payload holding a record whose class is secret by §3.3.1 (`ClassMnemonic`, `ClassCodex32Secret`, `ClassPassphrase`, `ClassPreimage`, `ClassPhrase`) in its public section, which is every record of a plaintext payload, is refused at load by default: after the `pass:` refusal, before the digest, and before any session exists, with the title "Load Payload" and the text "Record <n> of this payload is a secret, and it is not sealed. This build takes secrets only in the Sealed Payload, so nothing was loaded. Pack the payload again without it, or load it anyway on the next screen." Here <n> is the first such record's position as §14g counts it. The override screen follows, titled "Unsealed Secret", asking "Load it anyway? Every program can then use its secret. It stays unencrypted in flash until a new payload is written." with the choices DO NOT LOAD (the default) and LOAD ANYWAY. DO NOT LOAD, or Back, ends the load with nothing loaded. LOAD ANYWAY goes on as a load with no refusal. Every load asks again. When a loaded payload holds such a record, in its sealed section (STOP-2, RULED (a): Brian 2026-11-22) or loaded anyway, the "Payload Warnings" screen shows the line below: in a plaintext payload directly after the line "A SECRET is stored unencrypted in flash."; in a sealed payload as the screen's last line, after F2's line when F2 is raised, and the screen shows for this line alone when no flag is raised. The line:`
+  - §14f first paragraph (anchor: up to "The line:"), replace it with: `In the Refugium build, a payload holding a record whose class is secret by §3.3.1 (`ClassMnemonic`, `ClassCodex32Secret`, `ClassPassphrase`, `ClassPreimage`, `ClassPhrase`) in its public section, which is every record of a plaintext payload, is refused at load by default: after the `pass:` refusal, before the digest, and before any session exists, with the title "Load Payload" and the text "Record <n> of this payload is a secret, and it is not sealed. This build takes secrets only in the Sealed Payload, so nothing was loaded. Pack the payload again without it, or load it anyway on the next screen." Here <n> is the first such record's position as §14g counts it. The override screen follows, titled "Unsealed Secret", asking "Load it anyway? Every program can then use its secret. It stays unencrypted in flash until you wipe it from the host." with the choices DO NOT LOAD (the default) and LOAD ANYWAY. DO NOT LOAD, or Back, ends the load with nothing loaded, also on a second load after an earlier LOAD ANYWAY (that payload is dropped). LOAD ANYWAY goes on as a load with no refusal. Every load asks again. When a loaded payload holds such a record, in its sealed section (STOP-2, RULED (a): Brian 2026-11-22) or loaded anyway, the "Payload Warnings" screen shows the line below: in a plaintext payload directly after the line "A SECRET is stored unencrypted in flash."; in a sealed payload as the screen's last line, after F2's line when F2 is raised, and the screen shows for this line alone when no flag is raised. The line:`
   - §14f (anchor: "The KEEP / UNLOAD choice follows the screen whenever this line is on it, and nothing is refused (Q3)." through "is unchanged."), replace that text with: `The KEEP / UNLOAD choice follows the screen whenever this line is on it. An md1/mk1 or mt1 record that is secret only because the device could not confirm it (`[mdmk-decode]`) is neither refused nor raises this line; its own F1 line is unchanged. The `pass:` refusal comes first and has no override. LOAD ANYWAY changes nothing else: the session is the same non-wiping session (decision 2).`
-  - Test row 31 (anchor: "31. **(§14f)**"), replace the row with: `31. **(§14f)** In the Refugium build a payload holding a genuinely secret class outside a sealed section (plaintext, or a sealed payload's public section) is refused before the digest and then offered the override with DO NOT LOAD the default; DO NOT LOAD and Back load nothing; LOAD ANYWAY reaches the digest, then the warning line (plaintext, directly after the F1 line; sealed, as the last line), then KEEP / UNLOAD, and a second load asks again. A sealed payload holding one only in its sealed section gets the line as the last line (alone on a strong-passphrase payload), then KEEP / UNLOAD; an unconfirmed md1/mk1 alone is neither refused nor raises it; the default build never refuses or shows it.`
+  - Test row 31 (anchor: "31. **(§14f)**"), replace the row with: `31. **(§14f)** In the Refugium build a payload holding a genuinely secret class outside a sealed section (plaintext, or a sealed payload's public section) is refused before the digest and then offered the override with DO NOT LOAD the default; DO NOT LOAD and Back leave nothing loaded, also on a second load after LOAD ANYWAY; LOAD ANYWAY reaches the digest, then the warning line (plaintext, directly after the F1 line; sealed, as the last line), then KEEP / UNLOAD, and a second load asks again. A sealed payload holding one only in its sealed section gets the line as the last line (alone on a strong-passphrase payload), then KEEP / UNLOAD; an unconfirmed md1/mk1 alone is neither refused nor raises it; the default build never refuses or shows it.`
   - §14k (anchor: "and keeps every kit row open" through "(§14f warns; nothing refuses);"), replace that text with: `itself. The build of FIX sec-sh-sysw-plaintext-refuse (Q3 re-ruled: refuse, with override, §14f) closes `kitarch-a-s1`, `kitarch-c-a1` and the seedhammer half of `kitarch-b-s1`; `kitarch-b-s1` stays open for its host half (`me sysw pack` still writes such a payload, decision 6);`
 - FOLLOWUPS: none closed (the rows live in coordinator `status/secret-criticals.md`); none filed by this document.
   `kitarch-b-s1` stays open until its host half (`me sysw pack` permits plaintext secrets, spec decision 6) lands in
