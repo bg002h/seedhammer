@@ -1,0 +1,369 @@
+diff --git i/.github/workflows/test.yml w/.github/workflows/test.yml
+index c8b3f5b..3cbb7a0 100644
+--- i/.github/workflows/test.yml
++++ w/.github/workflows/test.yml
+@@ -151,11 +151,12 @@ jobs:
+     # The Refugium build (Refugium plan F7 §4.5): the same flags plus the tag.
+     - name: TinyGo device build, -tags refugium
+       run: nix develop --command tinygo build -size short -o refugium.elf -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks -tags refugium ./cmd/controller
+-    # The device half of the absence gate: every marker (the lock-boot log
+-    # format, the OTP redirect URL, the proof triggers, Poller.Read,
+-    # qaEngraveFlow, the OTP write primitives) PRESENT in default.elf and
+-    # ABSENT in refugium.elf, and the profile's own notices the other way
+-    # round. Allocated sections only, so DWARF cannot match.
++    # The device half of the absence gate: every marker (the proof triggers,
++    # Poller.Read, qaEngraveFlow) PRESENT in default.elf and ABSENT in
++    # refugium.elf, the profile's own notices the other way round, and the
++    # removed lock-boot arm's log format, the OTP redirect URL and the OTP
++    # write primitives ABSENT from both. Allocated sections only, so DWARF
++    # cannot match.
+     - name: Refugium ELF marker check
+       run: ./scripts/refugium-elf-check.sh default.elf refugium.elf
+     - uses: actions/upload-artifact@v4
+diff --git i/cmd/controller/lockboot_default.go w/cmd/controller/lockboot_default.go
+index 558d70c..61922e2 100644
+--- i/cmd/controller/lockboot_default.go
++++ w/cmd/controller/lockboot_default.go
+@@ -8,11 +8,15 @@ import (
+ 	"seedhammer.com/driver/otp"
+ )
+ 
+-// The OTP writer behind the `command: lock-boot` debug command
+-// (gui/debugcmd_default.go), moved out of platform_sh2.go unchanged so the
+-// Refugium build links none of it (Refugium plan F7 §4.1). Its twin,
+-// lockboot_refugium.go, refuses. signKeyHash stays in platform_sh2.go because
+-// isSecureBootEnabled still reads it.
++// The OTP writer that the `command: lock-boot` debug command used to call,
++// moved out of platform_sh2.go unchanged so the Refugium build links none of it
++// (Refugium plan F7 §4.1). Nothing calls it: the default build dropped that
++// command too (Brian 2026-11-23, P19; design/FIX_lockboot_default_remove.md),
++// and gui/refugium_build_test.go's TestDefaultBuildCarriesNoLockBootCommand
++// keeps it that way, so TinyGo links it into neither ELF
++// (scripts/refugium-elf-check.sh). It is kept, not deleted, to keep the
++// upstream diff small. Its twin, lockboot_refugium.go, refuses. signKeyHash
++// stays in platform_sh2.go because isSecureBootEnabled still reads it.
+ 
+ func (p *Platform) LockBoot() error {
+ 	if err := writeOTPValues(signKeyHash, boardVersion()); err != nil {
+diff --git i/cmd/controller/lockboot_refugium.go w/cmd/controller/lockboot_refugium.go
+index cb8d2d7..c10499a 100644
+--- i/cmd/controller/lockboot_refugium.go
++++ w/cmd/controller/lockboot_refugium.go
+@@ -7,9 +7,9 @@ import "errors"
+ // LockBoot is refused in the Refugium build, which links no OTP writer at all
+ // (Refugium plan F7 §4.1): not the white-label strings, not the boot key, not
+ // the secure-boot enable. The default build's writer is lockboot_default.go.
+-// Nothing in this build calls it -- gui's debug-command arm recognises no
+-// command here (gui/debugcmd_refugium.go) -- and it fails closed if anything
+-// ever does.
++// Nothing in either build calls it -- gui's debug-command arm recognises no
++// lock-boot command in either (design/FIX_lockboot_default_remove.md) -- and it
++// fails closed if anything ever does.
+ func (p *Platform) LockBoot() error {
+ 	return errors.New("this build cannot lock boot")
+ }
+diff --git i/gui/debugcmd_characterization_test.go w/gui/debugcmd_characterization_test.go
+index e092eb0..6412355 100644
+--- i/gui/debugcmd_characterization_test.go
++++ w/gui/debugcmd_characterization_test.go
+@@ -3,7 +3,6 @@
+ package gui
+ 
+ import (
+-	"errors"
+ 	"io"
+ 	"sync/atomic"
+ 	"testing"
+@@ -15,8 +14,10 @@ import (
+ // the move is a refactor the default build can prove it did not change.
+ //
+ // They are !refugium because they pin the DEFAULT build's behaviour: the
+-// Refugium build carries neither command (debugcmd_refugium.go), and no tag
+-// reaches the start screen there at all (§4.2).
++// Refugium build carries no debug command (debugcmd_refugium.go), and no tag
++// reaches the start screen there at all (§4.2). The default build carries
++// FOREVERLAURA! only: lock-boot was removed from it too (Brian 2026-11-23, P19;
++// design/FIX_lockboot_default_remove.md).
+ 
+ // driveStartScreenTag runs StartScreen.Flow with a reader that delivers rec
+ // once, pumping frames until done reports true or the deadline passes. It
+@@ -48,44 +49,31 @@ func driveStartScreenTag(t *testing.T, p *testPlatform, rec string, done func()
+ 	return act, returned, last
+ }
+ 
+-// TestDebugCommandLockBootCharacterization: a `command: lock-boot` tag on the
+-// start screen calls Platform.LockBoot exactly once and STAYS on the start
+-// screen -- Flow does not return an action for it.
+-func TestDebugCommandLockBootCharacterization(t *testing.T) {
+-	for _, tc := range []struct {
+-		name string
+-		err  error
+-	}{
+-		{"LockBoot succeeds", nil},
+-		{"LockBoot fails", errors.New("otp: refused")},
+-	} {
+-		t.Run(tc.name, func(t *testing.T) {
+-			p := newPlatform()
+-			var calls atomic.Int32
+-			p.lockBoot = func() error {
+-				calls.Add(1)
+-				return tc.err
+-			}
+-			// Keep pumping past the first call, so a second call or a return
+-			// would be seen.
+-			var after int
+-			_, returned, last := driveStartScreenTag(t, p, "command: lock-boot", func() bool {
+-				if calls.Load() == 0 {
+-					return false
+-				}
+-				after++
+-				return after > 50
+-			})
+-			if n := calls.Load(); n != 1 {
+-				t.Fatalf("LockBoot called %d times, want exactly 1", n)
+-			}
+-			if returned {
+-				t.Fatalf("StartScreen.Flow returned on a lock-boot tag; it must stay on the start screen")
+-			}
+-			if !uiContains(last, "Backup Wallet") {
+-				t.Fatalf("after lock-boot the screen is not the start screen; got %q", last)
+-			}
+-		})
++// TestDebugCommandLockBootIsUnknownInTheDefaultBuild: the default build carries
++// no lock-boot command (Brian 2026-11-23, P19 "remove it";
++// design/FIX_lockboot_default_remove.md). A `command: lock-boot` tag is an
++// unknown debug command like any other: Platform.LockBoot is never called,
++// StartScreen.Flow hands the command on as the scanned object, and
++// engraveObjectFlow refuses it, so the start screen reads "Unknown format".
++func TestDebugCommandLockBootIsUnknownInTheDefaultBuild(t *testing.T) {
++	p := newPlatform()
++	var calls atomic.Int32
++	p.lockBoot = func() error {
++		calls.Add(1)
++		return nil
++	}
++	act, returned, _ := driveStartScreenTag(t, p, "command: lock-boot", func() bool { return calls.Load() > 0 })
++	if n := calls.Load(); n != 0 {
++		t.Errorf("LockBoot called %d times for a lock-boot tag, want 0", n)
++	}
++	if !returned {
++		t.Fatal("StartScreen.Flow did not return on a lock-boot tag; want it handed on as an unknown command")
++	}
++	if want := (startScreenAction{scan: debugCommand{"lock-boot"}}); act != want {
++		t.Fatalf("lock-boot returned %+v, want scan: debugCommand{\"lock-boot\"}", act)
++	}
++	if engraveObjectFlow(NewContext(newPlatform()), &descriptorTheme, act.scan) {
++		t.Fatal("engraveObjectFlow accepted debugCommand{\"lock-boot\"}; want false (Unknown format)")
+ 	}
+ }
+ 
+diff --git i/gui/debugcmd_default.go w/gui/debugcmd_default.go
+index 6c5cbcf..ce34ffa 100644
+--- i/gui/debugcmd_default.go
++++ w/gui/debugcmd_default.go
+@@ -19,24 +19,17 @@ const (
+ 
+ // handleDebugCommand is the start screen's debug-command arm, moved out of
+ // StartScreen.Flow unchanged (Refugium plan F7 §4.1) so the Refugium build can
+-// replace it with debugcmd_refugium.go, which carries neither command. The
++// replace it with debugcmd_refugium.go, which carries no command. The
+ // behaviour is pinned by gui/debugcmd_characterization_test.go:
+ //
+ //   - FOREVERLAURA! returns the QA program;
+-//   - lock-boot calls Platform.LockBoot once and stays on the start screen,
+-//     reporting a failure in the status line;
+-//   - anything else is logged and passed through.
++//   - anything else is logged and passed through, lock-boot included: this
++//     build carries no lock-boot command and nothing here calls
++//     Platform.LockBoot (Brian 2026-11-23, P19; design/FIX_lockboot_default_remove.md).
+ func handleDebugCommand(ctx *Context, m *StartScreen, cmd debugCommand) (debugResult, startScreenAction) {
+ 	switch cmd.Command {
+ 	case "FOREVERLAURA!":
+ 		return debugReturn, startScreenAction{prog: qaProgram}
+-	case "lock-boot":
+-		m.Status = scanIdle
+-		if err := ctx.Platform.LockBoot(); err != nil {
+-			log.Printf("lock-boot: %v", err)
+-			m.Status = scanFailed
+-		}
+-		return debugStay, startScreenAction{}
+ 	default:
+ 		log.Printf("unknown debug command: %q", cmd.Command)
+ 		return debugPassThrough, startScreenAction{}
+diff --git i/gui/refugium_build_test.go w/gui/refugium_build_test.go
+index 583f0e5..a4ecc74 100644
+--- i/gui/refugium_build_test.go
++++ w/gui/refugium_build_test.go
+@@ -166,7 +166,10 @@ func TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall(t *testing.T) {
+ 		fileSet(t, "./cmd/controller", "tinygo,rp")...))
+ 
+ 	for _, lit := range refugiumForbiddenLiterals {
+-		if hits := def.literalHits(lit); len(hits) == 0 {
++		// lock-boot is absent from the default build too since P19
++		// (TestDefaultBuildCarriesNoLockBootCommand), so it is exempt from
++		// the control only.
++		if hits := def.literalHits(lit); lit != "lock-boot" && len(hits) == 0 {
+ 			t.Errorf("POSITIVE CONTROL: no default-build file has a string literal containing %q, "+
+ 				"so its absence from the Refugium build proves nothing", lit)
+ 		}
+@@ -187,6 +190,30 @@ func TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall(t *testing.T) {
+ 	}
+ }
+ 
++// TestDefaultBuildCarriesNoLockBootCommand: the default build carries no
++// lock-boot command either (Brian 2026-11-23, P19 "remove it";
++// design/FIX_lockboot_default_remove.md). In the default file sets -- the same
++// listings TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall reads -- no string
++// literal contains "lock-boot" and nothing calls a function or method named
++// LockBoot, so no tag, however it is spelled, reaches the OTP writer. Positive
++// control: the same sets carry the FOREVERLAURA! literal and the
++// handleDebugCommand call, so the listing did read the debug-command arm.
++func TestDefaultBuildCarriesNoLockBootCommand(t *testing.T) {
++	def := readSourceFacts(t, append(
++		fileSet(t, "./gui", "", "tinygo,rp"),
++		fileSet(t, "./cmd/controller", "tinygo,rp")...))
++	if len(def.literalHits("FOREVERLAURA!")) == 0 || len(def.calls["handleDebugCommand"]) == 0 {
++		t.Fatal("POSITIVE CONTROL: the default file sets carry no FOREVERLAURA! literal or no handleDebugCommand call, " +
++			"so the absences below prove nothing")
++	}
++	if hits := def.literalHits("lock-boot"); len(hits) > 0 {
++		t.Errorf("the default build carries a string literal containing %q, in %v", "lock-boot", hits)
++	}
++	if files := def.calls["LockBoot"]; len(files) > 0 {
++		t.Errorf("the default build calls LockBoot, in %v", files)
++	}
++}
++
+ // refugiumPairPackages are the packages carrying *_refugium.go files, and the
+ // constraint every such file conjoins with `refugium` (X in §4.1's rule).
+ var refugiumPairPackages = []struct {
+diff --git i/gui/refugium_profile_test.go w/gui/refugium_profile_test.go
+index cf92dfb..1993af4 100644
+--- i/gui/refugium_profile_test.go
++++ w/gui/refugium_profile_test.go
+@@ -100,7 +100,9 @@ func TestRefugiumNeverAsksThePlatformForAReader(t *testing.T) {
+ 
+ // §4.1 + §4.2, end to end on the start screen: a lock-boot tag held over a
+ // machine whose platform HAS a reader is never read, LockBoot is never called,
+-// and the start screen stays. Control: TestDebugCommandLockBootCharacterization.
++// and the start screen stays. Control:
++// TestDebugCommandLockBootIsUnknownInTheDefaultBuild (the default build reads
++// the same tag and hands it on).
+ func TestRefugiumStartScreenReadsNoTag(t *testing.T) {
+ 	p := newPlatform()
+ 	r := &countingTagReader{rec: []byte("command: lock-boot")}
+diff --git i/scripts/refugium-elf-check.sh w/scripts/refugium-elf-check.sh
+index 5988e8a..280f635 100755
+--- i/scripts/refugium-elf-check.sh
++++ w/scripts/refugium-elf-check.sh
+@@ -13,6 +13,13 @@
+ #   the profile's own notices: absent in DEFAULT.elf, present in REFUGIUM.elf
+ #                             (reverse control: the second file IS the
+ #                             Refugium build, not a default one missing bits)
++#   the OTP writer's markers: ABSENT in BOTH ELFs. Neither build carries the
++#                             lock-boot command (Brian 2026-11-23, P19;
++#                             design/FIX_lockboot_default_remove.md), so TinyGo
++#                             links no OTP writer into either. There is no
++#                             positive control left for them: their names were
++#                             measured PRESENT in f36f786's default ELF (each
++#                             count 1), the last build that called the writer.
+ #
+ # Two kinds of marker, both measured on the default ELF (plan §4.5; the
+ # measurement is repeated by this script on every run):
+@@ -23,11 +30,11 @@
+ #   symbols        defined symbols whose section is allocated, matched by
+ #                  exact name.
+ #
+-# writeOTPValues, AddBootKey and EnableSecureBoot have no symbols even in the
++# writeOTPValues, AddBootKey and EnableSecureBoot had no symbols even in the
+ # default ELF (inlined), and FOREVERLAURA! occurs 0 times there, so they cannot
+ # be markers: the OTP writer's absence rests on otp.writeECC/otp.writeOrRow, the
+ # redirect URL that only writeOTPValues carried, and gui's source-level call
+-# check (gui/refugium_build_test.go).
++# checks (gui/refugium_build_test.go).
+ #
+ # It also prints the st25r3916 driver symbols present in each ELF, for the
+ # record of what the reader's removal took with it; those are reported, not
+@@ -46,8 +53,6 @@ exec python3 - "$1" "$2" <<'PY'
+ import struct, sys
+ 
+ LITERALS = [
+-    b"lock-boot: %v",              # the debug-command arm's log format (gui)
+-    b"seedhammer.com/doc/?d=SHII", # the OTP redirect URL writeOTPValues wrote
+     b"PASSPROOF",                  # ppPassProofKeep* help strings + trigger
+     b"TEXTPROOF",
+     b"CONSTPROOF",
+@@ -57,6 +62,14 @@ LITERALS = [
+ SYMBOLS = [
+     "(*seedhammer.com/nfc/poller.Poller).Read",
+     "seedhammer.com/gui.qaEngraveFlow",
++]
++# ABSENT from BOTH ELFs: the removed lock-boot arm's log format and the OTP
++# writer it reached (see the header).
++ABSENT_LITERALS = [
++    b"lock-boot: %v",              # the removed debug-command arm's log format (gui)
++    b"seedhammer.com/doc/?d=SHII", # the OTP redirect URL writeOTPValues wrote
++]
++ABSENT_SYMBOLS = [
+     "seedhammer.com/driver/otp.writeECC",
+     "seedhammer.com/driver/otp.writeOrRow",
+ ]
+@@ -122,6 +135,10 @@ def table(path):
+         row[sym] = 1 if sym in syms else 0
+     for lit in PROFILE:
+         row["profile: " + lit.decode()] = alloc.count(lit)
++    for lit in ABSENT_LITERALS:
++        row["absent: " + lit.decode()] = alloc.count(lit)
++    for sym in ABSENT_SYMBOLS:
++        row["absent: " + sym] = 1 if sym in syms else 0
+     st = sorted(s for s in syms if s.startswith("(*seedhammer.com/driver/st25r3916.Device)."))
+     return row, st, len(alloc)
+ 
+@@ -134,6 +151,15 @@ print(f"{'marker':<45} {'default':>8} {'refugium':>9}")
+ fail = False
+ for k in drow:
+     verdict = ""
++    if k.startswith("absent: "):
++        if drow[k] != 0:
++            verdict = "  PRESENT in the default ELF"
++            fail = True
++        if rrow[k] != 0:
++            verdict += "  PRESENT in the Refugium ELF"
++            fail = True
++        print(f"{k:<45} {drow[k]:>8} {rrow[k]:>9}{verdict}")
++        continue
+     if k.startswith("profile: "):
+         if drow[k] != 0:
+             verdict = "  PRESENT in the default ELF"
+@@ -158,5 +184,6 @@ if fail:
+     print("RESULT: FAIL")
+     sys.exit(1)
+ print(f"RESULT: ok -- {len(LITERALS) + len(SYMBOLS)} markers present in the default ELF and absent "
+-      f"in the Refugium ELF; {len(PROFILE)} profile notices the other way round")
++      f"in the Refugium ELF; {len(ABSENT_LITERALS) + len(ABSENT_SYMBOLS)} OTP-writer markers absent "
++      f"from both; {len(PROFILE)} profile notices the other way round")
+ PY
+diff --git i/seal/record.go w/seal/record.go
+index a1a3d6f..33c7322 100644
+--- i/seal/record.go
++++ w/seal/record.go
+@@ -210,12 +210,13 @@ type AdmittedRecord struct {
+ 	PlateIndex, PlateTotal int
+ }
+ 
+-// cmdPrefix mirrors gui/scan.go's. A decrypted plaintext of
+-// "command: lock-boot" would reach gui/debugcmd_default.go's handleDebugCommand
+-// and call Platform.LockBoot, which does writeOTPValues -> otp.EnableSecureBoot
+-// -> machine.CPUReset (cmd/controller/lockboot_default.go). The Refugium build
+-// carries neither the command nor the writer (gui/debugcmd_refugium.go,
+-// cmd/controller/lockboot_refugium.go). This prefix is the only gate, and the
++// cmdPrefix mirrors gui/scan.go's. A decrypted plaintext of "command: ..."
++// would reach gui/debugcmd_default.go's handleDebugCommand, which in the default
++// build still starts the FOREVERLAURA! QA program. ("command: lock-boot", which
++// once called Platform.LockBoot -> writeOTPValues -> otp.EnableSecureBoot, is in
++// neither build since design/FIX_lockboot_default_remove.md; the Refugium build
++// carries no command at all, gui/debugcmd_refugium.go.) This prefix is the only
++// gate, and the
+ // wire format is normative and public, so the device MUST NOT assume the blob
+ // was produced by a conforming sealer.
+ const cmdPrefix = "command: "
