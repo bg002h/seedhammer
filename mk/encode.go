@@ -35,6 +35,11 @@ const (
 // from randomness). The round-trip Decode(Encode(card)) == card and per-chunk
 // codex32.ValidMK are the load-bearing correctness gates.
 //
+// Card.Network is checked, never serialized: the wire carries only the xpub's
+// version bytes. A non-empty Network must be exactly the name Decode gives those
+// bytes ("mainnet" for an xpub, "testnet" for a tpub, signet and regtest keys
+// included), else Encode returns an error; an empty Network takes the xpub's.
+//
 // Encode handles ONLY public material: it parses the account xpub and never
 // touches private keys.
 func Encode(card Card) ([]string, error) {
@@ -91,6 +96,12 @@ func encodeBytecode(card Card) ([]byte, error) {
 	compact, err := compactFromXpub(card.Xpub, comps)
 	if err != nil {
 		return nil, err
+	}
+
+	// FIX-sh-mk-encode-network (bh-sh-I10, T36): the network comes from the
+	// xpub version; a non-empty Card.Network that disagrees is refused.
+	if card.Network != "" && card.Network != networkOfVersion(compact[0:4]) {
+		return nil, errEncodeNetwork
 	}
 
 	// Header byte: version nibble 0; fingerprint flag (bit 2) iff a fingerprint
@@ -166,9 +177,7 @@ func compactFromXpub(xpub string, comps []uint32) ([]byte, error) {
 		return nil, errEncodeXpub
 	}
 	// Only mainnet/testnet public versions are representable on the wire.
-	switch hex.EncodeToString(version) {
-	case "0488b21e", "043587cf":
-	default:
+	if networkOfVersion(version) == "" {
 		return nil, errEncodeXpub
 	}
 	chainCode := key.ChainCode() // returns a copy

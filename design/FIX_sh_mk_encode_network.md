@@ -67,7 +67,7 @@ toolkit manual: no lockstep (seedhammer is not `mr`/`md-cli`).
 |---|---|---|---|
 | gui/derive_xpub.go:446-454 | `netName` | `net` from the same `pathPickerFlow` | one picker result |
 | gui/singlesig_derive.go:84 | `networkName(net)` (:154-159) | `deriveAccountXpub(..., net, ...)` (:56) | same `net`; callers pass MainNetParams (gui/singlesig.go:182, gui/singlesig_verify.go:131) |
-| gui/multisig_derive.go:48-49 | `"mainnet"` | `net` param | only caller chain passes `&chaincfg.MainNetParams` (gui/multisig_build.go:484-485 -> multisig_build_tail.go:107) |
+| gui/multisig_derive.go:48-49 | `"mainnet"` | `net` param | all three callers pass `&chaincfg.MainNetParams`: multisig_build_tail.go:107 (from multisig_build.go:484-485), multisig_supply_tail.go:138 (from multisig.go:239-240), multisig_verify.go:1108 |
 | gui/composer_cards.go:41-53 | `"mainnet"`, or a decoded card's own Network | key records: sysw/composer_records.go:418 `IsForNet(MainNet)`; seeds: gui/composer_sources.go:353 MainNetParams; cards: composerCardIsMainnet (:166) admits `""`/`"mainnet"` only | gated mainnet |
 | gui/template_engrave.go:48 | decoded card | same card | Decode output |
 | cmd/buildpayloadcards/main.go:111-112 | `"mainnet"` | `chaincfg.MainNetParams` (:81) | constant |
@@ -88,7 +88,7 @@ The scratch version is `design/FIX_sh_mk_encode_network-probe.diff` (evidence, n
    `// included), else Encode returns an error; an empty Network takes the xpub's.` mk/mk.go:134 field comment: `// "mainnet" | "testnet"; Decode
    names it from the xpub version; Encode accepts "" or the matching name`; gui/multisig_derive.go:25 "it is not
    serialized nor verified" becomes "it is not serialized; mk.Encode refuses it if it disagrees with the xpub
-   (T36)". gui/composer_cards.go:42 and gui/multisig_derive.go:49 "LABEL only" comments stay true (not serialized).
+   (T36)". gui/composer_cards.go:42 and gui/multisig_derive.go:49 "LABEL only" comments become "LABEL only (not serialized; Encode checks it)". mk/encode.go compactFromXpub (:167-172) uses `networkOfVersion(version) == ""` instead of its own version switch.
 
 ## 6. Tests
 
@@ -119,9 +119,11 @@ mainnet-on-xpub cards).
 
 `CGO_ENABLED=0 go test -timeout 20m ./...` (CI test.yml:75; locally `gui` via
 `mnemonic-engrave/scripts/gui-shard-test.sh ./gui/ 6 20m` and the rest with `go test -count=1 ./...` minus `gui`),
-`gofmt -l mk` empty (base already lists three `gui/transaction*.go` files; not this FIX), `go vet ./mk/`. The CI jobs at test.yml:103-127 (oraclelive compile, GOOS=js vet) and the
-TinyGo device build compile `mk`; the change adds no import, so they are expected unchanged; the builder runs them
-or takes green CI on the head.
+`gofmt -l mk` empty (base already lists three `gui/transaction*.go` files; not this FIX), `go vet ./mk/`. Every test.yml step: :75 (above), :103 (oraclelive compile), :112
+(`./scripts/test-32bit.sh`), :123 and :127 (GOOS=js vet, plain and `-tags refugium`), :134
+(`./scripts/refugium-tagged-test.sh`, the whole gui suite under `-tags refugium`) and the TinyGo device-build steps
+:150, :153, :160. The change adds no import, so they are expected unchanged; the builder runs them or takes green
+CI on the head.
 
 ## 8. Questions for the architect (ruled 1122-late: Q1 (a) refuse, Q2 fixed text)
 
