@@ -53,6 +53,8 @@ func Describe(err error) string {
 		return "repeated share"
 	case errors.Is(err, errInsufficientShares):
 		return "need more shares"
+	case errors.Is(err, errTooManyShares):
+		return "too many shares"
 	default:
 		return "invalid"
 	}

@@ -1,0 +1,35 @@
+diff --git i/codex32/codex32.go w/codex32/codex32.go
+index aeea3b7..bf68736 100644
+--- i/codex32/codex32.go
++++ w/codex32/codex32.go
+@@ -35,6 +35,7 @@ var (
+ 	errMismatchedThreshold = errors.New("mismatched threshold")
+ 	errInvalidIDLength     = errors.New("invalid id length")
+ 	errRepeatedIndex       = errors.New("repeated index")
++	errTooManyShares       = errors.New("too many shares")
+ )
+ 
+ const (
+@@ -215,6 +216,9 @@ func Interpolate(shares []String, index rune) (String, error) {
+ 		}
+ 		indices[i] = parts.shareIdx
+ 	}
++	if k := max(s0Parts.threshold, 1); len(shares) > k {
++		return String{}, errTooManyShares
++	}
+ 
+ 	// Do lagrange interpolation.
+ 	mult := feP
+diff --git i/codex32/polish.go w/codex32/polish.go
+index 67b087d..9b3b89c 100644
+--- i/codex32/polish.go
++++ w/codex32/polish.go
+@@ -53,6 +53,8 @@ func Describe(err error) string {
+ 		return "repeated share"
+ 	case errors.Is(err, errInsufficientShares):
+ 		return "need more shares"
++	case errors.Is(err, errTooManyShares):
++		return "too many shares"
+ 	default:
+ 		return "invalid"
+ 	}
