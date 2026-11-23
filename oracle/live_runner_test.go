@@ -307,3 +307,36 @@ func TestFixShOracleLiveRefusesAPathWithWhitespace(t *testing.T) {
 		t.Fatalf("exit %d; want exit 1 and the line %q\noutput:\n%s", res.exit, line, res.out)
 	}
 }
+
+// TestFixShOracleLiveRefusesAPathWithANewline: a newline is whitespace too, but
+// grep -l prints one name per line, so a name holding one splits in two and the
+// per-line whitespace check never sees it; the tagged file was dropped and the
+// run printed PASS.
+func TestFixShOracleLiveRefusesAPathWithANewline(t *testing.T) {
+	root := syntheticTree(t, map[string]string{
+		"oracle/live_test.go": taggedFile("oracle", "TestO"),
+		"a\nb/live_test.go":   taggedFile("ab", "TestNewline"),
+	})
+	res := runRunner(t, root, "", "")
+	const line = "::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:\n         ./a b/live_test.go\n"
+	if res.exit != 1 || !strings.Contains(res.out, line) {
+		t.Fatalf("exit %d; want exit 1 and the line %q\noutput:\n%s", res.exit, line, res.out)
+	}
+}
+
+// TestFixShOracleLiveDoesNotGlobAPath: the path list is split unquoted, so a
+// bracket in a directory name is a glob; `./x[ab]/live_test.go` expanded to
+// `./xa/live_test.go`, the bracket package was dropped and the run printed PASS.
+// Go cannot load `./x[ab]/` (malformed import path), which the stub stands in
+// for by failing that package.
+func TestFixShOracleLiveDoesNotGlobAPath(t *testing.T) {
+	root := syntheticTree(t, map[string]string{
+		"x[ab]/live_test.go": taggedFile("xab", "TestBracket"),
+		"xa/live_test.go":    taggedFile("xa", "TestXA"),
+	})
+	res := runRunner(t, root, "", "./x[ab]/")
+	const line = "\n         ./x[ab]/ TestBracket\n"
+	if res.exit != 1 || !strings.Contains(res.out, line) {
+		t.Fatalf("exit %d; want exit 1 and the never-run line %q\noutput:\n%s", res.exit, line, res.out)
+	}
+}
