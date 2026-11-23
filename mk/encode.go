@@ -19,6 +19,7 @@ var (
 	errEncodeFP        = errors.New("mk: invalid fingerprint")
 	errEncodePath      = errors.New("mk: invalid path")
 	errEncodeCompact   = errors.New("mk: compact-73 length mismatch")
+	errEncodeNetwork   = errors.New("mk: network does not match the xpub version")
 )
 
 const (
