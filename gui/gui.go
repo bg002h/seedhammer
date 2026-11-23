@@ -2716,6 +2716,19 @@ func validateMdmk(pl Platform, s, title, footer string) ([]string, []Plate, erro
 // direction: planTransactionTextPlates packs TEXT-ONLY paragraphs and puts the
 // codes on plates of their own.
 func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]string, []Plate, error) {
+	return validateMdmkStringsMode(pl, strs, title, footer, false)
+}
+
+// kitTextOnlyLayout is the kit door's plate layout (SPEC_systemwide_payloads.md
+// 14e, Q10): TEXT ONLY, whatever the number of strings, registered and
+// announced exactly as validateMdmkStrings' plates are.
+func kitTextOnlyLayout(pl Platform, strs []string, title, footer string) ([]string, []Plate, error) {
+	return validateMdmkStringsMode(pl, strs, title, footer, true)
+}
+
+// validateMdmkStringsMode is validateMdmkStrings with the kit door's one
+// switch: textOnly drops the QR variants of a one-string plate.
+func validateMdmkStringsMode(pl Platform, strs []string, title, footer string, textOnly bool) ([]string, []Plate, error) {
 	params := pl.EngraverParams()
 	const qrScale = 3
 	type textEngraving struct {
@@ -2723,7 +2736,7 @@ func validateMdmkStrings(pl Platform, strs []string, title, footer string) ([]st
 		Paragraphs []backup.Paragraph
 	}
 	var engravings []textEngraving
-	if len(strs) == 1 && noMS1QR(strs[0]) {
+	if len(strs) == 1 && (textOnly || noMS1QR(strs[0])) {
 		// The Refugium build offers an ms1 card as text only (F7 §4.4). The
 		// QR exists only in the single-string branch below, so this is where
 		// the gate sits.

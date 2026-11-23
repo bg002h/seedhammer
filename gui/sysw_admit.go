@@ -41,7 +41,11 @@ var admitted = map[syswProgram]map[sysw.Class]bool{
 	// filed as a follow-up with an owning future cycle rather than deleted,
 	// because §3.3.2's table is the normative oracle and this file transcribes
 	// it.
-	progBundle:    {sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
+	//
+	// ClassMr (SPEC_systemwide_payloads 14d, S1) is admitted HERE ALONE, and
+	// bundleFlow consumes it only through the kit door (kitCards): the gather
+	// flow, which takes md1 and mk1 cards, never offers an mr1 record.
+	progBundle:    {sysw.ClassDescriptor: true, sysw.ClassMDMK: true, sysw.ClassMr: true},
 	progSingleSig: {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassMDMK: true},
 	progMultisig:  {sysw.ClassMnemonic: true, sysw.ClassCodex32Secret: true, sysw.ClassPassphrase: true, sysw.ClassDescriptor: true, sysw.ClassMDMK: true},
 	// SEED CLASSES ADMITTED SINCE THE COMPOSER (C12, SPEC_wallet_policy_composer

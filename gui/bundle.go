@@ -28,6 +28,7 @@ const (
 	cardMK1 bundleCardKind = iota // an mk1 account-key card
 	cardMD1                       // an md1 descriptor card
 	cardMS1                       // an ms1 SECRET share card (T6a-2 single-sig engrave only)
+	cardMR1                       // an mr1 card (S1 kit door only); public, marked like md1/mk1
 )
 
 // bundleCard is one verified card in the accumulated bundle. strings holds the
