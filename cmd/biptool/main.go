@@ -102,15 +102,24 @@ func run(stdout io.Writer, stdin io.Reader, args []string) error {
 		if err := randFlags.Parse(args); err != nil {
 			randFlags.Usage()
 		}
+		if rest := randFlags.Args(); len(rest) > 0 {
+			return fmt.Errorf("rand: unexpected argument %q", rest[0])
+		}
 		return genRand(stdout)
 	case "seed":
 		if err := seedFlags.Parse(args); err != nil {
 			seedFlags.Usage()
 		}
+		if rest := seedFlags.Args(); len(rest) > 0 {
+			return fmt.Errorf("seed: unexpected argument %q", rest[0])
+		}
 		return genSeed(stdout, os.Stderr, stdin)
 	case "interpolate":
 		if err := interpolateFlags.Parse(args); err != nil {
 			interpolateFlags.Usage()
+		}
+		if rest := interpolateFlags.Args(); len(rest) > 0 {
+			return fmt.Errorf("interpolate: unexpected argument %q", rest[0])
 		}
 		return interpolate(stdout, stdin)
 	case "derive":
@@ -202,6 +211,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		if err := bip39Flags.Parse(args); err != nil {
 			bip39Flags.Usage()
 		}
+		if err := noArgsLeft(f, bip39Flags.Args()); err != nil {
+			return err
+		}
 		n := *words
 		if n < 12 || 24 < n || n%3 != 0 {
 			return fmt.Errorf("derive: invalid bip39 seed length: %d", n)
@@ -213,6 +225,12 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 			}
 		}
 		entLen := (n*11 - n/3) / 8
+		if len(seed) == 0 {
+			return errors.New("derive: no seed provided")
+		}
+		if len(seed) < entLen || (len(path) == 0 && len(seed) != entLen) {
+			return fmt.Errorf("derive: seed is %d bytes; -words %d needs exactly %d bytes", len(seed), n, entLen)
+		}
 		m := bip39.New(seed[:entLen])
 		if _, err := fmt.Fprintln(stdout, m); err != nil {
 			return outputErr(err)
@@ -220,6 +238,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 	case "seed":
 		if err := deriveSeedFlags.Parse(args); err != nil {
 			deriveSeedFlags.Usage()
+		}
+		if err := noArgsLeft(f, deriveSeedFlags.Args()); err != nil {
+			return err
 		}
 		n := *bytesLength
 		if n == 0 {
@@ -235,6 +256,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 			return outputErr(err)
 		}
 	case "xpub":
+		if err := noArgsLeft(f, args); err != nil {
+			return err
+		}
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: xpub derivation path %q does not begin with m/83696968h/32h/", dpath)
 		}
@@ -246,6 +270,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 			return outputErr(err)
 		}
 	case "xprv":
+		if err := noArgsLeft(f, args); err != nil {
+			return err
+		}
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: xprv derivation path %q does not begin with m/83696968h/32h/", dpath)
 		}
@@ -256,6 +283,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 			return outputErr(err)
 		}
 	case "pubkey":
+		if err := noArgsLeft(f, args); err != nil {
+			return err
+		}
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: pubkey derivation path %q does not begin with m/83696968h/32h/", dpath)
 		}
@@ -267,6 +297,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 			return outputErr(err)
 		}
 	case "privkey":
+		if err := noArgsLeft(f, args); err != nil {
+			return err
+		}
 		if !isXprvDeriv {
 			return fmt.Errorf("derive: privkey derivation path %q does not begin with m/83696968h/32h/", dpath)
 		}
@@ -279,6 +312,16 @@ func derive(stdout io.Writer, stdin io.Reader) error {
 		}
 	default:
 		return fmt.Errorf("derive: unknown format %q", f)
+	}
+	return nil
+}
+
+// noArgsLeft refuses an argument left after a derive format and its own
+// options: the flag package stops at the first non-flag, so a misplaced option
+// would otherwise be dropped silently (FIX-sh-biptool-args, bh-sh-I3).
+func noArgsLeft(format string, rest []string) error {
+	if len(rest) > 0 {
+		return fmt.Errorf("derive: unexpected argument %q after format %q", rest[0], format)
 	}
 	return nil
 }
