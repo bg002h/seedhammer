@@ -163,9 +163,11 @@ identical `otp set -s`. It only sets bits, so repeating is safe.
 **5 — Build, sign, flash** (§7). Freely retryable; no more slots at stake.
 
 ```sh
-nix run .#build-firmware
-../mnemonic-engrave/scripts/sign-firmware.sh <image>.uf2 ~/.sh2/sh2-boot-key.pem
-picotool load --verify <image>.signed.uf2
+nix run .#build-firmware &&
+# the name it printed after "Built ", without .uf2
+IMG="seedhammerii-v0.0.0-bg1a2b3c4" &&
+../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem &&
+  picotool load --verify "$IMG.signed.uf2"
 ```
 
 `nix run .#build-firmware` produces an **unsigned** image — never flash it. It
