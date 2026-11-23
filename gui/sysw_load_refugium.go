@@ -4,8 +4,9 @@ package gui
 
 // syswRefugiumLine is SPEC_systemwide_payloads.md 14f: the Refugium build
 // WARNS, and does not refuse, when a loaded SEALED payload holds a record whose
-// class is secret by 3.3.1 in its sealed section; a secret outside a sealed
-// section is refused at load (syswLoadFlow). It is decided by CLASS: an md1/mk1
+// class is secret by 3.3.1 in its sealed section, or outside one when the
+// operator chose LOAD ANYWAY over the refusal at load (syswLoadFlow). It is
+// decided by CLASS: an md1/mk1
 // record that is secret only because it is unconfirmed does not raise it.
 func syswRefugiumLine(s *syswSession) (string, bool) {
 	for _, r := range s.records {
