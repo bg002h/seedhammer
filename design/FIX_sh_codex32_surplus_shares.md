@@ -9,7 +9,7 @@ share against the first k) is not taken.
 Author: Claude Opus 5.5 (claude-opus-5-5), 2026-11-22. Base: seedhammer `origin/main` 25abe8e. All anchors are at that
 base. Protocol text: bitcoin/bips master `bip-0093.mediawiki`, fetched 2026-11-22 (sha256 in the author report).
 
-**OPEN-1 ruled (architect-bh-batch34 #33): option (a), k = 1 for threshold "0".** Every PROPOSED text below is confirmed.
+**OPEN-1 ruled (architect-bh-batch34 #33): option (a), k = 1 for threshold "0".** The three PROPOSED texts (R1 sentinel, R2 precedence, R4 label) are confirmed.
 
 ## 1. The defect
 
@@ -58,8 +58,16 @@ base. Protocol text: bitcoin/bips master `bip-0093.mediawiki`, fetched 2026-11-2
   k: `insufficient shares` unchanged. A set whose target is one of its inputs and has at most k shares still returns
   that input (L221-229, untouched). `ConsistentShares` (codex32/polish.go:152) is unchanged: it validates a partial set
   as it is collected and does not take k.
-- **R7 (doc comment).** The `Interpolate` doc comment (L188-190) gains one sentence: the set must hold at most k shares
-  (exactly k to interpolate a new index), and more than k is refused, per BIP-93. Not holder-visible.
+- **R7 (doc comment).** After the line `// Using the index 'S' will recover the master seed.` (L190), add these lines,
+verbatim:
+```
+//
+// The set must hold at most k shares, where k is the common threshold digit
+// (k is 1 for an unshared secret, threshold "0"), and exactly k to
+// interpolate an index that no input has. A set of more than k shares is
+// refused, per BIP-93: the number of shares is exactly the threshold.
+```
+Not holder-visible.
 
 ## 3. OPEN-1 (ruled (a), architect-bh-batch34)
 
@@ -137,6 +145,7 @@ Library rows, as scratch tests in `codex32/` (removed after the run), `go test -
 | A C D X, F | `ms13cashfe9jtwc7atzv2556rnhzrrqdvav7vw0ujqgtm4uu`, nil | `too many shares` |
 | A C D D, S | `repeated index` | `too many shares` |
 | T0a T0b, S / T0b T0a, S | T0a, nil / T0b, nil | `too many shares` |
+| T0a T0a, S | T0a, nil | `too many shares` |
 
 CLI rows, `printf '%s\n' <shares> | biptool <verb>`, binaries built from base and from the probe:
 
