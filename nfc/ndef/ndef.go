@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 // MessageReader is an [io.Reader] for parsing NDEF
@@ -154,7 +155,7 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 			if _, err := io.ReadFull(r.r, b); err != nil {
 				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
-			r.length = int(binary.BigEndian.Uint32(b))
+			r.length = int(min(binary.BigEndian.Uint32(b), math.MaxInt32))
 		} else {
 			// Short record.
 			b, err := r.readByte()
