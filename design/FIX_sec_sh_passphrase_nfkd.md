@@ -1,7 +1,6 @@
 # FIX: bip39.MnemonicSeed derives from the NFKD form of the passphrase
 
-**Small track** (one Opus review round). Grade I, class other (seed-derivation correctness; no device caller can pass
-a non-ASCII passphrase today, so not the funds path by device policy). Secret row
+**Small track** (one Opus review round). Grade C proposed (was I; architect-nfkd-m2), funds path: a `pass:` payload record reaches `MnemonicSeed` on the device without an ASCII check (`gui/sysw_source.go:110-111`). Secret row
 `SECRET id=bh1119-sh-i13-passphrase-no-nfkd` (coordinator `status/secret-criticals.md`); its grade-M duplicate
 `bh-sh-i13` (same defect, superseded) closes with it. Source: `design/agent-reports/bug-hunt-2026-11-19.md` I13
 (L114-118). Owner FOLLOWUP: mnemonic-engrave `design/FOLLOWUPS.md` `bip39-passphrase-nfkd-normalization` (L120).
@@ -12,9 +11,7 @@ Author: Claude Opus 5.5 (claude-opus-5-5), 2026-11-22. Base: seedhammer `origin/
 `bip39/bip39.go:261-270` `MnemonicSeed` builds the PBKDF2 salt as `[]byte("mnemonic"+password)` (L269) with no
 normalization. BIP-39 ("From mnemonic to seed") requires the passphrase to be NFKD-normalized first. Seen on base (§6):
 on the mnemonic `abandon` x11 + `about`, `"café"` and `"café"` derive two different seeds (SHA-256
-`19fcc124...` and `ab8cc794...`, the hunt's two hashes); only the second is the BIP-39 seed. Library callers that pass a
-passphrase through: `bip32/master.go:27`, `gui/derive.go:20`, `gui/bip85.go:76`. The device's own entry refuses non-ASCII
-(`passphrase/passphrase.go` `ErrNonASCII`), so the device does not reach the defect today; a library caller does.
+`19fcc124...` and `ab8cc794...`, the hunt's two hashes); only the second is the BIP-39 seed. Callers that pass a passphrase through: `bip32/master.go:27`, `gui/derive.go:20`, `gui/bip85.go:76`. The device keyboard is ASCII-only, but the derive flows (xpub, BIP-85, single-sig, multisig, and both verifies) take the passphrase from `syswPassphraseFlow`, which returns a `pass:` payload record's decoded bytes unchecked (`gui/sysw_source.go:110-111`). The Rust primary writes that record without normalizing (mnemonic-engrave `crates/me-cli/src/sysw/record.rs:158-160`), so the device reaches the defect today.
 
 The mnemonic sentence needs no normalization: every word comes from `LabelFor` over the English list, which is ASCII
 (`LC_ALL=C grep -c '[^ -~]' bip39/wordlist.txt` prints `0`).
@@ -37,7 +34,7 @@ The mnemonic sentence needs no normalization: every word comes from `LabelFor` o
   (empty, `TREZOR`) keeps its seed.
 - **R3 (invalid UTF-8).** Bytes that are not valid UTF-8 pass through unchanged; valid text around them is still
   normalized (the `norm` package's documented behaviour, measured in §6). No error, no panic: `MnemonicSeed` keeps its
-  signature. BIP-39 does not define a seed for non-UTF-8 input, and no device caller can produce one.
+  signature. BIP-39 does not define a seed for non-UTF-8 input, and the device receives one only as a `pass:` payload record of non-UTF-8 bytes.
 - **R4 (unchanged elsewhere).** Signature, return value length (64), iteration count and the sentence are unchanged.
   No holder-visible text, flag, exit code or device behaviour changes: the device still refuses non-ASCII with the
   existing `ErrNonASCII` text (the finding says the device keyboard does not change).
@@ -107,13 +104,14 @@ The scratch version is `design/FIX_sec_sh_passphrase_nfkd-probe.diff` (evidence,
    `// The device accepts only printable ASCII. That is NOT a BIP-39 rule -- the`
    `// standard permits any string -- it is this device's engraving limit`
    `// (ErrNonASCII). bip39.MnemonicSeed applies BIP-39's NFKD normalization, so a`
-   `// non-ASCII passphrase from a library caller derives the conformant seed.`
+   `// non-ASCII passphrase from a library caller or a pass: payload record`
+   `// derives the conformant seed.`
    `// SPEC_seedhammer_engrave_bip39_password.md D3 records the earlier reason (no`
    `// NFKD), removed by FIX sec-sh-passphrase-nfkd.`
 
 Secret residue: the salt and `sentence` buffers are not wiped, as at base; that class is owned by the open M row
 `sweep1122-sh-seed-residue-unwiped-class` and is out of scope. The ASCII path makes exactly one salt buffer (no
-growth); the NFKD path may grow it inside `appendNFKD` (only reachable by a non-ASCII library caller).
+growth); the NFKD path may grow it inside `appendNFKD` (reached by a non-ASCII library caller or `pass:` payload record).
 
 ## 5. Tests
 
@@ -184,16 +182,7 @@ ok; `GOARCH=386 go test ./bip39/` ok; `go vet ./bip39/ ./passphrase/` ok; gofmt 
 With the `appendNFKD` helper (r1 I1, r2 I1; fold runs on go1.26.4, `CGO_ENABLED=0`): the five-plus-one `TestFixSecShPassphraseNfkd*` rows pass, `./bip39/ ./bip32/ ./passphrase/ ./bip85/ ./backup/ ./cmd/biptool/` ok, `GOARCH=386 go test ./bip39/` ok, `go vet`, gofmt and `go mod tidy -diff` clean. The `go1.26.7` figures above predate the helper.
 Not run by the author: the rest of `./...` and the other jobs. The builder runs the whole gate.
 
-**Device size (for the reviewer and architect).** TinyGo pico-plus2 default build with the CI flags, `-size short`:
-base 127cf04 flash 1693432 / static RAM 63376; probe flash 1749568 / RAM 82824: **+56136 B flash, +19448 B static
-RAM** (data 32228 -> 51660; the `norm` tables are package variables, which TinyGo places in `.data`). The ASCII fast
-path does not reduce this (the package is linked either way). `-print-stacks` reports every goroutine as recursive
-at base and probe alike (no stack figure to compare). CI has no size gate; the recorded budget (mnemonic-engrave
-`design/STAGED_PLAN_tr_wsh_concrete_descriptors.md` L23: 62 KB = 11.8% static RAM) puts the cost near +3.7% of
-static RAM. The figures were measured on the plain-`norm` probe, before `appendNFKD` (r1 I1); the helper adds `sort` and
-`unicode/utf8` use and is not re-measured. **Architect to confirm this budget before the build** (r1 M2). The FIX takes the cost so the library is BIP-39-conformant on every target; the alternative (keep `norm`
-out of the TinyGo build behind a build tag, with a different non-ASCII behaviour on device) is a new edge-case
-decision and is not proposed.
+**Device size (architect-nfkd-m2, r1 M2 closed).** TinyGo 0.41.1 pico-plus2 default build, CI flags, `-size short`, with `appendNFKD`: base 8fb94a3 flash 1693432 / static RAM 63376; fix flash 1760032 / RAM 90168: **+66600 B flash, +26792 B static RAM** (`.data` 32228 -> 59004; the `norm` tables are package variables). Static RAM is 17.2% of the 512 KiB SRAM (434120 B left for heap and stacks); flash is 10.5% of 16 MiB. The ASCII fast path does not reduce this. The architect accepts the cost: a build tag that keeps `norm` off the device would leave the `pass:` payload path deriving a non-BIP-39 seed.
 
 ## 9. Lockstep and FOLLOWUPS
 
