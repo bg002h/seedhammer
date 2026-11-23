@@ -1,5 +1,5 @@
 diff --git i/bip39/bip39.go w/bip39/bip39.go
-index ca581c1..1ee3cfb 100644
+index ca581c1..87341be 100644
 --- i/bip39/bip39.go
 +++ w/bip39/bip39.go
 @@ -15,8 +15,10 @@ import (
@@ -13,7 +13,7 @@ index ca581c1..1ee3cfb 100644
  )
  
  type Word int
-@@ -266,7 +268,54 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
+@@ -266,7 +268,59 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
  			sentence = append(sentence, ' ')
  		}
  	}
@@ -42,9 +42,17 @@ index ca581c1..1ee3cfb 100644
 +// Invalid UTF-8 bytes pass through unchanged as starters.
 +func appendNFKD(dst []byte, s string) []byte {
 +	start := len(dst) // start of the current run of non-starters
++	flush := func() {
++		run := []rune(string(dst[start:]))
++		sort.SliceStable(run, func(a, b int) bool {
++			return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
++		})
++		dst = append(dst[:start], string(run)...)
++	}
 +	for i := 0; i < len(s); {
 +		r, n := utf8.DecodeRuneInString(s[i:])
 +		if r == utf8.RuneError && n == 1 {
++			flush()
 +			dst = append(dst, s[i])
 +			i++
 +			start = len(dst)
@@ -52,35 +60,33 @@ index ca581c1..1ee3cfb 100644
 +		}
 +		for _, d := range norm.NFKD.String(s[i : i+n]) {
 +			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
++				flush()
 +				dst = utf8.AppendRune(dst, d)
 +				start = len(dst)
 +				continue
 +			}
 +			dst = utf8.AppendRune(dst, d)
-+			run := []rune(string(dst[start:]))
-+			sort.SliceStable(run, func(a, b int) bool {
-+				return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
-+			})
-+			dst = append(dst[:start], string(run)...)
 +		}
 +		i += n
 +	}
++	flush()
 +	return dst
  }
  
  func New(entropy []byte) Mnemonic {
 diff --git i/bip39/fix_sec_sh_passphrase_nfkd_test.go w/bip39/fix_sec_sh_passphrase_nfkd_test.go
 new file mode 100644
-index 0000000..9d7dcc1
+index 0000000..9b9878e
 --- /dev/null
 +++ w/bip39/fix_sec_sh_passphrase_nfkd_test.go
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,93 @@
 +package bip39
 +
 +import (
 +	"encoding/hex"
 +	"strings"
 +	"testing"
++	"time"
 +)
 +
 +// FIX sec-sh-passphrase-nfkd (secret row bh1119-sh-i13-passphrase-no-nfkd):
@@ -143,6 +149,29 @@ index 0000000..9d7dcc1
 +	m := nfkdAbandonAbout(t)
 +	checkNfkdSeed(t, m, "31 acutes", "a"+strings.Repeat("\u0301", 31), "5b60cf53d7fd9730cee8e18f0dcf8fbc01e53d9cabfb3ae4aaf9bdd0ac9e58ba4d861773b6065c7ba30ea70157f3f8cee9e73229b7cc4a307e1ce19385a3cb6b")
 +	checkNfkdSeed(t, m, "30 acutes + grave-below", "a"+strings.Repeat("\u0301", 30)+"\u0316", "1dfb7d57cac09826e0111bb912a7e9ae1e0529aa12d631ea797c57778729c5f75cbe87712e560ee2681119c44987288ebea09b874b3d90c5b615a94d7114d8b0")
++}
++
++// A long run of non-starters (hostile or Zalgo-style input to a library
++// caller) is normalized in linear-ish time. 25000 pairs of U+0316, U+0301 (50000
++// marks, CCC 220 then 230, so the run needs sorting) took minutes when the helper
++// re-sorted the whole run after every mark (r2 I1); the correct helper takes
++// milliseconds. The 20 s bound is far above that and far below the old cost.
++func TestFixSecShPassphraseNfkdLongRunFast(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "05f77e030fba075675aede1f4363aca589ba7f514390964c72b3e97e313375d08e4fe779b5c2149a6a4342d789a0a2ed8eed92ee6ab8e4531f7777d2e3f3ad01"
++	p := "a" + strings.Repeat("̖́", 25000)
++	done := make(chan string, 1)
++	start := time.Now()
++	go func() { done <- hex.EncodeToString(MnemonicSeed(m, p)) }()
++	select {
++	case got := <-done:
++		t.Logf("50000 marks took %v", time.Since(start))
++		if got != want {
++			t.Errorf("long run: MnemonicSeed = %s, want %s", got, want)
++		}
++	case <-time.After(20 * time.Second):
++		t.Fatal("long run of 50000 marks did not finish within 20s (quadratic appendNFKD)")
++	}
 +}
 diff --git i/go.mod w/go.mod
 index 3c62928..1b3a7c3 100644

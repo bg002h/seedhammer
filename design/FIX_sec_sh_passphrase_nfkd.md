@@ -65,13 +65,21 @@ The scratch version is `design/FIX_sec_sh_passphrase_nfkd-probe.diff` (evidence,
    // appendNFKD appends the NFKD form of s to dst without the Stream-Safe Text
    // Format (UAX #15 s.13) U+034F insertion that norm applies after 30
    // non-starters: each rune is decomposed alone (no single decomposition reaches
-   // 30 non-starters), then each run of non-starters is stably sorted by CCC.
+   // 30 non-starters), then each run of non-starters is stably sorted by CCC once, when the run ends (sorting after every mark is quadratic).
    // Invalid UTF-8 bytes pass through unchanged as starters.
    func appendNFKD(dst []byte, s string) []byte {
    	start := len(dst) // start of the current run of non-starters
+   	flush := func() {
+   		run := []rune(string(dst[start:]))
+   		sort.SliceStable(run, func(a, b int) bool {
+   			return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
+   		})
+   		dst = append(dst[:start], string(run)...)
+   	}
    	for i := 0; i < len(s); {
    		r, n := utf8.DecodeRuneInString(s[i:])
    		if r == utf8.RuneError && n == 1 {
+   			flush()
    			dst = append(dst, s[i])
    			i++
    			start = len(dst)
@@ -79,19 +87,16 @@ The scratch version is `design/FIX_sec_sh_passphrase_nfkd-probe.diff` (evidence,
    		}
    		for _, d := range norm.NFKD.String(s[i : i+n]) {
    			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
+   				flush()
    				dst = utf8.AppendRune(dst, d)
    				start = len(dst)
    				continue
    			}
    			dst = utf8.AppendRune(dst, d)
-   			run := []rune(string(dst[start:]))
-   			sort.SliceStable(run, func(a, b int) bool {
-   				return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
-   			})
-   			dst = append(dst[:start], string(run)...)
    		}
    		i += n
    	}
+   	flush()
    	return dst
    }
    ```
@@ -132,7 +137,12 @@ Full 128-hex values are in the probe test file.
   `5b60cf53d7fd9730cee8e18f0dcf8fbc01e53d9cabfb3ae4aaf9bdd0ac9e58ba4d861773b6065c7ba30ea70157f3f8cee9e73229b7cc4a307e1ce19385a3cb6b`;
   `"a"+strings.Repeat("\u0301", 30)+"\u0316"` ->
   `1dfb7d57cac09826e0111bb912a7e9ae1e0529aa12d631ea797c57778729c5f75cbe87712e560ee2681119c44987288ebea09b874b3d90c5b615a94d7114d8b0`.
-  Expected values come from Python NFKD. **Tests that change:** none. Existing seed tests (`bip32/master_test.go`,
+  Expected values come from Python NFKD.
+- `TestFixSecShPassphraseNfkdLongRunFast` (R1, performance; test file imports `time`): `"a"+strings.Repeat("\u0316\u0301", 25000)` (50000
+  marks, CCC 220 then 230) must finish within 20 s (a goroutine and `time.After`; the fixed helper takes about 20 ms) and
+  derive `05f77e030fba0756...e3f3ad01` (Python NFKD, full value in the probe test file).
+
+**Tests that change:** none. Existing seed tests (`bip32/master_test.go`,
 `gui/derive_test.go`, `gui/master_key_residue_test.go`, `gui/gui_test.go`, `backup/`) use ASCII passphrases and pass
 unchanged (§8).
 
@@ -147,6 +157,7 @@ Command: `CGO_ENABLED=0 go test -count=1 -v -run 'TestFixSecShPassphraseNfkd' ./
 | TestFixSecShPassphraseNfkdAsciiUnchanged | PASS (control) | PASS |
 | TestFixSecShPassphraseNfkdInvalidUTF8 | FAIL: mixed `MnemonicSeed("\xffcafé") = ff9373f48020e609...` (latin1 matches) | PASS |
 | TestFixSecShPassphraseNfkdLongCombiningRun | FAIL at base, and FAIL with plain `norm.NFKD.AppendString` (U+034F inserted; seed differs from Python) | PASS with `appendNFKD` |
+| TestFixSecShPassphraseNfkdLongRunFast | FAIL on the helper of 7a7f66d (sort after every mark): no result within 20 s; passes only with the sort-once body | PASS (about 21 ms) |
 
 Mutations seen on the probe: `norm.NFD` instead of `norm.NFKD` fails Compatibility; `norm.NFKC` fails
 ComposedEqualsDecomposed and InvalidUTF8.
@@ -155,7 +166,7 @@ ComposedEqualsDecomposed and InvalidUTF8.
 
 | rule | rows |
 |---|---|
-| R1 NFKD, canonical and compatibility, no stream-safe | TestFixSecShPassphraseNfkdComposedEqualsDecomposed; TestFixSecShPassphraseNfkdCompatibility; TestFixSecShPassphraseNfkdLongCombiningRun |
+| R1 NFKD, canonical and compatibility, no stream-safe | TestFixSecShPassphraseNfkdComposedEqualsDecomposed; TestFixSecShPassphraseNfkdCompatibility; TestFixSecShPassphraseNfkdLongCombiningRun; TestFixSecShPassphraseNfkdLongRunFast |
 | R2 ASCII unchanged | TestFixSecShPassphraseNfkdAsciiUnchanged; existing TREZOR seed tests in bip32 and gui |
 | R3 invalid UTF-8 passes through | TestFixSecShPassphraseNfkdInvalidUTF8 |
 | R4 unchanged elsewhere | existing `./...` suite; device builds (§8) |
@@ -167,9 +178,10 @@ ComposedEqualsDecomposed and InvalidUTF8.
 `GOOS=js GOARCH=wasm go vet ./cmd/emu/` and with `-tags refugium`; `./scripts/refugium-tagged-test.sh`; both TinyGo
 device builds (`.github/workflows/test.yml` L150, L153) and `./scripts/refugium-elf-check.sh default.elf refugium.elf`.
 
-Measured on the probe by the author (go1.26.7, /scratch/code/shibboleth/.toolchain/go): `go test` of `./bip39/
+Measured on the probe by the author (plain-`norm` probe, go1.26.7, /scratch/code/shibboleth/.toolchain/go): `go test` of `./bip39/
 ./bip32/ ./passphrase/ ./backup/ ./bip85/ ./cmd/biptool/` ok; `./gui/` with `-run 'Derive|MasterKey|Fingerprint|Bip85|BIP85|Passphrase|Xpub'`
 ok; `GOARCH=386 go test ./bip39/` ok; `go vet ./bip39/ ./passphrase/` ok; gofmt clean; `go mod tidy -diff` exit 0.
+With the `appendNFKD` helper (r1 I1, r2 I1; fold runs on go1.26.4, `CGO_ENABLED=0`): the five-plus-one `TestFixSecShPassphraseNfkd*` rows pass, `./bip39/ ./bip32/ ./passphrase/ ./bip85/ ./backup/ ./cmd/biptool/` ok, `GOARCH=386 go test ./bip39/` ok, `go vet`, gofmt and `go mod tidy -diff` clean. The `go1.26.7` figures above predate the helper.
 Not run by the author: the rest of `./...` and the other jobs. The builder runs the whole gate.
 
 **Device size (for the reviewer and architect).** TinyGo pico-plus2 default build with the CI flags, `-size short`:
@@ -195,5 +207,5 @@ decision and is not proposed.
 ## 10. Evidence
 
 RED and GREEN rows run by the author as in §6. Probe diff `design/FIX_sec_sh_passphrase_nfkd-probe.diff` sha256
-0b68d3bc3e28e527b613fecea56ab296c93fb6354434caab4e03c08ad497e037; it was applied for the GREEN and size runs and
+bb98831dca3bd0c5d50cf37a908bf4f439f457071af973a355f76f3db25f68c5; it was applied for the GREEN and size runs and
 reverted. Seed values in §5/§6 are captured from the runs and the Python computation, not written by hand.
