@@ -366,11 +366,14 @@ nix run .#build-firmware
 # -> seedhammerii-<version>.uf2, named v0.0.0-bg<sha> by flake.nix -- NOT by
 #    `git describe`, which would inherit upstream's tags and read as official
 
+# the name it printed after "Built ", without .uf2; later commands reuse $IMG
+IMG="seedhammerii-v0.0.0-bg1a2b3c4"
+
 # sign it
-/path/to/mnemonic-engrave/scripts/sign-firmware.sh <image>.uf2 ~/.sh2/sh2-boot-key.pem
+/path/to/mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem
 ```
 
-`sign-firmware.sh` writes `<image>.signed.uf2` and **never modifies its input**.
+`sign-firmware.sh` writes `$IMG.signed.uf2` and **never modifies its input**.
 It proves the signature offline before anything reaches the device: it asserts
 the digest is unchanged after the signature is embedded (i.e. the signature
 really is outside the hashed region), verifies with `openssl`, checks the
@@ -386,7 +389,7 @@ recovery path, and signing over it would be silent and green.
 cannot know whether that key is in *your* slot. Confirm the link yourself:
 
 ```sh
-picotool info -a <image>.signed.uf2 \
+picotool info -a "$IMG.signed.uf2" \
   | awk '/[Pp]ublic key:/{print $NF}' | head -1 | xxd -r -p | sha256sum
 ```
 
@@ -396,7 +399,7 @@ will not boot no matter how valid its signature is.
 ### Flash
 
 ```sh
-picotool load --verify <image>.signed.uf2
+picotool load --verify "$IMG.signed.uf2"
 ```
 
 **Judge the result on machine power, not on USB.** The controller's
