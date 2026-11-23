@@ -71,14 +71,24 @@
 # tests that actually ran must equal the number discovered. A filter that
 # silences a check, and a run that executes nothing, both fail loudly now.
 #
-# The tagged files are type-checked on every push by
-# `go vet -tags oraclelive ./oracle/ ./gui/ ./sysw/` in .github/workflows/
-# test.yml, so they cannot rot uncompiled behind their own tag.
+# THE PACKAGES ARE DERIVED FROM THE SOURCE TOO. The search used to be limited
+# to a hand list (./oracle/ ./gui/ ./sysw/), and the same hand list was given
+# to `go test`, so cmd/emu's tagged test was neither discovered nor run while
+# this script printed PASS (bughunt-1119 bh-sh-I11). Now every directory that
+# `./...` would visit is searched, each package that holds a tagged file is run
+# with its own filter, and the vacuity check compares PACKAGE AND NAME.
+# oracle/live_runner_test.go (untagged, so in every `go test ./...`) checks
+# all of this against the tree with a stub `go`.
+#
+# The tagged files are compiled on every push by `go test -tags oraclelive
+# -run '^$'` over a package list in .github/workflows/test.yml, so they cannot
+# rot uncompiled behind their own tag. That list is kept by hand.
 #
 # ABSENCE IS FATAL IN HERE. You ran this on purpose; a missing oracle or a
 # missing primary checkout is a failure, not a reason to report success.
 
 set -uo pipefail
+set -f  # no pathname expansion: the path lists below are split unquoted, and a [ in a path is a glob
 cd "$(dirname "$0")/.."
 
 # -update is dispatched to ./gui/ ALONE, and deliberately not forwarded to the
@@ -126,24 +136,53 @@ echo
 # PASS while it never ran. \boraclelive\b also rejects `oraclelivex`.
 # (It would match a negated `//go:build !oraclelive`; none exists, and one
 # would show up as a discovered-but-never-run name below rather than silently.)
-tagged_files=$(grep -rlE '^//go:build\b.*\boraclelive\b' --include='*.go' ./oracle/ ./gui/ ./sysw/)
+#
+# The search covers the directories `./...` visits, by Go's own rules: not
+# testdata, vendor, or a name starting with "." or "_" (that also keeps out a
+# worktree or cache nested in a hidden directory). find, not `grep -r
+# --exclude-dir='.*'`: GNU grep applies that pattern to the "." it starts from
+# and searches nothing.
+# -Z and tr: a newline inside a path becomes a space, so the whitespace refusal below sees it rather than the loops splitting it.
+tagged_files=$(find . -type d \( -name testdata -o -name vendor -o -name '.?*' -o -name '_*' \) -prune \
+  -o -type f -name '*.go' -print0 | sort -z | xargs -0 -r grep -lZE '^//go:build\b.*\boraclelive\b' | tr '\n\0' ' \n')
 if [ -z "$tagged_files" ]; then
   echo "::error::no //go:build oraclelive files found; this script would run nothing"
   exit 1
 fi
-tagged_tests=$(grep -h '^func Test' $tagged_files | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | grep -v '^TestMain$' | sort -u)
+# Go cannot load a package whose path holds whitespace, and the loops below split
+# on it: refuse rather than drop the file and report PASS.
+if grep -q '[[:space:]]' <<<"$tagged_files"; then
+  echo "::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:"
+  grep '[[:space:]]' <<<"$tagged_files" | sed 's/^/         /'
+  exit 1
+fi
+# One line per (package, test): "./dir/ TestName".
+tagged_tests=$(for f in $tagged_files; do
+  pkg="${f%/*}/"
+  grep -h '^func Test' "$f" | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | grep -v '^TestMain$' | sed "s|^|$pkg |"
+done | sort -u)
 want=$(printf '%s\n' "$tagged_tests" | grep -c .)
 if [ "$want" -eq 0 ]; then
   echo "::error::tagged files exist but declare no tests; this script would run nothing"
   exit 1
 fi
-filter=$(printf '%s\n' "$tagged_tests" | paste -sd'|' -)
-echo "   discovered $want tagged test(s) from source"
+packages=$(printf '%s\n' "$tagged_tests" | cut -d' ' -f1 | sort -u)
+npkg=$(printf '%s\n' "$packages" | grep -c .)
+echo "   discovered $want tagged test(s) in $npkg package(s) from source"
 echo
 
-out=$(CGO_ENABLED=0 go test -tags oraclelive -count=1 -v -run "^($filter)\$" ./oracle/ ./gui/ ./sysw/ "$@" 2>&1)
-rc=$?
-printf '%s\n' "$out"
+# One `go test` per package, each with its own names, so a name is only ever
+# credited to the package that declares it.
+rc=0
+ran=
+for pkg in $packages; do
+  filter=$(printf '%s\n' "$tagged_tests" | sed -n "s|^$pkg ||p" | paste -sd'|' -)
+  out=$(CGO_ENABLED=0 go test -tags oraclelive -count=1 -v -run "^($filter)\$" "$pkg" "$@" 2>&1)
+  prc=$?
+  printf '%s\n' "$out"
+  [ $rc -eq 0 ] && rc=$prc
+  ran+=$(printf '%s\n' "$out" | sed -n "s|^=== RUN   \(Test[A-Za-z0-9_]*\)\$|$pkg \1|p")$'\n'
+done
 
 # VACUITY CHECK, by SET DIFFERENCE rather than by count.
 #
@@ -155,14 +194,14 @@ printf '%s\n' "$out"
 # from the output entirely. Counting also went spuriously RED whenever any tagged
 # test grew a subtest.
 #
-# So compare NAMES. The $-anchored sed drops `TestFoo/sub` because it contains a
-# '/', and naming the absentees beats a count at no cost.
-ran_names=$(printf '%s\n' "$out" | sed -n 's/^=== RUN   \(Test[A-Za-z0-9_]*\)$/\1/p' | sort -u)
+# So compare PACKAGE AND NAME. The $-anchored sed drops `TestFoo/sub` because it
+# contains a '/', and naming the absentees beats a count at no cost.
+ran_names=$(printf '%s' "$ran" | grep . | sort -u)
 missing=$(comm -23 <(printf '%s\n' "$tagged_tests") <(printf '%s\n' "$ran_names"))
 if [ -n "$missing" ]; then
   echo
   echo "::error::discovered $want tagged test(s); these never executed:"
-  printf '         %s\n' $missing
+  printf '%s\n' "$missing" | sed 's/^/         /'
   echo "         a live check that does not run is the defect this script exists to prevent"
   rc=1
 fi
