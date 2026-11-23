@@ -224,3 +224,18 @@ func TestFixShDocsImagePlaceholderSignFailNoFlash(t *testing.T) {
 		}
 	}
 }
+
+// TestFixShDocsImagePlaceholderBuildFailNoSign (R2): a failed build must not
+// reach the signer, so a same-named image left by an earlier (-dirty) build is
+// never signed or flashed.
+func TestFixShDocsImagePlaceholderBuildFailNoSign(t *testing.T) {
+	for _, page := range fixShDocsPages {
+		lines := append([]string{`nix() { rec nix "$@"; return 1; }`}, fixShDocsSignBlocks(t, page)...)
+		calls, _, _, output, _ := fixShDocsRun(t, lines)
+		for _, c := range calls {
+			if strings.HasPrefix(c, "sign-firmware.sh ") || (page == "../README.md" && strings.HasPrefix(c, "picotool argc=3 [load]")) {
+				t.Errorf("%s: build failed but the block still ran %s\nbash output: %s", page, c, output)
+			}
+		}
+	}
+}
