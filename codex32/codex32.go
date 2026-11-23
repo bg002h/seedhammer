@@ -191,9 +191,10 @@ func (s String) parts() *parts {
 // Using the index 'S' will recover the master seed.
 //
 // The set must hold at most k shares, where k is the common threshold digit
-// (k is 1 for an unshared secret, threshold "0"), and exactly k to
-// interpolate an index that no input has. A set of more than k shares is
-// refused, per BIP-93: the number of shares is exactly the threshold.
+// (k is 1 for threshold "0"), and exactly k to interpolate an index that no
+// input has. A set of more than k shares is refused, per BIP-93: the number
+// of shares is exactly the threshold. A set with a repeated index is refused,
+// even when the target is that index.
 func Interpolate(shares []String, index rune) (String, error) {
 	// Collect indices and sanity check.
 	if len(shares) == 0 {
@@ -223,6 +224,16 @@ func Interpolate(shares []String, index rune) (String, error) {
 	}
 	if k := max(s0Parts.threshold, 1); len(shares) > k {
 		return String{}, errTooManyShares
+	}
+	// Refuse a repeated index before the early return below, which would
+	// otherwise output whichever of two strings with the target index is
+	// first (BIP-93: all of the share index values are distinct).
+	for i := range indices {
+		for j := i + 1; j < len(indices); j++ {
+			if indices[i] == indices[j] {
+				return String{}, errRepeatedIndex
+			}
+		}
 	}
 
 	// Do lagrange interpolation.
