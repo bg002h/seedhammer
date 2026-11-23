@@ -20,6 +20,9 @@ type Reader struct {
 	footer blockFooter
 	// idx into the payload of the current block.
 	idx uint32
+	// own counts the blocks of family read so far; total is the
+	// block count the first of them declares.
+	own, total uint32
 }
 
 type FamilyID uint32
@@ -71,6 +74,9 @@ func (r *Reader) Read(buf []byte) (int, error) {
 	n := min(len(buf), int(r.header.PayloadSize()-r.idx))
 	n, err := r.r.Read(buf[:n])
 	r.idx += uint32(n)
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
 	return n, err
 }
 
@@ -108,6 +114,9 @@ func (r *Reader) loadBlock() error {
 		if n := len(r.footer.b) - int(r.idx); n > 0 {
 			footer := r.footer.b[:n]
 			if _, err := io.ReadFull(r.r, footer); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
 				return err
 			}
 			me := binary.LittleEndian.Uint32(footer[len(footer)-4:])
@@ -119,6 +128,9 @@ func (r *Reader) loadBlock() error {
 		r.idx = 0
 		// Read header.
 		if _, err := io.ReadFull(r.r, r.header.b[:]); err != nil {
+			if err == io.EOF && r.own < r.total {
+				err = io.ErrUnexpectedEOF
+			}
 			return err
 		}
 		bo := binary.LittleEndian
@@ -146,6 +158,10 @@ func (r *Reader) loadBlock() error {
 			return errors.New("uf2: non-contiguous data")
 		}
 		r.addr = addr
+		if r.own == 0 {
+			r.total = r.header.NumBlocks()
+		}
+		r.own++
 		return nil
 	}
 }

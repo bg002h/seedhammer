@@ -69,8 +69,8 @@ complete file prints exactly what it printed before (checked on two real sealed 
 
 ## 4. Code changes (builder applies)
 
-uf2/uf2.go only (the scratch version is `design/FIX_sh_uf2_truncation-probe.diff`; evidence, not a patch to copy
-blindly):
+uf2/uf2.go only (the scratch version is `design/FIX_sh_uf2_truncation-probe.diff`; the probe's uf2.go hunk
+implements steps 1-5):
 
 1. `Reader` (L13-23) gains two `uint32` fields: own-family blocks accepted, and the declared total; comment names this
    FIX.
@@ -103,6 +103,8 @@ New (test function names are the TRACE row names), in the probe diff:
     block: `io.ErrUnexpectedEOF`.
   - `TestFixShUF2CountsOwnFamilyOnly`: a 1-block other-family file then the first 2 blocks of a 3-block own file:
     `io.ErrUnexpectedEOF` (catches a counter that counts every block, as the triage's scratch fix did).
+  - `TestFixShUF2TotalFromFirstBlock`: block 0 declares numBlocks 3, block 1 declares 2, file ends after block 1:
+    `io.ErrUnexpectedEOF` (catches a reader that takes the total from every block).
 - cmd/picosign/fix_sh_uf2_truncation_test.go (uses the existing `fixShUF2` and `fixShRunChild` helpers of
   fix_sh_output_sink_test.go):
   - `TestFixShPicosignTruncatedUF2`: the 24-block fixture with its last block removed; `hash <f>`, `extract <f>` and
@@ -122,6 +124,7 @@ Command: `CGO_ENABLED=0 go test -count=1 -run 'TestFixSh|TestRead|TestWrite' -v 
 | TestFixShUF2BoundaryCut | FAIL: `cut at 512 of 3 blocks: read 256 bytes, err <nil>`; `cut at 1024 ...: read 512 bytes, err <nil>` | PASS |
 | TestFixShUF2MidBlockCut | FAIL, 8 lines: cuts 32 (0 bytes), 544 (256), 644 (356), 800 (512), each reader, `err <nil>` | PASS |
 | TestFixShUF2OtherFamilyBlockCut | FAIL: `cut 1056 bytes into a 3-block concatenation: read 512 bytes, err <nil>` | PASS |
+| TestFixShUF2TotalFromFirstBlock | FAIL: `first block declares 3, second declares 2, file ends after 2: read 512 bytes, err <nil>` | PASS |
 | TestFixShUF2CountsOwnFamilyOnly | FAIL: `1 other-family block + 2 of 3 own blocks: read 512 bytes, err <nil>` | PASS |
 | TestFixShPicosignTruncatedUF2 | FAIL: hash, extract, sign each `exit 2 stderr "picosign: [verb: ]<f>: picobin: missing block header\n"` | PASS |
 | TestFixShUF2CompleteFile, TestFixShUF2ConcatenatedFamilies, TestFixShUF2EmptyInput, TestRead, TestWrite | PASS (controls) | PASS |
@@ -135,7 +138,7 @@ TestFixShUF2OtherFamilyBlockCut.
 
 | rule | rows |
 |---|---|
-| R1 own-family count, first block's total | TestFixShUF2CountsOwnFamilyOnly; TestFixShUF2ConcatenatedFamilies |
+| R1 own-family count, first block's total | TestFixShUF2CountsOwnFamilyOnly; TestFixShUF2ConcatenatedFamilies; TestFixShUF2TotalFromFirstBlock |
 | R2 boundary cut; zero own blocks and complete files stay clean | TestFixShUF2BoundaryCut; TestFixShUF2EmptyInput; TestFixShUF2CompleteFile; TestFixShPicosignTruncatedUF2 |
 | R3 cut inside a block, both reader styles, other family too | TestFixShUF2MidBlockCut; TestFixShUF2OtherFamilyBlockCut |
 | R4 bare io.ErrUnexpectedEOF, picosign text | every RED row asserts `errors.Is`; TestFixShPicosignTruncatedUF2 asserts the exact lines |
