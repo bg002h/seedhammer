@@ -1,0 +1,737 @@
+{
+ "version": 1,
+ "spec": "SPEC_systemwide_payloads.md \u00a714 (S1, 2026-11-22)",
+ "generator": "scripts/gen-sysw-mr-vectors.py",
+ "network_of_cards": "signet",
+ "string_vectors": [
+  {
+   "name": "single-card",
+   "record": "mr1q2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg",
+   "class": "Mr",
+   "reason": null,
+   "why": "a signet single-string card (owner-heir), 75 characters",
+   "mr": {
+    "args": [
+     "mr1q2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg"
+    ],
+    "verdict": "accept",
+    "says": "shape 0"
+   }
+  },
+  {
+   "name": "chunk-0",
+   "record": "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+   "class": "Mr",
+   "reason": null,
+   "why": "chunk 0 of a signet 2-chunk card (2of3-heir)",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "refuse",
+    "says": "chunk 1 is missing"
+   }
+  },
+  {
+   "name": "chunk-1",
+   "record": "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+   "class": "Mr",
+   "reason": null,
+   "why": "chunk 1 of the same card",
+   "mr": {
+    "args": [
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+    ],
+    "verdict": "refuse",
+    "says": "chunk 0 is missing"
+   }
+  },
+  {
+   "name": "upper",
+   "record": "MR1Q2QYYTER2SCSQZPL40VEQYPPQQXPXPGNXJAKQQN88SQHS32RD4EYSMYJSMG0770KKUFGJEGG",
+   "class": "Unknown",
+   "reason": "MR_CASE",
+   "why": "all upper case: mr reads it, the container refuses it",
+   "mr": {
+    "args": [
+     "MR1Q2QYYTER2SCSQZPL40VEQYPPQQXPXPGNXJAKQQN88SQHS32RD4EYSMYJSMG0770KKUFGJEGG"
+    ],
+    "verdict": "accept",
+    "says": "shape 0"
+   }
+  },
+  {
+   "name": "mixed",
+   "record": "mr1q2qyyteR2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg",
+   "class": "Unknown",
+   "reason": "MR_CASE",
+   "why": "one capital letter",
+   "mr": {
+    "args": [
+     "mr1q2qyyteR2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg"
+    ],
+    "verdict": "refuse",
+    "says": "mixes upper and lower case"
+   }
+  },
+  {
+   "name": "character-b",
+   "record": "mr1q2qyyter2scsqzpl4bveqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg",
+   "class": "Unknown",
+   "reason": "MR_CHARACTER",
+   "why": "'b' is not in the mr1 alphabet",
+   "mr": {
+    "args": [
+     "mr1q2qyyter2scsqzpl4bveqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg"
+    ],
+    "verdict": "refuse",
+    "says": "not in the codex32 alphabet"
+   }
+  },
+  {
+   "name": "checksum",
+   "record": "mr1q2qyyter2scsqzpl40veqyppqqxzxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg",
+   "class": "Unknown",
+   "reason": "MR_CHECKSUM",
+   "why": "one substitution",
+   "mr": {
+    "args": [
+     "mr1q2qyyter2scsqzpl40veqyppqqxzxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg"
+    ],
+    "verdict": "refuse",
+    "says": "checksum does not verify"
+   }
+  },
+  {
+   "name": "too-long",
+   "record": "mr1q2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmgq2qyyter2scsqzpl40veqyzf4nn2y3djaa9",
+   "class": "Unknown",
+   "reason": "MR_LENGTH",
+   "why": "94 symbols after mr1, checksum valid",
+   "mr": {
+    "args": [
+     "mr1q2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmgq2qyyter2scsqzpl40veqyzf4nn2y3djaa9"
+    ],
+    "verdict": "refuse",
+    "says": "94 symbols after mr1"
+   }
+  },
+  {
+   "name": "too-short",
+   "record": "mr1g3sktpglm9ulh",
+   "class": "Unknown",
+   "reason": "MR_LENGTH",
+   "why": "13 symbols after mr1 (no data), checksum valid",
+   "mr": {
+    "args": [
+     "mr1g3sktpglm9ulh"
+    ],
+    "verdict": "refuse",
+    "says": "card header ends inside"
+   }
+  },
+  {
+   "name": "reserved-u",
+   "record": "mr1u2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmgsss9537dpszy3",
+   "class": "Unknown",
+   "reason": "MR_RESERVED_SYMBOL",
+   "why": "first data symbol u (card version 7)",
+   "mr": {
+    "args": [
+     "mr1u2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmgsss9537dpszy3"
+    ],
+    "verdict": "refuse",
+    "says": "card version 7 is reserved"
+   }
+  },
+  {
+   "name": "chunk-short",
+   "record": "mr1lqqqqqq78tvea325kvxt",
+   "class": "Unknown",
+   "reason": "MR_CHUNK_SHORT",
+   "why": "a chunk with 7 data symbols, checksum valid",
+   "mr": {
+    "args": [
+     "mr1lqqqqqq78tvea325kvxt",
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "refuse",
+    "says": "too few for its 37-bit chunk header"
+   }
+  },
+  {
+   "name": "chunk-pad-long",
+   "record": "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqqlh6xz2c8jsd0y",
+   "class": "Unknown",
+   "reason": "MR_CHUNK_PADDING",
+   "why": "chunk 1 plus one zero symbol: 5 padding bits",
+   "mr": {
+    "args": [
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqqlh6xz2c8jsd0y",
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "refuse",
+    "says": "ends in 5 bits"
+   }
+  },
+  {
+   "name": "chunk-pad-nonzero",
+   "record": "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4yezrpwmgytevymr",
+   "class": "Unknown",
+   "reason": "MR_CHUNK_PADDING",
+   "why": "chunk 0 with its last of 2 padding bits set",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4yezrpwmgytevymr",
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "refuse",
+    "says": "ends in 2 bits"
+   }
+  }
+ ],
+ "set_vectors": [
+  {
+   "name": "complete",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+   ],
+   "pack": "ok",
+   "reason": null,
+   "detail": null,
+   "why": "the 2-chunk card, in order",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+    ],
+    "verdict": "accept",
+    "says": "shape 0"
+   }
+  },
+  {
+   "name": "complete-reversed",
+   "records": [
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+   ],
+   "pack": "ok",
+   "reason": null,
+   "detail": null,
+   "why": "the same card, chunk 1 first: order inside a card is free",
+   "mr": {
+    "args": [
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "accept",
+    "says": "shape 0"
+   }
+  },
+  {
+   "name": "missing",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+   ],
+   "pack": "refused",
+   "reason": "SET_MISSING",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "index": 1,
+    "count": 2
+   },
+   "why": "chunk 1 of 2 missing",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn"
+    ],
+    "verdict": "refuse",
+    "says": "chunk 1 is missing"
+   }
+  },
+  {
+   "name": "duplicate",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+   ],
+   "pack": "refused",
+   "reason": "SET_DUPLICATE",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "index": 0,
+    "records": [
+     0,
+     1
+    ]
+   },
+   "why": "chunk 0 twice, even byte-identical",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+    ],
+    "verdict": "refuse",
+    "says": "chunk 0 is given twice"
+   }
+  },
+  {
+   "name": "count",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0pqtf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqt787lqsmndml2"
+   ],
+   "pack": "refused",
+   "reason": "SET_COUNT",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "record": 1,
+    "count": 3,
+    "first_count": 2
+   },
+   "why": "chunk 1 re-framed to say 3 chunks",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0pqtf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqt787lqsmndml2"
+    ],
+    "verdict": "refuse",
+    "says": "says the card has 3 chunks"
+   }
+  },
+  {
+   "name": "index",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qsnf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaq9fgm68eugrl6d"
+   ],
+   "pack": "refused",
+   "reason": "SET_INDEX",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "record": 1,
+    "index": 2,
+    "count": 2
+   },
+   "why": "chunk 1 re-framed as index 2 of 2",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0qsnf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaq9fgm68eugrl6d"
+    ],
+    "verdict": "refuse",
+    "says": "gives index 2 in a set of 2"
+   }
+  },
+  {
+   "name": "id",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstg0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaql234ysck4v0e0"
+   ],
+   "pack": "refused",
+   "reason": "SET_ID",
+   "detail": {
+    "begins": "mr1lg2c0"
+   },
+   "why": "chunk 1 with one content bit flipped (checksum valid)",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lg2c0qstg0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaql234ysck4v0e0"
+    ],
+    "verdict": "refuse",
+    "says": "these chunks are not one card"
+   }
+  },
+  {
+   "name": "slices",
+   "records": [
+    "mr1luxgmqsqqqypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8gsr0yty5736tup",
+    "mr1luxgmqsg7ruszzg3rysjjvfeg9y4zktpd9chnqvgy99dzpsc3zq3q"
+   ],
+   "pack": "refused",
+   "reason": "SET_SLICES",
+   "detail": {
+    "begins": "mr1luxgm"
+   },
+   "why": "50 bytes sliced 30+20 instead of 25+25; id correct",
+   "mr": {
+    "args": [
+     "mr1luxgmqsqqqypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8gsr0yty5736tup",
+     "mr1luxgmqsg7ruszzg3rysjjvfeg9y4zktpd9chnqvgy99dzpsc3zq3q"
+    ],
+    "verdict": "refuse",
+    "says": "[30, 20] bytes"
+   }
+  },
+  {
+   "name": "count-formula",
+   "records": [
+    "mr1luxgmpqqqqypqxpq9qcrsszg2pvxq6rs0zq8p97zvkyrmc08",
+    "mr1luxgmpqg3zgf3g9gkzuvpjxsmrsw3u8eqyye4sz9szh0kcvn",
+    "mr1luxgmpq3zyvjz2f389q5j52ev95hz7vp367cspfaukda47"
+   ],
+   "pack": "refused",
+   "reason": "SET_SLICES",
+   "detail": {
+    "begins": "mr1luxgm"
+   },
+   "why": "50 bytes in 3 chunks where the rule gives 2; id correct",
+   "mr": {
+    "args": [
+     "mr1luxgmpqqqqypqxpq9qcrsszg2pvxq6rs0zq8p97zvkyrmc08",
+     "mr1luxgmpqg3zgf3g9gkzuvpjxsmrsw3u8eqyye4sz9szh0kcvn",
+     "mr1luxgmpq3zyvjz2f389q5j52ev95hz7vp367cspfaukda47"
+    ],
+    "verdict": "refuse",
+    "says": "[17, 17, 16] bytes"
+   }
+  },
+  {
+   "name": "split",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "md1fgl68qs9qel40veprs874anyywx0atmxggu50atmxgguhqqxpxrgyg5qmkljvvahhzr8z",
+    "md1fgl68qst3f8z5nxj7mqqfnncqvgs9gdkhy3pkf9pk5cwjvn5ujycfn6qhzc5yfl9s9ajk",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+   ],
+   "pack": "refused",
+   "reason": "CARD_SPLIT",
+   "detail": {
+    "kind": "mr1",
+    "begins": "mr1lg2c0",
+    "record": 1
+   },
+   "why": "an md1 card between the two chunks",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "md1fgl68qs9qel40veprs874anyywx0atmxggu50atmxgguhqqxpxrgyg5qmkljvvahhzr8z",
+     "md1fgl68qst3f8z5nxj7mqqfnncqvgs9gdkhy3pkf9pk5cwjvn5ujycfn6qhzc5yfl9s9ajk",
+     "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf"
+    ],
+    "verdict": "refuse",
+    "says": "is an md1 string"
+   }
+  },
+  {
+   "name": "mixed-cards",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lj3x5qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqknhs48cfxu72m"
+   ],
+   "pack": "refused",
+   "reason": "SET_MISSING",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "index": 1,
+    "count": 2
+   },
+   "why": "chunk 0 of one card and chunk 1 of another",
+   "mr": {
+    "args": [
+     "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+     "mr1lj3x5qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqknhs48cfxu72m"
+    ],
+    "verdict": "refuse",
+    "says": "is of the chunk set that begins"
+   }
+  },
+  {
+   "name": "framing-only",
+   "records": [
+    "mr1l8hadpqqqqypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8g7ruszz4yz5l2m9g3jfu",
+    "mr1l8hadpqfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyxazg24c64w9xtw",
+    "mr1l8hadpqjyg4rywjzfff95cn2wfag9z5jn2324v46ct9d9khzate0kqctzvvjlkkssx3cy2u3"
+   ],
+   "pack": "ok",
+   "reason": null,
+   "detail": null,
+   "why": "3 chunks of 100 bytes that are not a card: the container does not decode cards (STOP-1); mr refuses it",
+   "mr": {
+    "args": [
+     "mr1l8hadpqqqqypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8g7ruszz4yz5l2m9g3jfu",
+     "mr1l8hadpqfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyxazg24c64w9xtw",
+     "mr1l8hadpqjyg4rywjzfff95cn2wfag9z5jn2324v46ct9d9khzate0kqctzvvjlkkssx3cy2u3"
+    ],
+    "verdict": "refuse",
+    "says": "U field"
+   }
+  }
+ ],
+ "kit_vectors": [
+  {
+   "name": "kit-2of3",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mk1qpk4mtpqqsqm3vrdeqxey5x6lcpue0vssqygrqyqsqygrqyqsqyqgdv8eaq3fjne26pjwjyhtpdpu2pnuy2qjvpakcqrgxn4qsa8a092r3u5",
+    "mk1qpk4mtppmtf325qnac9cxy99x2zqgdszpve25uz55thheer40jw8rn9ask8xpnkvscsvj3hf7g5ws29nmyqt2a43l5uzaxkxagmr8mjvg",
+    "mk1qpumhjpqqsqm3vrdepsaye8flcpue0vssqygrqyqsqyg9qyqsqyqgdv8eaqv3sh2w8clkrlywgwep524ryw7ry0788h3c62lht8yc97zuj0f",
+    "mk1qpumhjppc04r2g49rl4x2hdcldcwqnqrrvluur9spfxscytkjlks79u7kthvjxwkyqys68vx5w63mssz6hp7dmedq5uythh2tplszm8et",
+    "mk1qprduapqqsqm3vrdeqjycfn6lcpue0vssqygrqyqsqyg8qyqsqyqgdv8elctket6rgys0yye8c7dv4af8qkj7qs3z23g6gx4fsrynsykuq9w",
+    "mk1qprduappkn4ru8adws2dxu4resk0njszjqtw5dgm3pwcutcdh4rn3rxq3tfher5dannc78wk3l29gzkzu8qpk7wk0qea037ljtsn276h8",
+    "md1fgl68qs9qel40veprs874anyywx0atmxggu50atmxgguhqqxpxrgyg5qmkljvvahhzr8z",
+    "md1fgl68qst3f8z5nxj7mqqfnncqvgs9gdkhy3pkf9pk5cwjvn5ujycfn6qhzc5yfl9s9ajk"
+   ],
+   "kit": "eligible",
+   "reason": null,
+   "detail": null,
+   "cards": [
+    {
+     "kind": "mr1",
+     "strings": 2,
+     "begins": "mr1lg2c0",
+     "ends": "06uf"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qppc9",
+     "ends": "0uvz"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qpk4m",
+     "ends": "mjvg"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qpumh",
+     "ends": "m8et"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qprdu",
+     "ends": "76h8"
+    },
+    {
+     "kind": "md1",
+     "strings": 2,
+     "begins": "md1fgl68",
+     "ends": "9ajk"
+    }
+   ],
+   "why": "the 2of3-heir card, its four mk1 plates and the (0,0) md1 card: 6 cards"
+  },
+  {
+   "name": "kit-single",
+   "records": [
+    "mr1q2qyyter2scsqzpl40veqyppqqxpxpgnxjakqqn88sqhs32rd4eysmyjsmg0770kkufgjegg"
+   ],
+   "kit": "eligible",
+   "reason": null,
+   "detail": null,
+   "cards": [
+    {
+     "kind": "mr1",
+     "strings": 1,
+     "begins": "mr1q2qyy",
+     "ends": "jegg"
+    }
+   ],
+   "why": "one single-string card"
+  },
+  {
+   "name": "kit-text",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "text:68656c6c6f"
+   ],
+   "kit": "refused",
+   "reason": "KIT_OTHER_RECORD",
+   "detail": {
+    "record": 2,
+    "class": "free text"
+   },
+   "cards": null,
+   "why": "free text beside the card"
+  },
+  {
+   "name": "kit-mk1-alone",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6"
+   ],
+   "kit": "refused",
+   "reason": "KIT_UNCONFIRMED_MDMK",
+   "detail": {
+    "record": 2
+   },
+   "cards": null,
+   "why": "one string of a 2-string mk1 plate"
+  },
+  {
+   "name": "kit-mk1-split",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qpk4mtpqqsqm3vrdeqxey5x6lcpue0vssqygrqyqsqygrqyqsqyqgdv8eaq3fjne26pjwjyhtpdpu2pnuy2qjvpakcqrgxn4qsa8a092r3u5",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mk1qpk4mtppmtf325qnac9cxy99x2zqgdszpve25uz55thheer40jw8rn9ask8xpnkvscsvj3hf7g5ws29nmyqt2a43l5uzaxkxagmr8mjvg"
+   ],
+   "kit": "refused",
+   "reason": "CARD_SPLIT",
+   "detail": {
+    "kind": "mk1",
+    "begins": "mk1qppc9",
+    "record": 3
+   },
+   "cards": null,
+   "why": "two mk1 plates interleaved"
+  },
+  {
+   "name": "kit-upper",
+   "records": [
+    "MR1LG2C0QSQZSPPZ7G65XYQPS0RL40VEQPQCGQPSFS6PZ9QU2FC4YCMCSXM3AJXHUTN",
+    "MR1LG2C0QSTF0DSQYEEUQXYGZ5XMTJGSMYJSM2V8FXF6WFZVYEAQPJ52CKKNS06UF"
+   ],
+   "kit": "refused",
+   "reason": "MR_CASE",
+   "detail": {
+    "record": 0
+   },
+   "cards": null,
+   "why": "the card in upper case: the string rule runs first"
+  },
+  {
+   "name": "kit-missing",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mk1qpk4mtpqqsqm3vrdeqxey5x6lcpue0vssqygrqyqsqygrqyqsqyqgdv8eaq3fjne26pjwjyhtpdpu2pnuy2qjvpakcqrgxn4qsa8a092r3u5",
+    "mk1qpk4mtppmtf325qnac9cxy99x2zqgdszpve25uz55thheer40jw8rn9ask8xpnkvscsvj3hf7g5ws29nmyqt2a43l5uzaxkxagmr8mjvg",
+    "mk1qpumhjpqqsqm3vrdepsaye8flcpue0vssqygrqyqsqyg9qyqsqyqgdv8eaqv3sh2w8clkrlywgwep524ryw7ry0788h3c62lht8yc97zuj0f",
+    "mk1qpumhjppc04r2g49rl4x2hdcldcwqnqrrvluur9spfxscytkjlks79u7kthvjxwkyqys68vx5w63mssz6hp7dmedq5uythh2tplszm8et",
+    "mk1qprduapqqsqm3vrdeqjycfn6lcpue0vssqygrqyqsqyg8qyqsqyqgdv8elctket6rgys0yye8c7dv4af8qkj7qs3z23g6gx4fsrynsykuq9w",
+    "mk1qprduappkn4ru8adws2dxu4resk0njszjqtw5dgm3pwcutcdh4rn3rxq3tfher5dannc78wk3l29gzkzu8qpk7wk0qea037ljtsn276h8"
+   ],
+   "kit": "refused",
+   "reason": "SET_MISSING",
+   "detail": {
+    "begins": "mr1lg2c0",
+    "index": 1,
+    "count": 2
+   },
+   "cards": null,
+   "why": "the card's chunk 1 left out"
+  },
+  {
+   "name": "kit-two-copies",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qpk4mtpqqsqm3vrdeqxey5x6lcpue0vssqygrqyqsqygrqyqsqyqgdv8eaq3fjne26pjwjyhtpdpu2pnuy2qjvpakcqrgxn4qsa8a092r3u5",
+    "mk1qpk4mtppmtf325qnac9cxy99x2zqgdszpve25uz55thheer40jw8rn9ask8xpnkvscsvj3hf7g5ws29nmyqt2a43l5uzaxkxagmr8mjvg"
+   ],
+   "kit": "eligible",
+   "reason": null,
+   "detail": null,
+   "cards": [
+    {
+     "kind": "mr1",
+     "strings": 2,
+     "begins": "mr1lg2c0",
+     "ends": "06uf"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qppc9",
+     "ends": "0uvz"
+    },
+    {
+     "kind": "mr1",
+     "strings": 2,
+     "begins": "mr1lg2c0",
+     "ends": "06uf"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qpk4m",
+     "ends": "mjvg"
+    }
+   ],
+   "why": "S4's owner-heir payload: the card, mk1 plate 0, the card again, mk1 plate 1; two complete copies of a card are two cards (\u00a714c runs)"
+  },
+  {
+   "name": "kit-two-copies-mk1",
+   "records": [
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mr1lg2c0qsqzsppz7g65xyqps0rl40veqpqcgqpsfs6pz9qu2fc4ycmcsxm3ajxhutn",
+    "mr1lg2c0qstf0dsqyeeuqxygz5xmtjgsmyjsm2v8fxf6wfzvyeaqpj52ckkns06uf",
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz"
+   ],
+   "kit": "eligible",
+   "reason": null,
+   "detail": null,
+   "cards": [
+    {
+     "kind": "mr1",
+     "strings": 2,
+     "begins": "mr1lg2c0",
+     "ends": "06uf"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qppc9",
+     "ends": "0uvz"
+    },
+    {
+     "kind": "mr1",
+     "strings": 2,
+     "begins": "mr1lg2c0",
+     "ends": "06uf"
+    },
+    {
+     "kind": "mk1",
+     "strings": 2,
+     "begins": "mk1qppc9",
+     "ends": "0uvz"
+    }
+   ],
+   "why": "the same seat's mk1 plate in two kits: the md1/mk1 groups are runs too (\u00a714d), so both copies confirm (me 0.13.0 does not yet: it reads one over-full group, unconfirmed)"
+  },
+  {
+   "name": "no-mr1",
+   "records": [
+    "mk1qppc9xpqqsqm3vrdep2rd4eylcpue0vssqygrqyqsqygpqyqsqyqgdv8eag9v5c296qfpc56e6xc4ed689t8w76l8hpsgymuz8nr44036mz6",
+    "mk1qppc9xpplucp0dtenpf4xrp3mw9xprqrg9euqv046sd377nklhzwuf0rsq04pxqr0ncmucqczcdwnac6uekquzn8cc0xlmt426fyx0uvz",
+    "mk1qpk4mtpqqsqm3vrdeqxey5x6lcpue0vssqygrqyqsqygrqyqsqyqgdv8eaq3fjne26pjwjyhtpdpu2pnuy2qjvpakcqrgxn4qsa8a092r3u5",
+    "mk1qpk4mtppmtf325qnac9cxy99x2zqgdszpve25uz55thheer40jw8rn9ask8xpnkvscsvj3hf7g5ws29nmyqt2a43l5uzaxkxagmr8mjvg",
+    "mk1qpumhjpqqsqm3vrdepsaye8flcpue0vssqygrqyqsqyg9qyqsqyqgdv8eaqv3sh2w8clkrlywgwep524ryw7ry0788h3c62lht8yc97zuj0f",
+    "mk1qpumhjppc04r2g49rl4x2hdcldcwqnqrrvluur9spfxscytkjlks79u7kthvjxwkyqys68vx5w63mssz6hp7dmedq5uythh2tplszm8et",
+    "mk1qprduapqqsqm3vrdeqjycfn6lcpue0vssqygrqyqsqyg8qyqsqyqgdv8elctket6rgys0yye8c7dv4af8qkj7qs3z23g6gx4fsrynsykuq9w",
+    "mk1qprduappkn4ru8adws2dxu4resk0njszjqtw5dgm3pwcutcdh4rn3rxq3tfher5dannc78wk3l29gzkzu8qpk7wk0qea037ljtsn276h8"
+   ],
+   "kit": "none",
+   "reason": null,
+   "detail": null,
+   "cards": null,
+   "why": "no mr1 record: no kit door, Engrave Bundle as today"
+  }
+ ]
+}

@@ -39,7 +39,7 @@ func composerMintCard(st *composerState, slot uint8, templateChunks, keyedChunks
 	}
 	src := st.sources[a.src]
 	card := mk.Card{
-		Network:     "mainnet", // LABEL only: mainnet by construction (§4f, gui/policy_address.go:61).
+		Network:     "mainnet", // LABEL only (not serialized; Encode checks it): mainnet by construction (§4f, gui/policy_address.go:61).
 		Path:        composerOriginText(a.origin),
 		Fingerprint: fmt.Sprintf("%x", a.fingerprint),
 		Xpub:        a.xpub,
