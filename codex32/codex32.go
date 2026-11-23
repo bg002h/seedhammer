@@ -35,6 +35,7 @@ var (
 	errMismatchedThreshold = errors.New("mismatched threshold")
 	errInvalidIDLength     = errors.New("invalid id length")
 	errRepeatedIndex       = errors.New("repeated index")
+	errTooManyShares       = errors.New("too many shares")
 )
 
 const (
@@ -188,6 +189,11 @@ func (s String) parts() *parts {
 // Interpolate a set of shares to derive a share at a specific index.
 //
 // Using the index 'S' will recover the master seed.
+//
+// The set must hold at most k shares, where k is the common threshold digit
+// (k is 1 for an unshared secret, threshold "0"), and exactly k to
+// interpolate an index that no input has. A set of more than k shares is
+// refused, per BIP-93: the number of shares is exactly the threshold.
 func Interpolate(shares []String, index rune) (String, error) {
 	// Collect indices and sanity check.
 	if len(shares) == 0 {
@@ -214,6 +220,9 @@ func Interpolate(shares []String, index rune) (String, error) {
 			return String{}, errMismatchedID
 		}
 		indices[i] = parts.shareIdx
+	}
+	if k := max(s0Parts.threshold, 1); len(shares) > k {
+		return String{}, errTooManyShares
 	}
 
 	// Do lagrange interpolation.
