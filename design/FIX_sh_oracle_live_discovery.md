@@ -53,7 +53,9 @@ base (scripts/oracle-live.sh is unchanged since 9aec7a8, where the bug hunt cite
 Edge cases, decided here (none is visible to a holder; these are maintainer-script behaviours):
 - A tagged file at the repo root gets the package `./`, which `go test` accepts.
 - A tagged file inside a nested module, or in a directory `go test` cannot load, makes that package's `go test`
-  fail, so the script fails loudly. It is never silently dropped. No nested module exists at the base
+  fail, so the script fails loudly. It is never silently dropped.
+- A tagged file whose path holds whitespace is refused with the `::error::a tagged file's path holds whitespace`
+  line (§3) and exit 1, before any `go test` runs (Go cannot load such a package: `malformed import path`). No nested module exists at the base
   (`find . -name go.mod` finds only the root).
 - The same test name in two packages counts as two tests (R2 and R4).
 - Discovery uses `find ... -prune`, not `grep -r --exclude-dir='.*'`. Seen on GNU grep 3.12: that pattern also
@@ -66,6 +68,7 @@ Edge cases, decided here (none is visible to a holder; these are maintainer-scri
 |---|---|---|
 | discovery line | `   discovered <N> tagged test(s) from source` | `   discovered <N> tagged test(s) in <P> package(s) from source` **PROPOSED (architect confirms)** |
 | each never-run entry under `::error::discovered <N> tagged test(s); these never executed:` | `         <Test>` | `         <pkg> <Test>` (e.g. `         ./gui/ TestSame`) **PROPOSED (architect confirms)** |
+| whitespace refusal (new) | none (the file was dropped and the run could PASS) | `::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:` then each such path with nine spaces of indent; exit 1 **PROPOSED (architect confirms)** |
 | go output | one `go test` block for 3 packages | one block per package (4 at base: `./cmd/emu/`, `./gui/`, `./oracle/`, `./sysw/`) |
 
 Unchanged: every other line, including `live checks: PASS (exit 0)` / `live checks: FAIL (exit <rc>)`, both
@@ -82,8 +85,16 @@ the builder writes the final version.
 Files changed (for build ordering): `scripts/oracle-live.sh`; new `oracle/live_runner_test.go`. No other file.
 
 1. `scripts/oracle-live.sh` L129: replace the hand-listed grep with `find . -type d \( -name testdata -o -name vendor
-   -o -name '.?*' -o -name '_*' \) -prune -o -type f -name '*.go' -print | sort | xargs -r grep -lE '<same regex>'`
+   -o -name '.?*' -o -name '_*' \) -prune -o -type f -name '*.go' -print0 | sort -z | xargs -0 -r grep -lE '<same regex>'`
    (R1).
+1a. After the existing empty-discovery check, refuse a tagged path that holds whitespace (R1; review r1 I1):
+
+       if grep -q '[[:space:]]' <<<"$tagged_files"; then
+         echo "::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:"
+         grep '[[:space:]]' <<<"$tagged_files" | sed 's/^/         /'
+         exit 1
+       fi
+
 2. L134: build `tagged_tests` as `<pkg> <Test>` lines, sorted and unique, with `<pkg>` = `${f%/*}/` (R2). Derive the
    package list from it, then print R3's discovery line.
 3. L144-146: loop over the packages, one `go test` each, with that package's own `-run` filter. Keep the first
@@ -112,6 +123,8 @@ arguments. For each package and name it logs `<pkg>\t<name>` to `$STUB_LOG` and 
 - `TestFixShOracleLiveSkipsDirsGoIgnores`: tagged tests in `oracle/`, `oracle/testdata/`, `.hidden/`, `_skip/` and
   `vendor/v/`. Wants exit 0, stub pairs exactly `["./oracle/ TestO"]`, and
   `   discovered 1 tagged test(s) in 1 package(s) from source\n`.
+- `TestFixShOracleLiveRefusesAPathWithWhitespace`: tagged `oracle/live_test.go` (TestO) and `a b/live_test.go`
+  (TestSpace). Wants exit 1 and the whitespace `::error::` line followed by `         ./a b/live_test.go`.
 
 Tests that change: none. The tagged tests themselves are untouched. The new file also compiles under
 `-tags oraclelive` (seen: CI's tagged compile step is ok with it).
@@ -125,6 +138,7 @@ Command (from the repo root, Go 1.26.4, `GOTOOLCHAIN=local`):
 |---|---|---|
 | TestFixShOracleLiveRunsEveryTaggedTestInTheTree | FAIL: `oracle-live.sh exit 0` / `never asked for: ["./cmd/emu/ TestSyswComposerPayloadDigestAgreesWithMe"]`, and extra pairs (every name asked in each of the 3 hand-listed packages); output shows `discovered 8 tagged test(s) from source` | PASS |
 | TestFixShOracleLiveFailsOnAFailingNewPackage | FAIL: `a failing tagged test in ./newpkg/: exit 0, asked for it: false` | PASS |
+| TestFixShOracleLiveRefusesAPathWithWhitespace | FAIL: `exit 0; want exit 1 and the line ...` (also FAIL on the probe as first written: `live checks: PASS (exit 0)`) | PASS |
 | TestFixShOracleLiveReconcilesByPackage | FAIL: `./gui/ TestSame never ran: exit 0; want exit 1 ...` | PASS |
 | TestFixShOracleLiveSkipsDirsGoIgnores | FAIL: `exit 0, asked for ["./gui/ TestO" "./gui/ TestTestdata" "./oracle/ TestO" "./oracle/ TestTestdata" "./sysw/ TestO" "./sysw/ TestTestdata"]` (base searches `oracle/testdata/`) | PASS |
 
@@ -139,11 +153,11 @@ TestFixShOracleLiveRunsEveryTaggedTestInTheTree with `never asked for: ["./cmd/e
 
 | rule | rows |
 |---|---|
-| R1 module-wide discovery, Go's directory rules | TestFixShOracleLiveRunsEveryTaggedTestInTheTree; TestFixShOracleLiveFailsOnAFailingNewPackage; TestFixShOracleLiveSkipsDirsGoIgnores |
+| R1 module-wide discovery, Go's directory rules | TestFixShOracleLiveRunsEveryTaggedTestInTheTree; TestFixShOracleLiveFailsOnAFailingNewPackage; TestFixShOracleLiveSkipsDirsGoIgnores; TestFixShOracleLiveRefusesAPathWithWhitespace |
 | R2 tests keyed by package | TestFixShOracleLiveRunsEveryTaggedTestInTheTree (pairs exact); TestFixShOracleLiveReconcilesByPackage |
 | R3 one run per package, first failure's exit code | TestFixShOracleLiveFailsOnAFailingNewPackage; TestFixShOracleLiveRunsEveryTaggedTestInTheTree (no extra pairs) |
 | R4 vacuity by package and name, the listed line | TestFixShOracleLiveReconcilesByPackage |
-| R5 runs in `go test ./...` | all four (untagged file in ./oracle/) |
+| R5 runs in `go test ./...` | all five (untagged file in ./oracle/) |
 | R6 comments | none (review reads it) |
 | §3 discovery line | TestFixShOracleLiveSkipsDirsGoIgnores |
 

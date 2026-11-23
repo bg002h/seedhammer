@@ -1,9 +1,9 @@
 diff --git i/oracle/live_runner_test.go w/oracle/live_runner_test.go
 new file mode 100644
-index 0000000..525361d
+index 0000000..47480a9
 --- /dev/null
 +++ w/oracle/live_runner_test.go
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,309 @@
 +package oracle
 +
 +// FIX-sh-oracle-live-discovery (bughunt-1119 bh-sh-I11): the runner
@@ -299,8 +299,22 @@ index 0000000..525361d
 +		t.Fatalf("exit %d, asked for %q; want exit 0, %q and the line %q\noutput:\n%s", res.exit, res.pairs, want, line, res.out)
 +	}
 +}
++
++// TestFixShOracleLiveRefusesAPathWithWhitespace: a tagged file whose path holds
++// whitespace is refused (go cannot load it), never dropped with a PASS.
++func TestFixShOracleLiveRefusesAPathWithWhitespace(t *testing.T) {
++	root := syntheticTree(t, map[string]string{
++		"oracle/live_test.go": taggedFile("oracle", "TestO"),
++		"a b/live_test.go":    taggedFile("ab", "TestSpace"),
++	})
++	res := runRunner(t, root, "", "")
++	const line = "::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:\n         ./a b/live_test.go\n"
++	if res.exit != 1 || !strings.Contains(res.out, line) {
++		t.Fatalf("exit %d; want exit 1 and the line %q\noutput:\n%s", res.exit, line, res.out)
++	}
++}
 diff --git i/scripts/oracle-live.sh w/scripts/oracle-live.sh
-index 97ce8bc..6cc836c 100755
+index 97ce8bc..f8e4720 100755
 --- i/scripts/oracle-live.sh
 +++ w/scripts/oracle-live.sh
 @@ -71,9 +71,18 @@
@@ -325,7 +339,7 @@ index 97ce8bc..6cc836c 100755
  #
  # ABSENCE IS FATAL IN HERE. You ran this on purpose; a missing oracle or a
  # missing primary checkout is a failure, not a reason to report success.
-@@ -126,24 +135,45 @@ echo
+@@ -126,24 +135,52 @@ echo
  # PASS while it never ran. \boraclelive\b also rejects `oraclelivex`.
  # (It would match a negated `//go:build !oraclelive`; none exists, and one
  # would show up as a discovered-but-never-run name below rather than silently.)
@@ -337,12 +351,19 @@ index 97ce8bc..6cc836c 100755
 +# --exclude-dir='.*'`: GNU grep applies that pattern to the "." it starts from
 +# and searches nothing.
 +tagged_files=$(find . -type d \( -name testdata -o -name vendor -o -name '.?*' -o -name '_*' \) -prune \
-+  -o -type f -name '*.go' -print | sort | xargs -r grep -lE '^//go:build\b.*\boraclelive\b')
++  -o -type f -name '*.go' -print0 | sort -z | xargs -0 -r grep -lE '^//go:build\b.*\boraclelive\b')
  if [ -z "$tagged_files" ]; then
    echo "::error::no //go:build oraclelive files found; this script would run nothing"
    exit 1
  fi
 -tagged_tests=$(grep -h '^func Test' $tagged_files | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | grep -v '^TestMain$' | sort -u)
++# Go cannot load a package whose path holds whitespace, and the loops below split
++# on it: refuse rather than drop the file and report PASS.
++if grep -q '[[:space:]]' <<<"$tagged_files"; then
++  echo "::error::a tagged file's path holds whitespace; go cannot load it and this script cannot run it:"
++  grep '[[:space:]]' <<<"$tagged_files" | sed 's/^/         /'
++  exit 1
++fi
 +# One line per (package, test): "./dir/ TestName".
 +tagged_tests=$(for f in $tagged_files; do
 +  pkg="${f%/*}/"
@@ -378,7 +399,7 @@ index 97ce8bc..6cc836c 100755
  
  # VACUITY CHECK, by SET DIFFERENCE rather than by count.
  #
-@@ -155,14 +185,14 @@ printf '%s\n' "$out"
+@@ -155,14 +192,14 @@ printf '%s\n' "$out"
  # from the output entirely. Counting also went spuriously RED whenever any tagged
  # test grew a subtest.
  #
