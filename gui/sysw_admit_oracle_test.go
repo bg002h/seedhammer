@@ -65,6 +65,9 @@ var syswConsumers = []syswConsumer{
 		"Backup Wallet's typed-menu entry; its only non-test caller is the backupWallet arm"},
 	{"bundle_flow.go", "bundleFlow", []syswProgram{progBundle},
 		"Engrave Bundle's first card"},
+	{"bundle_flow.go", "kitCards", []syswProgram{progBundle},
+		"Engrave Bundle's kit door (S1 14d/14e): the one function that reads the " +
+			"session's ClassMr and ClassMDMK records; ClassMr is admitted here alone"},
 	{"freetext_flow.go", "engraveTextFlowFrom", []syswProgram{progText},
 		"Engrave Text"},
 	{"passphrase_flow.go", "engravePassphraseFlowFrom", []syswProgram{progPassword},
@@ -164,6 +167,8 @@ var classNames = map[string]sysw.Class{
 	// "names no sysw.Class constant" -- a true failure with a false cause.
 	"ClassPreimage": sysw.ClassPreimage,
 	"ClassPhrase":   sysw.ClassPhrase,
+	// S1's mr1 string, admitted at progBundle alone through the kit door.
+	"ClassMr": sysw.ClassMr,
 }
 
 // syswFilteredClass matches the FILTER consumption shape -- a comparison of a

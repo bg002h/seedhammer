@@ -1,0 +1,242 @@
+diff --git i/cmd/biptool/bughunt_sh2_s5_test.go w/cmd/biptool/bughunt_sh2_s5_test.go
+index 50f537b..bf3481f 100644
+--- i/cmd/biptool/bughunt_sh2_s5_test.go
++++ w/cmd/biptool/bughunt_sh2_s5_test.go
+@@ -20,7 +20,6 @@ func deriveNoPanic(t *testing.T, stdin, cmdline string) (err error, panicked any
+ // seed at all, and a 16-byte codex32 seed cannot fill 24 words. Both must be
+ // an error, not a panic.
+ func TestBughuntSh228Bip39ShortSeed(t *testing.T) {
+-	t.Skip("deferred-minor: sh-biptool-short-seed")
+ 	const bip32Vector1 = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+ 	const ms16 = "ms13cashsllhdmn9m42vcsamx24zrxgs3qqjzqud4m0d6nln" // 16-byte master seed (BIP-93 vector 3)
+ 	if s, err := codex32.New(ms16); err != nil || len(s.Seed()) != 16 {
+diff --git i/cmd/biptool/fix_sh_biptool_args_test.go w/cmd/biptool/fix_sh_biptool_args_test.go
+new file mode 100644
+index 0000000..59c9ce2
+--- /dev/null
++++ w/cmd/biptool/fix_sh_biptool_args_test.go
+@@ -0,0 +1,130 @@
++package main
++
++import (
++	"os"
++	"strconv"
++	"strings"
++	"testing"
++)
++
++// FIX-sh-biptool-args (bughunt-1119 bh-sh-I3, bh-sh-I4). `derive` refuses an
++// argument left after the format (and after its own -words / -n options), and
++// `derive bip39` refuses a seed shorter than the entropy the word count needs.
++// Each row runs the real main (TestMain's BIPTOOL_CHILD re-exec), so flag state
++// does not leak between rows and the exit code is asserted.
++
++// All inputs are test entropy (no real key): the codex32 share of bytes
++// 00..0f, and shares of all-zero bytes made in-process by `seed`.
++const (
++	fixArgsShare0f = "ms10testsqqqsyqcyq5rqwzqfpg9scrgwpupj0pvk8uetl6l"
++	fixArgsXprv    = "xprv9s21ZrQH143K2LBWUUQRFXhucrQqBpKdRRxNVq2zBqsx8HVqFk2uYo8kmbaLLHRdqtQpUm98uKfu3vca1LqdGhUtyoFnCNkfmXRyPXLjbKb"
++	fixArgsChild   = "xpub661MyMwAqRbcGYtxqsn5fkBerXLHYPhqTY36WeRoyARM8EQogL2Gw4a18TRg7gkfnQSYDDKzZRNQWMND4Wdo3ojq7Coiu96S4cLhwaALp6H"
++)
++
++// fixArgsZeroShare is the codex32 share of n zero bytes.
++func fixArgsZeroShare(t *testing.T, n int) []byte {
++	t.Helper()
++	share, err := execErr(make([]byte, n), "seed -id test -seedlen "+strconv.Itoa(n)+" -threshold 1 -idx S -hrp ms")
++	if err != nil {
++		t.Fatalf("seed -seedlen %d: %v", n, err)
++	}
++	return share
++}
++
++// fixArgsRun runs biptool in a child process and returns exit code, stdout
++// and stderr.
++func fixArgsRun(t *testing.T, stdin []byte, args string) (int, string, string) {
++	t.Helper()
++	out, err := os.CreateTemp(t.TempDir(), "stdout")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer out.Close()
++	code, stderr := fixShRunChild(t, fixShVerb{args, stdin, args}, out)
++	b, err := os.ReadFile(out.Name())
++	if err != nil {
++		t.Fatal(err)
++	}
++	return code, string(b), stderr
++}
++
++type fixArgsRefusal struct {
++	stdin  []byte
++	args   string
++	stderr string
++}
++
++func fixArgsWantRefusal(t *testing.T, rows []fixArgsRefusal) {
++	t.Helper()
++	for _, r := range rows {
++		t.Run(r.args, func(t *testing.T) {
++			code, stdout, stderr := fixArgsRun(t, r.stdin, r.args)
++			if code != 2 || stdout != "" || stderr != r.stderr {
++				t.Errorf("biptool %s: exit %d stdout %q stderr %q; want exit 2, no stdout, stderr %q",
++					r.args, code, stdout, stderr, r.stderr)
++			}
++		})
++	}
++}
++
++// R1: an option placed after a flagless format is refused, not dropped.
++func TestFixShBiptoolArgsMisplacedPath(t *testing.T) {
++	s := []byte(fixArgsShare0f)
++	var rows []fixArgsRefusal
++	for _, f := range []string{"xpub", "xprv", "pubkey", "privkey"} {
++		rows = append(rows, fixArgsRefusal{s, "derive " + f + " -path m/83696968h/32h/0h",
++			"biptool: derive: unexpected argument \"-path\" after format \"" + f + "\"\n"})
++	}
++	fixArgsWantRefusal(t, rows)
++}
++
++// R1: any argument left after the format, or after bip39's -words or seed's
++// -n, is refused; the first leftover is named.
++func TestFixShBiptoolArgsLeftoverArgument(t *testing.T) {
++	s := []byte(fixArgsShare0f)
++	z32 := fixArgsZeroShare(t, 32)
++	fixArgsWantRefusal(t, []fixArgsRefusal{
++		{s, "derive xpub extra", "biptool: derive: unexpected argument \"extra\" after format \"xpub\"\n"},
++		{z32, "derive -path m bip39 extra -words 12", "biptool: derive: unexpected argument \"extra\" after format \"bip39\"\n"},
++		{z32, "derive -path m bip39 -words 12 extra", "biptool: derive: unexpected argument \"extra\" after format \"bip39\"\n"},
++		{s, "derive -path m seed extra -n 8", "biptool: derive: unexpected argument \"extra\" after format \"seed\"\n"},
++		{s, "derive -path m seed -n 8 extra", "biptool: derive: unexpected argument \"extra\" after format \"seed\"\n"},
++	})
++}
++
++// R2, R3: bip39 refuses a seed shorter than the word count's entropy.
++func TestFixShBiptoolArgsShortSeed(t *testing.T) {
++	rows := []fixArgsRefusal{
++		{[]byte(fixArgsShare0f), "derive -path m bip39 -words 24",
++			"biptool: derive: only 16 bytes of seed available; -words 24 needs 32\n"},
++		{[]byte(fixArgsXprv), "derive -path m bip39 -words 12",
++			"biptool: derive: no seed provided\n"},
++	}
++	for _, c := range []struct{ seed, words, need int }{{31, 24, 32}, {19, 15, 20}, {23, 18, 24}, {27, 21, 28}} {
++		rows = append(rows, fixArgsRefusal{fixArgsZeroShare(t, c.seed), "derive -path m bip39 -words " + strconv.Itoa(c.words),
++			"biptool: derive: only " + strconv.Itoa(c.seed) + " bytes of seed available; -words " +
++				strconv.Itoa(c.words) + " needs " + strconv.Itoa(c.need) + "\n"})
++	}
++	fixArgsWantRefusal(t, rows)
++}
++
++// R4 (controls): the documented spellings keep their output.
++func TestFixShBiptoolArgsControls(t *testing.T) {
++	s := []byte(fixArgsShare0f)
++	for _, c := range []struct {
++		stdin      []byte
++		args, want string
++	}{
++		{s, "derive -path m/83696968h/32h/0h xpub", fixArgsChild + "\n"},
++		{s, "derive -path m bip39 -words 12", "abandon amount liar amount expire adjust cage candy arch gather drum buyer\n"},
++		{s, "derive -path m seed -n 8", "\x00\x01\x02\x03\x04\x05\x06\x07"},
++		{fixArgsZeroShare(t, 32), "derive -path m bip39 -words 24", strings.Repeat("abandon ", 23) + "art\n"},
++	} {
++		t.Run(c.args, func(t *testing.T) {
++			code, stdout, stderr := fixArgsRun(t, c.stdin, c.args)
++			if code != 0 || stdout != c.want || stderr != "" {
++				t.Errorf("biptool %s: exit %d stdout %q stderr %q; want exit 0, stdout %q", c.args, code, stdout, stderr, c.want)
++			}
++		})
++	}
++}
+diff --git i/cmd/biptool/main.go w/cmd/biptool/main.go
+index c5d33ac..de42801 100644
+--- i/cmd/biptool/main.go
++++ w/cmd/biptool/main.go
+@@ -202,6 +202,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 		if err := bip39Flags.Parse(args); err != nil {
+ 			bip39Flags.Usage()
+ 		}
++		if err := noArgsLeft(f, bip39Flags.Args()); err != nil {
++			return err
++		}
+ 		n := *words
+ 		if n < 12 || 24 < n || n%3 != 0 {
+ 			return fmt.Errorf("derive: invalid bip39 seed length: %d", n)
+@@ -213,6 +216,12 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 			}
+ 		}
+ 		entLen := (n*11 - n/3) / 8
++		if len(seed) == 0 {
++			return fmt.Errorf("derive: no seed provided")
++		}
++		if len(seed) < entLen {
++			return fmt.Errorf("derive: only %d bytes of seed available; -words %d needs %d", len(seed), n, entLen)
++		}
+ 		m := bip39.New(seed[:entLen])
+ 		if _, err := fmt.Fprintln(stdout, m); err != nil {
+ 			return outputErr(err)
+@@ -221,6 +230,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 		if err := deriveSeedFlags.Parse(args); err != nil {
+ 			deriveSeedFlags.Usage()
+ 		}
++		if err := noArgsLeft(f, deriveSeedFlags.Args()); err != nil {
++			return err
++		}
+ 		n := *bytesLength
+ 		if n == 0 {
+ 			n = len(seed)
+@@ -235,6 +247,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 			return outputErr(err)
+ 		}
+ 	case "xpub":
++		if err := noArgsLeft(f, args); err != nil {
++			return err
++		}
+ 		if !isXprvDeriv {
+ 			return fmt.Errorf("derive: xpub derivation path %q does not begin with m/83696968h/32h/", dpath)
+ 		}
+@@ -246,6 +261,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 			return outputErr(err)
+ 		}
+ 	case "xprv":
++		if err := noArgsLeft(f, args); err != nil {
++			return err
++		}
+ 		if !isXprvDeriv {
+ 			return fmt.Errorf("derive: xprv derivation path %q does not begin with m/83696968h/32h/", dpath)
+ 		}
+@@ -256,6 +274,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 			return outputErr(err)
+ 		}
+ 	case "pubkey":
++		if err := noArgsLeft(f, args); err != nil {
++			return err
++		}
+ 		if !isXprvDeriv {
+ 			return fmt.Errorf("derive: pubkey derivation path %q does not begin with m/83696968h/32h/", dpath)
+ 		}
+@@ -267,6 +288,9 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 			return outputErr(err)
+ 		}
+ 	case "privkey":
++		if err := noArgsLeft(f, args); err != nil {
++			return err
++		}
+ 		if !isXprvDeriv {
+ 			return fmt.Errorf("derive: privkey derivation path %q does not begin with m/83696968h/32h/", dpath)
+ 		}
+@@ -283,6 +307,16 @@ func derive(stdout io.Writer, stdin io.Reader) error {
+ 	return nil
+ }
+ 
++// noArgsLeft refuses an argument left after a derive format and its own
++// options: the flag package stops at the first non-flag, so a misplaced option
++// would otherwise be dropped silently (FIX-sh-biptool-args, bh-sh-I3).
++func noArgsLeft(format string, rest []string) error {
++	if len(rest) > 0 {
++		return fmt.Errorf("derive: unexpected argument %q after format %q", rest[0], format)
++	}
++	return nil
++}
++
+ func parseCodex32Conf() (codex32Conf, error) {
+ 	shareIdx, err := parseShareIndex(*seedIdx)
+ 	if err != nil {

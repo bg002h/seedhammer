@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"strings"
 
 	"seedhammer.com/backup"
 	"seedhammer.com/engrave"
@@ -22,6 +23,19 @@ import (
 // REFUSED in this channel (hand-typed only); a single mk1 is refused (malformed,
 // no integrity). No secret is ever gathered, displayed, or engraved.
 func bundleFlow(ctx *Context, th *Colors) {
+	// THE KIT DOOR (SPEC_systemwide_payloads.md 14e). With a loaded payload that
+	// offers a kit the gather flow below is never reached: an eligible kit opens
+	// the kit list at once (no "Cards from where?"), a refused one shows "Kit
+	// Refused" and returns to the carousel. A payload with no mr1 candidate, or
+	// none loaded, falls through to the gather flow exactly as before.
+	if kit := kitCards(ctx.sysw); kit.offers {
+		if !kit.eligible {
+			kitRefusedScreen(ctx, th, kit)
+			return
+		}
+		kitListFlow(ctx, th)
+		return
+	}
 	// The payload's cards are offered ONCE, before gathering, and then the
 	// operator continues scanning as usual — the bundle is a SET, and the offer
 	// adds to it rather than closing it.
@@ -797,4 +811,296 @@ func bundleAbortWarningText(p bundlePlate, secret bool) string {
 // share(s) must be hand-engraved separately (mirror host bundle.rs:296-306).
 func bundleMs1ReminderText() string {
 	return "Bundle engraved. Also hand-engrave your ms1 share(s) - they are never sent over NFC."
+}
+
+// ─── The kit door (SPEC_systemwide_payloads.md section 14d/14e) ──────────────
+
+// kitVerdict is what the loaded payload says about a kit, recomputed on every
+// entry from the session's records and the packer: nothing is cached.
+type kitVerdict struct {
+	// offers: the payload holds at least one mr1 candidate.
+	offers   bool
+	eligible bool
+	refusal  sysw.MrRefusal
+	// records are the payload's records in payload order, as the section 14g
+	// sentences count them.
+	records []string
+	// cards are the eligible kit's cards in list order.
+	cards []bundleCard
+	// begins and ends are each card's list-entry text.
+	meta []sysw.KitCard
+}
+
+// kitCards is the ONE function that reads the session's ClassMr and ClassMDMK
+// records for the kit door (oracle: gui/sysw_admit_oracle_test.go). The verdict
+// itself is sysw.EvaluateKit over every record, public section first; the
+// cards' strings are taken from the records by class, so a record of any other
+// class can never reach a plate.
+func kitCards(s *syswSession) kitVerdict {
+	var v kitVerdict
+	if s == nil || !s.loaded || !s.compared {
+		return v
+	}
+	v.records = make([]string, len(s.records))
+	for i, r := range s.records {
+		v.records[i] = r.body
+	}
+	kit := sysw.EvaluateKit(v.records)
+	v.offers = kit.Offers
+	v.eligible = kit.Eligible
+	v.refusal = kit.Refusal
+	if !kit.Eligible {
+		return v
+	}
+	for _, c := range kit.Cards {
+		bc := bundleCard{label: c.Kind + " card"}
+		switch c.Kind {
+		case "md1":
+			bc.kind = cardMD1
+		case "mk1":
+			bc.kind = cardMK1
+		default:
+			bc.kind = cardMR1
+		}
+		for _, i := range c.Strings {
+			switch s.records[i].class {
+			case sysw.ClassMr, sysw.ClassMDMK:
+				bc.strings = append(bc.strings, strings.TrimSpace(s.records[i].body))
+			}
+		}
+		v.cards = append(v.cards, bc)
+		v.meta = append(v.meta, c)
+	}
+	return v
+}
+
+// kitCardPlates and kitPlateLayout are the two test seams of the kit run
+// (plan S2 section 7): the packer, and the plate layout. Production values are
+// bundleCardPlates (section 14e: the fork's existing first-fit packer, never
+// across cards) and the TEXT ONLY layout (Q10).
+var (
+	kitCardPlates  = bundleCardPlates
+	kitPlateLayout = kitTextOnlyLayout
+)
+
+// kitPlatePlan is bundlePlatePlan over the kit's cards through the packer seam.
+func kitPlatePlan(params engrave.Params, cards []bundleCard) []bundlePlate {
+	var plan []bundlePlate
+	for ci, c := range cards {
+		groups := kitCardPlates(params, c.strings)
+		for pi, g := range groups {
+			plan = append(plan, bundlePlate{
+				cardIdx: ci + 1, cardTotal: len(cards),
+				plateIdx: pi + 1, plateTotal: len(groups),
+				strs: g, label: c.label, kind: c.kind,
+			})
+		}
+	}
+	return plan
+}
+
+// kitCount is "1 card" / "6 cards".
+func kitCount(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// kitLead is the payload menu's lead for an eligible kit.
+func kitLead(ctx *Context, v kitVerdict) string {
+	plan := kitPlatePlan(ctx.Platform.EngraverParams(), v.cards)
+	return fmt.Sprintf("Engrave kit now (%s, %s)?",
+		kitCount(len(v.cards), "card", "cards"), kitCount(len(plan), "plate", "plates"))
+}
+
+// kitEntryLabel is one list entry.
+func kitEntryLabel(v kitVerdict, k int, cut bool) string {
+	c := v.meta[k]
+	s := fmt.Sprintf("Card %d of %d: %s, begins %s, ends %s", k+1, len(v.cards), c.Kind, c.Begins, c.Ends)
+	if cut {
+		s += " (cut)"
+	}
+	return s
+}
+
+// kitCardCut reports whether every plate of card k has been cut.
+func kitCardCut(s *syswSession, plan []bundlePlate, k int) bool {
+	any := false
+	for _, p := range plan {
+		if p.cardIdx != k+1 {
+			continue
+		}
+		any = true
+		if !s.kitCut[[2]int{k, p.plateIdx - 1}] {
+			return false
+		}
+	}
+	return any
+}
+
+// kitListFlow is the "Engrave Kit" list and the run it starts. It is
+// recomputed from the session on entry; the highlight opens on card 1, and
+// after a run stopped by Back on the card it stopped in.
+func kitListFlow(ctx *Context, th *Colors) {
+	sel := 0
+	for !ctx.Done {
+		v := kitCards(ctx.sysw)
+		if !v.eligible {
+			return
+		}
+		plan := kitPlatePlan(ctx.Platform.EngraverParams(), v.cards)
+		start, ok := kitPickCard(ctx, th, v, plan, sel)
+		if !ok {
+			return
+		}
+		stopped, finished := kitRun(ctx, th, v, plan, start)
+		if finished {
+			sel = 0
+		} else {
+			sel = stopped
+		}
+	}
+}
+
+// kitPickCard is the paged, selectable list (the unlock plate list's pattern:
+// Back, Page, OK). It returns the highlighted card on OK.
+func kitPickCard(ctx *Context, th *Colors, v kitVerdict, plan []bundlePlate, sel int) (int, bool) {
+	header := fmt.Sprintf("%s, %s. Start at:", kitCount(len(v.cards), "card", "cards"), kitCount(len(plan), "plate", "plates"))
+	backBtn := &Clickable{Button: Button1}
+	pageBtn := &Clickable{Button: Button2}
+	okBtn := &Clickable{Button: Button3, AltButton: Center}
+	entries := make([]Clickable, len(v.cards))
+	dims := ctx.Platform.DisplaySize()
+	lineWidth := dims.X - 2*8
+	contentTop := leadingSize + 8
+	contentBottom := dims.Y - leadingSize
+	first := 0 // the first entry on the page
+	for !ctx.Done {
+		if backBtn.Clicked(ctx) {
+			return 0, false
+		}
+		for i := range entries {
+			if entries[i].Clicked(ctx) {
+				sel = i
+			}
+		}
+		if okBtn.Clicked(ctx) {
+			return sel, true
+		}
+		if sel < first {
+			first = sel
+		}
+		shown := 0
+		y := contentTop
+		var body []op.Op
+		if first == 0 {
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, th.Text, header)
+			body = append(body, lbl.Offset(image.Pt((dims.X-sz.X)/2, y)))
+			y += sz.Y + 6
+		}
+		for i := first; i < len(v.cards); i++ {
+			col := th.Text
+			if i == sel {
+				col = th.Background
+			}
+			label := kitEntryLabel(v, i, kitCardCut(ctx.sysw, plan, i))
+			lbl, sz := widget.Labelw(&ctx.B, ctx.Styles.body, lineWidth, col, label)
+			if i > first && y+sz.Y > contentBottom {
+				break
+			}
+			pos := image.Pt((dims.X-sz.X)/2, y)
+			hit := image.Rectangle{
+				Min: pos.Sub(image.Pt(buttonPadX, buttonPadY)),
+				Max: pos.Add(sz).Add(image.Pt(buttonPadX, buttonPadY)),
+			}
+			entry := lbl.Offset(pos)
+			if i == sel {
+				entry = op.Layer(entry, op.Compose(op.Color(&ctx.B, th.Text), op.RoundedRect2(&ctx.B, hit, cornerRadius)))
+			}
+			body = append(body, op.Layer(entry, op.Input(&ctx.B, &entries[i]).Clip(hit)))
+			y += sz.Y + 6
+			shown++
+			if y > contentBottom {
+				break
+			}
+		}
+		if pageBtn.Clicked(ctx) {
+			if first+shown < len(v.cards) {
+				first += shown
+			} else {
+				first = 0
+			}
+			sel = first
+			continue
+		}
+		titleOp, _ := layoutTitle(ctx, dims.X, th.Text, "Engrave Kit")
+		nav, _ := layoutNavigation(&ctx.B, th, dims, []NavButton{
+			{Clickable: backBtn, Style: StyleSecondary, Icon: assets.IconBack},
+			{Clickable: pageBtn, Style: StyleSecondary, Icon: assets.IconRight},
+			{Clickable: okBtn, Style: StylePrimary, Icon: assets.IconHammer},
+		}...)
+		frameOps := append([]op.Op{nav, titleOp}, body...)
+		frameOps = append(frameOps, op.Color(&ctx.B, th.Background))
+		ctx.Frame(op.Layer(frameOps...))
+	}
+	return 0, false
+}
+
+// kitRun cuts the cards from start to the last, in list order. It returns the
+// card it stopped in (0-based) and whether the run reached the end of the kit.
+func kitRun(ctx *Context, th *Colors, v kitVerdict, plan []bundlePlate, start int) (stopped int, finished bool) {
+	for _, p := range plan {
+		k := p.cardIdx - 1
+		if k < start {
+			continue
+		}
+		// Marks (STOP-3, RULED (a)): title "CARD k/N", footer "PLATE p/q", through
+		// bundlePlateMark's slots. The packer already trial-fits every plate
+		// against the widest 18 characters in both rows, so the marks change no
+		// plate count.
+		title, footer := bundlePlateMark(p.kind,
+			fmt.Sprintf("CARD %d/%d", p.cardIdx, p.cardTotal), fmt.Sprintf("PLATE %d/%d", p.plateIdx, p.plateTotal))
+		labels, plates, err := kitPlateLayout(ctx.Platform, p.strs, title, footer)
+		if err != nil || len(plates) == 0 {
+			showError(ctx, th, "Engrave Kit", fmt.Sprintf(
+				"Card %d of %d, plate %d of %d does not fit on a plate, so this kit cannot be engraved on this machine.",
+				p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal))
+			return k, false
+		}
+		cs := &ChoiceScreen{
+			Title:   fmt.Sprintf("Card %d of %d | Plate %d of %d", p.cardIdx, p.cardTotal, p.plateIdx, p.plateTotal),
+			Lead:    "Choose engraving",
+			Choices: labels,
+		}
+		for engraved := false; !engraved; {
+			idx, ok := cs.Choose(ctx, th)
+			if !ok {
+				if p.plateIdx > 1 {
+					showError(ctx, th, "Engrave Kit", fmt.Sprintf(
+						"Stopped before plate %d of %d of card %d of %d. To finish this card, choose card %d in the list again: it starts again at its plate 1.",
+						p.plateIdx, p.plateTotal, p.cardIdx, p.cardTotal, p.cardIdx))
+				}
+				return k, false
+			}
+			if NewEngraveScreen(ctx, plates[idx]).Engrave(ctx, &engraveTheme) {
+				engraved = true
+			}
+			// Engrave returned without completing: the same choice screen again.
+		}
+		if ctx.sysw != nil {
+			if ctx.sysw.kitCut == nil {
+				ctx.sysw.kitCut = map[[2]int]bool{}
+			}
+			ctx.sysw.kitCut[[2]int{k, p.plateIdx - 1}] = true
+		}
+	}
+	// No ms1 reminder: a kit's seeds come through the Sealed Payload.
+	n := len(v.cards)
+	if start+1 == n {
+		showNotice(ctx, th, "Engrave Kit", fmt.Sprintf("Card %d of this kit is cut.", n))
+	} else {
+		showNotice(ctx, th, "Engrave Kit", fmt.Sprintf("Cards %d to %d of this kit are cut.", start+1, n))
+	}
+	return n - 1, true
 }
