@@ -88,6 +88,7 @@
 # missing primary checkout is a failure, not a reason to report success.
 
 set -uo pipefail
+set -f  # no pathname expansion: the path lists below are split unquoted, and a [ in a path is a glob
 cd "$(dirname "$0")/.."
 
 # -update is dispatched to ./gui/ ALONE, and deliberately not forwarded to the
@@ -141,8 +142,9 @@ echo
 # worktree or cache nested in a hidden directory). find, not `grep -r
 # --exclude-dir='.*'`: GNU grep applies that pattern to the "." it starts from
 # and searches nothing.
+# -Z and tr: a newline inside a path becomes a space, so the whitespace refusal below sees it rather than the loops splitting it.
 tagged_files=$(find . -type d \( -name testdata -o -name vendor -o -name '.?*' -o -name '_*' \) -prune \
-  -o -type f -name '*.go' -print0 | sort -z | xargs -0 -r grep -lE '^//go:build\b.*\boraclelive\b')
+  -o -type f -name '*.go' -print0 | sort -z | xargs -0 -r grep -lZE '^//go:build\b.*\boraclelive\b' | tr '\n\0' ' \n')
 if [ -z "$tagged_files" ]; then
   echo "::error::no //go:build oraclelive files found; this script would run nothing"
   exit 1
