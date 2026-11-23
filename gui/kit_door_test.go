@@ -18,12 +18,12 @@ import (
 
 // The kit door (SPEC_systemwide_payloads.md section 14e, plan S2 phase SH-2).
 //
-// FIXTURES. The plan reads `me sysw pack` blobs for the load-time rows; `me`
-// cannot pack an mr1 record until its ME-1 build merges, so these rows build the
-// UNSEALED container in Go (sysw.Header.Encode "exists for tests") and
-// TestKitFixturePackerMatchesMe pins that packer byte for byte against a
-// container `me` did write (chain-codex32, chain-text). The me-packed
-// kit-2of3 / kit-with-ms1 chain_payloads entries are owed to that merge.
+// FIXTURES. The plan reads `me sysw pack` blobs for the load-time rows; these
+// rows build the UNSEALED container in Go (sysw.Header.Encode "exists for
+// tests") and TestKitFixturePackerMatchesMe pins that packer byte for byte
+// against containers `me` did write (chain-codex32, chain-text). For kit-2of3
+// and kit-with-ms1, me at engrave 73209a1e writes the same bytes (architect
+// 1122-late); their chain_payloads entries come with SH-5's me-packed kit blob.
 
 // kitVectorFile is the vendored S1 vectors, kit section.
 func kitVectorRecords(t *testing.T, name string) []string {
