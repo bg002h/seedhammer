@@ -101,23 +101,41 @@ index ca5557e..46b720f 100644
  
  // ppQuestion is the passphrase step's needle in THIS build (review I-2): the
 diff --git i/gui/sysw_load.go w/gui/sysw_load.go
-index 791c086..0c3a7f3 100644
+index 791c086..8a8d7b4 100644
 --- i/gui/sysw_load.go
 +++ w/gui/sysw_load.go
-@@ -172,6 +172,12 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
+@@ -166,12 +166,19 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
+ 	// RAM" is not on offer), and a payload with a record silently missing is
+ 	// not the payload the operator packed. This
+ 	// departs from this flow's rule that nothing here refuses (§13), for that
+-	// reason only.
++	// reason only. The same block also refuses a payload holding a secret
++	// class outside a sealed section (FIX sec-sh-sysw-plaintext-refuse): every
++	// record of a plaintext payload, or a record in a sealed payload's public
++	// section.
+ 	if refugiumProfile {
+ 		if n, found := syswFirstPassphraseRecord(p); found {
  			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
  			return false
  		}
-+		if !h.Sealed() {
-+			if n, found := syswFirstSecretRecord(p); found {
-+				showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
-+				return false
-+			}
++		if n, found := syswFirstSecretRecord(p); found {
++			showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
++			return false
 +		}
  	}
  
  	// Route 2: the operator compares the displayed digest. [digest-shown]
-@@ -361,3 +367,27 @@ func syswPassphraseRecordRefusal(position int) string {
+@@ -328,7 +335,8 @@ func syswLoadWarnings(s *syswSession) []string {
+ }
+ 
+ // syswRefugiumLineShown reports whether the Refugium warning (section 14f) is on
+-// the Payload Warnings screen, so KEEP / UNLOAD follows it (nothing is refused).
++// the Payload Warnings screen, so KEEP / UNLOAD follows it (the secret is in a
++// sealed section here: a secret outside one was refused at load).
+ func syswRefugiumLineShown(s *syswSession) bool {
+ 	_, ok := syswRefugiumLine(s)
+ 	return ok
+@@ -361,3 +369,25 @@ func syswPassphraseRecordRefusal(position int) string {
  		"This build takes no BIP-39 passphrase, so nothing was loaded. "+
  		"Pack the payload again without it.", position)
  }
@@ -127,12 +145,10 @@ index 791c086..0c3a7f3 100644
 +// secret section.
 +func syswFirstSecretRecord(p *sysw.Payload) (int, bool) {
 +	n := 0
-+	for _, sec := range [][]string{p.Public, p.Secret} {
-+		for _, r := range sec {
-+			n++
-+			if sysw.Classify(r).IsSecret() {
-+				return n, true
-+			}
++	for _, r := range p.Public {
++		n++
++		if sysw.Classify(r).IsSecret() {
++			return n, true
 +		}
 +	}
 +	return 0, false
@@ -141,24 +157,46 @@ index 791c086..0c3a7f3 100644
 +// syswPlaintextSecretRefusal names the record by POSITION only, never by its
 +// contents.
 +func syswPlaintextSecretRefusal(position int) string {
-+	return fmt.Sprintf("Record %d of this payload is a secret, and the payload is not sealed. "+
++	return fmt.Sprintf("Record %d of this payload is a secret, and it is not sealed. "+
 +		"This build takes secrets only in the Sealed Payload, so nothing was loaded. "+
 +		"Pack the payload again without it.", position)
 +}
+diff --git i/gui/sysw_load_refugium.go w/gui/sysw_load_refugium.go
+index 11286c9..65db126 100644
+--- i/gui/sysw_load_refugium.go
++++ w/gui/sysw_load_refugium.go
+@@ -3,8 +3,9 @@
+ package gui
+ 
+ // syswRefugiumLine is SPEC_systemwide_payloads.md 14f: the Refugium build
+-// WARNS, and does not refuse, when a loaded payload (plaintext or sealed) holds
+-// a record whose class is secret by 3.3.1. It is decided by CLASS: an md1/mk1
++// WARNS, and does not refuse, when a loaded SEALED payload holds a record whose
++// class is secret by 3.3.1 in its sealed section; a secret outside a sealed
++// section is refused at load (syswLoadFlow). It is decided by CLASS: an md1/mk1
+ // record that is secret only because it is unconfirmed does not raise it.
+ func syswRefugiumLine(s *syswSession) (string, bool) {
+ 	for _, r := range s.records {
 diff --git i/gui/sysw_plaintext_secret_refugium_test.go w/gui/sysw_plaintext_secret_refugium_test.go
 new file mode 100644
-index 0000000..2642154
+index 0000000..af65d96
 --- /dev/null
 +++ w/gui/sysw_plaintext_secret_refugium_test.go
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,254 @@
 +//go:build refugium
 +
 +package gui
 +
 +import (
++	"crypto/aes"
++	"crypto/cipher"
 +	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
 +	"testing"
 +
++	"seedhammer.com/seal"
 +	"seedhammer.com/sysw"
 +)
 +
@@ -167,7 +205,7 @@ index 0000000..2642154
 +// the Refugium build refuses, whole and before the digest, an unsealed
 +// systemwide payload holding a record whose CLASS is secret.
 +
-+const plaintextSecretRefusalFmt = "Record %d of this payload is a secret, and the payload is not sealed. " +
++const plaintextSecretRefusalFmt = "Record %d of this payload is a secret, and it is not sealed. " +
 +	"This build takes secrets only in the Sealed Payload, so nothing was loaded. " +
 +	"Pack the payload again without it."
 +
@@ -176,11 +214,11 @@ index 0000000..2642154
 +// plaintextSecretLoad drives the real load flow over a plaintext region of
 +// `records` and returns the first screen that is the refusal modal, the digest
 +// comparison, or the boot prompt's successor, plus the harness.
-+func plaintextSecretLoad(t *testing.T, boot bool, records ...string) (first string, ctx *Context, ret *bool, quit func()) {
++func plaintextSecretLoad(t *testing.T, boot bool, records ...string) (first string, ctx *Context, ret *bool, frame func() (string, bool), quit func()) {
 +	t.Helper()
 +	ctx = NewContext(kitPlatform(plaintextRegion(t, records...)))
 +	ret = new(bool)
-+	frame, _, quit := runUITouch(ctx, func() {
++	frame, _, quit = runUITouch(ctx, func() {
 +		*ret = syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), boot)
 +	})
 +	if boot {
@@ -197,7 +235,7 @@ index 0000000..2642154
 +		}
 +		if uiContains(c, "Compare this against") || uiContains(c, "nothing was loaded") ||
 +			uiContains(c, "Nothing was loaded") {
-+			return c, ctx, ret, quit
++			return c, ctx, ret, frame, quit
 +		}
 +	}
 +	quit()
@@ -224,10 +262,26 @@ index 0000000..2642154
 +			t.Fatalf("INCONCLUSIVE: %s fixture classifies %v, want secret %v", tc.name, got, tc.class)
 +		}
 +		for _, boot := range []bool{false, true} {
-+			c, ctx, ret, quit := plaintextSecretLoad(t, boot, "text:48656c6c6f", tc.secret)
++			c, ctx, ret, frame, quit := plaintextSecretLoad(t, boot, "text:48656c6c6f", tc.secret)
 +			want := fmt.Sprintf(plaintextSecretRefusalFmt, 2)
 +			if !uiContains(c, want) || uiContains(c, "Compare this against") {
 +				t.Errorf("%s boot=%v: want the refusal before any digest; got %q", tc.name, boot, c)
++			}
++			click(&ctx.Router, Button3) // dismiss the refusal; the flow must now return on its own
++			ended := false
++			for i := 0; i < 64; i++ {
++				c2, more := frame()
++				if !more {
++					ended = true
++					break
++				}
++				if uiContains(c2, "Compare this against") || uiContains(c2, "Keep this payload loaded?") {
++					t.Errorf("%s boot=%v: the flow went on past the refusal: %q", tc.name, boot, c2)
++					break
++				}
++			}
++			if !ended {
++				t.Errorf("%s boot=%v: the load flow did not return after the refusal was dismissed", tc.name, boot)
 +			}
 +			quit()
 +			if ctx.sysw != nil || *ret {
@@ -240,7 +294,7 @@ index 0000000..2642154
 +// TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord is RED row R2: the
 +// position is the FIRST secret record's, 1-based over the whole payload.
 +func TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord(t *testing.T) {
-+	c, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, refugiumMS1Vec)
++	c, _, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, refugiumMS1Vec)
 +	defer quit()
 +	if !uiContains(c, fmt.Sprintf(plaintextSecretRefusalFmt, 1)) {
 +		t.Errorf("want Record 1 named; got %q", c)
@@ -250,9 +304,9 @@ index 0000000..2642154
 +// TestKitarchPassRecordRefusalKeepsPrecedence is guard row G1: a payload with
 +// a pass: record and another secret shows the pass: refusal, unchanged.
 +func TestKitarchPassRecordRefusalKeepsPrecedence(t *testing.T) {
-+	c, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, "pass:636f7272")
++	c, _, _, _, quit := plaintextSecretLoad(t, false, plaintextSecretTestMnemonic, "pass:636f7272")
 +	defer quit()
-+	if !uiContains(c, syswPassphraseRecordRefusal(2)) || uiContains(c, "is a secret, and the payload is not sealed") {
++	if !uiContains(c, syswPassphraseRecordRefusal(2)) || uiContains(c, "is a secret, and it is not sealed") {
 +		t.Errorf("want the pass: refusal alone; got %q", c)
 +	}
 +}
@@ -265,12 +319,123 @@ index 0000000..2642154
 +		{"text:48656c6c6f"},
 +		kitVectorRecords(t, "kit-mk1-alone")[2:3],
 +	} {
-+		c, _, _, quit := plaintextSecretLoad(t, false, recs...)
++		c, _, _, _, quit := plaintextSecretLoad(t, false, recs...)
 +		if !uiContains(c, "Compare this against") {
 +			t.Errorf("%q: want the digest comparison; got %q", recs, c)
 +		}
 +		quit()
 +	}
++	// R3: the unconfirmed md1 alone keeps its F1 warning and then the
++	// KEEP / UNLOAD offer (TestF1OffersUnloadWhereItOnceOfferedErase is skipped
++	// under this tag, so this pins it at flow level).
++	ctx := NewContext(kitPlatform(plaintextRegion(t, kitVectorRecords(t, "kit-mk1-alone")[2:3]...)))
++	frame, drawer, quit := runUITouch(ctx, func() {
++		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
++	})
++	defer quit()
++	if c, ok := pumpUntil(frame, "Compare this against", 64); !ok {
++		t.Fatalf("no digest comparison; got %q", c)
++	}
++	tapNavSlot(t, ctx, drawer(), Button3) // confirm the digest
++	if c, ok := pumpUntil(frame, "Payload Warnings", 64); !ok {
++		t.Fatalf("an unconfirmed md1 lost its F1 warning; got %q", c)
++	}
++	tapNavSlot(t, ctx, drawer(), Button3) // acknowledge the warnings
++	if c, ok := pumpUntil(frame, "Keep this payload loaded?", 32); !ok {
++		t.Fatalf("the KEEP / UNLOAD offer did not follow F1; got %q", c)
++	}
++}
++
++// TestKitarchSecretInTheCleartextSectionOfASealedPayload: a sealed header does
++// not seal a record in its public section; only p.Secret is sealed.
++func TestKitarchSecretInTheCleartextSectionOfASealedPayload(t *testing.T) {
++	for _, tc := range []struct {
++		name  string
++		p     sysw.Payload
++		n     int
++		found bool
++	}{
++		{"secret in public of a sealed payload", sysw.Payload{Public: []string{"text:41", plaintextSecretTestMnemonic}, Secret: []string{refugiumMS1Vec}}, 2, true},
++		{"secret only in the sealed section", sysw.Payload{Public: []string{"text:41"}, Secret: []string{refugiumMS1Vec}}, 0, false},
++	} {
++		n, found := syswFirstSecretRecord(&tc.p)
++		if n != tc.n || found != tc.found {
++			t.Errorf("%s: got (%d, %v), want (%d, %v)", tc.name, n, found, tc.n, tc.found)
++		}
++	}
++}
++
++// sealedRegionWithPublic hand-seals a systemwide container whose PUBLIC
++// (cleartext, authenticated only) section is `pub` and whose sealed section is
++// `sec`, under the passphrase "abandon about". `me sysw pack` never writes a
++// secret class into the public section; any other writer can.
++func sealedRegionWithPublic(t *testing.T, pub, sec []string) sysw.Reader {
++	t.Helper()
++	pb := []byte(strings.Join(pub, "\n"))
++	pt := []byte(strings.Join(sec, "\n"))
++	h := sysw.Header{Iterations: sysw.MinIterations, PubLen: uint32(len(pb)), CtLen: uint32(len(pt))}
++	enc := h.Encode()
++	blob := append(enc[:], pb...)
++	key := seal.DeriveKey(seal.NormalisePassphrase("abandon about"), h.Salt[:], int(h.Iterations))
++	b, err := aes.NewCipher(key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	g, err := cipher.NewGCM(b)
++	if err != nil {
++		t.Fatal(err)
++	}
++	blob = g.Seal(blob, h.IV[:], pt, append([]byte(nil), blob...))
++	region := make([]byte, sysw.RegionLen)
++	for i := range region {
++		region[i] = 0xFF
++	}
++	copy(region, blob)
++	f := filepath.Join(t.TempDir(), "region.bin")
++	if err := os.WriteFile(f, region, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	return sysw.FileReader{Path: f}
++}
++
++// TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused: the header
++// is sealed, but record 2 sits in the cleartext section.
++func TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused(t *testing.T) {
++	p := newPlatform()
++	p.display = sh2DisplaySize
++	p.sysw = sealedRegionWithPublic(t, []string{"text:48656c6c6f", plaintextSecretTestMnemonic}, []string{"text:41"})
++	ctx := NewContext(p)
++	frame, drawer, quit := runUITouch(ctx, func() {
++		syswLoadFlow(ctx, &descriptorTheme, ctx.Platform.SyswReader(), false)
++	})
++	defer quit()
++	if c, ok := pumpUntil(frame, "1:", 64); !ok {
++		t.Fatalf("no passphrase prompt; got %q", c)
++	}
++	for _, w := range []string{"abandon", "about"} {
++		runes(&ctx.Router, w)
++		click(&ctx.Router, Button3)
++		if _, more := frame(); !more {
++			t.Fatal("passphrase entry ended early")
++		}
++	}
++	tapNavSlot(t, ctx, drawer(), Button2) // done
++	pumpUntil(frame, "words - unlock", 32)
++	click(&ctx.Router, Down)
++	tapNavSlot(t, ctx, drawer(), Button3) // UNLOCK
++	for i := 0; i < 64; i++ {
++		c, more := frame()
++		if !more {
++			break
++		}
++		if uiContains(c, "Compare this against") || uiContains(c, "Payload Warnings") {
++			t.Fatalf("a secret in the cleartext section of a sealed payload was not refused; got %q", c)
++		}
++		if uiContains(c, fmt.Sprintf(plaintextSecretRefusalFmt, 2)) {
++			return
++		}
++	}
++	t.Fatal("no refusal drawn")
 +}
 diff --git i/gui/sysw_unload_test.go w/gui/sysw_unload_test.go
 index 09be9a3..5bb1796 100644

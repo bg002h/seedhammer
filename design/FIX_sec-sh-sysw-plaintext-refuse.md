@@ -1,4 +1,4 @@
-# FIX: the Refugium build refuses an unsealed systemwide payload holding a secret
+# FIX: the Refugium build refuses a systemwide payload holding a secret outside a sealed section
 
 **Small track** (one Opus review round). Class: other (not a funds path). Grade I, three rows, one defect:
 `kitarch-a-s1-sysw-plaintext-secret`, `kitarch-b-s1-plaintext-secret-admitted` (seedhammer half),
@@ -16,34 +16,36 @@ Brian 2026-11-22) is not touched.
 
 ## 1. The defect
 
-In the Refugium build, `syswLoadFlow` loads a plaintext (unsealed) systemwide payload holding a record whose class is
-secret (`sysw.Class.IsSecret`: ClassMnemonic, ClassCodex32Secret, ClassPassphrase, ClassPreimage, ClassPhrase). It shows
+In the Refugium build, `syswLoadFlow` loads a plaintext (unsealed) systemwide payload, or a sealed one whose PUBLIC
+(cleartext) section holds a record, whose class is secret (`sysw.Class.IsSecret`: ClassMnemonic, ClassCodex32Secret, ClassPassphrase, ClassPreimage, ClassPhrase). It shows
 the digest, creates the session (`gui/sysw_load.go:202-207`), then shows "Payload Warnings" with F1's line and the
 §14f Refugium line (`gui/sysw_load_refugium.go:9-17`, `gui/sysw_load.go:228-247`) and offers KEEP / UNLOAD. KEEP leaves
 the secret loaded and every program may take it. The rows' rule (Brian 2026-11-22, "secrets only sealed"; ruling Q1
 routes secrets through the Sealed Payload, the wiping container) is met only by a refusal. Seen on base: RED rows R1,
 R2 (§6) draw the digest screen where the refusal belongs.
 
-Only `pass:` is refused today (`gui/sysw_load.go:160-175`, plan F7 §4.3); this FIX adds the other secret classes for
-unsealed payloads at the same point.
+Only `pass:` is refused today (`gui/sysw_load.go:160-175`, plan F7 §4.3); this FIX adds the other secret classes, for any record outside a sealed section, at the same point. Only a
+sealed payload's SEALED section is encrypted; its public section is cleartext in flash and in the host file, merely
+authenticated (`sysw/open.go:44-64`), so the refusal keys on the SECTION, not on the header (r1 I-2).
 
 ## 2. Spec delta (rules; §7 maps each to its rows)
 
-- **R1 (refuse).** Refugium build only. After `sysw.Open` succeeds and after the `pass:` refusal, when the header is
-  NOT sealed (`!h.Sealed()`) and any record's class is secret by `sysw.Classify(r).IsSecret()`, the flow shows the
+- **R1 (refuse).** Refugium build only. After `sysw.Open` succeeds and after the `pass:` refusal, when any record in the payload's PUBLIC (cleartext) section, which is every record of a
+  plaintext payload, has a secret class by `sysw.Classify(r).IsSecret()`, the flow shows the
   modal of §3 and returns false. No digest screen, no session (`ctx.sysw` is not assigned), no Payload Warnings, no
   KEEP / UNLOAD. Identical on every route into `syswLoadFlow`: boot (`gui/gui.go:2136`, after LOAD), the carousel's
   Load Payload and LOAD AGAIN (`gui/sysw_unload.go:120`); all three are this one function.
-- **R2 (position).** The modal names the FIRST secret record by 1-based position counted over `p.Public` then
-  `p.Secret` (the order `syswSession.load` appends them, `gui/sysw_session.go:104-106`), never its contents.
+- **R2 (position).** The modal names the FIRST secret record by 1-based position counted over `p.Public` (in a plaintext payload `p.Secret` is always empty,
+  `sysw/open.go:50`; public is counted first, as `syswSession.load` appends, `gui/sysw_session.go:104-106`, so the
+  position is the same as the whole-payload count), never its contents.
 - **R3 (class, not flag).** Secrecy is by CLASS only, as §14f decides it: a record secret only because it is an
   unconfirmed md1/mk1 (`[mdmk-decode]`) or an unconfirmed mt1 (`[mt-decode]`) is NOT refused; its F1 warning and the
   KEEP / UNLOAD offer are unchanged.
 - **R4 (precedence).** A payload holding a `pass:` record keeps the existing `pass:` refusal and its text, unchanged,
   even when another secret record comes before it. The `pass:` check runs first (it keys on the prefix, so it also
   catches a `pass:` that classifies ClassUnknown); R1 runs only when it did not fire.
-- **R5 (sealed unchanged).** A sealed systemwide payload holding a secret keeps today's behaviour in the Refugium
-  build: §14f line last on Payload Warnings, then KEEP / UNLOAD (STOP-2 ruled (a)).
+- **R5 (sealed section unchanged).** A sealed systemwide payload holding a secret only in its sealed section keeps
+  today's behaviour in the Refugium build: §14f line last on Payload Warnings, then KEEP / UNLOAD (STOP-2 ruled (a)).
 - **R6 (default build unchanged).** The default build (`!refugium`) is byte-for-byte unchanged in behaviour:
   `refugiumProfile` is the const `false` there (`gui/profile_default.go:10`), so the new branch is dead code it does
   not take; F1 + KEEP / UNLOAD stay.
@@ -59,7 +61,7 @@ One new modal, Refugium build only, via `showError` (the same call and title as 
   `gui/sysw_load.go:172`; the recon's "Not Loaded" was considered and not taken, because "Not Loaded" titles the
   declined-digest case, which is not a refusal.
 - Body, `%d` the R2 position — PROPOSED (architect confirms):
-  `Record %d of this payload is a secret, and the payload is not sealed. This build takes secrets only in the Sealed Payload, so nothing was loaded. Pack the payload again without it.`
+  `Record %d of this payload is a secret, and it is not sealed. This build takes secrets only in the Sealed Payload, so nothing was loaded. Pack the payload again without it.`
 
   It names no class: `txClassName` (`gui/transaction.go:276-299`) has no name for ClassPreimage or ClassPhrase (they
   read "unrecognised record"), and a new class-name vocabulary is out of scope for a small row. "Sealed Payload" is the
@@ -70,24 +72,27 @@ shown for sealed payloads (R5) and for unconfirmed-only plaintext payloads (R3).
 
 ## 4. Code changes (builder applies; reference implementation in `design/FIX_sec-sh-sysw-plaintext-refuse-probe.diff`)
 
-- `gui/sysw_load.go`, inside the existing `if refugiumProfile {` block (L170-175), after the `pass:` check: when
-  `!h.Sealed()`, call a new `syswFirstSecretRecord(p)` and on found `showError(ctx, th, "Load Payload",
+- `gui/sysw_load.go`, inside the existing `if refugiumProfile {` block (L170-175), after the `pass:` check, with no
+  header condition: call a new `syswFirstSecretRecord(p)` and on found `showError(ctx, th, "Load Payload",
   syswPlaintextSecretRefusal(n))` and `return false`.
 - `gui/sysw_load.go`, two new functions after `syswPassphraseRecordRefusal` (L359-363):
-  `syswFirstSecretRecord(p *sysw.Payload) (int, bool)` (R2 order, `sysw.Classify(r).IsSecret()`), and
+  `syswFirstSecretRecord(p *sysw.Payload) (int, bool)` (a loop over `p.Public` only, `sysw.Classify(r).IsSecret()`), and
   `syswPlaintextSecretRefusal(position int) string` (the §3 body via `fmt.Sprintf`).
-- Comments (no behaviour): `gui/sysw_load.go:160-169` gains one sentence that the same block also refuses an unsealed
-  payload holding a secret class (this FIX, rows above); `gui/sysw_load_refugium.go:5-8` reads "WARNS, and does not
-  refuse, when a loaded SEALED payload holds a record whose class is secret by 3.3.1; a plaintext one is refused at
-  load (syswLoadFlow)"; `gui/sysw_load.go:330-331` drops "(nothing is refused)" for "(the payload is sealed here: a
-  plaintext secret was refused at load)".
+- Comments (no behaviour; the probe diff carries all three, r1 M-2): `gui/sysw_load.go:160-169` gains the sentence
+  "The same block also refuses a payload holding a secret class outside a sealed section (FIX
+  sec-sh-sysw-plaintext-refuse): every record of a plaintext payload, or a record in a sealed payload's public
+  section."; `gui/sysw_load_refugium.go:5-8` reads "WARNS, and does not refuse, when a loaded SEALED payload holds a
+  record whose class is secret by 3.3.1 in its sealed section; a secret outside a sealed section is refused at load
+  (syswLoadFlow)"; `gui/sysw_load.go:330-331` drops "(nothing is refused)" for "(the secret is in a sealed section
+  here: a secret outside one was refused at load)".
 - Kept as is, by decision: the plaintext arm of `syswLoadWarnings` that appends the §14f line after F1
   (`gui/sysw_load.go:306-311`). The Refugium load flow no longer reaches it with a plaintext secret, but it is the
   warnings renderer's rule over any session and `TestRefugiumSecretWarningLine` pins it at unit level; removing it is
   not needed to close the rows.
 - `scripts/refugium-tagged-test.sh:22`: "one of six" becomes "one of seven" (the new skip reason, §5).
 
-The builder may copy the probe diff's `gui/` and `scripts/` hunks verbatim; they are what produced §6's GREEN rows.
+The builder may copy the probe diff's `gui/` and `scripts/` hunks verbatim (comment hunks included); they are what
+produced §6's GREEN rows.
 
 ## 5. Tests
 
@@ -96,13 +101,22 @@ New file `gui/sysw_plaintext_secret_refugium_test.go` (`//go:build refugium`), i
 - `TestKitarchPlaintextSecretRefusedBeforeDigest` (R1): payload `[text:48656c6c6f, <secret>]` for each of ClassMnemonic
   (BIP-39 test mnemonic abandon x11 + about), ClassCodex32Secret (BIP-93 vector `refugiumMS1Vec`), ClassPreimage
   (`composerTestPreimageRecord`), ClassPhrase (`composerTestPhraseRecord`), on boot and non-boot routes: the refusal
-  with "Record 2" is drawn, no "Compare this against", `ctx.sysw == nil`, return false. The fixture's class is asserted
-  first (INCONCLUSIVE otherwise).
+  with "Record 2" is drawn; then Button3 dismisses it and the flow must return on its own within 64 frames, never
+  drawing "Compare this against" or "Keep this payload loaded?" (so a refusal that does not return fails, r1 I-1);
+  `ctx.sysw == nil`, return false. `plaintextSecretLoad` returns its `frame` func for this. The fixture's class is
+  asserted first (INCONCLUSIVE otherwise).
 - `TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord` (R2): `[mnemonic, ms1]` names Record 1.
 - `TestKitarchPassRecordRefusalKeepsPrecedence` (R4, guard): `[mnemonic, pass:636f7272]` shows
   `syswPassphraseRecordRefusal(2)` and not the new text.
 - `TestKitarchPlaintextWithoutSecretClassStillLoads` (R3, guard): a public `text:` payload and `kit-mk1-alone`'s
-  unconfirmed md1 reach "Compare this against".
+  unconfirmed md1 reach "Compare this against"; and the unconfirmed md1, driven on, shows F1's "Payload Warnings"
+  and then "Keep this payload loaded?" (r1 M-3: pins F1 then KEEP / UNLOAD at flow level, which the skipped
+  `TestF1OffersUnloadWhereItOnceOfferedErase` no longer does under this tag).
+- `TestKitarchSecretInTheCleartextSectionOfASealedPayload` (R1, unit, r1 I-2): `syswFirstSecretRecord` on
+  {Public: [text:41, mnemonic], Secret: [ms1]} gives (2, true); on {Public: [text:41], Secret: [ms1]} gives (0, false).
+- `TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused` (R1, flow, r1 I-2): a hand-sealed region (passphrase
+  "abandon about", Public [text:48656c6c6f, mnemonic], Secret [text:41]), driven as `loadSealedForWarnings` does; the
+  refusal for Record 2 is drawn and neither "Compare this against" nor "Payload Warnings" ever is.
 
 Tests that change (each loads a plaintext payload holding a secret through `syswLoadFlow`, so under `-tags refugium`
 it now meets the refusal; found by running the whole tagged suite with the fix and nothing else, §6): each gains
@@ -130,8 +144,11 @@ and S-E through the real flow), `TestRefugiumLineSealedUnconfirmedMdmkAloneRaise
 
 ## 6. RED and GREEN rows (go1.26.4 at `~/.local/go/bin`, `GOTOOLCHAIN=local CGO_ENABLED=0`, GOCACHE and TMPDIR under the worktree)
 
-RED, on base 127cf04 with only the new test file added
-(`git apply --include='gui/sysw_plaintext_secret_refugium_test.go' design/FIX_sec-sh-sysw-plaintext-refuse-probe.diff`):
+RED, on f9aa66a-plus-fold (base 127cf04 plus this document and the probe diff), with the new test file and the two
+new functions only, and the call site left out of `syswLoadFlow` (the new unit row needs the functions to compile):
+`git apply --include='gui/sysw_plaintext_secret_refugium_test.go' --include='gui/sysw_load.go'
+design/FIX_sec-sh-sysw-plaintext-refuse-probe.diff`, then delete the four-line `if n, found :=
+syswFirstSecretRecord(p); found { ... }` block from `syswLoadFlow`:
 
 `go test -tags refugium -count=1 -run '^TestKitarch' -v ./gui/`
 
@@ -140,19 +157,23 @@ Expected (seen; copied from the run, digests abbreviated by the reader only):
 ```
 --- FAIL: TestKitarchPlaintextSecretRefusedBeforeDigest
     ...: mnemonic boot=false: want the refusal before any digest; got "PayloadDigestComparethisagainst`mesyswshow<file>`onthehost:b13bd6cdb1f3b750de030a2619885f7a"
-    (and boot=true, codex32 secret, preimage, phrase: 8 lines, each the digest screen)
+    (8 lines in all: mnemonic, codex32 secret, preimage, phrase, each on both routes, each the digest screen)
 --- FAIL: TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord
     ...: want Record 1 named; got "PayloadDigestComparethisagainst`mesyswshow<file>`onthehost:333461fd47ea959706906f8a27d6c0f0"
 --- PASS: TestKitarchPassRecordRefusalKeepsPrecedence
 --- PASS: TestKitarchPlaintextWithoutSecretClassStillLoads
+--- PASS: TestKitarchSecretInTheCleartextSectionOfASealedPayload
+--- FAIL: TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused
+    ...: a secret in the cleartext section of a sealed payload was not refused; got "PayloadDigestComparethisagainst`mesyswshow<file>`onthehost:e3630237991ae6b9d77bc3cb7a784f95"
 FAIL	seedhammer.com/gui
 ```
 
 GREEN, with the whole probe diff applied (`git apply design/FIX_sec-sh-sysw-plaintext-refuse-probe.diff`):
 
-- the same command: 4 PASS, `ok seedhammer.com/gui`.
-- `./scripts/refugium-tagged-test.sh 6`: `RESULT: ok -- 1314 passed, 68 stepped aside for the profile and 2 for the
-  environment, 9 deferred-minor, of 1393 tests under -tags refugium`.
+- the same command: 6 PASS, `ok seedhammer.com/gui`. Mutation (r1 I-1): with `return false` deleted after the new
+  `showError`, `TestKitarchPlaintextSecretRefusedBeforeDigest` FAILs "the flow went on past the refusal" on both routes.
+- `./scripts/refugium-tagged-test.sh 6`: `RESULT: ok -- 1316 passed, 68 stepped aside for the profile and 2 for the
+  environment, 9 deferred-minor, of 1395 tests under -tags refugium`.
 - Fix without the nine skips (how the "tests that change" list was found): the same script, `RESULT: FAIL`, exactly
   the nine tests of §5 failing.
 - `go test -timeout 20m ./...` (untagged): see §8.
@@ -161,13 +182,14 @@ GREEN, with the whole probe diff applied (`git apply design/FIX_sec-sh-sysw-plai
 
 | Rule | Rows |
 |---|---|
-| R1 refuse, both routes, no session | TestKitarchPlaintextSecretRefusedBeforeDigest (RED) |
+| R1 refuse, both routes, no session, dismiss-and-drain | TestKitarchPlaintextSecretRefusedBeforeDigest (RED) |
+| R1 section-keyed (public section of a sealed payload) | TestKitarchSecretInTheCleartextSectionOfASealedPayload (unit), TestKitarchSealedPayloadWithASecretInItsPublicSectionIsRefused (RED) |
 | R2 first position | TestKitarchPlaintextSecretRefusalNamesFirstSecretRecord (RED), R1's "Record 2" |
-| R3 class not flag | TestKitarchPlaintextWithoutSecretClassStillLoads (guard) |
+| R3 class not flag; F1 then KEEP / UNLOAD unchanged | TestKitarchPlaintextWithoutSecretClassStillLoads (guard, incl. the flow to "Keep this payload loaded?") |
 | R4 pass: precedence | TestKitarchPassRecordRefusalKeepsPrecedence (guard) |
-| R5 sealed unchanged | TestRefugiumSecretWarningLine sealed rows, TestRefugiumLineSealedUnconfirmedMdmkAloneRaisesNone (existing) |
+| R5 sealed section unchanged | TestRefugiumSecretWarningLine sealed rows, TestRefugiumLineSealedUnconfirmedMdmkAloneRaisesNone (existing) |
 | R6 default unchanged | the untagged suite, incl. the nine changed tests running unskipped (existing) |
-| R7 no session | R1's `ctx.sysw == nil` and return-false assertions |
+| R7 no session | R1's dismiss-and-drain plus `ctx.sysw == nil` |
 
 ## 8. Gate (the repo's CI jobs, `.github/workflows/test.yml`; run once each to a file and grep it)
 
@@ -193,12 +215,31 @@ ELF and absent in the Refugium ELF". Keep TMPDIR and GOCACHE outside the worktre
   when Q3 is lifted (texts PROPOSED, architect confirms):
   - §3 third amendment (L531-534): replace "in the Refugium build, a loaded payload (plaintext or sealed) holding a
     genuinely secret class gets one more warning line ... It warns and does not refuse (Brian's Q3 ruling)." with "in
-    the Refugium build, a plaintext payload holding a genuinely secret class is refused at load, and a sealed one gets
-    one more warning line, which names the Sealed Payload as the only way secrets travel in that build (Q3 lifted,
-    FIX sec-sh-sysw-plaintext-refuse)."
-  - §14a Q3 line (L1708-1710) and §14f (L1930-1949): the plaintext half becomes the R1-R4 refusal with §3's text;
-    the sealed half stands. Test row 31 (L1439-1444): "plaintext, directly after the F1 line" becomes "plaintext:
-    refused at load (§14f)".
+    the Refugium build, a payload holding a genuinely secret class outside a sealed section (any record of a plaintext
+    payload, or one in a sealed payload's public section) is refused at load, and a sealed payload holding one in its
+    sealed section gets one more warning line, which names the Sealed Payload as the only way secrets travel in that
+    build (Q3 lifted, FIX sec-sh-sysw-plaintext-refuse)."
+  - §14a L1708-1710: replace the bullet with "- Q3 (lifted, FIX sec-sh-sysw-plaintext-refuse): the Refugium build
+    REFUSES at load a payload holding a record of a genuinely secret class outside a sealed section (every such record
+    of a plaintext payload, and any in the public section of a sealed one), and WARNS on a sealed payload holding one
+    in its sealed section (STOP-2, RULED (a): Brian 2026-11-22). Decision 6 is unchanged for the default build; §3.3.3
+    and §14f add the refusal and the warning line."
+  - §14f L1932-1939: replace the first paragraph up to "The line:" with "In the Refugium build, a payload holding a
+    record whose class is secret by §3.3.1 (`ClassMnemonic`, `ClassCodex32Secret`, `ClassPassphrase`, `ClassPreimage`,
+    `ClassPhrase`) in its public section, which is every record of a plaintext payload, is refused at load: after the
+    `pass:` refusal, before the digest, and before any session exists, with the title "Load Payload" and the text
+    "Record <n> of this payload is a secret, and it is not sealed. This build takes secrets only in the Sealed
+    Payload, so nothing was loaded. Pack the payload again without it." Here <n> is the first such record's position
+    as §14g counts it. When a loaded sealed payload holds such a record in its sealed section (STOP-2, RULED (a):
+    Brian 2026-11-22), the "Payload Warnings" screen shows the line below as its last line, after F2's line when F2
+    is raised, and the screen shows for this line alone when no flag is raised. The line:"
+  - §14f L1944-1946: replace "The KEEP / UNLOAD choice follows the screen whenever this line is on it, and nothing
+    is refused (Q3). An md1/mk1 record that is secret only because it is unconfirmed (`[mdmk-decode]`) does not raise
+    this line; its own F1 line is unchanged." with "The KEEP / UNLOAD choice follows the screen whenever this line is
+    on it. An md1/mk1 or mt1 record that is secret only because it is unconfirmed (`[mdmk-decode]`, `[mt-decode]`) is
+    neither refused nor raises this line; its own F1 line is unchanged."
+  - Test row 31 (L1439-1444): "plaintext, directly after the F1 line" becomes "plaintext, or a secret in a sealed
+    payload's public section: refused at load (§14f)".
   - §14k (L2120-2126): `kitarch-a-s1`, `kitarch-c-a1` and the seedhammer half of `kitarch-b-s1` are closed by this
     build.
 - FOLLOWUPS: none closed (the rows live in coordinator `status/secret-criticals.md`); none filed by this document.
@@ -215,7 +256,7 @@ ELF and absent in the Refugium ELF". Keep TMPDIR and GOCACHE outside the worktre
 
 ## 11. How this was checked
 
-RED rows run on base 127cf04 with only the new test file (output `/scratch/cache/sec-sh-sysw-red.txt`); GREEN rows and
+The r1 fold (Claude Sonnet 5.5, claude-sonnet-5-5) re-ran every §6 row on the folded probe (`/scratch/cache/fold-sysw-*.txt`). Original runs: RED rows run on base 127cf04 with only the new test file (output `/scratch/cache/sec-sh-sysw-red.txt`); GREEN rows and
 the gate with the probe diff applied (`/scratch/cache/sec-sh-sysw-green.txt`, `-probe-tagged.txt` without the skips,
 `-probe-tagged2.txt` with them, `-probe-untagged.txt`). The probe was reverted after the runs; the branch carries only
 this document and the probe diff.
