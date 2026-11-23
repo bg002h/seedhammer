@@ -22,7 +22,8 @@ import (
 // mk1.Path is the matched slot origin (so compactFromXpub's depth/child gate
 // passes — the xpub was derived AT this origin). mk1.Stubs is the policy_id_stub
 // of the SUPPLIED md1 (I-4 — binds the key card to the supplied policy).
-// Network is a LABEL only ("mainnet"); it is not serialized nor verified.
+// Network is a LABEL only ("mainnet"); it is not serialized; mk.Encode refuses
+// it if it disagrees with the xpub (T36).
 //
 // SECURITY: gate m.Valid() before m.Entropy() (which panics on invalid);
 // deriveAccountXpub scrubs the seed/master internally; the entropy buffer is
@@ -46,7 +47,7 @@ func deriveMultisigLeg(m bip39.Mnemonic, passphrase string, net *chaincfg.Params
 	}
 
 	mk1, err := mk.Encode(mk.Card{
-		Network:     "mainnet", // LABEL only (mainnet-only, I-8).
+		Network:     "mainnet", // LABEL only (not serialized; Encode checks it) (mainnet-only, I-8).
 		Path:        origin.String(),
 		Fingerprint: fmt.Sprintf("%08x", masterFP),
 		Stubs:       [][4]byte{stub},
