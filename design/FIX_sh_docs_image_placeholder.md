@@ -45,8 +45,10 @@ consistency, R3).
   short sha: copied unedited, the signer refuses a missing file (fails closed); it never names a real build.
 - **R2 (every use quoted).** Every printed command that names the image uses `"$IMG.uf2"` or `"$IMG.signed.uf2"`
   (double quotes around the whole word), so a name holding a space or shell metacharacters stays one argument:
-  - README.md L167 -> `../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem`
-  - README.md L168 -> `picotool load --verify "$IMG.signed.uf2"`
+  - README.md L167 -> `../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem &&`
+  - README.md L168 -> `  picotool load --verify "$IMG.signed.uf2"` (chained with `&&`: the block is pasteable as one unit now,
+    and `sign-firmware.sh` leaves `$IMG.signed.uf2` behind when a check after its L51 copy fails, so the flash
+    must run only when the signer exits 0; review r1 I1, PROPOSED)
   - custom-firmware.md L370 -> `/path/to/mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem`
   - custom-firmware.md L389 -> `picotool info -a "$IMG.signed.uf2" \` (the L390 pipeline is unchanged)
   - custom-firmware.md L399 -> `picotool load --verify "$IMG.signed.uf2"`
@@ -67,8 +69,8 @@ README.md L165-169 becomes
     nix run .#build-firmware
     # the name it printed after "Built ", without .uf2
     IMG="seedhammerii-v0.0.0-bg1a2b3c4"
-    ../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem
-    picotool load --verify "$IMG.signed.uf2"
+    ../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem &&
+      picotool load --verify "$IMG.signed.uf2"
     ```
 
 custom-firmware.md L363-371 becomes (new lines 368-370 inserted after the existing L367 comment, before `# sign it`)
@@ -127,6 +129,10 @@ shell session), rewrites the two known signer prefixes (`../mnemonic-engrave/scr
 - `TestFixShDocsImagePlaceholderNoAngleWords` (R4): no ` ```sh ` line of either page matches `<[A-Za-z][A-Za-z0-9_-]*>`
   after removing a `#` comment (a `#` at line start or after a space).
 
+- `TestFixShDocsImagePlaceholderSignFailNoFlash` (R2): README's signing block run with the signer recorder
+  redefined to exit 1 (`sign_firmware() { rec sign-firmware.sh "$@"; return 1; }` prepended); fails if any
+  recorded call starts with `picotool argc=3 [load]`.
+
 **Tests that change:** none (no existing test reads these pages).
 
 ## 6. RED rows (run on base 25abe8e with the §5 test added; signet not involved, no keys)
@@ -139,6 +145,7 @@ Command (Go 1.26.7, `GOTOOLCHAIN=local`, own `GOCACHE`):
 | TestFixShDocsImagePlaceholderVerbatim | FAIL x4: README log `sign-firmware.sh argc=1 [HOME/.sh2/sh2-boot-key.pem]`, `picotool argc=2 [load] [--verify]`; custom-firmware.md also `picotool argc=2 [info] [-a]`; both pages: `working directory after the printed commands = [".signed.uf2" ".uf2" "image"]` | PASS |
 | TestFixShDocsImagePlaceholderSpacedName | FAIL x2: `../README.md: 0 lines assign IMG="..." in the signing blocks, want 1`, same for custom-firmware.md | PASS |
 | TestFixShDocsImagePlaceholderNoAngleWords | FAIL x5: `../README.md:167`, `:168`, `custom-firmware.md:370`, `:389`, `:399` `placeholder outside a comment in a sh block` | PASS |
+| TestFixShDocsImagePlaceholderSignFailNoFlash | PASS at base (the `<image` redirection stops the load line); FAIL on the probe as first written (`signer failed but the block still ran picotool argc=3 [load] [--verify] [seedhammerii-v0.0.0-bg1a2b3c4.signed.uf2]`) | PASS |
 
 Mutation seen on the scratch fix: unquoting README's load line (`picotool load --verify $IMG.signed.uf2`) fails
 TestFixShDocsImagePlaceholderSpacedName (picotool gets `my` and `image.signed.uf2`). An unquoted assignment
@@ -149,7 +156,7 @@ TestFixShDocsImagePlaceholderSpacedName (picotool gets `my` and `image.signed.uf
 | rule | rows |
 |---|---|
 | R1 example name in a quoted variable, set once per page | TestFixShDocsImagePlaceholderVerbatim; TestFixShDocsImagePlaceholderSpacedName (value pinned, one assignment) |
-| R2 every use quoted, one argument | TestFixShDocsImagePlaceholderVerbatim (sentinel dir, no hidden file); TestFixShDocsImagePlaceholderSpacedName |
+| R2 every use quoted, one argument; README flash only after a successful signer | TestFixShDocsImagePlaceholderVerbatim (sentinel dir, no hidden file); TestFixShDocsImagePlaceholderSpacedName; TestFixShDocsImagePlaceholderSignFailNoFlash |
 | R3 prose | review only (inline code in prose is not run) |
 | R4 no `<word>` in a run line | TestFixShDocsImagePlaceholderNoAngleWords |
 | R5 unchanged | `git diff --stat` touches only the two pages and the new test; review |

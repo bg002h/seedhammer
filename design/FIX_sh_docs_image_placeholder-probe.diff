@@ -1,5 +1,5 @@
 diff --git i/README.md w/README.md
-index 8748375..c058c44 100644
+index 8748375..2d08b9c 100644
 --- i/README.md
 +++ w/README.md
 @@ -164,8 +164,10 @@ identical `otp set -s`. It only sets bits, so repeating is safe.
@@ -10,8 +10,8 @@ index 8748375..c058c44 100644
 -picotool load --verify <image>.signed.uf2
 +# the name it printed after "Built ", without .uf2
 +IMG="seedhammerii-v0.0.0-bg1a2b3c4"
-+../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem
-+picotool load --verify "$IMG.signed.uf2"
++../mnemonic-engrave/scripts/sign-firmware.sh "$IMG.uf2" ~/.sh2/sh2-boot-key.pem &&
++  picotool load --verify "$IMG.signed.uf2"
  ```
  
  `nix run .#build-firmware` produces an **unsigned** image — never flash it. It
@@ -56,10 +56,10 @@ index bf9f99c..14f346d 100644
  **Judge the result on machine power, not on USB.** The controller's
 diff --git i/docs/fix_sh_docs_image_placeholder_test.go w/docs/fix_sh_docs_image_placeholder_test.go
 new file mode 100644
-index 0000000..9c0a013
+index 0000000..f922587
 --- /dev/null
 +++ w/docs/fix_sh_docs_image_placeholder_test.go
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,226 @@
 +package docs_test
 +
 +// FIX-sh-docs-image-placeholder (bughunt-1119 bh-sh-I12): the install pages
@@ -271,6 +271,18 @@ index 0000000..9c0a013
 +			if in && fixShDocsAngleWord.MatchString(code) {
 +				t.Errorf("%s:%d: placeholder outside a comment in a sh block: %s", page, i+1, line)
 +			}
++		}
++	}
++}
++
++// TestFixShDocsImagePlaceholderSignFailNoFlash (R2): README's signing block run
++// with a signer that fails must not reach the flash command.
++func TestFixShDocsImagePlaceholderSignFailNoFlash(t *testing.T) {
++	lines := append([]string{`sign_firmware() { rec sign-firmware.sh "$@"; return 1; }`}, fixShDocsSignBlocks(t, "../README.md")...)
++	calls, _, _, output, _ := fixShDocsRun(t, lines)
++	for _, c := range calls {
++		if strings.HasPrefix(c, "picotool argc=3 [load]") {
++			t.Errorf("../README.md: signer failed but the block still ran %s\nbash output: %s", c, output)
 +		}
 +	}
 +}
