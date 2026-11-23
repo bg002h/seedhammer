@@ -1,0 +1,138 @@
+diff --git i/bip39/bip39.go w/bip39/bip39.go
+index ca581c1..ae92dee 100644
+--- i/bip39/bip39.go
++++ w/bip39/bip39.go
+@@ -17,6 +17,7 @@ import (
+ 	"strings"
+ 
+ 	"golang.org/x/crypto/pbkdf2"
++	"golang.org/x/text/unicode/norm"
+ )
+ 
+ type Word int
+@@ -266,7 +267,20 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
+ 			sentence = append(sentence, ' ')
+ 		}
+ 	}
+-	return pbkdf2.Key(sentence, []byte("mnemonic"+password), 2048, 64, sha512.New)
++	return pbkdf2.Key(sentence, seedSalt(password), 2048, 64, sha512.New)
++}
++
++// seedSalt returns "mnemonic" followed by the NFKD form of password, as
++// BIP-39 requires. ASCII is its own NFKD form and is copied unchanged.
++// Invalid UTF-8 bytes pass through unchanged.
++func seedSalt(password string) []byte {
++	salt := append(make([]byte, 0, len("mnemonic")+len(password)), "mnemonic"...)
++	for i := 0; i < len(password); i++ {
++		if password[i] >= 0x80 {
++			return norm.NFKD.AppendString(salt, password)
++		}
++	}
++	return append(salt, password...)
+ }
+ 
+ func New(entropy []byte) Mnemonic {
+diff --git i/bip39/fix_sec_sh_passphrase_nfkd_test.go w/bip39/fix_sec_sh_passphrase_nfkd_test.go
+new file mode 100644
+index 0000000..b18e97b
+--- /dev/null
++++ w/bip39/fix_sec_sh_passphrase_nfkd_test.go
+@@ -0,0 +1,60 @@
++package bip39
++
++import (
++	"encoding/hex"
++	"testing"
++)
++
++// FIX sec-sh-passphrase-nfkd (secret row bh1119-sh-i13-passphrase-no-nfkd):
++// BIP-39 derives the seed from the NFKD form of the passphrase. Every expected
++// seed below was computed independently with Python 3 (hashlib.pbkdf2_hmac,
++// unicodedata.normalize("NFKD", p)) on the mnemonic "abandon" x11 + "about".
++// Test inputs only; no real secret.
++
++func nfkdAbandonAbout(t *testing.T) Mnemonic {
++	t.Helper()
++	m, err := ParseMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
++	if err != nil {
++		t.Fatal(err)
++	}
++	return m
++}
++
++func checkNfkdSeed(t *testing.T, m Mnemonic, name, passphrase, want string) {
++	t.Helper()
++	if got := hex.EncodeToString(MnemonicSeed(m, passphrase)); got != want {
++		t.Errorf("%s: MnemonicSeed(%+q) = %s, want %s", name, passphrase, got, want)
++	}
++}
++
++// "café" spelt precomposed (U+00E9) and decomposed (e + U+0301) is one
++// passphrase under NFKD and derives one seed.
++func TestFixSecShPassphraseNfkdComposedEqualsDecomposed(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "af8bbd2566df7b69d926f2b09dfdbd75db6c994a3399b2cc65f928d63e3fd4e61218ee0d15f8c810be4d45e66d47b43c15a5cc753976b1666912377ff7ae9818"
++	checkNfkdSeed(t, m, "precomposed", "café", want)
++	checkNfkdSeed(t, m, "decomposed", "café", want)
++}
++
++// NFKD, not NFD: the compatibility ligature U+FB01 derives the seed of "fi".
++func TestFixSecShPassphraseNfkdCompatibility(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	const want = "6f8c92074395505f20fb58dee916a71167cca6b574bcfb870fbbd086931f51a7e1d812948405326fbe13783e989776629a0eb5c4e28468991c79a2e4a56f17d8"
++	checkNfkdSeed(t, m, "ligature", "ﬁ", want)
++	checkNfkdSeed(t, m, "ascii", "fi", want)
++}
++
++// ASCII is its own NFKD form: the published vectors keep their seeds.
++func TestFixSecShPassphraseNfkdAsciiUnchanged(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "empty", "", "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4")
++	checkNfkdSeed(t, m, "TREZOR", "TREZOR", "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e53495531f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04")
++}
++
++// Invalid UTF-8 bytes pass through unchanged; the valid text around them is
++// still normalized.
++func TestFixSecShPassphraseNfkdInvalidUTF8(t *testing.T) {
++	m := nfkdAbandonAbout(t)
++	checkNfkdSeed(t, m, "latin1", "caf\xe9", "439aad27d41563beae6cd52b6a2b64ef734193b39b796c4a2620e81f7ad668859ca09ba2f1ddfb521d696dec584d718ea4c046153e557a7f3c6c5e44918ff82c")
++	checkNfkdSeed(t, m, "mixed", "\xffcafé", "f3d30b72b6e7a2c0b44e64bd343ce9afa5c8c88210f92be78cd3da65be6f312b1213aa33ab34859e3d8d8afb092ecd6a6d6a016bc01305d0552321ae5fa43115")
++}
+diff --git i/go.mod w/go.mod
+index 3c62928..1b3a7c3 100644
+--- i/go.mod
++++ w/go.mod
+@@ -14,6 +14,7 @@ require (
+ 	github.com/seedhammer/kortschak-qr v0.3.2
+ 	golang.org/x/crypto v0.52.0
+ 	golang.org/x/image v0.41.0
++	golang.org/x/text v0.37.0
+ 	gonum.org/v1/gonum v0.17.0
+ )
+ 
+@@ -24,5 +25,4 @@ require (
+ 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
+ 	github.com/x448/float16 v0.8.4 // indirect
+ 	golang.org/x/sys v0.45.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
+ )
+diff --git i/passphrase/passphrase.go w/passphrase/passphrase.go
+index 2efddc1..f8f0d49 100644
+--- i/passphrase/passphrase.go
++++ w/passphrase/passphrase.go
+@@ -1,10 +1,11 @@
+ // Package passphrase validates BIP-39 passphrases for engraving.
+ //
+ // The device accepts only printable ASCII. That is NOT a BIP-39 rule -- the
+-// standard permits any string -- it is the boundary within which this
+-// codebase's derivation is provably conformant: bip39.MnemonicSeed performs no
+-// NFKD normalization, which is identity on ASCII and divergent otherwise. See
+-// SPEC_seedhammer_engrave_bip39_password.md D3.
++// standard permits any string -- it is this device's engraving limit
++// (ErrNonASCII). bip39.MnemonicSeed applies BIP-39's NFKD normalization, so a
++// non-ASCII passphrase from a library caller derives the conformant seed.
++// SPEC_seedhammer_engrave_bip39_password.md D3 records the earlier reason (no
++// NFKD), removed by FIX sec-sh-passphrase-nfkd.
+ package passphrase
+ 
+ import "errors"
