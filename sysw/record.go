@@ -66,6 +66,12 @@ const (
 	// progWalletPolicy alone and progPassword's row stays {ClassPassphrase}.
 	ClassPreimage
 	ClassPhrase
+	// ClassMr is one mr1 string (a single-string card or one chunk of a chunk
+	// set): SPEC_systemwide_payloads.md section 14b. NOT secret and NOT bearer:
+	// the kit's public strings are engraved verbatim, so flash holds nothing
+	// the steel will not. It has no confirmation walk (STOP-1: framing only).
+	// Admitted at Engrave Bundle alone, and only through the kit door.
+	ClassMr
 )
 
 // IsSecret extends the shipped predicate (seal/session.go:17, which is

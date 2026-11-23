@@ -233,7 +233,7 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 		// operator learns a secret is sitting unencrypted in flash, and the
 		// answer to "I did not want that" should not be a hunt through the
 		// carousel.
-		if syswHasFlag(ctx.sysw, flagSecretInPlaintext) {
+		if syswHasFlag(ctx.sysw, flagSecretInPlaintext) || syswRefugiumLineShown(ctx.sysw) {
 			cs := &ChoiceScreen{
 				Title:   "Payload",
 				Lead:    "Keep this payload loaded?",
@@ -247,6 +247,12 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			}
 		}
 	}
+	// "Kit Refused" comes after the Payload Warnings screen and its KEEP /
+	// UNLOAD, and is not shown when the holder chose UNLOAD (the session is
+	// gone above). It is shown by syswPayloadMenu, on every opening, and the
+	// menu follows EVERY load of a payload that offers a kit (boot, the carousel
+	// with nothing loaded, LOAD AGAIN: syswLoadThenMenu), so it shows once per
+	// load on every route and never here.
 	return true
 }
 
@@ -298,6 +304,11 @@ func syswLoadWarnings(s *syswSession) []string {
 					"secret - is stored unencrypted in flash.")
 			case f == flagSecretInPlaintext:
 				out = append(out, "A SECRET is stored unencrypted in flash.")
+				// SPEC_systemwide_payloads.md 14f: in a plaintext payload the
+				// Refugium line follows F1's SECRET line directly.
+				if line, ok := syswRefugiumLine(s); ok {
+					out = append(out, line)
+				}
 			case f == flagWeakPassphrase && r.unconfirmed:
 				out = append(out, "An md1/mk1 the device could not confirm - treated as a "+
 					"secret - is protected by a passphrase below the word-count floor.")
@@ -306,7 +317,21 @@ func syswLoadWarnings(s *syswSession) []string {
 			}
 		}
 	}
+	// ...and in a sealed payload it is the screen's last line, after F2's when F2
+	// is raised, and the screen shows for this line alone when no flag is.
+	if s.sealed {
+		if line, ok := syswRefugiumLine(s); ok {
+			out = append(out, line)
+		}
+	}
 	return out
+}
+
+// syswRefugiumLineShown reports whether the Refugium warning (section 14f) is on
+// the Payload Warnings screen, so KEEP / UNLOAD follows it (nothing is refused).
+func syswRefugiumLineShown(s *syswSession) bool {
+	_, ok := syswRefugiumLine(s)
+	return ok
 }
 
 // syswFirstPassphraseRecord returns the 1-based position of the first record

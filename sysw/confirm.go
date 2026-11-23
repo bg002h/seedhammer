@@ -20,7 +20,7 @@ import (
 // reach it through different decoder APIs. Where they differ is spelled out at
 // cardKeyOf below.
 //
-// Grouped by (hrp, chunk_set_id), NEVER by HRP alone: a 2-of-3 wsh-sortedmulti
+// Grouped by RUNS of (hrp, chunk_set_id) -- see mdmkGroups -- NEVER by HRP alone: a 2-of-3 wsh-sortedmulti
 // wallet has three separate mk1 cards and three md1 cards, each chunked
 // independently, so HRP grouping sees six chunks against a declared total of two
 // and reports EVERY multisig wallet as unconfirmed.
@@ -32,70 +32,124 @@ import (
 // Nothing here refuses anything. §13 D6 demoted the refusal this replaced: an
 // unconfirmed record loads, and counts as SECRET for flag evaluation (§3.3.3).
 func MDMKUnconfirmed(records []string) []int {
-	type cardKey struct {
-		hrp     byte
-		chunked bool
-		csid    uint32
-		// uniq separates non-chunked records, which are each their OWN card.
-		// One key for all of them would let the first one to decode vouch for
-		// the rest, which is exactly how smuggled entropy would pass.
-		uniq int
-	}
-
-	groups := make(map[cardKey][]int)
-	var order []cardKey // map order is randomised; the walk must not be
 	var out []int
+	for _, g := range mdmkGroups(records) {
+		if !g.confirmed {
+			out = append(out, g.idxs...)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// mdmkGroup is one `[mdmk-decode]` group: the ClassMDMK records of one card,
+// as indices into the caller's slice, in payload order.
+type mdmkGroup struct {
+	// kind is "md1" or "mk1".
+	kind      string
+	idxs      []int
+	confirmed bool
+}
+
+// mdmkGroups groups the ClassMDMK records of a payload BY RUNS, in every
+// payload, on host and device alike (SPEC_systemwide_payloads.md section 14d):
+// a record joins the latest group of its (hrp, chunk-set id) while that group
+// holds fewer strings than its first string's count; otherwise it opens a new
+// group. So two complete copies of one mk1 card are two groups, and each
+// confirms. A non-chunked record is its own group. A record whose card
+// identity cannot be read is its own unconfirmed group (fail CLOSED).
+//
+// Groups are returned in the order of their first record. The real decoders are
+// the arbiter of `confirmed`, per section 12.6.
+func mdmkGroups(records []string) []mdmkGroup {
+	type runKey struct {
+		hrp  byte
+		csid uint32
+	}
+	type run struct {
+		g     int
+		count int
+	}
+	var groups []mdmkGroup
+	latest := make(map[runKey]run) // the latest chunked group of each key
 
 	for i, r := range records {
 		if Classify(r) != ClassMDMK {
 			continue
 		}
-		k, ok := cardKeyOf(r)
+		kind := "md1"
+		if mdmkHRP(r) == 'k' {
+			kind = "mk1"
+		}
+		k, count, ok := cardKeyOf(r)
 		if !ok {
-			// Fail CLOSED. A record whose card identity cannot be read cannot be
-			// grouped, so nothing could ever confirm it. REACHABLE: Classify
-			// trims (classify.go) and the decoders do not, so " md1..." arrives
-			// here.
-			out = append(out, i)
+			groups = append(groups, mdmkGroup{kind: kind, idxs: []int{i}})
 			continue
 		}
-		key := cardKey{hrp: k.hrp, chunked: k.chunked, csid: k.csid}
 		if !k.chunked {
-			key.uniq = i + 1
+			groups = append(groups, mdmkGroup{kind: kind, idxs: []int{i}})
+			continue
 		}
-		if _, seen := groups[key]; !seen {
-			order = append(order, key)
+		key := runKey{hrp: k.hrp, csid: k.csid}
+		if l, seen := latest[key]; seen && len(groups[l.g].idxs) < l.count {
+			groups[l.g].idxs = append(groups[l.g].idxs, i)
+			continue
 		}
-		groups[key] = append(groups[key], i)
+		groups = append(groups, mdmkGroup{kind: kind, idxs: []int{i}})
+		latest[key] = run{g: len(groups) - 1, count: count}
 	}
 
-	for _, key := range order {
-		idxs := groups[key]
-		set := make([]string, len(idxs))
-		for j, i := range idxs {
+	for gi := range groups {
+		g := &groups[gi]
+		if g.confirmed || len(g.idxs) == 0 {
+			continue
+		}
+		first := records[g.idxs[0]]
+		if _, _, ok := cardKeyOf(first); !ok {
+			continue
+		}
+		set := make([]string, len(g.idxs))
+		for j, i := range g.idxs {
 			set[j] = records[i]
 		}
-		// The real decoders are the arbiter, per §12.6. A BCH verifier is not
-		// one, and that is the whole point of the rule.
-		var confirmed bool
+		k, _, _ := cardKeyOf(first)
 		switch {
-		case key.hrp == 'd' && key.chunked:
+		case k.hrp == 'd' && k.chunked:
 			_, err := md.Reassemble(set)
-			confirmed = err == nil
-		case key.hrp == 'd':
+			g.confirmed = err == nil
+		case k.hrp == 'd':
 			_, err := md.Decode(set[0])
-			confirmed = err == nil
+			g.confirmed = err == nil
 		default: // 'k'
 			_, err := mk.Decode(set)
-			confirmed = err == nil
-		}
-		if !confirmed {
-			out = append(out, idxs...)
+			g.confirmed = err == nil
 		}
 	}
+	return groups
+}
 
-	sort.Ints(out)
-	return out
+// mdmkHRP is the discriminant of a ClassMDMK record: 'd' for md1, 'k' for mk1.
+func mdmkHRP(record string) byte {
+	if codex32.ValidMD(record) {
+		return 'd'
+	}
+	return 'k'
+}
+
+// mdmkChunkIndex is the chunk index of a confirmed md1/mk1 string (0 for a
+// non-chunked one).
+func mdmkChunkIndex(record string) int {
+	switch {
+	case codex32.ValidMD(record):
+		if h, err := md.ParseChunkHeader(record); err == nil && h.Chunked {
+			return h.ChunkIndex
+		}
+	case codex32.ValidMK(record):
+		if h, err := mk.ParseHeader(record); err == nil && h.Chunked {
+			return h.ChunkIndex
+		}
+	}
+	return 0
 }
 
 // card is one record's card identity: the HRP discriminant plus, when the record
@@ -117,22 +171,22 @@ type card struct {
 // then errors on a bad version, so the same record lands in the arm above
 // instead. Both end at UNCONFIRMED, which is what §12.6 binds; only the route
 // differs, and vector S-J pins that the agreement is real for every card form.
-func cardKeyOf(record string) (card, bool) {
+func cardKeyOf(record string) (card, int, bool) {
 	switch {
 	case codex32.ValidMD(record):
 		h, err := md.ParseChunkHeader(record)
 		if err != nil {
-			return card{}, false
+			return card{}, 0, false
 		}
-		return card{hrp: 'd', chunked: h.Chunked, csid: h.ChunkSetID}, true
+		return card{hrp: 'd', chunked: h.Chunked, csid: h.ChunkSetID}, h.TotalChunks, true
 	case codex32.ValidMK(record):
 		h, err := mk.ParseHeader(record)
 		if err != nil {
-			return card{}, false
+			return card{}, 0, false
 		}
-		return card{hrp: 'k', chunked: h.Chunked, csid: h.ChunkSetID}, true
+		return card{hrp: 'k', chunked: h.Chunked, csid: h.ChunkSetID}, h.TotalChunks, true
 	}
-	return card{}, false
+	return card{}, 0, false
 }
 
 // MTUnconfirmed returns the indices of the ClassMt records that are NOT

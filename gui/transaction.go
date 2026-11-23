@@ -293,6 +293,8 @@ func txClassName(c sysw.Class) string {
 		return "mt1 chunk"
 	case sysw.ClassTx:
 		return "raw transaction"
+	case sysw.ClassMr:
+		return "mr1 string"
 	}
 	return "unrecognised record"
 }
