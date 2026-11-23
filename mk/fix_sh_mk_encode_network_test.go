@@ -131,3 +131,27 @@ func TestMkEncodeNetworkErrorText(t *testing.T) {
 		t.Fatalf("errEncodeNetwork = %q, want %q", errEncodeNetwork.Error(), want)
 	}
 }
+
+// R7: an unsupported public version is still refused at Encode, and Decode keeps its text.
+func TestMkEncodeNetworkUnsupportedVersionRefused(t *testing.T) {
+	p := chaincfg.MainNetParams
+	p.Name, p.Net = "probeynet", 0x1234abcd
+	p.HDPrivateKeyID = [4]byte{0x04, 0x9d, 0x78, 0x78}
+	p.HDPublicKeyID = [4]byte{0x04, 0x9d, 0x7c, 0xb2}
+	if err := chaincfg.Register(&p); err != nil {
+		t.Fatal(err)
+	}
+	ypub := deriveTestXpub(t, "m/84'/0'/0'", &p)
+	for _, n := range []string{"", "mainnet"} {
+		if _, err := Encode(fixNetCard(n, "m/84'/0'/0'", ypub)); !errors.Is(err, errEncodeXpub) {
+			t.Errorf("Network=%q ypub: err=%v, want errEncodeXpub", n, err)
+		}
+	}
+}
+
+func TestMkDecodeVersionErrorText(t *testing.T) {
+	_, _, err := reconstructXpub(make([]byte, xpubCompactBytes), nil)
+	if err == nil || err.Error() != "mk: invalid xpub version: 00000000" {
+		t.Fatalf("got %v", err)
+	}
+}
