@@ -1,0 +1,241 @@
+package docs_test
+
+// FIX-sh-docs-image-placeholder (bughunt-1119 bh-sh-I12): the install pages
+// printed `<image>.uf2` / `<image>.signed.uf2` inside ```sh blocks. A shell
+// reads `<image` as an input redirection and `>`-less `.signed.uf2` as the
+// next word, so with a file named `image` present picotool got only `load
+// --verify` and stdout went to a hidden `.signed.uf2`; without one the line
+// failed with `image: No such file or directory`. These tests run the printed
+// signing and flashing blocks under bash with argument recorders.
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// The example name the pages print (PROPOSED text, FIX §2 R1).
+const fixShDocsExampleImg = "seedhammerii-v0.0.0-bg1a2b3c4"
+
+// fixShDocsPages are the two install pages, relative to this package.
+var fixShDocsPages = []string{"../README.md", "custom-firmware.md"}
+
+// fixShDocsSignBlocks returns, in page order, the lines of every ```sh block
+// of page that signs or flashes an image (names sign-firmware.sh or a
+// .signed.uf2 file), joined as one script: the page's blocks run in one shell.
+func fixShDocsSignBlocks(t *testing.T, page string) []string {
+	t.Helper()
+	f, err := os.Open(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var out, block []string
+	in := false
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "```") {
+			if in {
+				joined := strings.Join(block, "\n")
+				if strings.Contains(joined, "sign-firmware.sh") || strings.Contains(joined, ".signed.uf2") {
+					out = append(out, block...)
+				}
+				block = nil
+			}
+			in = !in && strings.TrimSpace(line) == "```sh"
+			continue
+		}
+		if in {
+			block = append(block, line)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Fatalf("%s: no ```sh block signs or flashes an image", page)
+	}
+	return out
+}
+
+var fixShDocsSignerPrefix = regexp.MustCompile(`^(\.\./|/path/to/)mnemonic-engrave/scripts/sign-firmware\.sh `)
+
+// fixShDocsRun runs lines under bash in a fresh directory holding an `image`
+// sentinel, with recorders for nix, the signing script and picotool, and
+// stdin-draining stubs for the fingerprint pipeline. It returns the recorded
+// calls (the temporary HOME spelled HOME), the directory's entries afterwards, the sentinel's content and the
+// combined output of bash.
+func fixShDocsRun(t *testing.T, lines []string) (calls []string, entries []string, sentinel, output string, err error) {
+	t.Helper()
+	bash, lerr := exec.LookPath("bash")
+	if lerr != nil {
+		t.Fatalf("bash is needed to run the printed commands: %v", lerr)
+	}
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	home := filepath.Join(root, "home")
+	rec := filepath.Join(root, "calls.txt")
+	for _, d := range []string{work, home} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(work, "image"), []byte("SENTINEL\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var script strings.Builder
+	script.WriteString(`rec() { local n=$1; shift; { printf '%s argc=%d' "$n" "$#"; printf ' [%s]' "$@"; printf '\n'; } >> "$REC"; }
+nix() { rec nix "$@"; }
+sign_firmware() { rec sign-firmware.sh "$@"; }
+picotool() { rec picotool "$@"; }
+awk() { cat >/dev/null; }
+head() { cat >/dev/null; }
+xxd() { cat >/dev/null; }
+sha256sum() { cat >/dev/null; }
+`)
+	for _, l := range lines {
+		script.WriteString(fixShDocsSignerPrefix.ReplaceAllString(l, "sign_firmware "))
+		script.WriteString("\n")
+	}
+	cmd := exec.Command(bash, "--noprofile", "--norc", "-c", script.String())
+	cmd.Dir = work
+	cmd.Env = []string{"HOME=" + home, "REC=" + rec, "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if b, rerr := os.ReadFile(rec); rerr == nil {
+		calls = strings.Split(strings.TrimSuffix(strings.ReplaceAll(string(b), home, "HOME"), "\n"), "\n")
+	}
+	des, derr := os.ReadDir(work)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	for _, de := range des {
+		entries = append(entries, de.Name())
+	}
+	sort.Strings(entries)
+	s, _ := os.ReadFile(filepath.Join(work, "image"))
+	return calls, entries, string(s), string(out), err
+}
+
+// fixShDocsWant is the recorded call list for img on page.
+func fixShDocsWant(page, img, home string) []string {
+	want := []string{
+		"nix argc=2 [run] [.#build-firmware]",
+		fmt.Sprintf("sign-firmware.sh argc=2 [%s.uf2] [%s/.sh2/sh2-boot-key.pem]", img, home),
+	}
+	if page == "custom-firmware.md" {
+		want = append(want, fmt.Sprintf("picotool argc=3 [info] [-a] [%s.signed.uf2]", img))
+	}
+	return append(want, fmt.Sprintf("picotool argc=3 [load] [--verify] [%s.signed.uf2]", img))
+}
+
+func fixShDocsCheck(t *testing.T, page string, lines []string, img string) {
+	t.Helper()
+	calls, entries, sentinel, output, err := fixShDocsRun(t, lines)
+	if err != nil {
+		t.Errorf("%s: bash failed: %v\n%s", page, err, output)
+	}
+	want := fixShDocsWant(page, img, "HOME")
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("%s: recorded calls\n%s\nwant\n%s\nbash output: %s", page, strings.Join(calls, "\n"), strings.Join(want, "\n"), output)
+	}
+	if strings.Join(entries, ",") != "image" || sentinel != "SENTINEL\n" {
+		t.Errorf("%s: working directory after the printed commands = %q, image = %q; want only the untouched image sentinel", page, entries, sentinel)
+	}
+}
+
+var fixShDocsAssign = regexp.MustCompile(`^IMG="([^"$` + "`" + `\\]*)"`)
+
+// TestFixShDocsImagePlaceholderVerbatim: the printed blocks, run as printed in a
+// directory holding a file named `image`, pass the example name as one argument
+// to each command and create no file.
+func TestFixShDocsImagePlaceholderVerbatim(t *testing.T) {
+	for _, page := range fixShDocsPages {
+		fixShDocsCheck(t, page, fixShDocsSignBlocks(t, page), fixShDocsExampleImg)
+	}
+}
+
+// TestFixShDocsImagePlaceholderSpacedName: with the printed IMG assignment's
+// value replaced by a name holding a space, every command still gets that name
+// as one argument.
+func TestFixShDocsImagePlaceholderSpacedName(t *testing.T) {
+	const spaced = "my image"
+	for _, page := range fixShDocsPages {
+		lines := fixShDocsSignBlocks(t, page)
+		n := 0
+		for i, l := range lines {
+			if m := fixShDocsAssign.FindStringSubmatch(l); m != nil {
+				if m[1] != fixShDocsExampleImg {
+					t.Errorf("%s: printed IMG value %q, want %q", page, m[1], fixShDocsExampleImg)
+				}
+				lines[i] = `IMG="` + spaced + `"` + l[len(m[0]):]
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s: %d lines assign IMG=\"...\" in the signing blocks, want 1", page, n)
+			continue
+		}
+		fixShDocsCheck(t, page, lines, spaced)
+	}
+}
+
+var fixShDocsAngleWord = regexp.MustCompile(`<[A-Za-z][A-Za-z0-9_-]*>`)
+
+// TestFixShDocsImagePlaceholderNoAngleWords: no ```sh line of the install pages
+// carries a <word> placeholder outside a comment.
+func TestFixShDocsImagePlaceholderNoAngleWords(t *testing.T) {
+	for _, page := range fixShDocsPages {
+		b, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := false
+		for i, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(line, "```") {
+				in = !in && strings.TrimSpace(line) == "```sh"
+				continue
+			}
+			code := line
+			if j := strings.Index(code, "#"); j >= 0 && (j == 0 || code[j-1] == ' ') {
+				code = code[:j]
+			}
+			if in && fixShDocsAngleWord.MatchString(code) {
+				t.Errorf("%s:%d: placeholder outside a comment in a sh block: %s", page, i+1, line)
+			}
+		}
+	}
+}
+
+// TestFixShDocsImagePlaceholderSignFailNoFlash (R2): README's signing block run
+// with a signer that fails must not reach the flash command.
+func TestFixShDocsImagePlaceholderSignFailNoFlash(t *testing.T) {
+	lines := append([]string{`sign_firmware() { rec sign-firmware.sh "$@"; return 1; }`}, fixShDocsSignBlocks(t, "../README.md")...)
+	calls, _, _, output, _ := fixShDocsRun(t, lines)
+	for _, c := range calls {
+		if strings.HasPrefix(c, "picotool argc=3 [load]") {
+			t.Errorf("../README.md: signer failed but the block still ran %s\nbash output: %s", c, output)
+		}
+	}
+}
+
+// TestFixShDocsImagePlaceholderBuildFailNoSign (R2): a failed build must not
+// reach the signer, so a same-named image left by an earlier (-dirty) build is
+// never signed or flashed.
+func TestFixShDocsImagePlaceholderBuildFailNoSign(t *testing.T) {
+	for _, page := range fixShDocsPages {
+		lines := append([]string{`nix() { rec nix "$@"; return 1; }`}, fixShDocsSignBlocks(t, page)...)
+		calls, _, _, output, _ := fixShDocsRun(t, lines)
+		for _, c := range calls {
+			if strings.HasPrefix(c, "sign-firmware.sh ") || (page == "../README.md" && strings.HasPrefix(c, "picotool argc=3 [load]")) {
+				t.Errorf("%s: build failed but the block still ran %s\nbash output: %s", page, c, output)
+			}
+		}
+	}
+}
