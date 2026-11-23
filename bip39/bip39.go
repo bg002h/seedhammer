@@ -15,8 +15,10 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/text/unicode/norm"
 )
 
 type Word int
@@ -266,7 +268,59 @@ func MnemonicSeed(m Mnemonic, password string) []byte {
 			sentence = append(sentence, ' ')
 		}
 	}
-	return pbkdf2.Key(sentence, []byte("mnemonic"+password), 2048, 64, sha512.New)
+	return pbkdf2.Key(sentence, seedSalt(password), 2048, 64, sha512.New)
+}
+
+// seedSalt returns "mnemonic" followed by the NFKD form of password, as
+// BIP-39 requires. ASCII is its own NFKD form and is copied unchanged.
+// Invalid UTF-8 bytes pass through unchanged. No stream-safe U+034F is
+// inserted (see appendNFKD).
+func seedSalt(password string) []byte {
+	salt := append(make([]byte, 0, len("mnemonic")+len(password)), "mnemonic"...)
+	for i := 0; i < len(password); i++ {
+		if password[i] >= 0x80 {
+			return appendNFKD(salt, password)
+		}
+	}
+	return append(salt, password...)
+}
+
+// appendNFKD appends the NFKD form of s to dst without the Stream-Safe Text
+// Format (UAX #15 s.13) U+034F insertion that norm applies after 30
+// non-starters: each rune is decomposed alone (no single decomposition reaches
+// 30 non-starters), then each run of non-starters is stably sorted by CCC once, when the run ends (sorting after every mark is quadratic).
+// Invalid UTF-8 bytes pass through unchanged as starters.
+func appendNFKD(dst []byte, s string) []byte {
+	start := len(dst) // start of the current run of non-starters
+	flush := func() {
+		run := []rune(string(dst[start:]))
+		sort.SliceStable(run, func(a, b int) bool {
+			return norm.NFD.PropertiesString(string(run[a])).CCC() < norm.NFD.PropertiesString(string(run[b])).CCC()
+		})
+		dst = append(dst[:start], string(run)...)
+	}
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && n == 1 {
+			flush()
+			dst = append(dst, s[i])
+			i++
+			start = len(dst)
+			continue
+		}
+		for _, d := range norm.NFKD.String(s[i : i+n]) {
+			if norm.NFD.PropertiesString(string(d)).CCC() == 0 {
+				flush()
+				dst = utf8.AppendRune(dst, d)
+				start = len(dst)
+				continue
+			}
+			dst = utf8.AppendRune(dst, d)
+		}
+		i += n
+	}
+	flush()
+	return dst
 }
 
 func New(entropy []byte) Mnemonic {
