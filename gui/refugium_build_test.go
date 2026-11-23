@@ -97,11 +97,12 @@ func fileSet(t *testing.T, pkg string, tagSets ...string) []string {
 type sourceFacts struct {
 	literals map[string][]string // value -> files
 	calls    map[string][]string // name -> files
+	refs     map[string][]string // selector name (call or method value) -> files
 }
 
 func readSourceFacts(t *testing.T, files []string) sourceFacts {
 	t.Helper()
-	f := sourceFacts{literals: map[string][]string{}, calls: map[string][]string{}}
+	f := sourceFacts{literals: map[string][]string{}, calls: map[string][]string{}, refs: map[string][]string{}}
 	fset := token.NewFileSet()
 	for _, path := range files {
 		file, err := parser.ParseFile(fset, path, nil, 0)
@@ -117,6 +118,8 @@ func readSourceFacts(t *testing.T, files []string) sourceFacts {
 						f.literals[v] = append(f.literals[v], name)
 					}
 				}
+			case *ast.SelectorExpr:
+				f.refs[n.Sel.Name] = append(f.refs[n.Sel.Name], name)
 			case *ast.CallExpr:
 				switch fn := n.Fun.(type) {
 				case *ast.Ident:
@@ -166,7 +169,10 @@ func TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall(t *testing.T) {
 		fileSet(t, "./cmd/controller", "tinygo,rp")...))
 
 	for _, lit := range refugiumForbiddenLiterals {
-		if hits := def.literalHits(lit); len(hits) == 0 {
+		// lock-boot is absent from the default build too since P19
+		// (TestDefaultBuildCarriesNoLockBootCommand), so it is exempt from
+		// the control only.
+		if hits := def.literalHits(lit); lit != "lock-boot" && len(hits) == 0 {
 			t.Errorf("POSITIVE CONTROL: no default-build file has a string literal containing %q, "+
 				"so its absence from the Refugium build proves nothing", lit)
 		}
@@ -184,6 +190,39 @@ func TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall(t *testing.T) {
 		if files := refugium.calls[call]; len(files) > 0 {
 			t.Errorf("the Refugium build calls %s, in %v", call, files)
 		}
+	}
+}
+
+// TestDefaultBuildCarriesNoLockBootCommand: the default build carries no
+// lock-boot command either (Brian 2026-11-23, P19 "remove it";
+// design/FIX_lockboot_default_remove.md). In the default file sets -- the same
+// listings TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall reads -- no string
+// literal contains "lock-boot" and nothing calls a function or method named
+// LockBoot, so no tag, however it is spelled, reaches the OTP writer. Positive
+// control: the same sets carry the FOREVERLAURA! literal and the
+// handleDebugCommand call, so the listing did read the debug-command arm.
+func TestDefaultBuildCarriesNoLockBootCommand(t *testing.T) {
+	def := readSourceFacts(t, append(
+		fileSet(t, "./gui", "", "tinygo,rp"),
+		fileSet(t, "./cmd/controller", "tinygo,rp")...))
+	if len(def.literalHits("FOREVERLAURA!")) == 0 || len(def.calls["handleDebugCommand"]) == 0 {
+		t.Fatal("POSITIVE CONTROL: the default file sets carry no FOREVERLAURA! literal or no handleDebugCommand call, " +
+			"so the absences below prove nothing")
+	}
+	// scripts/refugium-elf-check.sh's ABSENT_LITERALS marker: the writer still
+	// carries it, so its absence from both ELFs is not a stale name.
+	if len(def.literalHits("seedhammer.com/doc/?d=SHII")) == 0 {
+		t.Error("POSITIVE CONTROL: no default-build file carries the OTP redirect URL seedhammer.com/doc/?d=SHII, " +
+			"so refugium-elf-check.sh's absent row for it proves nothing")
+	}
+	if hits := def.literalHits("lock-boot"); len(hits) > 0 {
+		t.Errorf("the default build carries a string literal containing %q, in %v", "lock-boot", hits)
+	}
+	if files := def.calls["LockBoot"]; len(files) > 0 {
+		t.Errorf("the default build calls LockBoot, in %v", files)
+	}
+	if files := def.refs["LockBoot"]; len(files) > 0 {
+		t.Errorf("the default build refers to LockBoot (a call or a method value), in %v", files)
 	}
 }
 

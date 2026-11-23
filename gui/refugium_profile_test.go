@@ -100,7 +100,9 @@ func TestRefugiumNeverAsksThePlatformForAReader(t *testing.T) {
 
 // §4.1 + §4.2, end to end on the start screen: a lock-boot tag held over a
 // machine whose platform HAS a reader is never read, LockBoot is never called,
-// and the start screen stays. Control: TestDebugCommandLockBootCharacterization.
+// and the start screen stays. Control:
+// TestDebugCommandLockBootIsUnknownInTheDefaultBuild (the default build reads
+// the same tag and hands it on).
 func TestRefugiumStartScreenReadsNoTag(t *testing.T) {
 	p := newPlatform()
 	r := &countingTagReader{rec: []byte("command: lock-boot")}

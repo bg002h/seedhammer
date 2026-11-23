@@ -62,10 +62,12 @@ func TestRefusesAnUppercaseRecord(t *testing.T) {
 	}
 }
 
-// The irreversible branch. Platform.LockBoot (cmd/controller/lockboot_default.go)
-// does writeOTPValues -> otp.EnableSecureBoot -> machine.CPUReset, reached from
-// gui/debugcmd_default.go with the "command: " prefix (gui/scan.go) as the only
-// gate.
+// The irreversible branch, historically: "command: lock-boot" once reached
+// Platform.LockBoot (cmd/controller/lockboot_default.go: writeOTPValues ->
+// otp.EnableSecureBoot -> machine.CPUReset) from gui/debugcmd_default.go;
+// neither build carries it now (design/FIX_lockboot_default_remove.md), but
+// "command: " still dispatches to handleDebugCommand (FOREVERLAURA!), so the
+// prefix stays refused here.
 //
 // The command sits at INDEX 2 of a 6-record section, not index 0. At index 0
 // the test passes under a loop that validates records[0] and trusts the rest.
