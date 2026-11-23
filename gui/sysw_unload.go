@@ -1,5 +1,12 @@
 package gui
 
+import (
+	"fmt"
+	"strings"
+
+	"seedhammer.com/sysw"
+)
+
 // UNLOAD — SPEC_systemwide_payloads §13 D10.
 //
 // THE FIRMWARE NEVER WRITES FLASH. This stage was planned as an ERASE: an
@@ -33,7 +40,36 @@ package gui
 // not the replacement one.
 func syswPayloadMenu(ctx *Context, th *Colors) {
 	if ctx.sysw == nil || !ctx.sysw.loaded {
-		syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+		syswLoadThenMenu(ctx, th)
+		return
+	}
+	// THE KIT DOOR (SPEC_systemwide_payloads.md 14e). Every time this menu opens
+	// on a payload that offers a kit: a refused one first shows "Kit Refused" and
+	// then today's menu unchanged; an eligible one leads with "Engrave kit now
+	// (N cards, M plates)?" and ENGRAVE KIT. A payload with no mr1 candidate sees
+	// neither.
+	kit := kitCards(ctx.sysw)
+	if kit.offers && !kit.eligible {
+		kitRefusedScreen(ctx, th, kit)
+	}
+	if kit.eligible {
+		cs := &ChoiceScreen{
+			Title:   "Load Payload",
+			Lead:    kitLead(ctx, kit),
+			Choices: []string{"ENGRAVE KIT", "LOAD AGAIN", "UNLOAD"},
+		}
+		choice, ok := cs.Choose(ctx, th)
+		if !ok {
+			return
+		}
+		switch choice {
+		case 0:
+			kitListFlow(ctx, th)
+		case 1:
+			syswLoadThenMenu(ctx, th)
+		default:
+			syswUnloadFlow(ctx, th)
+		}
 		return
 	}
 	// CONTENT-DERIVED (§3.3, G-P3.15). The lead names what this payload
@@ -72,7 +108,18 @@ func syswPayloadMenu(ctx *Context, th *Colors) {
 		syswUnloadFlow(ctx, th)
 		return
 	}
-	syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false)
+	syswLoadThenMenu(ctx, th)
+}
+
+// syswLoadThenMenu is the load from the carousel (nothing loaded, or LOAD
+// AGAIN). After a load of a payload that offers a kit, eligible or refused, the
+// payload menu opens at once, as it does at boot (SPEC_systemwide_payloads.md
+// 14e, Brian 2026-11-22): the kit offer must not depend on the route that loaded
+// the payload. A payload with no mr1 candidate returns to the carousel as before.
+func syswLoadThenMenu(ctx *Context, th *Colors) {
+	if syswLoadFlow(ctx, th, ctx.Platform.SyswReader(), false) && kitCards(ctx.sysw).offers {
+		syswPayloadMenu(ctx, th)
+	}
 }
 
 // syswPayloadHasTransaction reports whether the loaded payload holds anything
@@ -158,4 +205,73 @@ func syswReloadCost(s *syswSession) string {
 	default:
 		return reload + "You will need to compare the digest again. Unload it?"
 	}
+}
+
+// kitRefusedScreen is the "Kit Refused" screen: the reason's device sentence, a
+// blank line, and what it means (SPEC_systemwide_payloads.md 14e). Its only way
+// on is to dismiss it.
+func kitRefusedScreen(ctx *Context, th *Colors, v kitVerdict) {
+	showError(ctx, th, "Kit Refused", kitSentence(v.refusal, v.records)+"\n\n"+
+		"Nothing from this payload can be engraved as a kit. Write the kit payload again.")
+}
+
+// kitSentence is section 14g's sentence for a refusal, with the DEVICE
+// placeholders: `<n>` is the record's position in the loaded payload counted
+// from 1, public section first (the order of v.records).
+func kitSentence(r sysw.MrRefusal, records []string) string {
+	d := r.Detail
+	rec := func(i int) string { return fmt.Sprintf("record %d of this payload", i+1) }
+	R := func(i int) string { return fmt.Sprintf("Record %d of this payload", i+1) }
+	trimmed := func(i int) string {
+		if i < 0 || i >= len(records) {
+			return ""
+		}
+		return strings.TrimSpace(records[i])
+	}
+	switch r.Reason {
+	case sysw.MrCase:
+		return R(d.Record) + " is an mr1 string with capital letters; the mr1 strings of a kit are all lowercase, as mr prints them."
+	case sysw.MrCharacter:
+		return R(d.Record) + " begins mr1 but holds a character no mr1 string uses."
+	case sysw.MrLength:
+		return fmt.Sprintf("%s begins mr1 but is %d characters long; an mr1 string is 17 to 96 characters long.", R(d.Record), len(trimmed(d.Record)))
+	case sysw.MrChecksum:
+		return R(d.Record) + " is an mr1 string whose checksum does not match: at least one character is wrong."
+	case sysw.MrReservedSymbol:
+		p := trimmed(d.Record)
+		if len(p) > 4 {
+			p = p[:4]
+		}
+		return fmt.Sprintf("%s begins %s, which no mr1 card or chunk begins with.", R(d.Record), p)
+	case sysw.MrChunkShort:
+		return R(d.Record) + " is an mr1 chunk too short to hold its chunk header."
+	case sysw.MrChunkPadding:
+		return R(d.Record) + " is an mr1 chunk that does not end the way mr ends a chunk (0 to 4 zero bits after its last byte)."
+	case sysw.SetCount:
+		return fmt.Sprintf("The mr1 card that begins %s disagrees with itself: %s says the card has %d chunks, but its first chunk says %d.",
+			d.Begins, rec(d.Record), d.Count, d.FirstCount)
+	case sysw.SetIndex:
+		return fmt.Sprintf("The mr1 card that begins %s has %d chunks, numbered 0 to %d, but %s is numbered %d.",
+			d.Begins, d.Count, d.Count-1, rec(d.Record), d.Index)
+	case sysw.SetDuplicate:
+		return fmt.Sprintf("The mr1 card that begins %s holds chunk %d twice: records %d and %d of this payload. "+
+			"Each copy of a card holds each chunk once, and a copy must be complete before the next copy starts.",
+			d.Begins, d.Index, d.Records[0]+1, d.Records[1]+1)
+	case sysw.SetMissing:
+		return fmt.Sprintf("The mr1 card that begins %s is incomplete: chunk %d of its %d chunks is missing "+
+			"(chunks are numbered from 0), or a chunk repeated after a complete copy began a second, incomplete copy.",
+			d.Begins, d.Index, d.Count)
+	case sysw.SetSlices:
+		return fmt.Sprintf("The mr1 card that begins %s is not divided into chunks the way mr divides a card, so mr did not write it.", d.Begins)
+	case sysw.SetID:
+		return fmt.Sprintf("The mr1 card that begins %s does not match its own chunk-set id: its chunks come from different cards, or one was altered.", d.Begins)
+	case sysw.CardSplit:
+		return fmt.Sprintf("The %s card that begins %s is split: %s sits between its strings but is not part of it. Keep each card's strings together.",
+			d.Kind, d.Begins, rec(d.Record))
+	case sysw.KitOtherRecord:
+		return fmt.Sprintf("%s is not an md1, mk1 or mr1 string (it is: %s), so this payload is not a kit.", R(d.Record), txClassName(d.Class))
+	case sysw.KitUnconfirmedMDMK:
+		return R(d.Record) + " is an md1 or mk1 string whose card does not decode: it is incomplete or damaged."
+	}
+	return "This payload is not a kit."
 }
