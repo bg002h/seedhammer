@@ -55,6 +55,13 @@ type syswSession struct {
 	// would let one byte string be admitted as one class and consumed as
 	// another.
 	records []syswRecord
+
+	// kitCut is the kit door's " (cut)" record (SPEC_systemwide_payloads.md
+	// 14e): the (card, plate) pairs, 0-based, whose plate was cut since THIS
+	// payload was loaded. It lives in the session, so LOAD AGAIN (a fresh
+	// session) and UNLOAD (no session) clear it, and nothing is written to
+	// flash.
+	kitCut map[[2]int]bool
 }
 
 type syswRecord struct {
