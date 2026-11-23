@@ -13,6 +13,18 @@
 #   the profile's own notices: absent in DEFAULT.elf, present in REFUGIUM.elf
 #                             (reverse control: the second file IS the
 #                             Refugium build, not a default one missing bits)
+#   the OTP writer's markers: ABSENT in BOTH ELFs. Neither build carries the
+#                             lock-boot command (Brian 2026-11-23, P19;
+#                             design/FIX_lockboot_default_remove.md), so neither
+#                             ELF carries the lock-boot writer's markers (its
+#                             redirect URL and the OTP write primitives it
+#                             reaches). The check cannot see an OTP write whose
+#                             primitives TinyGo inlined (FOLLOWUPS
+#                             sh-elf-check-inlined-otp-write), and otp.writeECC
+#                             is a symbol only while it has 2+ callers. There is no
+#                             positive control left for them: their names were
+#                             measured PRESENT in f36f786's default ELF (each
+#                             count 1), the last build that called the writer.
 #
 # Two kinds of marker, both measured on the default ELF (plan §4.5; the
 # measurement is repeated by this script on every run):
@@ -23,11 +35,11 @@
 #   symbols        defined symbols whose section is allocated, matched by
 #                  exact name.
 #
-# writeOTPValues, AddBootKey and EnableSecureBoot have no symbols even in the
+# writeOTPValues, AddBootKey and EnableSecureBoot had no symbols even in the
 # default ELF (inlined), and FOREVERLAURA! occurs 0 times there, so they cannot
 # be markers: the OTP writer's absence rests on otp.writeECC/otp.writeOrRow, the
 # redirect URL that only writeOTPValues carried, and gui's source-level call
-# check (gui/refugium_build_test.go).
+# checks (gui/refugium_build_test.go).
 #
 # It also prints the st25r3916 driver symbols present in each ELF, for the
 # record of what the reader's removal took with it; those are reported, not
@@ -46,8 +58,6 @@ exec python3 - "$1" "$2" <<'PY'
 import struct, sys
 
 LITERALS = [
-    b"lock-boot: %v",              # the debug-command arm's log format (gui)
-    b"seedhammer.com/doc/?d=SHII", # the OTP redirect URL writeOTPValues wrote
     b"PASSPROOF",                  # ppPassProofKeep* help strings + trigger
     b"TEXTPROOF",
     b"CONSTPROOF",
@@ -57,6 +67,14 @@ LITERALS = [
 SYMBOLS = [
     "(*seedhammer.com/nfc/poller.Poller).Read",
     "seedhammer.com/gui.qaEngraveFlow",
+]
+# ABSENT from BOTH ELFs: the removed lock-boot arm's log format and the OTP
+# writer it reached (see the header).
+ABSENT_LITERALS = [
+    b"lock-boot: %v",              # the removed debug-command arm's log format (gui)
+    b"seedhammer.com/doc/?d=SHII", # the OTP redirect URL writeOTPValues wrote
+]
+ABSENT_SYMBOLS = [
     "seedhammer.com/driver/otp.writeECC",
     "seedhammer.com/driver/otp.writeOrRow",
 ]
@@ -122,6 +140,10 @@ def table(path):
         row[sym] = 1 if sym in syms else 0
     for lit in PROFILE:
         row["profile: " + lit.decode()] = alloc.count(lit)
+    for lit in ABSENT_LITERALS:
+        row["absent: " + lit.decode()] = alloc.count(lit)
+    for sym in ABSENT_SYMBOLS:
+        row["absent: " + sym] = 1 if sym in syms else 0
     st = sorted(s for s in syms if s.startswith("(*seedhammer.com/driver/st25r3916.Device)."))
     return row, st, len(alloc)
 
@@ -134,6 +156,15 @@ print(f"{'marker':<45} {'default':>8} {'refugium':>9}")
 fail = False
 for k in drow:
     verdict = ""
+    if k.startswith("absent: "):
+        if drow[k] != 0:
+            verdict = "  PRESENT in the default ELF"
+            fail = True
+        if rrow[k] != 0:
+            verdict += "  PRESENT in the Refugium ELF"
+            fail = True
+        print(f"{k:<45} {drow[k]:>8} {rrow[k]:>9}{verdict}")
+        continue
     if k.startswith("profile: "):
         if drow[k] != 0:
             verdict = "  PRESENT in the default ELF"
@@ -158,5 +189,6 @@ if fail:
     print("RESULT: FAIL")
     sys.exit(1)
 print(f"RESULT: ok -- {len(LITERALS) + len(SYMBOLS)} markers present in the default ELF and absent "
-      f"in the Refugium ELF; {len(PROFILE)} profile notices the other way round")
+      f"in the Refugium ELF; {len(ABSENT_LITERALS) + len(ABSENT_SYMBOLS)} OTP-writer markers absent "
+      f"from both; {len(PROFILE)} profile notices the other way round")
 PY

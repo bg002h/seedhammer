@@ -55,7 +55,7 @@ and `scripts/refugium-elf-check.sh:49`, both naming the log-format marker, §4.4
   - unreachability is pinned instead: no default-build file in `gui` or `cmd/controller` calls anything named
     `LockBoot` (R2), so a later command under another spelling cannot reach it unnoticed;
   - measured (§4.3): with no caller TinyGo links none of the writer into the default ELF, and the ELF check asserts
-    that on every run (§4.4), so the shipped binary carries no OTP writer while the source stays.
+    that on every run (§4.4), so the shipped binary carries none of the lock-boot writer's markers (its redirect URL literal and the OTP write primitives it reaches) while the source stays; the check cannot see an OTP write whose primitives TinyGo inlined (FOLLOWUPS sh-elf-check-inlined-otp-write).
 - **D3, the emulator's refusal stays**, unchanged (`cmd/emu/platform.go:324-329`). It is now reachable from no UI
   path; it stays because `gui.Platform` declares the method.
 - **D4, the gates follow the change.** `lock-boot` stays on the Refugium build's forbidden-literal list but is exempt
@@ -89,7 +89,7 @@ USB/picotool.
 
 ### 4.2 Comments that named the removed path (text only)
 - `cmd/controller/lockboot_default.go:11-15`, old: `// The OTP writer behind the `command: lock-boot` debug command` / `// (gui/debugcmd_default.go), moved out of platform_sh2.go unchanged so the` / `// Refugium build links none of it (Refugium plan F7 §4.1). Its twin,` / `// lockboot_refugium.go, refuses. signKeyHash stays in platform_sh2.go because` / `// isSecureBootEnabled still reads it.`
-  new: `// The OTP writer that the `command: lock-boot` debug command used to call,` / `// moved out of platform_sh2.go unchanged so the Refugium build links none of it` / `// (Refugium plan F7 §4.1). Nothing calls it: the default build dropped that` / `// command too (Brian 2026-11-23, P19; design/FIX_lockboot_default_remove.md),` / `// and gui/refugium_build_test.go's TestDefaultBuildCarriesNoLockBootCommand` / `// keeps it that way, so TinyGo links it into neither ELF` / `// (scripts/refugium-elf-check.sh). It is kept, not deleted, to keep the` / `// upstream diff small. Its twin, lockboot_refugium.go, refuses. signKeyHash` / `// stays in platform_sh2.go because isSecureBootEnabled still reads it.`
+  new: `// The OTP writer that the `command: lock-boot` debug command used to call,` / `// moved out of platform_sh2.go unchanged so the Refugium build links none of it` / `// (Refugium plan F7 §4.1). Nothing calls it: the default build dropped that` / `// command too (Brian 2026-11-23, P19; design/FIX_lockboot_default_remove.md),` / `// and gui/refugium_build_test.go's TestDefaultBuildCarriesNoLockBootCommand` / `// keeps it that way, the redirect URL literal and the OTP write primitives it` / `// reaches are asserted absent from both ELFs (scripts/refugium-elf-check.sh),` / `// which cannot see a write whose primitives TinyGo inlined. It is kept, not deleted, to keep the` / `// upstream diff small. Its twin, lockboot_refugium.go, refuses. signKeyHash` / `// stays in platform_sh2.go because isSecureBootEnabled still reads it.`
 - `cmd/controller/lockboot_refugium.go:10-12`, old: `// Nothing in this build calls it -- gui's debug-command arm recognises no` / `// command here (gui/debugcmd_refugium.go) -- and it fails closed if anything` / `// ever does.`
   new: `// Nothing in either build calls it -- gui's debug-command arm recognises no` / `// lock-boot command in either (design/FIX_lockboot_default_remove.md) -- and it` / `// fails closed if anything ever does.`
 - `seal/record.go:213-218`, old: `// cmdPrefix mirrors gui/scan.go's. A decrypted plaintext of` / `// "command: lock-boot" would reach gui/debugcmd_default.go's handleDebugCommand` / `// and call Platform.LockBoot, which does writeOTPValues -> otp.EnableSecureBoot` / `// -> machine.CPUReset (cmd/controller/lockboot_default.go). The Refugium build` / `// carries neither the command nor the writer (gui/debugcmd_refugium.go,` / `// cmd/controller/lockboot_refugium.go). This prefix is the only gate, and the`
@@ -117,7 +117,7 @@ ELF is the same before and after: every changed production file is `!refugium` o
 
 Flash: base default 1760032 bytes, probe default 1756476 (3556 fewer); Refugium 1688872. So with its only caller gone,
 TinyGo links the OTP writer into **neither** ELF: D2 keeps the source (small upstream diff) while the shipped default
-binary, like the Refugium one, carries no OTP writer. §4.4 asserts that on every CI run.
+binary carries none of the lock-boot writer: its redirect URL literal and the OTP write primitives it reaches are asserted absent from both ELFs on every CI run (§4.4). The check cannot see an OTP write whose primitives TinyGo inlined; that limit is shared with the Refugium side (FOLLOWUPS sh-elf-check-inlined-otp-write).
 
 ### 4.4 `scripts/refugium-elf-check.sh`
 The unchanged script FAILS on the GREEN default ELF (`./scripts/refugium-elf-check.sh probe-default.elf
@@ -153,6 +153,11 @@ Changed file `gui/refugium_build_test.go` (untagged; runs in both suites):
   (`./gui` with tags `""` and `tinygo,rp`; `./cmd/controller` with `tinygo,rp`): no string literal containing
   `lock-boot`, no call named `LockBoot`. Positive control first: the same sets carry a `FOREVERLAURA!` literal and a
   `handleDebugCommand` call, else `t.Fatal("POSITIVE CONTROL: ...")`.
+  Review r1 folds (M1, M3): R2 also records every selector name (`refs`) and fails on any reference to `LockBoot`, a call
+  or a method value (`the default build refers to LockBoot (a call or a method value), in [...]`); and it carries a
+  source positive control that a default-build file still has the redirect URL `seedhammer.com/doc/?d=SHII` (the
+  ELF check's absent row for it proves nothing otherwise). In the RED run these lines are `refugium_build_test.go:219`,
+  `:222`, `:225` once those two folds are in.
 - `TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall` (R3, changed, stays GREEN at every step): `lock-boot` is exempt
   from the default-build positive control only (comment cites R2); its Refugium-absence check is unchanged.
 
@@ -172,7 +177,7 @@ Unchanged and still green: `cmd/controller/bughunt_sh2_39_test.go` (writeOTPValu
 The command throughout (CI's `go test ./...` restricted to the rows):
 `go test ./gui/ -run '^(TestDebugCommandLockBootIsUnknownInTheDefaultBuild|TestDefaultBuildCarriesNoLockBootCommand|TestDebugCommandQAProgramCharacterization|TestDebugCommandUnknownCharacterization|TestRefugiumFileSetsCarryNoForbiddenLiteralOrCall|TestRefugiumPairsAreWellFormed)$' -count=1 -v`
 
-- **RED on f36f786 plus the test changes** (production code unmodified), rc=1:
+- **RED on f36f786 plus R1 and R2 only** (R3's hunk not applied; production code unmodified), rc=1:
   - `debugcmd_characterization_test.go:67: LockBoot called 1 times for a lock-boot tag, want 0`
   - `debugcmd_characterization_test.go:70: StartScreen.Flow did not return on a lock-boot tag; want it handed on as an unknown command`
   - `--- FAIL: TestDebugCommandLockBootIsUnknownInTheDefaultBuild`

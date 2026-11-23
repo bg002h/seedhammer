@@ -210,12 +210,13 @@ type AdmittedRecord struct {
 	PlateIndex, PlateTotal int
 }
 
-// cmdPrefix mirrors gui/scan.go's. A decrypted plaintext of
-// "command: lock-boot" would reach gui/debugcmd_default.go's handleDebugCommand
-// and call Platform.LockBoot, which does writeOTPValues -> otp.EnableSecureBoot
-// -> machine.CPUReset (cmd/controller/lockboot_default.go). The Refugium build
-// carries neither the command nor the writer (gui/debugcmd_refugium.go,
-// cmd/controller/lockboot_refugium.go). This prefix is the only gate, and the
+// cmdPrefix mirrors gui/scan.go's. A decrypted plaintext of "command: ..."
+// would reach gui/debugcmd_default.go's handleDebugCommand, which in the default
+// build still starts the FOREVERLAURA! QA program. ("command: lock-boot", which
+// once called Platform.LockBoot -> writeOTPValues -> otp.EnableSecureBoot, is in
+// neither build since design/FIX_lockboot_default_remove.md; the Refugium build
+// carries no command at all, gui/debugcmd_refugium.go.) This prefix is the only
+// gate, and the
 // wire format is normative and public, so the device MUST NOT assume the blob
 // was produced by a conforming sealer.
 const cmdPrefix = "command: "
