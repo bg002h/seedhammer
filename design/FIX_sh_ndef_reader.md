@@ -109,10 +109,11 @@ fixtures are hex NDEF bytes with no key material.
 - `TestFixShNdefRecordDataWithEOF`: RecordReader over the same three readers, buffers 1 and 4096: Text
   `d101045400616263` (want `[abc]`), type-ends-stream `d102006162` (want no record, nil), media record
   `d2010378616263` (want no record, nil), URI `d10102550461` (want `[https://a]`).
-- `TestFixShNdefTruncatedIsUnexpectedEOF`: 13 truncations, each over `bytes.Reader` and `DataErrReader`, want the
+- `TestFixShNdefTruncatedIsUnexpectedEOF`: 16 truncations, each over `bytes.Reader` and `DataErrReader`, want the
   listed bytes and an error whose text is exact and which `errors.Is` io.ErrUnexpectedEOF and not io.EOF:
   MessageReader `0305616263` (`abc`), `fd05616263` (empty), `03`, `03ff01`, `03ff`; RecordReader `d101`, `d90101`,
-  `d10100`, `d1020061`, `d10105540061` (`a`), `d2010578616263` (empty), `c101`, `c1010000`. Controls in the same
+  `d10100`, `d1020061`, `d10105540061` (`a`), `d2010578616263` (empty), `d1010154` (Text status byte missing),
+  `d10103540261` (Text language cut), `d1010155` (URI code missing), `c101`, `c1010000`. Controls in the same
   row: MessageReader on empty, `fe`, `0300` and RecordReader on empty, `d00000` each return `0, io.EOF` (R5).
 
 Tests that change: none. TestRecords and TestMessages pass unmodified; TestBughuntSh218NdefEmptyTextURIRecord stays
@@ -128,13 +129,15 @@ Command: `CGO_ENABLED=0 go test -count=1 -run 'TestFixShNdef' ./nfc/ndef/`
 | TestFixShNdefRecordsEveryBuffer | FAIL, 78 lines, e.g. `d9010c0155ff046578616d706c652e636f6d bytes buffer 1: got ["hexample.com"], <nil>; want ["https://example.com"], nil` | PASS |
 | TestFixShNdefMessageDataWithEOF | FAIL, 3 lines: `0303616263 data-err: got "abc", ndef: tlv: EOF; want "abc", nil`; `fd03616263 data-err: got "abc", ndef: tlv: EOF; want "", nil`; `030161fd03626364 data-err: got "abcd", ndef: tlv: EOF; want "a", nil` | PASS |
 | TestFixShNdefRecordDataWithEOF | FAIL, 5 lines: `d102006162 data-err buffer 1: got [], ndef: message: EOF; want [], nil` (and buffer 4096); `d10102550461 {bytes,one-byte,data-err} buffer 1: got ["ha"]` | PASS |
-| TestFixShNdefTruncatedIsUnexpectedEOF | FAIL, 22 lines, e.g. `skipped tlv value short (fd05616263) data-err: got "abc", "ndef: tlv: EOF" (Is io.EOF=true, Is io.ErrUnexpectedEOF=false); want "", "ndef: tlv: unexpected EOF" wrapping io.ErrUnexpectedEOF only`; `03ff01` and `c1010000` already pass (io.ReadFull's partial read) | PASS |
+| TestFixShNdefTruncatedIsUnexpectedEOF | FAIL, 28 lines, e.g. `skipped tlv value short (fd05616263) data-err: got "abc", "ndef: tlv: EOF" (Is io.EOF=true, Is io.ErrUnexpectedEOF=false); want "", "ndef: tlv: unexpected EOF" wrapping io.ErrUnexpectedEOF only`; `03ff01` and `c1010000` already pass (io.ReadFull's partial read) | PASS |
 
 Mutations seen on the probe (each one change, `go test ./nfc/ndef/`): prefix copied and dropped again (L223 form) fails
 URIPrefixEveryBuffer, RecordsEveryBuffer, RecordDataWithEOF; MessageReader skip `n = 0` removed fails
 TruncatedIsUnexpectedEOF; MessageReader EOF-complete-is-nil removed fails MessageDataWithEOF; RecordReader skip
 `n = 0` removed fails TruncatedIsUnexpectedEOF; `discard` EOF fix removed fails RecordDataWithEOF; `truncated` made
-the identity fails TruncatedIsUnexpectedEOF.
+the identity fails TruncatedIsUnexpectedEOF; `truncated(err)` replaced by `err` at the Text status byte, the Text
+language discard or the URI identifier code (one site at a time) fails TruncatedIsUnexpectedEOF on `text status byte
+missing`, `text language cut` or `uri code missing` respectively (review r1 I1).
 
 ## 7. Coverage map (rule -> rows)
 
@@ -143,7 +146,7 @@ the identity fails TruncatedIsUnexpectedEOF.
 | R1 URI prefix at every buffer | TestFixShNdefURIPrefixEveryBuffer; TestFixShNdefRecordsEveryBuffer; URI subtest of TestFixShNdefRecordDataWithEOF |
 | R2 data with io.EOF completes the structure | TestFixShNdefMessageDataWithEOF (`0303616263`, `030161fd03626364`); TestFixShNdefRecordDataWithEOF (`d102006162`) |
 | R3 skipped containers expose nothing | TestFixShNdefMessageDataWithEOF (`fd03616263`); TestFixShNdefRecordDataWithEOF (`d2010378616263`); TestFixShNdefTruncatedIsUnexpectedEOF (`fd05616263`, `d2010578616263`) |
-| R4 truncation is io.ErrUnexpectedEOF | TestFixShNdefTruncatedIsUnexpectedEOF (13 cases, both readers) |
+| R4 truncation is io.ErrUnexpectedEOF | TestFixShNdefTruncatedIsUnexpectedEOF (16 cases, both readers) |
 | R5 unchanged | controls in TestFixShNdefTruncatedIsUnexpectedEOF; TestRecords; TestMessages; `bytes` columns of the rows above |
 
 ## 8. Gate (the repo's CI jobs; run once each to a file and grep it)

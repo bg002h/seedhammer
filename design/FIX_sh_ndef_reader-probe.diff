@@ -1,9 +1,9 @@
 diff --git i/nfc/ndef/fix_sh_ndef_reader_test.go w/nfc/ndef/fix_sh_ndef_reader_test.go
 new file mode 100644
-index 0000000..aa064c7
+index 0000000..26e9b45
 --- /dev/null
 +++ w/nfc/ndef/fix_sh_ndef_reader_test.go
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,258 @@
 +package ndef
 +
 +// Tests for design/FIX_sh_ndef_reader.md (bug hunt 2026-11-19, bh-sh-I8 and
@@ -214,6 +214,9 @@ index 0000000..aa064c7
 +		{"record type cut", "d1020061", false, "", "ndef: message: unexpected EOF"},
 +		{"record payload short", "d10105540061", false, "a", "ndef: message: unexpected EOF"},
 +		{"skipped record payload short", "d2010578616263", false, "", "ndef: message: unexpected EOF"},
++		{"text status byte missing", "d1010154", false, "", "ndef: message: unexpected EOF"},
++		{"text language cut", "d10103540261", false, "", "ndef: message: unexpected EOF"},
++		{"uri code missing", "d1010155", false, "", "ndef: message: unexpected EOF"},
 +	}
 +	for _, tc := range tests {
 +		data := fixShHex(t, tc.data)
