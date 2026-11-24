@@ -2,6 +2,12 @@ name: "Build image"
 on:
   create:
   push:
+    branches: [main]
+  workflow_dispatch:
+# Publishing workflow (builds the release firmware image): never cancel in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
