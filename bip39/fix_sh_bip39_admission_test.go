@@ -232,3 +232,48 @@ func TestFixShBip39NewErrorExitsZeroAccumulator(t *testing.T) {
 		})
 	}
 }
+
+// TestFixShBip39ValidRefusesOutOfRangeWord: Word is an exported int, so a
+// caller can build a Mnemonic holding a word outside 0..NumWords-1 through the
+// public API. Valid must return false for it, without panicking. Two shapes:
+// an out-of-range FIRST word (its high bits make the entropy longer than the
+// padding arithmetic allows: a panic) and an out-of-range word whose extra
+// bit ORs into the previous word's already-set low bit (a valid-looking
+// phrase: a differential).
+func TestFixShBip39ValidRefusesOutOfRangeWord(t *testing.T) {
+	good, _ := fixShPhrase(12, 1)
+	if !good.Valid() {
+		t.Fatal("control phrase not valid")
+	}
+	check := func(name string, m Mnemonic) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("%s: Valid panicked: %v", name, r)
+			}
+		}()
+		if m.Valid() {
+			t.Errorf("%s: Valid = true; want false", name)
+		}
+	}
+	for _, bad := range []Word{-1, NumWords, NumWords + 1, 1 << 20} {
+		m := append(Mnemonic(nil), good...)
+		m[0] += bad - m[0] // m[0] = bad
+		check(fmt.Sprintf("first word %d", bad), m)
+	}
+	// Word i's bit 11 ORs into word i-1's bit 0; pick an i with that bit set
+	// in word i-1 so the arithmetic result is unchanged.
+	found := false
+	for i := 1; i < len(good)-1; i++ {
+		if good[i-1]&1 == 1 {
+			m := append(Mnemonic(nil), good...)
+			m[i] += NumWords
+			check(fmt.Sprintf("word %d + NumWords", i), m)
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("fixture has no word with low bit set; change the phrase")
+	}
+}
