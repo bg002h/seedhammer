@@ -113,10 +113,16 @@ func ClosestWord(word string) (Word, bool) {
 // clear() beside it is deletable with the whole suite green.
 var entropyResidueHook func(where string, ent []byte)
 
-// Valid reports whether the mnemonic checksum is correct.
+// validLength reports whether n is a word count BIP-39 defines: 12, 15, 18,
+// 21 or 24 (ENT of 128 to 256 bits in steps of 32). FIX-sh-bip39-admission R3.
+func validLength(n int) bool {
+	return n >= 12 && n <= 24 && n%3 == 0
+}
+
+// Valid reports whether the mnemonic has a word count BIP-39 defines and a
+// correct checksum.
 func (m Mnemonic) Valid() bool {
-	// Panics in splitMnemonic.
-	if len(m)%3 != 0 {
+	if !validLength(len(m)) {
 		return false
 	}
 	ent, _ := splitMnemonic(m)
@@ -158,12 +164,13 @@ func (m Mnemonic) FixChecksum() Mnemonic {
 // LastWordCandidates returns every word that, placed in the final slot,
 // yields a checksum-valid mnemonic given the already-filled earlier words.
 // It operates on a copy and does not mutate prefix. It returns nil if
-// len(prefix)%3 != 0 or if any of the first len(prefix)-1 words is unset
+// len(prefix) is not 12, 15, 18, 21 or 24 or if any of the first
+// len(prefix)-1 words is unset
 // (< 0) or out of range (>= NumWords). Otherwise it returns 8 candidates
 // for a 24-word mnemonic and 128 for a 12-word one. The final slot of
 // prefix is ignored.
 func LastWordCandidates(prefix Mnemonic) []Word {
-	if len(prefix) == 0 || len(prefix)%3 != 0 {
+	if !validLength(len(prefix)) {
 		return nil
 	}
 	for _, w := range prefix[:len(prefix)-1] {
@@ -342,7 +349,20 @@ func Parse(buf []byte) (Mnemonic, error) {
 			clear(m)
 			return nil, fmt.Errorf("bip39: parse: unknown word: %q", w)
 		}
+		// FIX-sh-bip39-admission R1 (T35): an abbreviation must name exactly
+		// one word. ClosestWord returns the first word in sorted order with
+		// this prefix, so it is ambiguous when it is not the word itself and
+		// the next word shares the prefix.
+		if LabelFor(closest) != string(wu) && int(closest)+1 < len(index) &&
+			bytes.HasPrefix([]byte(LabelFor(closest+1)), wu) {
+			clear(m)
+			return nil, fmt.Errorf("bip39: parse: ambiguous word: %q", w)
+		}
 		m = append(m, closest)
+	}
+	if !validLength(len(m)) {
+		clear(m)
+		return nil, fmt.Errorf("bip39: parse: wrong word count: %d", len(m))
 	}
 	if !m.Valid() {
 		clear(m)
@@ -353,6 +373,9 @@ func Parse(buf []byte) (Mnemonic, error) {
 
 func ParseMnemonic(mnemonic string) (Mnemonic, error) {
 	words := strings.Split(mnemonic, " ")
+	if !validLength(len(words)) {
+		return nil, fmt.Errorf("bip39: wrong word count: %d", len(words))
+	}
 	m := make(Mnemonic, len(words))
 	for i, w := range words {
 		wu := strings.ToUpper(w)
