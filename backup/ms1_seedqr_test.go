@@ -297,8 +297,11 @@ func TestEngraveSeedStringSeedQRRefusals(t *testing.T) {
 		t.Fatal("no word with an odd predecessor to alias")
 	}
 	aliased[aliasAt] += bip39.NumWords
-	if !aliased.Valid() {
-		t.Fatal("control: the aliased mnemonic must pass Valid, or this case proves nothing")
+	// FIX-sh-bip39-admission: Valid itself now refuses a word outside the
+	// wordlist, so this case no longer reaches the backup range check alone;
+	// it still must be refused.
+	if aliased.Valid() {
+		t.Fatal("control: Valid must refuse a word aliased past the wordlist")
 	}
 	aliasedPlate := good
 	aliasedPlate.MasterFingerprint = 0
