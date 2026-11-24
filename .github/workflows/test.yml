@@ -151,11 +151,12 @@ jobs:
     # The Refugium build (Refugium plan F7 §4.5): the same flags plus the tag.
     - name: TinyGo device build, -tags refugium
       run: nix develop --command tinygo build -size short -o refugium.elf -target pico-plus2 -stack-size 16kb -gc precise -opt 2 -scheduler tasks -tags refugium ./cmd/controller
-    # The device half of the absence gate: every marker (the lock-boot log
-    # format, the OTP redirect URL, the proof triggers, Poller.Read,
-    # qaEngraveFlow, the OTP write primitives) PRESENT in default.elf and
-    # ABSENT in refugium.elf, and the profile's own notices the other way
-    # round. Allocated sections only, so DWARF cannot match.
+    # The device half of the absence gate: every marker (the proof triggers,
+    # Poller.Read, qaEngraveFlow) PRESENT in default.elf and ABSENT in
+    # refugium.elf, the profile's own notices the other way round, and the
+    # removed lock-boot arm's log format, the OTP redirect URL and the OTP
+    # write primitives ABSENT from both. Allocated sections only, so DWARF
+    # cannot match.
     - name: Refugium ELF marker check
       run: ./scripts/refugium-elf-check.sh default.elf refugium.elf
     - uses: actions/upload-artifact@v4

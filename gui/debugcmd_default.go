@@ -19,24 +19,17 @@ const (
 
 // handleDebugCommand is the start screen's debug-command arm, moved out of
 // StartScreen.Flow unchanged (Refugium plan F7 §4.1) so the Refugium build can
-// replace it with debugcmd_refugium.go, which carries neither command. The
+// replace it with debugcmd_refugium.go, which carries no command. The
 // behaviour is pinned by gui/debugcmd_characterization_test.go:
 //
 //   - FOREVERLAURA! returns the QA program;
-//   - lock-boot calls Platform.LockBoot once and stays on the start screen,
-//     reporting a failure in the status line;
-//   - anything else is logged and passed through.
+//   - anything else is logged and passed through, lock-boot included: this
+//     build carries no lock-boot command and nothing here calls
+//     Platform.LockBoot (Brian 2026-11-23, P19; design/FIX_lockboot_default_remove.md).
 func handleDebugCommand(ctx *Context, m *StartScreen, cmd debugCommand) (debugResult, startScreenAction) {
 	switch cmd.Command {
 	case "FOREVERLAURA!":
 		return debugReturn, startScreenAction{prog: qaProgram}
-	case "lock-boot":
-		m.Status = scanIdle
-		if err := ctx.Platform.LockBoot(); err != nil {
-			log.Printf("lock-boot: %v", err)
-			m.Status = scanFailed
-		}
-		return debugStay, startScreenAction{}
 	default:
 		log.Printf("unknown debug command: %q", cmd.Command)
 		return debugPassThrough, startScreenAction{}

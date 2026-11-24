@@ -131,7 +131,7 @@ const (
 
 // Card is the decoded account metadata carried by an mk1 string set.
 type Card struct {
-	Network     string    // "mainnet" | "testnet"
+	Network     string    // "mainnet" | "testnet"; Decode names it from the xpub version; Encode accepts "" or the matching name
 	Path        string    // e.g. "m/48'/0'/0'/2'" ("m" for depth-0)
 	Fingerprint string    // 8 lowercase hex, or "" if absent
 	Stubs       [][4]byte // policy-id stubs (len >= 1)
@@ -380,6 +380,19 @@ func pathString(comps []uint32) string {
 	return b.String()
 }
 
+// networkOfVersion names the network of a 4-byte public xpub version, the one
+// source of Card.Network for Decode and Encode alike: "mainnet", "testnet", or
+// "" for any other version.
+func networkOfVersion(version []byte) string {
+	switch hex.EncodeToString(version) {
+	case "0488b21e":
+		return "mainnet"
+	case "043587cf":
+		return "testnet"
+	}
+	return ""
+}
+
 func reconstructXpub(compact []byte, comps []uint32) (xpub, network string, err error) {
 	if len(compact) != xpubCompactBytes {
 		return "", "", errUnexpectedEnd
@@ -388,12 +401,8 @@ func reconstructXpub(compact []byte, comps []uint32) (xpub, network string, err 
 	parentFP := compact[4:8]
 	chainCode := compact[8:40]
 	pubKey := compact[40:73]
-	switch hex.EncodeToString(version) {
-	case "0488b21e":
-		network = "mainnet"
-	case "043587cf":
-		network = "testnet"
-	default:
+	network = networkOfVersion(version)
+	if network == "" {
 		return "", "", fmt.Errorf("mk: invalid xpub version: %x", version)
 	}
 	if _, err := btcec.ParsePubKey(pubKey); err != nil {

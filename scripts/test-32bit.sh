@@ -24,7 +24,7 @@
 # being committed.
 set -uo pipefail
 
-PKGS=("${@:-./sysw/}")
+if [ $# -gt 0 ]; then PKGS=("$@"); else PKGS=(./sysw/ ./nfc/ndef/); fi  # nfc/ndef: a uint32 NDEF length widened to int (review-build5-sh-ndef-reader-s1 I1)
 fail=0
 
 # 386 both builds AND runs here, which is what makes the assertion real.

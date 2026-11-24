@@ -166,11 +166,37 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 	// RAM" is not on offer), and a payload with a record silently missing is
 	// not the payload the operator packed. This
 	// departs from this flow's rule that nothing here refuses (§13), for that
-	// reason only.
+	// reason only. The same block also refuses, by default, a payload holding a
+	// secret class outside a sealed section (FIX sec-sh-sysw-plaintext-refuse):
+	// every record of a plaintext payload, or a record in a sealed payload's
+	// public section. That refusal alone has an override, LOAD ANYWAY, after
+	// which the payload loads as before and warns (Q3 re-ruled 2026-11-22).
 	if refugiumProfile {
 		if n, found := syswFirstPassphraseRecord(p); found {
 			showError(ctx, th, "Load Payload", syswPassphraseRecordRefusal(n))
 			return false
+		}
+		if n, found := syswFirstSecretRecord(p); found {
+			// A session already loaded here came from this same region (LOAD
+			// AGAIN re-reads it, and it cannot change while the GUI runs), so
+			// it holds this secret: drop it before the modal says "nothing
+			// was loaded", as declining the digest drops one. LOAD ANYWAY
+			// loads it again below.
+			ctx.sysw = nil
+			showError(ctx, th, "Load Payload", syswPlaintextSecretRefusal(n))
+			// Refused BY DEFAULT, with an explicit override (Brian 2026-11-22,
+			// Q3 re-ruled "Refuse, with override"). DO NOT LOAD is choice 0 and
+			// therefore the default, as BACK is on the UNLOAD confirmation: the
+			// resting position is the one that loads nothing. Back is DO NOT
+			// LOAD. The answer is not remembered: every load asks again.
+			cs := &ChoiceScreen{
+				Title:   "Unsealed Secret",
+				Lead:    syswPlaintextSecretOverrideLead,
+				Choices: []string{"DO NOT LOAD", "LOAD ANYWAY"},
+			}
+			if choice, ok := cs.Choose(ctx, th); !ok || choice != 1 {
+				return false
+			}
 		}
 	}
 
@@ -233,7 +259,7 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 		// operator learns a secret is sitting unencrypted in flash, and the
 		// answer to "I did not want that" should not be a hunt through the
 		// carousel.
-		if syswHasFlag(ctx.sysw, flagSecretInPlaintext) {
+		if syswHasFlag(ctx.sysw, flagSecretInPlaintext) || syswRefugiumLineShown(ctx.sysw) {
 			cs := &ChoiceScreen{
 				Title:   "Payload",
 				Lead:    "Keep this payload loaded?",
@@ -247,6 +273,12 @@ func syswLoadFlow(ctx *Context, th *Colors, r sysw.Reader, atBoot bool) bool {
 			}
 		}
 	}
+	// "Kit Refused" comes after the Payload Warnings screen and its KEEP /
+	// UNLOAD, and is not shown when the holder chose UNLOAD (the session is
+	// gone above). It is shown by syswPayloadMenu, on every opening, and the
+	// menu follows EVERY load of a payload that offers a kit (boot, the carousel
+	// with nothing loaded, LOAD AGAIN: syswLoadThenMenu), so it shows once per
+	// load on every route and never here.
 	return true
 }
 
@@ -298,6 +330,11 @@ func syswLoadWarnings(s *syswSession) []string {
 					"secret - is stored unencrypted in flash.")
 			case f == flagSecretInPlaintext:
 				out = append(out, "A SECRET is stored unencrypted in flash.")
+				// SPEC_systemwide_payloads.md 14f: in a plaintext payload the
+				// Refugium line follows F1's SECRET line directly.
+				if line, ok := syswRefugiumLine(s); ok {
+					out = append(out, line)
+				}
 			case f == flagWeakPassphrase && r.unconfirmed:
 				out = append(out, "An md1/mk1 the device could not confirm - treated as a "+
 					"secret - is protected by a passphrase below the word-count floor.")
@@ -306,7 +343,22 @@ func syswLoadWarnings(s *syswSession) []string {
 			}
 		}
 	}
+	// ...and in a sealed payload it is the screen's last line, after F2's when F2
+	// is raised, and the screen shows for this line alone when no flag is.
+	if s.sealed {
+		if line, ok := syswRefugiumLine(s); ok {
+			out = append(out, line)
+		}
+	}
 	return out
+}
+
+// syswRefugiumLineShown reports whether the Refugium warning (section 14f) is on
+// the Payload Warnings screen, so KEEP / UNLOAD follows it (the secret is in a
+// sealed section, or outside one and loaded by LOAD ANYWAY).
+func syswRefugiumLineShown(s *syswSession) bool {
+	_, ok := syswRefugiumLine(s)
+	return ok
 }
 
 // syswFirstPassphraseRecord returns the 1-based position of the first record
@@ -336,3 +388,32 @@ func syswPassphraseRecordRefusal(position int) string {
 		"This build takes no BIP-39 passphrase, so nothing was loaded. "+
 		"Pack the payload again without it.", position)
 }
+
+// syswFirstSecretRecord returns the 1-based position of the first record in the
+// PUBLIC (cleartext) section whose CLASS is secret (sysw.Class.IsSecret); every
+// record of a plaintext payload is public. A sealed section is not scanned (it
+// is encrypted; its secrets only warn, section 14f).
+func syswFirstSecretRecord(p *sysw.Payload) (int, bool) {
+	n := 0
+	for _, r := range p.Public {
+		n++
+		if sysw.Classify(r).IsSecret() {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// syswPlaintextSecretRefusal names the record by POSITION only, never by its
+// contents.
+func syswPlaintextSecretRefusal(position int) string {
+	return fmt.Sprintf("Record %d of this payload is a secret, and it is not sealed. "+
+		"This build takes secrets only in the Sealed Payload, so nothing was loaded. "+
+		"Pack the payload again without it, or load it anyway on the next screen.", position)
+}
+
+// syswPlaintextSecretOverrideLead is the override screen's question and its
+// cost: the systemwide session is the non-wiping class (sysw_session.go), and
+// UNLOAD drops it without zeroing it.
+const syswPlaintextSecretOverrideLead = "Load it anyway? Every program can then use its secret. " +
+	"It stays unencrypted in flash until you wipe it from the host."

@@ -3,7 +3,6 @@
 package gui
 
 import (
-	"errors"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -15,8 +14,10 @@ import (
 // the move is a refactor the default build can prove it did not change.
 //
 // They are !refugium because they pin the DEFAULT build's behaviour: the
-// Refugium build carries neither command (debugcmd_refugium.go), and no tag
-// reaches the start screen there at all (§4.2).
+// Refugium build carries no debug command (debugcmd_refugium.go), and no tag
+// reaches the start screen there at all (§4.2). The default build carries
+// FOREVERLAURA! only: lock-boot was removed from it too (Brian 2026-11-23, P19;
+// design/FIX_lockboot_default_remove.md).
 
 // driveStartScreenTag runs StartScreen.Flow with a reader that delivers rec
 // once, pumping frames until done reports true or the deadline passes. It
@@ -48,44 +49,31 @@ func driveStartScreenTag(t *testing.T, p *testPlatform, rec string, done func() 
 	return act, returned, last
 }
 
-// TestDebugCommandLockBootCharacterization: a `command: lock-boot` tag on the
-// start screen calls Platform.LockBoot exactly once and STAYS on the start
-// screen -- Flow does not return an action for it.
-func TestDebugCommandLockBootCharacterization(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{"LockBoot succeeds", nil},
-		{"LockBoot fails", errors.New("otp: refused")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := newPlatform()
-			var calls atomic.Int32
-			p.lockBoot = func() error {
-				calls.Add(1)
-				return tc.err
-			}
-			// Keep pumping past the first call, so a second call or a return
-			// would be seen.
-			var after int
-			_, returned, last := driveStartScreenTag(t, p, "command: lock-boot", func() bool {
-				if calls.Load() == 0 {
-					return false
-				}
-				after++
-				return after > 50
-			})
-			if n := calls.Load(); n != 1 {
-				t.Fatalf("LockBoot called %d times, want exactly 1", n)
-			}
-			if returned {
-				t.Fatalf("StartScreen.Flow returned on a lock-boot tag; it must stay on the start screen")
-			}
-			if !uiContains(last, "Backup Wallet") {
-				t.Fatalf("after lock-boot the screen is not the start screen; got %q", last)
-			}
-		})
+// TestDebugCommandLockBootIsUnknownInTheDefaultBuild: the default build carries
+// no lock-boot command (Brian 2026-11-23, P19 "remove it";
+// design/FIX_lockboot_default_remove.md). A `command: lock-boot` tag is an
+// unknown debug command like any other: Platform.LockBoot is never called,
+// StartScreen.Flow hands the command on as the scanned object, and
+// engraveObjectFlow refuses it, so the start screen reads "Unknown format".
+func TestDebugCommandLockBootIsUnknownInTheDefaultBuild(t *testing.T) {
+	p := newPlatform()
+	var calls atomic.Int32
+	p.lockBoot = func() error {
+		calls.Add(1)
+		return nil
+	}
+	act, returned, _ := driveStartScreenTag(t, p, "command: lock-boot", func() bool { return calls.Load() > 0 })
+	if n := calls.Load(); n != 0 {
+		t.Errorf("LockBoot called %d times for a lock-boot tag, want 0", n)
+	}
+	if !returned {
+		t.Fatal("StartScreen.Flow did not return on a lock-boot tag; want it handed on as an unknown command")
+	}
+	if want := (startScreenAction{scan: debugCommand{"lock-boot"}}); act != want {
+		t.Fatalf("lock-boot returned %+v, want scan: debugCommand{\"lock-boot\"}", act)
+	}
+	if engraveObjectFlow(NewContext(newPlatform()), &descriptorTheme, act.scan) {
+		t.Fatal("engraveObjectFlow accepted debugCommand{\"lock-boot\"}; want false (Unknown format)")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 // MessageReader is an [io.Reader] for parsing NDEF
@@ -24,6 +25,9 @@ type RecordReader struct {
 	scratch  [4]byte
 	length   int
 	skip     bool
+	// prefix is the part of a URI record's expanded prefix not yet
+	// returned to the caller (FIX_sh_ndef_reader R1).
+	prefix string
 }
 
 func NewMessageReader(rd io.Reader) *MessageReader {
@@ -39,8 +43,17 @@ func (r *MessageReader) Read(buf []byte) (int, error) {
 			l := min(len(buf), r.length)
 			n, err := r.r.Read(buf[:l])
 			r.length -= n
+			if r.skip {
+				// A skipped TLV exposes no bytes (FIX_sh_ndef_reader R3).
+				n = 0
+			}
+			if err == io.EOF && r.length == 0 {
+				// The TLV is complete: its bytes are delivered and the
+				// next Read reports the end (FIX_sh_ndef_reader R2).
+				err = nil
+			}
 			if err != nil {
-				return n, fmt.Errorf("ndef: tlv: %w", err)
+				return n, fmt.Errorf("ndef: tlv: %w", truncated(err))
 			}
 			if r.skip {
 				continue
@@ -66,7 +79,7 @@ func (r *MessageReader) Read(buf []byte) (int, error) {
 		// Read length.
 		buf = r.scratch[:1]
 		if _, err := io.ReadFull(r.r, buf); err != nil {
-			return 0, fmt.Errorf("ndef: tlv: %w", err)
+			return 0, fmt.Errorf("ndef: tlv: %w", truncated(err))
 		}
 		length8 := buf[0]
 		length := int(length8)
@@ -74,7 +87,7 @@ func (r *MessageReader) Read(buf []byte) (int, error) {
 			// 2-byte length.
 			buf = r.scratch[:2]
 			if _, err := io.ReadFull(r.r, buf); err != nil {
-				return 0, fmt.Errorf("ndef: tlv: %w", err)
+				return 0, fmt.Errorf("ndef: tlv: %w", truncated(err))
 			}
 			length = int(binary.BigEndian.Uint16(buf))
 		}
@@ -94,13 +107,21 @@ func NewRecordReader(rd io.Reader) *RecordReader {
 // are available.
 func (r *RecordReader) Read(buf []byte) (int, error) {
 	for {
+		if r.prefix != "" {
+			n := copy(buf, r.prefix)
+			r.prefix = r.prefix[n:]
+			return n, nil
+		}
 		if r.length > 0 {
 			l := min(len(buf), r.length)
 			n, err := r.r.Read(buf[:l])
 			r.length -= n
 			if err != nil {
 				if err != io.EOF || r.length > 0 {
-					return n, fmt.Errorf("ndef: message: %w", err)
+					if r.skip {
+						n = 0
+					}
+					return n, fmt.Errorf("ndef: message: %w", truncated(err))
 				}
 			}
 			if r.skip {
@@ -132,14 +153,14 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 			// 32-bit length.
 			b := r.scratch[:4]
 			if _, err := io.ReadFull(r.r, b); err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
-			r.length = int(binary.BigEndian.Uint32(b))
+			r.length = int(min(binary.BigEndian.Uint32(b), math.MaxInt32))
 		} else {
 			// Short record.
 			b, err := r.readByte()
 			if err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			r.length = int(b)
 		}
@@ -148,7 +169,7 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 		if flags&flagIR != 0 {
 			b, err := r.readByte()
 			if err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			idLen = b
 		}
@@ -157,14 +178,14 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 		if tlen == 1 {
 			b := r.scratch[:1]
 			if _, err := io.ReadFull(r.r, b); err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			tlen--
 			wellKnown = b[0]
 		}
 		// Skip the (remaining) type and id.
 		if err := r.discard(buf, int(tlen)+int(idLen)); err != nil {
-			return 0, fmt.Errorf("ndef: message: %w", err)
+			return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 		}
 		// Reject chunked records.
 		if flags&flagCF != 0 {
@@ -178,12 +199,11 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 			r.skip = true
 			continue
 		}
-		n := 0
 		switch wellKnown {
 		case 'T': // Text
 			header, err := r.readByte()
 			if err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			r.length--
 			if header&(0b1<<7) != 0 { // Don't bother with UTF-16.
@@ -196,13 +216,13 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 				return 0, errors.New("ndef: message: text language too long")
 			}
 			if err := r.discard(buf, int(langLen)); err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			r.length -= langLen
 		case 'U': // URI
 			header, err := r.readByte()
 			if err != nil {
-				return 0, fmt.Errorf("ndef: message: %w", err)
+				return 0, fmt.Errorf("ndef: message: %w", truncated(err))
 			}
 			r.length--
 			prefix := ""
@@ -220,8 +240,8 @@ func (r *RecordReader) Read(buf []byte) (int, error) {
 				r.skip = true
 				continue
 			}
-			n = copy(buf, prefix)
-			return n, nil
+			r.prefix = prefix
+			continue
 		default:
 			r.skip = true
 			continue
@@ -240,11 +260,25 @@ func (r *RecordReader) discard(buf []byte, n int) error {
 		l := min(len(buf), n)
 		rn, err := r.r.Read(buf[:l])
 		n -= rn
+		if err == io.EOF && n == 0 {
+			// The last discarded byte came with the end (R2).
+			return nil
+		}
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// truncated reports an end of stream inside a TLV or a record as
+// io.ErrUnexpectedEOF, so that no caller can take a truncated structure
+// for a complete one (FIX_sh_ndef_reader R4).
+func truncated(err error) error {
+	if err == io.EOF {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 const (

@@ -1,10 +1,12 @@
 // Package passphrase validates BIP-39 passphrases for engraving.
 //
 // The device accepts only printable ASCII. That is NOT a BIP-39 rule -- the
-// standard permits any string -- it is the boundary within which this
-// codebase's derivation is provably conformant: bip39.MnemonicSeed performs no
-// NFKD normalization, which is identity on ASCII and divergent otherwise. See
-// SPEC_seedhammer_engrave_bip39_password.md D3.
+// standard permits any string -- it is this device's engraving limit
+// (ErrNonASCII). bip39.MnemonicSeed applies BIP-39's NFKD normalization, so a
+// non-ASCII passphrase from a library caller or a pass: payload record
+// derives the conformant seed.
+// SPEC_seedhammer_engrave_bip39_password.md D3 records the earlier reason (no
+// NFKD), removed by FIX sec-sh-passphrase-nfkd.
 package passphrase
 
 import "errors"
