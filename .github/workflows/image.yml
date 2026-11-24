@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      full:
+        description: "also run the nightly jobs (no nightly jobs in this workflow; accepted so the release gate can pass -f full=true everywhere)"
+        type: boolean
+        default: false
 # Publishing workflow (builds the release firmware image): never cancel in progress.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
