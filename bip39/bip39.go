@@ -125,6 +125,14 @@ func (m Mnemonic) Valid() bool {
 	if !validLength(len(m)) {
 		return false
 	}
+	// Word is an exported int: refuse a value outside the wordlist before
+	// splitMnemonic's arithmetic (a high bit would OR into a neighbour or
+	// overflow the padding).
+	for _, w := range m {
+		if w < 0 || w >= NumWords {
+			return false
+		}
+	}
 	ent, _ := splitMnemonic(m)
 	if entropyResidueHook != nil {
 		entropyResidueHook("Valid.ent", ent)
