@@ -40,3 +40,32 @@ func TestEncodeMS1WipesItsPayload(t *testing.T) {
 		t.Fatal("EncodeMS1 wiped the caller's entropy; only its own copy is its to wipe")
 	}
 }
+
+// TestEncodeMS1PreimageWipesItsPayload pins the wipe of EncodeMS1Preimage's
+// internal payload buffer (0x03 prefix followed by a copy of the preimage).
+// It reuses encodeMS1PayloadHook, which hands over the slice itself.
+func TestEncodeMS1PreimageWipesItsPayload(t *testing.T) {
+	var x [32]byte
+	for i := range x {
+		x[i] = 0x5a
+	}
+	want := append([]byte{msPrefixPreimage}, x[:]...)
+	var captured, snapshot []byte
+	encodeMS1PayloadHook = func(p []byte) {
+		captured = p
+		snapshot = append([]byte(nil), p...)
+	}
+	t.Cleanup(func() { encodeMS1PayloadHook = nil })
+
+	if _, err := EncodeMS1Preimage(x); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(snapshot, want) {
+		t.Fatalf("hook saw %x, want the payload %x", snapshot, want)
+	}
+	for i, b := range captured {
+		if b != 0 {
+			t.Fatalf("payload byte %d is still %#02x after EncodeMS1Preimage returned", i, b)
+		}
+	}
+}
