@@ -409,7 +409,7 @@ func Parse(buf []byte) (Mnemonic, error) {
 		if !valid || len(wu) < 3 ||
 			!bytes.HasPrefix([]byte(LabelFor(closest)), wu) {
 			clear(m)
-			return nil, fmt.Errorf("bip39: parse: unknown word: %q", w)
+			return nil, fmt.Errorf("bip39: parse: unknown word at position %d", len(m)+1)
 		}
 		// FIX-sh-bip39-admission R1 (T35): an abbreviation must name exactly
 		// one word. ClosestWord returns the first word in sorted order with
@@ -418,7 +418,7 @@ func Parse(buf []byte) (Mnemonic, error) {
 		if LabelFor(closest) != string(wu) && int(closest)+1 < len(index) &&
 			bytes.HasPrefix([]byte(LabelFor(closest+1)), wu) {
 			clear(m)
-			return nil, fmt.Errorf("bip39: parse: ambiguous word: %q", w)
+			return nil, fmt.Errorf("bip39: parse: ambiguous word at position %d", len(m)+1)
 		}
 		m = append(m, closest)
 	}
