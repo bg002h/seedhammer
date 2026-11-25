@@ -40,7 +40,7 @@ func EncodeMS1(entropy []byte) (string, error) {
 
 // encodeMS1PayloadHook hands over EncodeMS1's payload buffer right after its
 // wipe is deferred, so a test holds the same backing array and can read it
-// after the call returns. nil in production.
+// after the call returns (EncodeMS1 and EncodeMS1Preimage both call it). nil in production.
 var encodeMS1PayloadHook func([]byte)
 
 // EncodeMS1Preimage encodes a hashlock preimage X as the ms1 kind-0x03 plate
@@ -62,6 +62,10 @@ func EncodeMS1Preimage(x [32]byte) (string, error) {
 	payload := make([]byte, 0, 1+len(x))
 	payload = append(payload, msPrefixPreimage)
 	payload = append(payload, x[:]...)
+	defer clear(payload)
+	if encodeMS1PayloadHook != nil {
+		encodeMS1PayloadHook(payload)
+	}
 	s, err := NewSeed("ms", 0, "hash", 's', payload)
 	if err != nil {
 		return "", err

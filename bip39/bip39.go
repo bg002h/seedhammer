@@ -275,6 +275,13 @@ func ChecksumWord(entropy []byte) Word {
 	return w % Word(len(index))
 }
 
+// MnemonicSeed derives the BIP-39 seed. The passphrase is NFKD-normalised by
+// golang.org/x/text/unicode/norm, whose Unicode version (15.0.0 in x/text
+// v0.37.0, see norm.Version) is older than the Rust primary's
+// unicode-normalization (17.0). A character assigned after Unicode 15.0 passes
+// through unnormalised here, so a passphrase using one can derive a different
+// seed than the Rust tools do. BIP-39 pins no Unicode version
+// (design/FIX_sec_sh_passphrase_nfkd.md, R1).
 func MnemonicSeed(m Mnemonic, password string) []byte {
 	var sentence []byte
 	for i, w := range m {
@@ -409,7 +416,7 @@ func Parse(buf []byte) (Mnemonic, error) {
 		if !valid || len(wu) < 3 ||
 			!bytes.HasPrefix([]byte(LabelFor(closest)), wu) {
 			clear(m)
-			return nil, fmt.Errorf("bip39: parse: unknown word: %q", w)
+			return nil, fmt.Errorf("bip39: parse: unknown word at position %d", len(m)+1)
 		}
 		// FIX-sh-bip39-admission R1 (T35): an abbreviation must name exactly
 		// one word. ClosestWord returns the first word in sorted order with
@@ -418,7 +425,7 @@ func Parse(buf []byte) (Mnemonic, error) {
 		if LabelFor(closest) != string(wu) && int(closest)+1 < len(index) &&
 			bytes.HasPrefix([]byte(LabelFor(closest+1)), wu) {
 			clear(m)
-			return nil, fmt.Errorf("bip39: parse: ambiguous word: %q", w)
+			return nil, fmt.Errorf("bip39: parse: ambiguous word at position %d", len(m)+1)
 		}
 		m = append(m, closest)
 	}

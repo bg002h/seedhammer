@@ -48,7 +48,7 @@ func TestFixShBip39AmbiguousPrefixRefused(t *testing.T) {
 	}
 	for _, in := range []string{"abs", "ABS"} {
 		m, err := Parse([]byte(in + tail))
-		want := fmt.Sprintf("bip39: parse: ambiguous word: %q", in)
+		want := "bip39: parse: ambiguous word at position 1"
 		if err == nil {
 			t.Errorf("Parse(%q ...) accepted as %v; want error %q", in, m, want)
 		} else if err.Error() != want {
@@ -102,7 +102,7 @@ func TestFixShBip39EveryPrefixNamesExactlyOneWord(t *testing.T) {
 				continue
 			}
 			refused++
-			wantErr := fmt.Sprintf("bip39: parse: ambiguous word: %q", strings.ToLower(p))
+			wantErr := "bip39: parse: ambiguous word at position 1"
 			if err == nil || err.Error() != wantErr {
 				t.Errorf("prefix %q (%d words): Parse gave (%v, %v); want error %q", p, len(matches), got, err, wantErr)
 			}
@@ -210,7 +210,7 @@ func TestFixShBip39NewErrorExitsZeroAccumulator(t *testing.T) {
 		name, input, wantErr string
 		wantLen              int
 	}{
-		{"ambiguous word after eleven good ones", elevenZoo + " abs", `bip39: parse: ambiguous word: "abs"`, 11},
+		{"ambiguous word after eleven good ones", elevenZoo + " abs", "bip39: parse: ambiguous word at position 12", 11},
 		{"wrong word count (holds all nine)", strings.TrimSpace(strings.Repeat("zoo ", 9)), "bip39: parse: wrong word count: 9", 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,5 +275,21 @@ func TestFixShBip39ValidRefusesOutOfRangeWord(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("fixture has no word with low bit set; change the phrase")
+	}
+}
+
+// sh-bip39-unknown-word-error-copy (architect H5): Parse's unknown-word exit
+// reports a 1-based position and never carries the word, because a Go-string
+// copy of a sealed record's word cannot be wiped.
+func TestParseUnknownWordErrorCarriesPositionNotWord(t *testing.T) {
+	elevenZoo := strings.TrimSpace(strings.Repeat("zoo ", 11))
+	for _, tc := range []struct{ input, want string }{
+		{elevenZoo + " notaword", "bip39: parse: unknown word at position 12"},
+		{"qqqzzz " + elevenZoo, "bip39: parse: unknown word at position 1"},
+	} {
+		_, err := Parse([]byte(tc.input))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("Parse(%q) error %v; want %q", tc.input, err, tc.want)
+		}
 	}
 }
