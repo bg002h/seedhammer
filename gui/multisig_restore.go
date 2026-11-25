@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"errors"
+
 	"seedhammer.com/address"
 	"seedhammer.com/md"
 )
@@ -69,7 +71,7 @@ func multisigRestoreLines(md1 []string, tpl md.Template, keys []md.ExpandedKey) 
 			if err != nil {
 				return nil, false, err
 			}
-			change0, err := at(0, true)
+			change0, err := firstChange(func() (string, error) { return at(0, true) })
 			if err != nil {
 				return nil, false, err
 			}
@@ -83,7 +85,7 @@ func multisigRestoreLines(md1 []string, tpl md.Template, keys []md.ExpandedKey) 
 	if err != nil {
 		return nil, false, err
 	}
-	change0, err := address.Change(desc, 0)
+	change0, err := firstChange(func() (string, error) { return address.Change(desc, 0) })
 	if err != nil {
 		return nil, false, err
 	}
@@ -161,4 +163,16 @@ func multisigRestoreDocFlow(ctx *Context, th *Colors, md1 []string, tpl md.Templ
 	}
 	head := append([]string{status}, verifyStatusScopeLines(status)...)
 	restoreDocScreen(ctx, th, append(append(head, lines...), extra...))
+}
+
+// firstChange is the restore doc's "First change:" value. A policy none of
+// whose keys has a multipath step has no change chain (bug hunt 2026-11-25
+// SH#6; the Rust primary refuses chain 1 for it), and the line says so instead
+// of failing the whole document or repeating the first receive address.
+func firstChange(at func() (string, error)) (string, error) {
+	a, err := at()
+	if errors.Is(err, address.ErrNoChangeChain) {
+		return "none (no change chain)", nil
+	}
+	return a, err
 }

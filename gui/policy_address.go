@@ -193,6 +193,20 @@ func complexAddressDeriver(collected []string, keys []md.ExpandedKey) (func(uint
 			return address.WitnessScriptAddress(script, network)
 		}
 	}
+	// NO CHANGE CHAIN, NO CHANGE ADDRESSES (bug hunt 2026-11-25 SH#6). With no
+	// key holding a multipath step, DeriveChild ignores `change` and the
+	// "change" list was the receive list again; the Rust primary refuses chain
+	// 1 for such a policy. The same predicate as address.Change on the flat
+	// route, over the same keys the derivation uses.
+	if !address.HasChangeChain(bkeys) {
+		derive := src
+		src = func(index uint32, change bool) (string, error) {
+			if change {
+				return "", address.ErrNoChangeChain
+			}
+			return derive(index, change)
+		}
+	}
 	if _, err := src(0, false); err != nil {
 		return nil, false
 	}
