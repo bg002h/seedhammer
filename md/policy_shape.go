@@ -443,7 +443,45 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 			}
 		}
 		return true
-	case tagAndB, tagAndV, tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI,
+	case tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI:
+		// A DISJUNCTION INSIDE A BRANCH (port of md-codec 0.48.5's rule,
+		// policy_shape.rs `collect`). splitBranches splits an `or` only at the
+		// top of a branch; one under and_v or a wrapper used to be walked here
+		// like a conjunction, merging both alternatives into ONE Branch and
+		// leaving Complete true. wsh(and_v(v:pk(@0),or_d(pk(@1),older(52560))))
+		// then summarised as "Spend path: 1 / 2 key(s), custom +timelock" while
+		// @0 can spend ALONE after the lock (bug hunt 2026-11-25 SH#2). Showing
+		// every alternative would need a cross product of branches; the summary
+		// refuses instead, so the consent falls to its honest-minimal screen.
+		//
+		// The one exception is Rust's too: `l:X` = or_i(0,X), `u:X` =
+		// or_i(X,0) and `and_n(X,Y)` = andor(X,Y,0) carry a `0` alternative
+		// that is never satisfiable, so they are not disjunctions.
+		b, ok := n.body.(childrenBody)
+		if !ok {
+			return false
+		}
+		zeroArm := false
+		switch n.tag {
+		case tagOrI:
+			for _, c := range b.children {
+				if c.tag == tagFalse {
+					zeroArm = true
+				}
+			}
+		case tagAndOr:
+			zeroArm = len(b.children) > 2 && b.children[2].tag == tagFalse
+		}
+		if !zeroArm {
+			return false
+		}
+		for _, c := range b.children {
+			if !collect(c, br, keys) {
+				return false
+			}
+		}
+		return true
+	case tagAndB, tagAndV,
 		tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual,
 		tagWsh, tagSh:
 		b, ok := n.body.(childrenBody)
