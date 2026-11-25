@@ -235,6 +235,15 @@ coverage (measured: the pin test did not flag them).
 `scripts/vendor-liana-cases.sh`; `md/liana_test.go` checks the sha256 and
 asserts exactly nine cases.
 
+`policy_shape_cases.json` (seedhammer I-1, thresh k-of-n) is the Rust
+primary's shared policy-shape vector file,
+`crates/md-codec/tests/fixtures/policy_shape/cases.json`, with its own pin
+`policy_shape_cases.provenance.json`, written by
+`scripts/vendor-policy-shape-cases.sh`. `md/policy_shape_cases_test.go`
+checks the sha256, asserts the case count, and requires the Go walk to give
+Rust's shape for every case; `gui/policy_summary_anyof_test.go` reads the same
+file for the device-text goldens.
+
 Regenerate with the descriptor-mnemonic path given **explicitly** -- both
 scripts default to `$HERE/../descriptor-mnemonic`, which from a worktree is a
 sibling that does not exist:
@@ -242,4 +251,5 @@ sibling that does not exist:
 ```bash
 scripts/vendor-compose-vectors.sh /scratch/code/shibboleth/descriptor-mnemonic
 scripts/vendor-liana-cases.sh /scratch/code/shibboleth/descriptor-mnemonic
+scripts/vendor-policy-shape-cases.sh /scratch/code/shibboleth/descriptor-mnemonic
 ```

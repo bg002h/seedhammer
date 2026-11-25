@@ -168,13 +168,14 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int, liana
 	if err != nil {
 		return nil, err
 	}
-	if !shape.Complete {
+	if !shape.Complete || composerShapeHasAnyOf(shape) {
 		// THE HONESTY CONTRACT (md/policy_shape.go:60-63): an incomplete walk
 		// means the summariser met a node it could not classify, and a partial
 		// description is worse than none -- the operator would believe they had
 		// seen the whole policy. The composer only builds shapes §5 lowers, so
 		// this is a builder defect, and it says so rather than showing a
-		// half-policy.
+		// half-policy. An any-of entry is one too: the lines below read every
+		// branch as a conjunction (composerShapeHasAnyOf).
 		return nil, fmt.Errorf("md: this device cannot describe the policy it just built")
 	}
 	tpl, keys, err := md.ExpandWalletPolicyChunks(chunks)
@@ -497,4 +498,22 @@ func composerLianaOutsideModelClass(root md.ScriptKind, shape md.PolicyShape) st
 		return "a second unlocked path"
 	}
 	return ""
+}
+
+// composerShapeHasAnyOf reports an any-of entry (md.Branch.AnyN > 0, a
+// thresh(k<n) at a path root; seedhammer I-1). The composer's three shape
+// readers -- composerConsentLinesFor, composerSelfCheck and
+// composerUnspendableFires -- read every md.Branch as a CONJUNCTION, where each
+// key and lock listed is required. An any-of entry is not one: its keys and
+// locks are conditions, any AnyK of which spend. The composer cannot build a
+// thresh (md-codec compose has no Tag::Thresh), so one reaching these readers
+// is a builder defect, and each treats it EXACTLY as an incomplete shape
+// rather than misread it.
+func composerShapeHasAnyOf(shape md.PolicyShape) bool {
+	for _, b := range shape.Branches {
+		if b.AnyN > 0 {
+			return true
+		}
+	}
+	return false
 }

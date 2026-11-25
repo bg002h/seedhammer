@@ -178,6 +178,15 @@ func policySummaryLines(shape md.PolicyShape) []string {
 		}
 	}
 	for i, b := range shape.Branches {
+		if b.AnyN > 0 {
+			// FIRST, and before anything reads Keys or Locks as required: an
+			// any-of entry is a thresh(k<n) whose keys and timelocks are
+			// CONDITIONS, none individually required (seedhammer I-1). Read
+			// as the arms below read a conjunction, a 2-of-3 printed as
+			// "3 key(s), custom", which says all three must sign.
+			out = append(out, fmt.Sprintf("  %d: %s", i+1, anyOfEntry(b)))
+			continue
+		}
 		var desc string
 		if b.N > 0 {
 			desc = fmt.Sprintf("%d-of-%d", b.K, b.N)
@@ -195,6 +204,34 @@ func policySummaryLines(shape md.PolicyShape) []string {
 		out = append(out, fmt.Sprintf("  %d: %s", i+1, desc))
 	}
 	return out
+}
+
+// anyOfEntry is the text of one any-of entry (md.Branch.AnyN > 0,
+// DESIGN_thresh_summary §3): "any k of these n", then what the n conditions
+// are and the fewest keys any satisfying choice needs. An all-key entry is
+// "any 2 of these 3 keys"; a mixed one is "any 2 of these 3: 2 keys,
+// 1 timelock; at least 1 key"; when the timelocks alone reach k it ends
+// "NO KEY NEEDED", because no signature is then required. ONE string, so the
+// pager never splits an entry across pages (a label wraps inside itself).
+func anyOfEntry(b md.Branch) string {
+	locks := b.AnyN - b.Keys
+	if locks == 0 {
+		return fmt.Sprintf("any %d of these %d keys", b.AnyK, b.AnyN)
+	}
+	count := func(c int, word string) string {
+		if c == 1 {
+			return "1 " + word
+		}
+		return fmt.Sprintf("%d %ss", c, word)
+	}
+	inventory := count(locks, "timelock")
+	if b.Keys > 0 {
+		inventory = count(b.Keys, "key") + ", " + inventory
+	}
+	if m := b.AnyOfMinKeys(); m > 0 {
+		return fmt.Sprintf("any %d of these %d: %s; at least %s", b.AnyK, b.AnyN, inventory, count(m, "key"))
+	}
+	return fmt.Sprintf("any %d of these %d: %s; NO KEY NEEDED", b.AnyK, b.AnyN, inventory)
 }
 
 // policyTypeLabel renders a short k-of-N label for a classifiable multisig/
