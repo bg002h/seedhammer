@@ -1,0 +1,234 @@
+diff --git i/bip32/bip32.go w/bip32/bip32.go
+index dd3df24..29e89a5 100644
+--- i/bip32/bip32.go
++++ w/bip32/bip32.go
+@@ -76,6 +76,9 @@ func ParsePathElement(p string) (uint32, error) {
+ 	if err != nil {
+ 		return 0, fmt.Errorf("bip32: invalid path element: %q", p)
+ 	}
++	if idx < 0 || idx >= 1<<31 {
++		return 0, fmt.Errorf("bip32: path element out of range: %q", p)
++	}
+ 	iu32 := uint32(idx)
+ 	if int64(iu32) != idx || iu32+offset < iu32 {
+ 		return 0, fmt.Errorf("bip32: path element out of range: %q", p)
+diff --git i/bip32/bughunt_sh2_s3_test.go w/bip32/bughunt_sh2_s3_test.go
+index 84cec93..2da056b 100644
+--- i/bip32/bughunt_sh2_s3_test.go
++++ w/bip32/bughunt_sh2_s3_test.go
+@@ -11,7 +11,6 @@ import "testing"
+ // indicate the unhardened or hardened derivation steps", so an unmarked NUM is
+ // unhardened and must be below 2^31.
+ func TestBughuntSh235ParsePathUnhardenedOverflow(t *testing.T) {
+-	t.Skip("deferred-minor: sh-parsepath-unhardened-overflow")
+ 	// Positive controls: the boundary values parse to the right indices.
+ 	for _, c := range []struct {
+ 		in   string
+diff --git i/bip380/fix_sh_bip32_unhardened_test.go w/bip380/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..52e31f2
+--- /dev/null
++++ w/bip380/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,63 @@
++package bip380
++
++import (
++	"testing"
++
++	"seedhammer.com/bip32"
++)
++
++// FIX-sh-bip32-unhardened (bughunt-1119 bh-sh-M6, regraded I). BIP-380: key
++// origin and use-site steps are "/NUM or /NUMh path elements to indicate the
++// unhardened or hardened derivation steps", and its invalid vector "Derivation
++// index out of range: xprv.../2147483648" refuses an unmarked 2^31. The parser
++// carried an unmarked 2147483648 as 0h.
++
++const fixShBip32K = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH1jbkfNk3iJ9zR65Yw6u3B2QZzpkMSTN4y8Lfm1t44HbpZX7efhZ"
++
++func TestFixShBip32UnhardenedOriginRefused(t *testing.T) {
++	for _, origin := range []string{"84h/0h/2147483648", "84h/0h/4294967295", "2147483648", "48'/1'/2147483648/2'"} {
++		desc := "wpkh([d34db33f/" + origin + "]" + fixShBip32K + "/0/*)"
++		if d, err := Parse(desc); err == nil {
++			t.Errorf("Parse(%q) accepted; origin %v", desc, bip32.Path(d.Keys[0].DerivationPath))
++		}
++	}
++}
++
++func TestFixShBip32UnhardenedChildRefused(t *testing.T) {
++	for _, use := range []string{"/2147483648/*", "/0/2147483648", "/4294967295/*"} {
++		desc := "wpkh([d34db33f/84h/1h/0h]" + fixShBip32K + use + ")"
++		if d, err := Parse(desc); err == nil {
++			t.Errorf("Parse(%q) accepted; children %+v", desc, d.Keys[0].Children)
++		}
++	}
++	// A range end of 2^31 was already refused; it stays refused.
++	desc := "wpkh([d34db33f/84h/1h/0h]" + fixShBip32K + "/<0;2147483648>/*)"
++	if _, err := Parse(desc); err == nil {
++		t.Errorf("Parse(%q) accepted", desc)
++	}
++}
++
++// Control: the largest unhardened and hardened elements still parse to the
++// same values.
++func TestFixShBip32UnhardenedBoundaryAccepted(t *testing.T) {
++	desc := "wpkh([d34db33f/84h/1h/2147483647]" + fixShBip32K + "/2147483647/*)"
++	d, err := Parse(desc)
++	if err != nil {
++		t.Fatalf("Parse(%q): %v", desc, err)
++	}
++	k := d.Keys[0]
++	if got := bip32.Path(k.DerivationPath).String(); got != "m/84h/1h/2147483647" {
++		t.Errorf("origin = %s, want m/84h/1h/2147483647", got)
++	}
++	if len(k.Children) != 2 || k.Children[0].Index != 2147483647 || k.Children[0].Hardened {
++		t.Errorf("children = %+v, want unhardened 2147483647 then *", k.Children)
++	}
++	desc = "wpkh([d34db33f/2147483647h]" + fixShBip32K + "/0/*)"
++	d, err = Parse(desc)
++	if err != nil {
++		t.Fatalf("Parse(%q): %v", desc, err)
++	}
++	if got := bip32.Path(d.Keys[0].DerivationPath); len(got) != 1 || got[0] != 0xFFFFFFFF {
++		t.Errorf("origin = %v, want [0xffffffff]", got)
++	}
++}
+diff --git i/cmd/biptool/fix_sh_bip32_unhardened_test.go w/cmd/biptool/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..13948d8
+--- /dev/null
++++ w/cmd/biptool/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,13 @@
++package main
++
++import "testing"
++
++// FIX-sh-bip32-unhardened (bh-sh-M6): `derive -path` refuses an unmarked
++// element of 2^31 or more instead of deriving the hardened child it wraps to.
++func TestFixShBip32UnhardenedBiptoolPath(t *testing.T) {
++	code, stdout, stderr := fixArgsRun(t, []byte(fixArgsXprv), "derive -path m/83696968h/32h/2147483648 xprv")
++	const want = "biptool: bip32: path element out of range: \"2147483648\"\n"
++	if code != 2 || stdout != "" || stderr != want {
++		t.Errorf("exit %d stdout %q stderr %q; want exit 2, no stdout, stderr %q", code, stdout, stderr, want)
++	}
++}
+diff --git i/gui/fix_sh_bip32_unhardened_test.go w/gui/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..bff4cdd
+--- /dev/null
++++ w/gui/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,37 @@
++package gui
++
++import (
++	"errors"
++	"testing"
++
++	"seedhammer.com/bip380"
++)
++
++// FIX-sh-bip32-unhardened (bh-sh-M6). The grade's scanned text: an origin
++// element 2147483648 with no hardened marker. At the NFC scan door it is an
++// unknown format (main screen subtitle "Unknown format"), not a descriptor
++// carried as origin m/84h/0h/0h.
++const fixShBip32K = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH1jbkfNk3iJ9zR65Yw6u3B2QZzpkMSTN4y8Lfm1t44HbpZX7efhZ"
++
++func TestFixShBip32UnhardenedScanDoorUnknownFormat(t *testing.T) {
++	ok := "wpkh([d34db33f/84h/0h/2147483647]" + fixShBip32K + "/0/*)"
++	if obj, err := scanOnce(t, ok); err != nil {
++		t.Fatalf("control scan %q: %v", ok, err)
++	} else if _, isDesc := obj.(*bip380.Descriptor); !isDesc {
++		t.Fatalf("control scan %q = %T, want *bip380.Descriptor", ok, obj)
++	}
++	for _, s := range []string{
++		"wpkh([d34db33f/84h/0h/2147483648]" + fixShBip32K + "/0/*)",
++		"wpkh([d34db33f/84h/0h/0h]" + fixShBip32K + "/2147483648/*)",
++	} {
++		obj, err := scanOnce(t, s)
++		if !errors.Is(err, errScanUnknownFormat) {
++			if d, isDesc := obj.(*bip380.Descriptor); isDesc {
++				t.Errorf("scan %q = descriptor with origin %v children %+v, err %v; want errScanUnknownFormat",
++					s, d.Keys[0].DerivationPath, d.Keys[0].Children, err)
++			} else {
++				t.Errorf("scan %q = %T, err %v; want errScanUnknownFormat", s, obj, err)
++			}
++		}
++	}
++}
+diff --git i/nonstandard/fix_sh_bip32_unhardened_test.go w/nonstandard/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..4d67544
+--- /dev/null
++++ w/nonstandard/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,22 @@
++package nonstandard
++
++import (
++	"fmt"
++	"testing"
++)
++
++// FIX-sh-bip32-unhardened (bh-sh-M6): a BlueWallet "Derivation:" header with
++// an unmarked element of 2^31 or more is refused, not read as hardened.
++func TestFixShBip32UnhardenedBlueWallet(t *testing.T) {
++	file := func(deriv string) []byte {
++		return []byte(fmt.Sprintf("Name: t\nPolicy: 2 of 2\nDerivation: %s\nFormat: P2WSH\n\n%s\n\n%s\n", deriv, bhBWKey1, bhBWKey2))
++	}
++	if _, err := OutputDescriptor(file("m/48'/0'/0'/2147483647")); err != nil {
++		t.Fatalf("control m/48'/0'/0'/2147483647 refused: %v", err)
++	}
++	for _, deriv := range []string{"m/48'/0'/0'/2147483648", "m/48'/0'/2147483648/2'"} {
++		if d, err := OutputDescriptor(file(deriv)); err == nil {
++			t.Errorf("Derivation %s accepted; origin %v", deriv, d.Keys[0].DerivationPath)
++		}
++	}
++}
+diff --git i/seal/fix_sh_bip32_unhardened_test.go w/seal/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..ff541e1
+--- /dev/null
++++ w/seal/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,20 @@
++package seal
++
++import "testing"
++
++// FIX-sh-bip32-unhardened (bh-sh-M6): a sealed record whose origin has an
++// unmarked element of 2^31 or more classifies as ClassUnknown, not
++// ClassDescriptor. Not reachable from a screen: AdmitSection's lowercase pass
++// refuses any record carrying an extended key before it classifies.
++const fixShBip32K = "tpubD6NzVbkrYhZ4Wgf68pWWfTRzdXMoepBvepfiAKtNoE7RvbAbWVfWzQxH1jbkfNk3iJ9zR65Yw6u3B2QZzpkMSTN4y8Lfm1t44HbpZX7efhZ"
++
++func TestFixShBip32UnhardenedSealUnknown(t *testing.T) {
++	ok := "wpkh([d34db33f/84h/1h/2147483647]" + fixShBip32K + "/0/*)"
++	if got := Classify([]byte(ok)); got != ClassDescriptor {
++		t.Fatalf("control Classify(%q) = %v, want ClassDescriptor", ok, got)
++	}
++	bad := "wpkh([d34db33f/84h/1h/2147483648]" + fixShBip32K + "/0/*)"
++	if got := Classify([]byte(bad)); got != ClassUnknown {
++		t.Errorf("Classify(%q) = %v, want ClassUnknown", bad, got)
++	}
++}
+diff --git i/sysw/fix_sh_bip32_unhardened_test.go w/sysw/fix_sh_bip32_unhardened_test.go
+new file mode 100644
+index 0000000..ef55047
+--- /dev/null
++++ w/sysw/fix_sh_bip32_unhardened_test.go
+@@ -0,0 +1,17 @@
++package sysw
++
++import "testing"
++
++// FIX-sh-bip32-unhardened (bh-sh-M6): at the payload door a descriptor record
++// whose origin has an unmarked element of 2^31 or more is ClassUnknown (inert),
++// not ClassDescriptor carried as the hardened origin it wraps to.
++func TestFixShBip32UnhardenedPayloadUnknown(t *testing.T) {
++	ok := "wpkh([d34db33f/84h/1h/0h]" + skTP + "/<0;1>/*)"
++	if got := Classify(ok); got != ClassDescriptor {
++		t.Fatalf("control Classify(%q) = %v, want ClassDescriptor", ok, got)
++	}
++	bad := "wpkh([d34db33f/84h/1h/2147483648]" + skTP + "/<0;1>/*)"
++	if got := Classify(bad); got != ClassUnknown {
++		t.Errorf("Classify(%q) = %v, want ClassUnknown", bad, got)
++	}
++}
