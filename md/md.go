@@ -49,6 +49,10 @@ var (
 	errEmptyTLV         = errors.New("md: empty TLV entry")
 	errPlaceholderRange = errors.New("md: placeholder index out of range")
 	errOverrideOrder    = errors.New("md: override order violation")
+	// errMalformedPayloadPadding: a non-zero bit in the <=7-bit tail the TLV
+	// loop accepts as padding (port of md-codec tlv.rs reject_non_zero_pad,
+	// F-A8, md-codec 0.41.0).
+	errMalformedPayloadPadding = errors.New("md: malformed payload padding (trailing pad bits not all zero)")
 )
 
 // ─── Tag (port of tag.rs). 6-bit primary codes 0x00..=0x23; 0x24..=0x3E
@@ -614,7 +618,12 @@ func readTLV(r *bitReader, kiw uint8, n uint8) (tlvSection, error) {
 	for {
 		entryStart := r.pos()
 		if r.remaining() < 5 {
-			break // not enough bits for even a tag — clean end-of-stream
+			// Not enough bits for even a tag — the codex32 byte padding. The
+			// reference encoder always zero-pads, so a set bit is malformed.
+			if err := rejectNonZeroPad(r); err != nil {
+				return tlvSection{}, err
+			}
+			break
 		}
 		ok, err := readTLVEntry(r, kiw, n, &section, &haveLastTag, &lastTag)
 		if ok {
@@ -623,11 +632,35 @@ func readTLV(r *bitReader, kiw uint8, n uint8) (tlvSection, error) {
 		// Decide: rollback-as-padding or propagate error.
 		r.restore(entryStart)
 		if r.remaining() <= 7 {
+			if err := rejectNonZeroPad(r); err != nil {
+				return tlvSection{}, err
+			}
 			break
 		}
 		return tlvSection{}, err
 	}
 	return section, nil
+}
+
+// rejectNonZeroPad verifies the remaining (<=7) trailing bits are all zero,
+// without moving the cursor (port of md-codec tlv.rs reject_non_zero_pad, F-A8,
+// md-codec 0.41.0). Called at both points where readTLV accepts the tail as
+// padding (bug hunt 2026-11-25 SH#3).
+func rejectNonZeroPad(r *bitReader) error {
+	bits := r.remaining()
+	if bits == 0 {
+		return nil
+	}
+	saved := r.pos()
+	pad, err := r.read(bits)
+	r.restore(saved)
+	if err != nil {
+		return err
+	}
+	if pad != 0 {
+		return errMalformedPayloadPadding
+	}
+	return nil
 }
 
 // readTLVEntry parses one TLV entry. Returns (true, nil) on success;
@@ -1215,6 +1248,9 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 		if err := validateMultipathConsistency(d.useSite, d.tlv.useSiteOverrides); err != nil {
 			return nil, err
 		}
+		if err := validateUseSiteOverridesCanonical(d.useSite, d.tlv.useSiteOverrides); err != nil {
+			return nil, err
+		}
 	}
 	if d.tree.tag == tagTr {
 		if b, ok := d.tree.body.(trBody); ok && b.tree != nil {
@@ -1223,6 +1259,9 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 			}
 		}
 	}
+	if err := validateNoEmptyOriginOverrides(d); err != nil {
+		return nil, err
+	}
 	if err := validateExplicitOriginRequired(d); err != nil {
 		return nil, err
 	}
@@ -1230,6 +1269,63 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+var (
+	errBaselineUseSiteOverride  = errors.New("md: use-site override keyed on baseline @0")
+	errRedundantUseSiteOverride = errors.New("md: redundant use-site override (equals the baseline use-site path)")
+	errEmptyOriginOverride      = errors.New("md: origin-path override present but empty")
+)
+
+// validateUseSiteOverridesCanonical refuses the two use-site override shapes no
+// encoder writes: an entry keyed on @0 (the baseline cannot be overridden) and
+// an entry equal to the baseline. Port of md-codec validate.rs
+// validate_use_site_overrides_canonical (md-codec 0.37.0), in its order: the @0
+// check first. Before it, Go applied an @0 override and derived @0 from it
+// while every Rust tool refused the card (bug hunt 2026-11-25 SH#3).
+func validateUseSiteOverridesCanonical(baseline useSitePath, overrides []idxUseSite) error {
+	for _, o := range overrides {
+		if o.idx == 0 {
+			return errBaselineUseSiteOverride
+		}
+		if useSitePathEqual(o.path, baseline) {
+			return errRedundantUseSiteOverride
+		}
+	}
+	return nil
+}
+
+// useSitePathEqual is Rust's derived PartialEq on UseSitePath: multipath
+// (None, or the same alternatives in order) and the wildcard's hardening.
+func useSitePathEqual(a, b useSitePath) bool {
+	if a.hasMultipath != b.hasMultipath || a.wildcardHardened != b.wildcardHardened {
+		return false
+	}
+	if !a.hasMultipath {
+		return true
+	}
+	if len(a.multipath) != len(b.multipath) {
+		return false
+	}
+	for i := range a.multipath {
+		if a.multipath[i] != b.multipath[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// validateNoEmptyOriginOverrides refuses an origin-path override that is
+// present with zero components, unconditionally (port of md-codec validate.rs
+// validate_no_empty_origin_overrides, md-codec 0.42.0; bug hunt 2026-11-25
+// SH#3).
+func validateNoEmptyOriginOverrides(d *descriptor) error {
+	for _, o := range d.tlv.originOverrides {
+		if len(o.path.components) == 0 {
+			return errEmptyOriginOverride
+		}
+	}
+	return nil
 }
 
 // ─── Public template types ───────────────────────────────────────────────────
