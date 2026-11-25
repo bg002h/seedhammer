@@ -334,20 +334,16 @@ func composerConsentLinesFor(chunks []string, listed []int, keyPathNo int, liana
 	// branch unreachable for a duplicate, so the F-514 block that used to sit
 	// on it could not fire. It lives in noAddressLines now, on the branch
 	// above. See the longer note at gui/wallet_policy.go's equivalent.
-	lines = append(lines, "")
-	for _, chain := range []struct {
-		label  string
-		change bool
-	}{{"Receive", false}, {"Change", true}} {
-		for i := 0; i < addrProofPerChain; i++ {
-			a, err := at(uint32(i), chain.change)
-			if err != nil {
-				return nil, fmt.Errorf("md: address derivation failed for %s %d", chain.label, i)
-			}
-			lines = append(lines, fmt.Sprintf("%s %d:", chain.label, i), a)
-		}
+	// THROUGH addressProofLines (gui/wallet_policy.go), so a policy with no
+	// change chain reads "Change: none (no change chain)" here too rather than
+	// ending the consent (review r1 I-1). The composer mints <0;1>/* today,
+	// so this is consistency, not a reachable path.
+	proof, err := addressProofLines(at)
+	if err != nil {
+		return nil, err
 	}
-	return lines, nil
+	lines = append(lines, "")
+	return append(lines, proof...), nil
 }
 
 // composerMixesLockBases reports whether the decoded branches carry locks of
