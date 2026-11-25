@@ -2,7 +2,13 @@
 // account metadata they carry: network, derivation path, origin fingerprint,
 // policy-id stubs, and the BIP-32 account xpub. mk1 is PUBLIC; this package
 // performs no secret handling. Wire format: mnemonic-key/crates/mk-codec
-// (family_token "mk-codec 0.2").
+// (family_token "mk-codec 0.2"; the wire layout is unchanged through 0.6.0).
+//
+// PROVENANCE PIN (Rust-primary rule). Encode's mint-time refusals track
+// mk-codec 0.6.0's check_key_rules (mnemonic-key 113d8b6, unreleased at the
+// time; bug hunt 2026-11-25 SH#4) and its 2^31 path-index rule (via
+// bip32.ParsePath). The rest of mk-codec 0.3-0.6 has not been audited against
+// this port.
 package mk
 
 import (

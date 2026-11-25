@@ -5,11 +5,26 @@
 // taproot internal key's three states and kind bit -- and the identity hashes
 // track descriptor-mnemonic/crates/md-codec 0.47.0 (descriptor-mnemonic
 // cf35d61a, tag descriptor-mnemonic-md-cli-v0.19.0), with the kind-1 vectors
-// vendored from descriptor-mnemonic 430ea478. Known lags, each with a
-// follow-up: pathless shared origins (F-166); md-codec's compose `--unspendable`
-// selection and SPEC §6's kind-1 mint refusals (F-654). compose.go carries its
-// own, older pin (md-codec::compose at 66bdf2f4). Vendored corpora are pinned
-// per file in md/testdata/*.provenance.json.
+// vendored from descriptor-mnemonic 430ea478.
+//
+// Converged since, against md-codec 0.48.7 (descriptor-mnemonic c8cde234),
+// bug hunt 2026-11-25: Check over a bare PkK/PkH emits the bare key
+// (to_miniscript.rs Check-idempotence, SH#1); policy_shape refuses a
+// disjunction inside a branch (0.48.5, SH#2); decode refuses an @0 or
+// redundant use-site override (0.37.0), an empty origin override (0.42.0) and
+// a non-zero TLV padding tail (0.41.0) (SH#3).
+//
+// Known lags, each with a follow-up: pathless shared origins (F-166);
+// md-codec's compose `--unspendable` selection and SPEC §6's kind-1 mint
+// refusals (F-654); policy_shape's 0.48.0 "duplicate-index multi reports no
+// k-of-n" in its bare spelling (plainMulti still reports one). NOT AUDITED
+// against this port: the rest of 0.48.0-0.48.7 (among them 0.48.5's thresh
+// older() BIP-68 check, origin/multipath values above 2^29-1, non-ASCII
+// aliasing, and 0.48.6's out-of-order slot numbering at mint). The
+// emitter has no miniscript type checker, so it emits trees Rust refuses at
+// type-check (e.g. Check(Check(PkK))) instead of refusing them. compose.go
+// carries its own, older pin (md-codec::compose at 66bdf2f4). Vendored
+// corpora are pinned per file in md/testdata/*.provenance.json.
 package md
 
 import "errors"

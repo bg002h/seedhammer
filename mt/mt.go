@@ -6,7 +6,11 @@
 // (spec: mnemonic-engrave/design/SPEC_mt_v0_1.md); the confirmation semantics
 // converge on mnemonic-engrave/crates/me-cli/src/sysw/mt.rs and tx.rs, which
 // may never be led by this port. Provenance pin: mt-codec 0.1.0 /
-// me-cli sysw::mt as of the exp/tx-brief-driven branch.
+// me-cli sysw::mt as of the exp/tx-brief-driven branch. Checked 2026-11-25
+// against mt-codec 0.2.0's decode changes (mnemonic-transaction 78f03c9): a
+// chunk-count disagreement is refused (errCountMismatch) and a non-ASCII
+// character fails the codex32 charset table, so the decode side needs no
+// change; nothing else in 0.2.0 was audited (bug hunt 2026-11-25 SH#5).
 //
 // mt1 is PUBLIC in the sysw sense — the record exists to be engraved in
 // cleartext — but the DECODED set is a BEARER instrument: anyone holding the
