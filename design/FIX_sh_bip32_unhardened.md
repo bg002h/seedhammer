@@ -38,8 +38,8 @@ is added. The fix refuses an element whose digits are 2^31 or more, marked or no
   2^31 or more, with the existing error text `bip32: path element out of range: %q` (%q is the element with its suffix
   stripped). It is checked after `ParseInt` succeeds and before the hardened offset is added.
 - R2. Every value that parsed before and is below 2^31 parses to the same uint32 as before; `0h`/`0'` give
-  0x80000000 and `2147483647h` gives 0xffffffff. Every element refused before stays refused with the same text
-  (on 64-bit builds `2147483648h` and `-1` already gave `bip32: path element out of range`; on the 32-bit device `2147483648h` gave `bip32: invalid path element`).
+  0x80000000 and `2147483647h` gives 0xffffffff. Every element refused before stays refused; on 64-bit builds with the same text, and on the 32-bit device with the text `out of range` where it was `invalid path element` (M1, §4).
+  (On 64-bit builds `2147483648h` and `-1` already gave `bip32: path element out of range`; on the 32-bit device `2147483648h` gave `bip32: invalid path element`.)
 - R3. `ParsePath` refuses any path that holds such an element (it calls `ParsePathElement`, bip32.go:94). No caller
   changes.
 - R4. A descriptor text carrying such an element at the origin or at a use-site step is not a descriptor
@@ -58,7 +58,7 @@ No new holder-visible text, flag, exit code, type or command.
 | Payload door (`sysw.Classify`, sysw/record.go:132 -> sysw/descriptor.go:87) | `ClassDescriptor`, offered as a wallet policy | `ClassUnknown`: inert, offered to nobody, counted in the composer door's not-understood count (gui/composer_door.go:34-37, :57). `gui/wallet_policy.go:117`'s `Couldn't read the wallet policy from the payload.` is not reached (the record is not admitted) |
 | BlueWallet multisig text, `Derivation: m/48'/0'/0'/2147483648` (nonstandard/parse.go:111) | origin `m/48h/0h/0h/0h` | not a descriptor; at the scan door `Unknown format` as above |
 | `biptool derive -path m/83696968h/32h/2147483648 xprv` (cmd/biptool/main.go:143) | exit 0, derives the BIP-85 child at index 0h | exit 2, stderr `biptool: bip32: path element out of range: "2147483648"` (existing text and exit path) |
-| the device (TinyGo, 32-bit `int`), every door above | already refused: `bip32: invalid path element`, `Unknown format` / `Unrecognized tag.` / `Not a recognized address.` / `ClassUnknown` | unchanged, except that the error text becomes `bip32: path element out of range` (M1 is taken, §4) |
+| the device (TinyGo, 32-bit `int`), every device door above (all but biptool) | already refused: `bip32: invalid path element`, `Unknown format` / `Unrecognized tag.` / `Not a recognized address.` / `ClassUnknown` | unchanged, except that the error text becomes `bip32: path element out of range` (M1 is taken, §4) |
 
 PROPOSED texts for WORDING_REVIEW: none. Every text above already exists at base.
 
@@ -69,7 +69,7 @@ insert a check that returns `0, fmt.Errorf("bip32: path element out of range: %q
 with a two-line comment: BIP-32 puts normal children at 0 through 2^31-1 and BIP-380 reads an unmarked NUM as an
 unhardened step, so 2^31 or more is out of range whether or not it is marked. Leave the existing uint32 check at
 :80-82 as it is (now unreachable for the overflow case; removing it is not part of this fix). No other production file
-changes except the one-line change below. The scratch version is `design/FIX_sh_bip32_unhardened-probe.diff` (§9).
+changes except the one-line change below. The scratch version is `design/FIX_sh_bip32_unhardened-probe.diff` (§9); it holds the check but NOT the ParseInt change below, which the builder adds by hand.
 
 Also change bip32/bip32.go:75 from `strconv.ParseInt(p, 10, 0)` to `strconv.ParseInt(p, 10, 64)`, so the refusal text
 `bip32: path element out of range: %q` is the same on 32- and 64-bit builds (with bitSize 0 the 32-bit device returns
@@ -150,7 +150,7 @@ Device word size: the same rows minus gui and biptool, run with `GOARCH=386`, PA
 
 | rule | rows |
 |---|---|
-| R1 refusal, text, marked and unmarked | TestBughuntSh235ParsePathUnhardenedOverflow (`2147483648h` control, unmarked rows); TestFixShBip32UnhardenedBiptoolPath (exact text) |
+| R1 refusal, text, marked and unmarked | TestBughuntSh235ParsePathUnhardenedOverflow (`2147483648h` control, unmarked rows); TestFixShBip32UnhardenedBiptoolPath (exact text); TestFixShBip32UnhardenedPathElementOutOfRangeText (text at both word sizes, run at GOARCH=386) |
 | R2 boundaries unchanged | TestBughuntSh235ParsePathUnhardenedOverflow controls (`2147483647`, `0h`, `0'`, `2147483647h`); TestFixShBip32UnhardenedBoundaryAccepted |
 | R3 ParsePath | TestBughuntSh235ParsePathUnhardenedOverflow (`m/48h/2147483648/0`) |
 | R4 descriptor doors | TestFixShBip32UnhardenedOriginRefused, TestFixShBip32UnhardenedChildRefused, TestFixShBip32UnhardenedScanDoorUnknownFormat, TestFixShBip32UnhardenedPayloadUnknown, TestFixShBip32UnhardenedSealUnknown, TestFixShBip32UnhardenedBlueWallet |

@@ -72,9 +72,14 @@ func ParsePathElement(p string) (uint32, error) {
 		offset = hdkeychain.HardenedKeyStart
 		p = p[:len(p)-1]
 	}
-	idx, err := strconv.ParseInt(p, 10, 0)
+	idx, err := strconv.ParseInt(p, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("bip32: invalid path element: %q", p)
+	}
+	// BIP-32 puts normal children at 0 through 2^31-1 and BIP-380 reads an unmarked NUM as an
+	// unhardened step, so 2^31 or more is out of range whether or not it is marked.
+	if idx < 0 || idx >= 1<<31 {
+		return 0, fmt.Errorf("bip32: path element out of range: %q", p)
 	}
 	iu32 := uint32(idx)
 	if int64(iu32) != idx || iu32+offset < iu32 {
