@@ -275,6 +275,13 @@ func ChecksumWord(entropy []byte) Word {
 	return w % Word(len(index))
 }
 
+// MnemonicSeed derives the BIP-39 seed. The passphrase is NFKD-normalised by
+// golang.org/x/text/unicode/norm, whose Unicode version (15.0.0 in x/text
+// v0.37.0, see norm.Version) is older than the Rust primary's
+// unicode-normalization (17.0). A character assigned after Unicode 15.0 passes
+// through unnormalised here, so a passphrase using one can derive a different
+// seed than the Rust tools do. BIP-39 pins no Unicode version
+// (design/FIX_sec_sh_passphrase_nfkd.md, R1).
 func MnemonicSeed(m Mnemonic, password string) []byte {
 	var sentence []byte
 	for i, w := range m {
