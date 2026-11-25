@@ -58,6 +58,7 @@ No new holder-visible text, flag, exit code, type or command.
 | Payload door (`sysw.Classify`, sysw/record.go:132 -> sysw/descriptor.go:87) | `ClassDescriptor`, offered as a wallet policy | `ClassUnknown`: inert, offered to nobody, counted in the composer door's not-understood count (gui/composer_door.go:34-37, :57). `gui/wallet_policy.go:117`'s `Couldn't read the wallet policy from the payload.` is not reached (the record is not admitted) |
 | BlueWallet multisig text, `Derivation: m/48'/0'/0'/2147483648` (nonstandard/parse.go:111) | origin `m/48h/0h/0h/0h` | not a descriptor; at the scan door `Unknown format` as above |
 | `biptool derive -path m/83696968h/32h/2147483648 xprv` (cmd/biptool/main.go:143) | exit 0, derives the BIP-85 child at index 0h | exit 2, stderr `biptool: bip32: path element out of range: "2147483648"` (existing text and exit path) |
+| the device (TinyGo, 32-bit `int`), every door above | already refused: `bip32: invalid path element`, `Unknown format` / `Unrecognized tag.` / `Not a recognized address.` / `ClassUnknown` | unchanged, except that the error text becomes `bip32: path element out of range` (M1 is taken, §4) |
 
 PROPOSED texts for WORDING_REVIEW: none. Every text above already exists at base.
 
@@ -68,7 +69,12 @@ insert a check that returns `0, fmt.Errorf("bip32: path element out of range: %q
 with a two-line comment: BIP-32 puts normal children at 0 through 2^31-1 and BIP-380 reads an unmarked NUM as an
 unhardened step, so 2^31 or more is out of range whether or not it is marked. Leave the existing uint32 check at
 :80-82 as it is (now unreachable for the overflow case; removing it is not part of this fix). No other production file
-changes. The scratch version is `design/FIX_sh_bip32_unhardened-probe.diff` (§9).
+changes except the one-line change below. The scratch version is `design/FIX_sh_bip32_unhardened-probe.diff` (§9).
+
+Also change bip32/bip32.go:75 from `strconv.ParseInt(p, 10, 0)` to `strconv.ParseInt(p, 10, 64)`, so the refusal text
+`bip32: path element out of range: %q` is the same on 32- and 64-bit builds (with bitSize 0 the 32-bit device returns
+`bip32: invalid path element` for 2147483648 and above; the reviewer measured `path element out of range` for
+`2147483648`, `4294967295`, `4294967296` and `2147483648h` on both GOARCH=386 and amd64).
 
 ## 5. Callers (grep `ParsePathElement(\|ParsePath(` over non-test .go files at base)
 
