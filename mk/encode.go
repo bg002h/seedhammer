@@ -1,11 +1,13 @@
 package mk
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
+	btcaddr "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
 	"seedhammer.com/bip32"
 	"seedhammer.com/codex32"
@@ -20,6 +22,11 @@ var (
 	errEncodePath      = errors.New("mk: invalid path")
 	errEncodeCompact   = errors.New("mk: compact-73 length mismatch")
 	errEncodeNetwork   = errors.New("mk: network does not match the xpub version")
+	// The key-origin rules of mk-codec 0.6.0 (bytecode/encode.rs
+	// check_key_rules, R2-R4): mint-time refusals only.
+	errEncodeMasterParentFP = errors.New("mk: depth-0 key has a non-zero parent fingerprint")
+	errEncodeMasterFP       = errors.New("mk: depth-0 origin fingerprint is not the key's own")
+	errEncodeOriginParentFP = errors.New("mk: depth-1 origin fingerprint is not the xpub's parent fingerprint")
 )
 
 const (
@@ -47,7 +54,73 @@ func Encode(card Card) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// After the structural checks, as in Rust's validate_card (check_structure
+	// then check_key_rules). NOT inside encodeBytecode: DerivedChunkSetID
+	// re-encodes an already-DECODED card, which may be a legacy card minted
+	// before the rules, and Rust's canonical payload skips them for exactly
+	// that reason ("canonical_payload_bytes keeps accepting a decoded legacy
+	// card").
+	if err := checkKeyRules(card); err != nil {
+		return nil, err
+	}
 	return encodeChunks(bytecode)
+}
+
+// checkKeyRules is the port of mk-codec 0.6.0's check_key_rules (mnemonic-key
+// crates/mk-codec/src/bytecode/encode.rs; bug hunt 2026-11-25 SH#4). Before it,
+// Encode minted a card whose stated origin fingerprint contradicts its own
+// xpub -- reachable through the re-mint of an imported card (the composer's,
+// reStubMk1) -- while the Rust encoder refuses it. Decoding is unaffected.
+//
+//   - R2, depth 0: the parent fingerprint must be 00000000.
+//   - R3, depth 0: a present origin fingerprint must be the key's own
+//     (hash160(pubkey)[0:4]); the one exemption is an all-zero chain code
+//     with origin 00000000.
+//   - R4, depth 1: a present origin fingerprint must be the xpub's parent
+//     fingerprint. No exemption.
+//
+// Depth 2 and deeper carry no rule. Called only after encodeBytecode accepted
+// the card, so the xpub and the fingerprint are already known to parse.
+func checkKeyRules(card Card) error {
+	key, err := hdkeychain.NewKeyFromString(card.Xpub)
+	if err != nil {
+		return errEncodeXpub
+	}
+	var fp []byte
+	if card.Fingerprint != "" {
+		if fp, err = hex.DecodeString(card.Fingerprint); err != nil || len(fp) != 4 {
+			return errEncodeFP
+		}
+	}
+	fpU32 := func(b []byte) uint32 {
+		return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	}
+	switch key.Depth() {
+	case 0:
+		if key.ParentFingerprint() != 0 {
+			return errEncodeMasterParentFP
+		}
+		if fp == nil {
+			return nil
+		}
+		pub, err := key.ECPubKey()
+		if err != nil {
+			return errEncodeXpub
+		}
+		own := btcaddr.Hash160(pub.SerializeCompressed())[:4]
+		if bytes.Equal(fp, own) {
+			return nil
+		}
+		zeroOK := bytes.Equal(key.ChainCode(), make([]byte, 32)) && fpU32(fp) == 0
+		if !zeroOK {
+			return errEncodeMasterFP
+		}
+	case 1:
+		if fp != nil && fpU32(fp) != key.ParentFingerprint() {
+			return errEncodeOriginParentFP
+		}
+	}
+	return nil
 }
 
 // DerivedChunkSetID is the SPEC "device-csid-warning" Contract 1 export: the
