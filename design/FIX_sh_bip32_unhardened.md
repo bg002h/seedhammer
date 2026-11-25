@@ -15,11 +15,7 @@ All line anchors below are at that base.
 marker and a value of 2^31 or more therefore passes, and its value lands in the hardened half: `2147483648` becomes
 `0x80000000` (0h) and `4294967295` becomes `0xffffffff` (2147483647h).
 
-The parser is on the device's descriptor path. `bip380.ParseKey` reads the key origin through `bip32.ParsePath`
-(bip380/bip380.go:401) and every use-site step through `bip32.ParsePathElement` (:498, :502, :516). A scanned
-`wpkh([d34db33f/84h/0h/2147483648]tpub.../0/*)` is accepted and carried with origin `m/84h/0h/0h`, which is not the
-text that was scanned, onto the descriptor screen and into what the device engraves (RED row
-`TestFixShBip32UnhardenedScanDoorUnknownFormat`, §6).
+The parser is on the descriptor path (`bip380.ParseKey` origin via `bip32.ParsePath`, bip380/bip380.go:401; use-site steps via `ParsePathElement`, :498, :502, :516). The acceptance happens only where Go's `int` is 64 bits: `strconv.ParseInt(p, 10, 0)` uses the `int` width, which is 32 bits on the SeedHammer II (TinyGo, scripts/test-32bit.sh:5-6). There, 2147483648 and above already fail with `bip32: invalid path element`, and the descriptor is already refused (`Unknown format`). On 64-bit builds (host biptool, the js/wasm emulator, the host test suite), a scanned `wpkh([d34db33f/84h/0h/2147483648]tpub.../0/*)` is accepted with origin `m/84h/0h/0h`. The fix makes every build refuse it, as the device already does.
 
 ### The rule, from the source text (bitcoin/bips master, fetched 2026-11-24)
 
@@ -43,7 +39,7 @@ is added. The fix refuses an element whose digits are 2^31 or more, marked or no
   stripped). It is checked after `ParseInt` succeeds and before the hardened offset is added.
 - R2. Every value that parsed before and is below 2^31 parses to the same uint32 as before; `0h`/`0'` give
   0x80000000 and `2147483647h` gives 0xffffffff. Every element refused before stays refused with the same text
-  (`2147483648h` and `-1` already gave `bip32: path element out of range`; the new check gives the identical text).
+  (on 64-bit builds `2147483648h` and `-1` already gave `bip32: path element out of range`; on the 32-bit device `2147483648h` gave `bip32: invalid path element`).
 - R3. `ParsePath` refuses any path that holds such an element (it calls `ParsePathElement`, bip32.go:94). No caller
   changes.
 - R4. A descriptor text carrying such an element at the origin or at a use-site step is not a descriptor
@@ -54,7 +50,7 @@ No new holder-visible text, flag, exit code, type or command.
 
 ## 3. Holder-visible changes (complete list)
 
-| where | at base | after the fix |
+| where | at base, 64-bit builds (host biptool, wasm emulator, host tests) | after the fix |
 |---|---|---|
 | NFC scan, main screen: `wpkh([d34db33f/84h/0h/2147483648]K/0/*)` (origin element) | descriptor screen opens; origin shown and engraved as `m/84h/0h/0h` | `scanner.Scan` (gui/scan.go:87) gets an error from `nonstandard.OutputDescriptor`, every later arm declines, so it returns `errScanUnknownFormat` (:105); `startScanner` sets `scanUnknownFormat` (gui/nfc_scan.go:87-88); the main screen subtitle reads the existing text **`Unknown format`** (gui/gui.go:2400-2401) |
 | NFC scan, main screen: `wpkh([fp/84h/0h/0h]K/2147483648/*)` (use-site element) | parsed as a hardened `/0h/*` child; already refused by `sysw.UseSitesOK` in `engraveObjectFlow` (gui/gui.go:2644-2648), which shows `Unknown format` | same text `Unknown format`, now from the scanner (`errScanUnknownFormat`). No visible change |
@@ -141,6 +137,8 @@ RED command (run on base a042d824 with the tests added and the skip removed; Go 
 | TestFixShBip32UnhardenedSealUnknown | FAIL `Classify(...) = output descriptor, want ClassUnknown` | PASS |
 | TestFixShBip32UnhardenedScanDoorUnknownFormat | FAIL `scan "wpkh([d34db33f/84h/0h/2147483648]tpub.../0/*)" = descriptor with origin m/84h/0h/0h ..., err <nil>; want errScanUnknownFormat`; the use-site text likewise (`children [{... Hardened:true ...}`) | PASS |
 | TestFixShBip32UnhardenedBoundaryAccepted | PASS (control) | PASS |
+
+Device word size: the same rows minus gui and biptool, run with `GOARCH=386`, PASS at base (`ok` for bip32, bip380, nonstandard, sysw and seal), because the device's 32-bit `strconv.ParseInt(p, 10, 0)` already refuses. The RED rows are 64-bit-build rows.
 
 ## 7. Coverage map (rule -> rows)
 
