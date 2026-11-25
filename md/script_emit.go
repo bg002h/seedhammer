@@ -209,6 +209,22 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		if !ok || len(c.children) != 1 {
 			return ErrScriptUnsupported
 		}
+		// CHECK-IDEMPOTENCE over a bare key (port of md-codec to_miniscript.rs
+		// `to-miniscript-check-pkh-double-wrap`). A bare PkK/PkH already IS
+		// `c:pk_k`/`c:pk_h` (the arms above emit its OP_CHECKSIG), so
+		// `Check(PkK)` and `Check(PkH)` denote the SAME fragment as the bare
+		// tag. The toolkit before 0.55.0 and md-cli before 0.30 wrote that
+		// shape for every pk()/pkh() outside tap context, and such cards are
+		// already engraved. Appending a second OP_CHECKSIG built
+		// `<K> CHECKSIG CHECKSIG`: an unsatisfiable script whose address
+		// belongs to no wallet the Rust tools derive (bug hunt 2026-11-25
+		// SH#1). Only a bare-key child with a key-argument body is unwrapped,
+		// exactly as Rust matches it; every other child keeps the c: below.
+		if k := c.children[0]; k.tag == tagPkK || k.tag == tagPkH {
+			if _, ok := k.body.(keyArgBody); ok {
+				return emitFragment(k, e, out)
+			}
+		}
 		if err := emitFragment(c.children[0], e, out); err != nil {
 			return err
 		}

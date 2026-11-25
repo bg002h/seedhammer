@@ -112,11 +112,20 @@ func describeTapLeaf(n node) (TapLeaf, error) {
 		}
 		return TapLeaf{Kind: TapLeafPK, KeyIndices: []uint8{b.index}, K: 1}, nil
 	case tagCheck:
+		// Unwrap ONLY a bare key (PkK/PkH with a key argument), the one child
+		// over which `c:` is idempotent in the Rust primary and in
+		// emitFragment's tagCheck arm. Unwrapping any child described
+		// `Check(Check(PkK))` as a plain pk leaf, a tree the emitter and Rust
+		// both read differently (bug hunt 2026-11-25 SH#1, describe vs emit).
 		b, ok := n.body.(childrenBody)
 		if !ok || len(b.children) != 1 {
 			return TapLeaf{}, errTapLeafUnsupported
 		}
-		return describeTapLeaf(b.children[0])
+		k := b.children[0]
+		if k.tag != tagPkK && k.tag != tagPkH {
+			return TapLeaf{}, errTapLeafUnsupported
+		}
+		return describeTapLeaf(k)
 	case tagMultiA, tagSortedMultiA:
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
