@@ -169,7 +169,8 @@
     "use-site-non-consecutive": "S6 row 32 -- a non-consecutive multipath (conjunct 7)",
     "use-site-out-of-set": "S6 row 33 -- any other use-site path shape (conjunct 7's closed set)",
     "md1-no-wildcard": "S6 row 34 -- a multipath with no trailing wildcard under `--as md1` (S5.3(a''))",
-    "multi-record-descriptor": "S6 row 35 -- a multi-record input whose records include a descriptor, `--as` absent"
+    "multi-record-descriptor": "S6 row 35 -- a multi-record input whose records include a descriptor, `--as` absent",
+    "md1-origin-mismatch": "S6 row 36 -- under `--as md1`, a key whose origin contradicts its own depth or child number (amended 2026-11-25, bug hunt E3)"
   },
   "vectors": [
     {
