@@ -173,10 +173,23 @@ func PolicyShapeChunks(strs []string) (PolicyShape, error) {
 	return policyShape(d.tree), nil
 }
 
-// policyShape walks a decoded tree. It never errors: an unrecognised shape is
-// reported as Complete=false, because "I do not understand this" is a RESULT the
-// caller must act on, not an exception to swallow.
+// policyShape summarizes a decoded tree. It never errors: an unrecognised shape
+// is reported as Complete=false, because "I do not understand this" is a RESULT
+// the caller must act on, not an exception to swallow. A tree that is not typed
+// miniscript in its context (treeTypeChecks, THE TYPE RULE of md review r2 I-1)
+// is also Complete=false: Complete = walk && typed, and every other field is
+// left as the walk left it (md-codec policy_shape, descriptor-mnemonic
+// ca48a05e).
 func policyShape(tree node) PolicyShape {
+	s := walkShape(tree)
+	if !treeTypeChecks(tree) {
+		s.Complete = false
+	}
+	return s
+}
+
+// walkShape is the structural walk behind policyShape, before the type rule.
+func walkShape(tree node) PolicyShape {
 	s := PolicyShape{Complete: true}
 	switch tree.tag {
 	case tagTr:

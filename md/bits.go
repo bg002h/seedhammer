@@ -20,9 +20,15 @@
 // the whole rule for a thresh. A thresh(k<n) at a path root whose every child
 // is on the allowlist is ONE any-of entry (Branch.AnyK/AnyN); a k == n thresh
 // is a conjunction only over the same allowlist; every other thresh makes the
-// shape incomplete. The allowlist is the type check this port does not have.
-// md/policy_shape_cases_test.go holds the walk to Rust's shape on every
-// vendored case.
+// shape incomplete. THE TYPE RULE (md review r2 I-1, descriptor-mnemonic
+// ca48a05e; vectors re-vendored from a7680cf2 with `git show`) then ANDs in
+// whether the tree is typed miniscript in its context: Complete = walk &&
+// treeTypeChecks, a port of rust-miniscript's correctness and global checks
+// over md's conversion rules (md/policy_typecheck.go). It also requires every
+// tap leaf's root to be B, which md review r3 adds and the a7680cf2 pin does
+// not yet have. md/policy_shape_cases_test.go holds the walk and the type rule
+// to Rust on every vendored case; md/policy_shape_props_test.go enumerates
+// the thresh allowlist.
 //
 // Known lags, each with a follow-up: pathless shared origins (F-166);
 // md-codec's compose `--unspendable` selection and SPEC §6's kind-1 mint

@@ -1,6 +1,7 @@
 package md
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +48,10 @@ type shapeCase struct {
 	Tree      jsonNode `json:"tree"`
 	MD1       []string `json:"md1"`
 	MD1Absent *string  `json:"md1_absent"`
+	// Typed is Rust's policy_type_checks answer (THE TYPE RULE, md review r2
+	// I-1). A pointer so a file that lost the field fails instead of reading
+	// as false.
+	Typed     *bool `json:"typed"`
 	ShapeRust struct {
 		Complete bool              `json:"complete"`
 		KeyPath  string            `json:"key_path"`
@@ -56,9 +61,9 @@ type shapeCase struct {
 }
 
 // policyShapeCaseCount is the number of cases at the pinned primary commit
-// (descriptor-mnemonic d05655ac). A count, not ">0": a truncated copy that kept
+// (descriptor-mnemonic a7680cf2). A count, not ">0": a truncated copy that kept
 // one case would otherwise pass.
-const policyShapeCaseCount = 67
+const policyShapeCaseCount = 84
 
 func policyShapeCases(t *testing.T) []shapeCase {
 	t.Helper()
@@ -84,14 +89,29 @@ func policyShapeCases(t *testing.T) []shapeCase {
 		Format int         `json:"format"`
 		Cases  []shapeCase `json:"cases"`
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
+	// An unknown field fails: a field the primary adds is a rule this reader
+	// does not yet compare, and silently ignoring it would pass a port that
+	// disagrees with it.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&doc); err != nil {
+		t.Fatalf("policy_shape_cases.json: %v", err)
 	}
 	if doc.Format != 1 {
 		t.Fatalf("policy_shape_cases.json is format %d; this reader knows format 1", doc.Format)
 	}
 	if len(doc.Cases) != policyShapeCaseCount {
 		t.Fatalf("policy_shape_cases.json carries %d cases, want %d", len(doc.Cases), policyShapeCaseCount)
+	}
+	for _, c := range doc.Cases {
+		if c.Typed == nil {
+			t.Fatalf("case %s carries no typed answer", c.Name)
+		}
+		// THE TYPE RULE: complete = walk && typed. A file that says an
+		// untyped tree is complete contradicts its own rule.
+		if !*c.Typed && c.ShapeRust.Complete {
+			t.Fatalf("case %s: typed false but shape complete", c.Name)
+		}
 	}
 	return doc.Cases
 }
@@ -221,10 +241,35 @@ func TestPolicyShapeAgreesWithRustCases(t *testing.T) {
 			}
 		})
 	}
-	// 64 of the 67 carry a card; md1_absent names why the other three cannot
+	// 81 of the 84 carry a card; md1_absent names why the other three cannot
 	// (k = 0, k > n, no placeholder).
-	if fromCard != 64 {
-		t.Errorf("%d cases compared from a card, want 64", fromCard)
+	if fromCard != 81 {
+		t.Errorf("%d cases compared from a card, want 81", fromCard)
+	}
+}
+
+// TestPolicyTypeChecksAgreesWithRustCases compares THE TYPE RULE on its own,
+// case by case, against Rust's recorded `typed` -- including the cases whose
+// walk is already incomplete, where the shape comparison alone could not tell a
+// wrong type checker from a right one.
+func TestPolicyTypeChecksAgreesWithRustCases(t *testing.T) {
+	for _, c := range policyShapeCases(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			tree := buildNode(t, c.Tree)
+			if got := treeTypeChecks(tree); got != *c.Typed {
+				t.Errorf("from tree: treeTypeChecks = %v, Rust typed = %v", got, *c.Typed)
+			}
+			if c.MD1 == nil {
+				return
+			}
+			d, err := Reassemble(c.MD1)
+			if err != nil {
+				t.Fatalf("from md1: decode: %v", err)
+			}
+			if got := treeTypeChecks(d.tree); got != *c.Typed {
+				t.Errorf("from md1: treeTypeChecks = %v, Rust typed = %v", got, *c.Typed)
+			}
+		})
 	}
 }
 
@@ -233,8 +278,14 @@ func TestPolicyShapeAgreesWithRustCases(t *testing.T) {
 // conjunctions over a thresh, and any-of entries, both all-key and mixed and
 // keyless.
 func TestPolicyShapeCasesCoverEveryVerdict(t *testing.T) {
-	var incomplete, conj, allKeys, mixed, keyless int
+	var incomplete, conj, allKeys, mixed, keyless, untypedWalkComplete int
 	for _, c := range policyShapeCases(t) {
+		// The type rule must be load-bearing in the file: some untyped tree
+		// must be one the walk alone would summarize (or_b(pk, thresh) is
+		// the review's example), or the rule's tests prove nothing.
+		if !*c.Typed && walkShape(buildNode(t, c.Tree)).Complete {
+			untypedWalkComplete++
+		}
 		if !c.ShapeRust.Complete {
 			incomplete++
 			continue
@@ -252,8 +303,8 @@ func TestPolicyShapeCasesCoverEveryVerdict(t *testing.T) {
 			}
 		}
 	}
-	if incomplete == 0 || conj == 0 || allKeys == 0 || mixed == 0 || keyless == 0 {
-		t.Fatalf("vendored cases lost a class: incomplete %d, conjunction %d, all-key %d, mixed %d, keyless %d",
-			incomplete, conj, allKeys, mixed, keyless)
+	if incomplete == 0 || conj == 0 || allKeys == 0 || mixed == 0 || keyless == 0 || untypedWalkComplete == 0 {
+		t.Fatalf("vendored cases lost a class: incomplete %d, conjunction %d, all-key %d, mixed %d, keyless %d, untyped-but-walk-complete %d",
+			incomplete, conj, allKeys, mixed, keyless, untypedWalkComplete)
 	}
 }
