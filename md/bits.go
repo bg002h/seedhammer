@@ -21,7 +21,7 @@
 // is on the allowlist is ONE any-of entry (Branch.AnyK/AnyN); a k == n thresh
 // is a conjunction only over the same allowlist; every other thresh makes the
 // shape incomplete. THE TYPE RULE (md reviews r2 I-1, r3, r4; descriptor-mnemonic
-// ca48a05e, f8b4a675, 5ad5a9b2; vectors re-vendored from 2d5c9935 with `git show`)
+// ca48a05e, f8b4a675, 5ad5a9b2; vectors re-vendored from 1dac0e10 with `git show`)
 // then ANDs in whether the tree is valid miniscript in its context: Complete =
 // walk && treeTypeChecks, a port of rust-miniscript's type, placement,
 // script-size and satisfaction-limit checks (within_resource_limits) over

@@ -18,7 +18,7 @@ import (
 type depthCase struct {
 	name  string
 	tree  node
-	typed bool // treeTypeChecks, cross-checked against md-codec 2d5c9935
+	typed bool // treeTypeChecks, cross-checked against md-codec 2d5c9935 (unchanged at 1dac0e10)
 	walk  bool // walkShape's Complete
 }
 

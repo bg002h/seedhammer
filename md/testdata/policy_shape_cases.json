@@ -7276,6 +7276,236 @@
       "typed": true
     },
     {
+      "md1": [
+        "md1f2yujqspy6tvyyy4qqxpye5d8xqzyxg2vwsj5kc6ulpr9xnx35ucqgsepf36z2jmr5vgfcu4fhp3ym",
+        "md1f2yujqs2ulpr9xnx35ucqgsepf36z2jmrtnuyv5c6wvqygvs5cap9fd34e7zx2vq3dr5c036p86ra"
+      ],
+      "md1_absent": null,
+      "name": "typed_witness_items_84",
+      "shape": {
+        "branches": [
+          {
+            "any_of": null,
+            "depth": 0,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "sorted": false
+          }
+        ],
+        "complete": true,
+        "key_path": "NotTaproot",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": [
+            {
+              "body": {
+                "data": [
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": {
+                              "indices": [
+                                0,
+                                1,
+                                2,
+                                3,
+                                4,
+                                5,
+                                6,
+                                7,
+                                8,
+                                9,
+                                10,
+                                11,
+                                12,
+                                13,
+                                14,
+                                15,
+                                16,
+                                17,
+                                18,
+                                19
+                              ],
+                              "k": 20
+                            },
+                            "kind": "MultiKeys"
+                          },
+                          "tag": "Multi"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "Verify"
+                  },
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": [
+                              {
+                                "body": {
+                                  "data": {
+                                    "indices": [
+                                      0,
+                                      1,
+                                      2,
+                                      3,
+                                      4,
+                                      5,
+                                      6,
+                                      7,
+                                      8,
+                                      9,
+                                      10,
+                                      11,
+                                      12,
+                                      13,
+                                      14,
+                                      15,
+                                      16,
+                                      17,
+                                      18,
+                                      19
+                                    ],
+                                    "k": 20
+                                  },
+                                  "kind": "MultiKeys"
+                                },
+                                "tag": "Multi"
+                              }
+                            ],
+                            "kind": "Children"
+                          },
+                          "tag": "Verify"
+                        },
+                        {
+                          "body": {
+                            "data": [
+                              {
+                                "body": {
+                                  "data": [
+                                    {
+                                      "body": {
+                                        "data": {
+                                          "indices": [
+                                            0,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7,
+                                            8,
+                                            9,
+                                            10,
+                                            11,
+                                            12,
+                                            13,
+                                            14,
+                                            15,
+                                            16,
+                                            17,
+                                            18,
+                                            19
+                                          ],
+                                          "k": 20
+                                        },
+                                        "kind": "MultiKeys"
+                                      },
+                                      "tag": "Multi"
+                                    }
+                                  ],
+                                  "kind": "Children"
+                                },
+                                "tag": "Verify"
+                              },
+                              {
+                                "body": {
+                                  "data": {
+                                    "indices": [
+                                      0,
+                                      1,
+                                      2,
+                                      3,
+                                      4,
+                                      5,
+                                      6,
+                                      7,
+                                      8,
+                                      9,
+                                      10,
+                                      11,
+                                      12,
+                                      13,
+                                      14,
+                                      15,
+                                      16,
+                                      17,
+                                      18,
+                                      19
+                                    ],
+                                    "k": 20
+                                  },
+                                  "kind": "MultiKeys"
+                                },
+                                "tag": "Multi"
+                              }
+                            ],
+                            "kind": "Children"
+                          },
+                          "tag": "AndV"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "AndV"
+                  }
+                ],
+                "kind": "Children"
+              },
+              "tag": "AndV"
+            }
+          ],
+          "kind": "Children"
+        },
+        "tag": "Wsh"
+      },
+      "typed": true
+    },
+    {
       "md1": null,
       "md1_absent": "threshold k=0 out of range; require 1 ≤ k ≤ 32",
       "name": "thresh_neg_k_zero",
@@ -13605,6 +13835,284 @@
                 "kind": "Children"
               },
               "tag": "OrI"
+            }
+          ],
+          "kind": "Children"
+        },
+        "tag": "Wsh"
+      },
+      "typed": false
+    },
+    {
+      "md1": [
+        "md1fvjdvpqpy6tvyyy4qqxpye5d8xqzyxg2vwsj5kc6ulpr9xnx35ucqg33pnf4cvc36gl",
+        "md1fvjdvpq2ry9x8gf2tvdw0s3jnfng6wvqygvs5cap9fd34e7zx2dxdzcslt570q99ml2",
+        "md1fvjdvpq48xqzyxg2vwsj5kc6ulpr9xxnnqpzry9x8gf2tvdw0s3jnq20dgjz3h9yctp"
+      ],
+      "md1_absent": null,
+      "name": "untyped_witness_items_over_100",
+      "shape": {
+        "branches": [
+          {
+            "any_of": null,
+            "depth": 0,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "sorted": false
+          }
+        ],
+        "complete": false,
+        "key_path": "NotTaproot",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": [
+            {
+              "body": {
+                "data": [
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": {
+                              "indices": [
+                                0,
+                                1,
+                                2,
+                                3,
+                                4,
+                                5,
+                                6,
+                                7,
+                                8,
+                                9,
+                                10,
+                                11,
+                                12,
+                                13,
+                                14,
+                                15,
+                                16,
+                                17,
+                                18,
+                                19
+                              ],
+                              "k": 20
+                            },
+                            "kind": "MultiKeys"
+                          },
+                          "tag": "Multi"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "Verify"
+                  },
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": [
+                              {
+                                "body": {
+                                  "data": {
+                                    "indices": [
+                                      0,
+                                      1,
+                                      2,
+                                      3,
+                                      4,
+                                      5,
+                                      6,
+                                      7,
+                                      8,
+                                      9,
+                                      10,
+                                      11,
+                                      12,
+                                      13,
+                                      14,
+                                      15,
+                                      16,
+                                      17,
+                                      18,
+                                      19
+                                    ],
+                                    "k": 20
+                                  },
+                                  "kind": "MultiKeys"
+                                },
+                                "tag": "Multi"
+                              }
+                            ],
+                            "kind": "Children"
+                          },
+                          "tag": "Verify"
+                        },
+                        {
+                          "body": {
+                            "data": [
+                              {
+                                "body": {
+                                  "data": [
+                                    {
+                                      "body": {
+                                        "data": {
+                                          "indices": [
+                                            0,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7,
+                                            8,
+                                            9,
+                                            10,
+                                            11,
+                                            12,
+                                            13,
+                                            14,
+                                            15,
+                                            16,
+                                            17,
+                                            18,
+                                            19
+                                          ],
+                                          "k": 20
+                                        },
+                                        "kind": "MultiKeys"
+                                      },
+                                      "tag": "Multi"
+                                    }
+                                  ],
+                                  "kind": "Children"
+                                },
+                                "tag": "Verify"
+                              },
+                              {
+                                "body": {
+                                  "data": [
+                                    {
+                                      "body": {
+                                        "data": [
+                                          {
+                                            "body": {
+                                              "data": {
+                                                "indices": [
+                                                  0,
+                                                  1,
+                                                  2,
+                                                  3,
+                                                  4,
+                                                  5,
+                                                  6,
+                                                  7,
+                                                  8,
+                                                  9,
+                                                  10,
+                                                  11,
+                                                  12,
+                                                  13,
+                                                  14,
+                                                  15,
+                                                  16,
+                                                  17,
+                                                  18,
+                                                  19
+                                                ],
+                                                "k": 20
+                                              },
+                                              "kind": "MultiKeys"
+                                            },
+                                            "tag": "Multi"
+                                          }
+                                        ],
+                                        "kind": "Children"
+                                      },
+                                      "tag": "Verify"
+                                    },
+                                    {
+                                      "body": {
+                                        "data": {
+                                          "indices": [
+                                            0,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7,
+                                            8,
+                                            9,
+                                            10,
+                                            11,
+                                            12,
+                                            13,
+                                            14,
+                                            15,
+                                            16,
+                                            17,
+                                            18,
+                                            19
+                                          ],
+                                          "k": 20
+                                        },
+                                        "kind": "MultiKeys"
+                                      },
+                                      "tag": "Multi"
+                                    }
+                                  ],
+                                  "kind": "Children"
+                                },
+                                "tag": "AndV"
+                              }
+                            ],
+                            "kind": "Children"
+                          },
+                          "tag": "AndV"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "AndV"
+                  }
+                ],
+                "kind": "Children"
+              },
+              "tag": "AndV"
             }
           ],
           "kind": "Children"

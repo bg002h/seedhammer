@@ -6,9 +6,9 @@
   ],
   "repo": "descriptor-mnemonic",
   "remote": "git@github.com:bg002h/descriptor-mnemonic.git",
-  "commit": "2d5c9935b844ddaee226f37a99476464c0203cb0",
+  "commit": "1dac0e1001893cee3adf76e99e4a37e7124d9492",
   "read_from": "git show <commit>:<path>",
   "path": "crates/md-codec/tests/fixtures/policy_shape/cases.json",
-  "sha256": "e1e2aab38fa8e2fbaf6c759d4e28ffb9a9966fa107d243ec887d1125b5df49c4",
+  "sha256": "325792c57df18950380a2db8916fbefb7b58295d56ca1c4768b2382dceabfc3e",
   "recorded_at": "2026-11-26"
 }

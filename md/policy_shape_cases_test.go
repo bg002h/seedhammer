@@ -61,9 +61,9 @@ type shapeCase struct {
 }
 
 // policyShapeCaseCount is the number of cases at the pinned primary commit
-// (descriptor-mnemonic 2d5c9935). A count, not ">0": a truncated copy that kept
+// (descriptor-mnemonic 1dac0e10). A count, not ">0": a truncated copy that kept
 // one case would otherwise pass.
-const policyShapeCaseCount = 104
+const policyShapeCaseCount = 106
 
 func policyShapeCases(t *testing.T) []shapeCase {
 	t.Helper()
@@ -241,10 +241,10 @@ func TestPolicyShapeAgreesWithRustCases(t *testing.T) {
 			}
 		})
 	}
-	// 100 of the 104 carry a card; md1_absent names why the other four cannot
+	// 102 of the 106 carry a card; md1_absent names why the other four cannot
 	// (k = 0, k > n, no placeholder, multi in a tap leaf).
-	if fromCard != 100 {
-		t.Errorf("%d cases compared from a card, want 100", fromCard)
+	if fromCard != 102 {
+		t.Errorf("%d cases compared from a card, want 102", fromCard)
 	}
 }
 
@@ -306,5 +306,50 @@ func TestPolicyShapeCasesCoverEveryVerdict(t *testing.T) {
 	if incomplete == 0 || conj == 0 || allKeys == 0 || mixed == 0 || keyless == 0 || untypedWalkComplete == 0 {
 		t.Fatalf("vendored cases lost a class: incomplete %d, conjunction %d, all-key %d, mixed %d, keyless %d, untyped-but-walk-complete %d",
 			incomplete, conj, allKeys, mixed, keyless, untypedWalkComplete)
+	}
+}
+
+// TestWitnessItemLimitVectors pins the two Rust vectors for Segwitv0's
+// 100-witness-item limit (review r2 m-2; descriptor-mnemonic 1dac0e10): five
+// chained 20-of-20 multis need 105 items with the script and are refused by
+// that limit alone (3415 bytes, 105 ops, both under their limits), while four
+// need 84 and type-check. The walk accepts both, so only the type rule tells
+// them apart, from the tree and from the card.
+func TestWitnessItemLimitVectors(t *testing.T) {
+	want := map[string]bool{"untyped_witness_items_over_100": false, "typed_witness_items_84": true}
+	for _, c := range policyShapeCases(t) {
+		typed, ok := want[c.Name]
+		if !ok {
+			continue
+		}
+		delete(want, c.Name)
+		t.Run(c.Name, func(t *testing.T) {
+			if *c.Typed != typed {
+				t.Fatalf("Rust typed = %v, want %v", *c.Typed, typed)
+			}
+			if c.MD1 == nil {
+				t.Fatal("no card")
+			}
+			d, err := Reassemble(c.MD1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !walkShape(d.tree).Complete {
+				t.Fatal("walk refused; the vector no longer isolates the limit")
+			}
+			if got := treeTypeChecks(d.tree); got != typed {
+				t.Errorf("treeTypeChecks = %v, want %v", got, typed)
+			}
+			shape, err := PolicyShapeChunks(c.MD1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if shape.Complete != typed {
+				t.Errorf("PolicyShapeChunks Complete = %v, want %v", shape.Complete, typed)
+			}
+		})
+	}
+	for name := range want {
+		t.Errorf("vendored file has no case %q", name)
 	}
 }
