@@ -213,7 +213,7 @@ type typeRuleCase struct {
 // typeRuleCases are the trees review r1 m-1 named, and the context rules the
 // vendored file does not reach. Each answer is the one rust-miniscript gives
 // (the reasoning is in the comment). A differential probe of
-// descriptor-mnemonic 6ca7e05c agreed on every row md can encode as a card;
+// descriptor-mnemonic 2d5c9935 agreed on every row md can encode as a card;
 // tr(multi), the 67/68-key rows and the six-multi rows have no card (md
 // refuses a multi leaf and n > 32), so their answers are checked against
 // rust-miniscript's source arithmetic only.
@@ -318,14 +318,16 @@ func typeRuleCases() []typeRuleCase {
 		// way.
 		{"wsh(thresh multi x5)", tpWsh(multiThresh(5)), true, false},
 		{"wsh(thresh multi x6)", tpWsh(multiThresh(6)), false, false},
-		// Some satisfaction must exist in wsh/sh; a tap leaf's local checks
-		// do not ask (Tap::check_local_consensus_validity reads sat_data only
-		// when it is Some), so Rust and this port summarize the never-
-		// spendable leaf as a one-key path. Reported to the primary; a port
-		// follows Rust here, it does not lead.
+		// Some satisfaction must exist in wsh/sh, and in every tap leaf
+		// (md review r4: rust-miniscript's Tap checks skip it, md-codec adds
+		// it), so one never-spendable leaf refuses the whole tr.
 		{"wsh(and_v(v:pk,0))", tpWsh(tpPair(tagAndV, v(pk(0)), tpEmpty(tagFalse))), false, false},
-		{"tr(and_v(v:pk,0))", tpTrLeaf(tpPair(tagAndV, v(pk(0)), tpEmpty(tagFalse))), true, true},
-		// ExtData::threshold satisfies the k+1 costliest children (`i <= k`)
+		{"tr(and_v(v:pk,0))", tpTrLeaf(tpPair(tagAndV, v(pk(0)), tpEmpty(tagFalse))), false, false},
+		{"tr({pk,0})", node{tag: tagTr, body: trBody{ik: InternalKeyNUMS, tree: func() *node {
+			x := tpPair(tagTapTree, pk(0), tpEmpty(tagFalse))
+			return &x
+		}()}}, false, false},
+		// ExtData::threshold satisfies the min(k+1, n) costliest children (`i <= k`)
 		// and counts a missing satisfaction as none at all, so a never-
 		// satisfiable s:or_i(0,0) child sinks the thresh when k+1 reaches it
 		// (Rust's own measured example) and not when it does not.

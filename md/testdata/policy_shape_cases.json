@@ -6248,6 +6248,216 @@
     },
     {
       "md1": [
+        "md1f07zcqqpqjtvyyy4qqxpxsgeg8zjw9gue3gsqtll9enwmk82te"
+      ],
+      "md1_absent": null,
+      "name": "thresh_neg_ori_two_zero_2of4",
+      "shape": {
+        "branches": [],
+        "complete": false,
+        "key_path": "NotTaproot",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": [
+            {
+              "body": {
+                "data": {
+                  "children": [
+                    {
+                      "body": {
+                        "data": {
+                          "index": 0
+                        },
+                        "kind": "KeyArg"
+                      },
+                      "tag": "PkK"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": {
+                                "index": 1
+                              },
+                              "kind": "KeyArg"
+                            },
+                            "tag": "PkK"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": {
+                                "index": 2
+                              },
+                              "kind": "KeyArg"
+                            },
+                            "tag": "PkK"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": [
+                                {
+                                  "body": {
+                                    "kind": "Empty"
+                                  },
+                                  "tag": "False"
+                                },
+                                {
+                                  "body": {
+                                    "kind": "Empty"
+                                  },
+                                  "tag": "False"
+                                }
+                              ],
+                              "kind": "Children"
+                            },
+                            "tag": "OrI"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    }
+                  ],
+                  "k": 2
+                },
+                "kind": "Variable"
+              },
+              "tag": "Thresh"
+            }
+          ],
+          "kind": "Children"
+        },
+        "tag": "Wsh"
+      },
+      "typed": true
+    },
+    {
+      "md1": [
+        "md1fzlenqqpqjtvyyy4qqxpxsseg8zjw9gue3gsqsu954qckn0uy8"
+      ],
+      "md1_absent": null,
+      "name": "thresh_neg_ori_two_zero_3of4",
+      "shape": {
+        "branches": [],
+        "complete": false,
+        "key_path": "NotTaproot",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": [
+            {
+              "body": {
+                "data": {
+                  "children": [
+                    {
+                      "body": {
+                        "data": {
+                          "index": 0
+                        },
+                        "kind": "KeyArg"
+                      },
+                      "tag": "PkK"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": {
+                                "index": 1
+                              },
+                              "kind": "KeyArg"
+                            },
+                            "tag": "PkK"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": {
+                                "index": 2
+                              },
+                              "kind": "KeyArg"
+                            },
+                            "tag": "PkK"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    },
+                    {
+                      "body": {
+                        "data": [
+                          {
+                            "body": {
+                              "data": [
+                                {
+                                  "body": {
+                                    "kind": "Empty"
+                                  },
+                                  "tag": "False"
+                                },
+                                {
+                                  "body": {
+                                    "kind": "Empty"
+                                  },
+                                  "tag": "False"
+                                }
+                              ],
+                              "kind": "Children"
+                            },
+                            "tag": "OrI"
+                          }
+                        ],
+                        "kind": "Children"
+                      },
+                      "tag": "Swap"
+                    }
+                  ],
+                  "k": 3
+                },
+                "kind": "Variable"
+              },
+              "tag": "Thresh"
+            }
+          ],
+          "kind": "Children"
+        },
+        "tag": "Wsh"
+      },
+      "typed": false
+    },
+    {
+      "md1": [
         "md1fs7xrqspq2tvyyy4qqxpxsg3gw9fa6pc8qurswpc8qursp8uey2p3quntu",
         "md1fs7xrqsg8qurswpc8qurswpc8qurswpc8qurswpc8qursjyfrfg7trzrqp"
       ],
@@ -8819,6 +9029,237 @@
               "tag": "TapTree"
             },
             "unspendable_kind": "liana_unspendable"
+          },
+          "kind": "Tr"
+        },
+        "tag": "Tr"
+      },
+      "typed": false
+    },
+    {
+      "md1": [
+        "md1f0zyfqqpqztvyyy4qqxqaxd9gsqnl0x8k8dk0v8q"
+      ],
+      "md1_absent": null,
+      "name": "untyped_tap_leaf_unsatisfiable",
+      "shape": {
+        "branches": [
+          {
+            "any_of": null,
+            "depth": 0,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              0
+            ],
+            "sorted": false
+          }
+        ],
+        "complete": false,
+        "key_path": "Nums",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": {
+            "is_nums": true,
+            "key_index": 0,
+            "tree": {
+              "body": {
+                "data": [
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": {
+                              "index": 0
+                            },
+                            "kind": "KeyArg"
+                          },
+                          "tag": "PkK"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "Verify"
+                  },
+                  {
+                    "body": {
+                      "kind": "Empty"
+                    },
+                    "tag": "False"
+                  }
+                ],
+                "kind": "Children"
+              },
+              "tag": "AndV"
+            }
+          },
+          "kind": "Tr"
+        },
+        "tag": "Tr"
+      },
+      "typed": false
+    },
+    {
+      "md1": [
+        "md1f23urqqpq2tvyyy4qqxqu22ye543q0fdxdxp9gd3w0"
+      ],
+      "md1_absent": null,
+      "name": "untyped_tap_two_leaves_one_unsatisfiable",
+      "shape": {
+        "branches": [
+          {
+            "any_of": null,
+            "depth": 1,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              0
+            ],
+            "sorted": false
+          },
+          {
+            "any_of": null,
+            "depth": 1,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              1
+            ],
+            "sorted": false
+          }
+        ],
+        "complete": false,
+        "key_path": "Nums",
+        "tap_depth": 1
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": {
+            "is_nums": true,
+            "key_index": 0,
+            "tree": {
+              "body": {
+                "data": [
+                  {
+                    "body": {
+                      "data": {
+                        "index": 0
+                      },
+                      "kind": "KeyArg"
+                    },
+                    "tag": "PkK"
+                  },
+                  {
+                    "body": {
+                      "data": [
+                        {
+                          "body": {
+                            "data": [
+                              {
+                                "body": {
+                                  "data": {
+                                    "index": 1
+                                  },
+                                  "kind": "KeyArg"
+                                },
+                                "tag": "PkK"
+                              }
+                            ],
+                            "kind": "Children"
+                          },
+                          "tag": "Verify"
+                        },
+                        {
+                          "body": {
+                            "kind": "Empty"
+                          },
+                          "tag": "False"
+                        }
+                      ],
+                      "kind": "Children"
+                    },
+                    "tag": "AndV"
+                  }
+                ],
+                "kind": "Children"
+              },
+              "tag": "TapTree"
+            }
+          },
+          "kind": "Tr"
+        },
+        "tag": "Tr"
+      },
+      "typed": false
+    },
+    {
+      "md1": [
+        "md1fmkjrqqpqztvyyy4qqxqkyak5eg5qkrsa5s"
+      ],
+      "md1_absent": null,
+      "name": "untyped_tr_slot_leaf_zero",
+      "shape": {
+        "branches": [
+          {
+            "any_of": null,
+            "depth": 0,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": true,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [
+              0
+            ],
+            "sorted": false
+          },
+          {
+            "any_of": null,
+            "depth": 0,
+            "hashlocks": 0,
+            "k": 0,
+            "key_path_entry": false,
+            "locks": [],
+            "min_keys": null,
+            "n": 0,
+            "slots": [],
+            "sorted": false
+          }
+        ],
+        "complete": false,
+        "key_path": "Xpub",
+        "tap_depth": 0
+      },
+      "template": null,
+      "tree": {
+        "body": {
+          "data": {
+            "is_nums": false,
+            "key_index": 0,
+            "tree": {
+              "body": {
+                "kind": "Empty"
+              },
+              "tag": "False"
+            }
           },
           "kind": "Tr"
         },

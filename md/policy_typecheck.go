@@ -2,7 +2,8 @@ package md
 
 // THE TYPE RULE of the policy summary (md review r2 I-1 and r3; port of
 // md-codec 0.49.0 `policy_shape::policy_type_checks`, descriptor-mnemonic
-// f8b4a675, whose doc lists the six rule groups this file implements).
+// f8b4a675 and 5ad5a9b2, whose doc lists the six rule groups this file
+// implements).
 //
 // policy_shape's walk vouches for a thresh node's own children (the
 // allowlist); it does not vouch for the CONTEXT around a node. Untyped trees
@@ -42,11 +43,11 @@ package md
 //     Ctx::check_local_validity at each script root, over ExtData's
 //     static_ops / sat_data / dissat_data (types/extra_props.rs): some
 //     satisfaction exists and at most 201 ops run (wsh/sh), at most 100
-//     witness items (wsh) or a 1650-byte scriptSig (sh); a tap leaf only
-//     needs its satisfaction, if it has one, within the 1000-element stack.
-//     ExtData::threshold's sort-and-fold is ported as written, so a thresh
-//     with a never-satisfiable child is never satisfiable when its k+1
-//     costliest children include that child (it counts `i <= k`).
+//     witness items (wsh) or a 1650-byte scriptSig (sh); a tap leaf needs a
+//     satisfaction (md-codec's own per-leaf check, md review r4) within the
+//     1000-element stack. ExtData::threshold's sort-and-fold is ported as
+//     written: it satisfies min(k+1, n) children (`i <= k`), so a thresh with
+//     a never-satisfiable child is never satisfiable when those include it.
 //
 // ONE DIFFERENCE BY CONSTRUCTION: Rust's lookup_key also refuses a placeholder
 // index >= n. This walk sees only the tree, so it cannot; every tree it sees
@@ -236,8 +237,10 @@ func msScriptOK(t msType, ctx msCtx) bool {
 		// max_satisfaction_witness_elements = count + 1 (the script).
 		return sat.d.wsCount+1 <= msMaxStandardP2WSHItems
 	case ctxTap:
-		// No satisfaction is not an error in Tap's local checks.
-		return !sat.ok || sat.d.wsCount+sat.d.execStack <= msMaxStackSize
+		// Tap's local checks read sat_data only when it is Some; md-codec
+		// adds `Tap::max_satisfaction_size(ms).is_some()` per leaf (md review
+		// r4), so a never-satisfiable leaf refuses the whole tr.
+		return sat.ok && sat.d.wsCount+sat.d.execStack <= msMaxStackSize
 	}
 	return false
 }
