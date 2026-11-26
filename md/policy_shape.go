@@ -182,7 +182,10 @@ func PolicyShapeChunks(strs []string) (PolicyShape, error) {
 // ca48a05e).
 func policyShape(tree node) PolicyShape {
 	s := walkShape(tree)
-	if !treeTypeChecks(tree) {
+	// The rule can only lower Complete, so a walk that already refused needs
+	// no type check (review r2 m-3); TestPolicyTypeChecksAgreesWithRustCases
+	// still runs it on every vendored tree.
+	if s.Complete && !treeTypeChecks(tree) {
 		s.Complete = false
 	}
 	return s

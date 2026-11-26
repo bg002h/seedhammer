@@ -36,7 +36,9 @@ package md
 //     c:pk_k / c:pk_h. thresh/multi/multi_a need 1 <= k <= n (multi n <= 20,
 //     multi_a n <= 999); TapTree::combine refuses a leaf deeper than 128.
 //  5. Script limits: Miniscript::from_ast at EVERY node runs the recursion
-//     depth (402) and check_global_validity on ExtData::pk_cost -- Legacy 520,
+//     depth (402; unreachable on a decoded card, whose tree is at most
+//     maxDecodeDepth = 128 deep, so it is no stack budget) and
+//     check_global_validity on ExtData::pk_cost -- Legacy 520,
 //     Segwitv0 10000 and 3600, Tap the block weight. A sortedmulti root is
 //     built unchecked, then checked at the root by group 6's call.
 //  6. Satisfaction limits: Miniscript::within_resource_limits, i.e.
@@ -246,15 +248,34 @@ func msScriptOK(t msType, ctx msCtx) bool {
 }
 
 // tapTreeTypeChecks is tree_to_taptree plus script_ok per leaf. depth counts
-// the TapTree nodes above n.
-func tapTreeTypeChecks(n node, depth int) bool {
-	if n.tag == tagTapTree {
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
+// the TapTree nodes above n. Iterative, like msNode (review r2 I-1).
+func tapTreeTypeChecks(root node, depth int) bool {
+	type item struct {
+		n     node
+		depth int
+	}
+	work := []item{{root, depth}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		n := it.n
+		if n.tag == tagTapTree {
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				return false
+			}
+			work = append(work, item{b.children[1], it.depth + 1}, item{b.children[0], it.depth + 1})
+			continue
+		}
+		if !tapLeafTypeChecks(n, it.depth) {
 			return false
 		}
-		return tapTreeTypeChecks(b.children[0], depth+1) && tapTreeTypeChecks(b.children[1], depth+1)
 	}
+	return true
+}
+
+// tapLeafTypeChecks is one leaf of tree_to_taptree plus script_ok.
+func tapLeafTypeChecks(n node, depth int) bool {
 	// TapTree::combine refuses a child leaf already at depth > 127, so a leaf
 	// may sit at most 128 TapTree nodes deep.
 	if depth > msTaprootControlMaxNodes {
@@ -284,8 +305,9 @@ func msThresholdOK(k, n, max int) bool {
 // v != 0. Both come to 1 <= v < 2^31.
 func msTimelockOK(v uint32) bool { return v >= 1 && v < 1<<31 }
 
-// msScriptNumSize is lib.rs script_num_size.
-func msScriptNumSize(n int) int {
+// msScriptNumSize is lib.rs script_num_size. uint32, not int: the firmware's
+// int is 32 bits, where 0x80000000 does not fit (review r2 C-1).
+func msScriptNumSize(n uint32) int {
 	switch {
 	case n <= 0x10:
 		return 1
@@ -365,7 +387,113 @@ func msGlobalOK(t msType, tg tag, ctx msCtx) bool {
 
 // msNode is node_to_miniscript followed by Miniscript::from_ast: the type of
 // n in ctx, or ok=false where Rust's conversion errors.
-func msNode(n node, ctx msCtx) (msType, bool) {
+//
+// ITERATIVE on purpose (review r2 I-1): a hostile but decodable card nests
+// 128 levels, and a recursive walk carrying msType values would need about
+// 100 KB of stack on a device whose goroutines get 16 KB. The explicit stacks
+// below live on the heap, so the frame is constant at any depth. Any failure
+// anywhere fails the whole tree, as one `?` does in Rust, so a post-order
+// evaluation with early exit is the same function as the recursion.
+func msNode(root node, ctx msCtx) (msType, bool) {
+	type frame struct {
+		n        node
+		arity    int // children whose types sit on vals, once expanded
+		expanded bool
+	}
+	work := []frame{{n: msBareCheck(root)}}
+	var vals []msType
+	for len(work) > 0 {
+		f := work[len(work)-1]
+		work = work[:len(work)-1]
+		if f.expanded {
+			subs := vals[len(vals)-f.arity:]
+			t, ok := msCombine(f.n, subs, ctx)
+			if !ok {
+				return msType{}, false
+			}
+			vals = append(vals[:len(vals)-f.arity], t)
+			continue
+		}
+		children, ok := msChildren(f.n)
+		if !ok {
+			return msType{}, false
+		}
+		if children == nil {
+			t, ok := msLeaf(f.n, ctx)
+			if !ok {
+				return msType{}, false
+			}
+			vals = append(vals, t)
+			continue
+		}
+		work = append(work, frame{n: f.n, arity: len(children), expanded: true})
+		// Pushed last-first, so the first child is evaluated first and the
+		// children's types land on vals in order.
+		for i := len(children) - 1; i >= 0; i-- {
+			work = append(work, frame{n: msBareCheck(children[i])})
+		}
+	}
+	if len(vals) != 1 {
+		return msType{}, false
+	}
+	return vals[0], true
+}
+
+// msBareCheck applies Check-idempotence: md-codec's node_to_miniscript turns
+// Check over a BARE key into that key's own conversion (c:pk_k / c:pk_h), so
+// the wrapper is dropped before the node is typed.
+func msBareCheck(n node) node {
+	if n.tag != tagCheck {
+		return n
+	}
+	c, ok := soleChild(n)
+	if !ok || (c.tag != tagPkK && c.tag != tagPkH) {
+		return n
+	}
+	if _, ok := c.body.(keyArgBody); !ok {
+		return n
+	}
+	return c
+}
+
+// msChildren is the arity check of node_to_miniscript: the children of an
+// inner node (nil for a leaf), or ok=false for a malformed body.
+func msChildren(n node) ([]node, bool) {
+	switch n.tag {
+	case tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
+		c, ok := soleChild(n)
+		if !ok {
+			return nil, false
+		}
+		return []node{c}, true
+	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI:
+		b, ok := n.body.(childrenBody)
+		if !ok || len(b.children) != 2 {
+			return nil, false
+		}
+		return b.children, true
+	case tagAndOr:
+		b, ok := n.body.(childrenBody)
+		if !ok || len(b.children) != 3 {
+			return nil, false
+		}
+		return b.children, true
+	case tagThresh:
+		b, ok := n.body.(variableBody)
+		if !ok {
+			return nil, false
+		}
+		if len(b.children) == 0 {
+			// Threshold::new refuses n = 0; a leaf here would skip it.
+			return nil, false
+		}
+		return b.children, true
+	}
+	return nil, true
+}
+
+// msLeaf types a node with no miniscript children.
+func msLeaf(n node, ctx msCtx) (msType, bool) {
 	var t msType
 	switch n.tag {
 	case tagPkK, tagPkH:
@@ -380,81 +508,6 @@ func msNode(n node, ctx msCtx) (msType, bool) {
 		}
 		t = msCheck(k)
 		return t, msGlobalOK(t, tagCheck, ctx)
-	case tagCheck:
-		c, ok := soleChild(n)
-		if !ok {
-			return msType{}, false
-		}
-		// Check-idempotence: Check over a BARE key denotes the same fragment.
-		if c.tag == tagPkK || c.tag == tagPkH {
-			if _, ok := c.body.(keyArgBody); ok {
-				return msNode(c, ctx)
-			}
-		}
-		sub, ok := msNode(c, ctx)
-		if !ok || sub.corr.base != msK {
-			return msType{}, false
-		}
-		t = msCheck(sub)
-	case tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
-		c, ok := soleChild(n)
-		if !ok {
-			return msType{}, false
-		}
-		sub, ok := msNode(c, ctx)
-		if !ok {
-			return msType{}, false
-		}
-		if t, ok = msWrap(n.tag, sub); !ok {
-			return msType{}, false
-		}
-	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			return msType{}, false
-		}
-		l, ok := msNode(b.children[0], ctx)
-		if !ok {
-			return msType{}, false
-		}
-		r, ok := msNode(b.children[1], ctx)
-		if !ok {
-			return msType{}, false
-		}
-		if t, ok = msBinary(n.tag, l, r); !ok {
-			return msType{}, false
-		}
-	case tagAndOr:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 3 {
-			return msType{}, false
-		}
-		var s [3]msType
-		for i := range s {
-			if s[i], ok = msNode(b.children[i], ctx); !ok {
-				return msType{}, false
-			}
-		}
-		if t, ok = msAndOr(s[0], s[1], s[2]); !ok {
-			return msType{}, false
-		}
-	case tagThresh:
-		b, ok := n.body.(variableBody)
-		if !ok {
-			return msType{}, false
-		}
-		subs := make([]msType, len(b.children))
-		for i, c := range b.children {
-			if subs[i], ok = msNode(c, ctx); !ok {
-				return msType{}, false
-			}
-		}
-		if !msThresholdOK(int(b.k), len(subs), 0) {
-			return msType{}, false
-		}
-		if t, ok = msThresh(int(b.k), subs); !ok {
-			return msType{}, false
-		}
 	case tagMulti, tagMultiA:
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
@@ -480,7 +533,7 @@ func msNode(n node, ctx msCtx) (msType, bool) {
 		t = msType{
 			corr: msCorr{base: msB, input: msZero, dissat: false, unit: false},
 			ext: msExt{
-				pkCost: msScriptNumSize(int(v)) + 1, staticOps: 1,
+				pkCost: msScriptNumSize(uint32(v)) + 1, staticOps: 1,
 				sat: some(msSat{execStack: 1}),
 			},
 		}
@@ -513,6 +566,37 @@ func msNode(n node, ctx msCtx) (msType, bool) {
 	default:
 		// sortedmulti/sortedmulti_a below their one legal position, raw_pkh,
 		// a TapTree node, a top-level wrapper, or an unknown tag.
+		return msType{}, false
+	}
+	return t, msGlobalOK(t, n.tag, ctx)
+}
+
+// msCombine types an inner node from its children's types (msChildren's
+// order), then runs from_ast's global checks.
+func msCombine(n node, subs []msType, ctx msCtx) (msType, bool) {
+	var t msType
+	var ok bool
+	switch n.tag {
+	case tagCheck:
+		// A Check that msBareCheck kept is over a non-key: its child must be K.
+		if subs[0].corr.base != msK {
+			return msType{}, false
+		}
+		t, ok = msCheck(subs[0]), true
+	case tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
+		t, ok = msWrap(n.tag, subs[0])
+	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI:
+		t, ok = msBinary(n.tag, subs[0], subs[1])
+	case tagAndOr:
+		t, ok = msAndOr(subs[0], subs[1], subs[2])
+	case tagThresh:
+		k := int(n.body.(variableBody).k)
+		if !msThresholdOK(k, len(subs), 0) {
+			return msType{}, false
+		}
+		t, ok = msThresh(k, subs)
+	}
+	if !ok {
 		return msType{}, false
 	}
 	return t, msGlobalOK(t, n.tag, ctx)
@@ -860,7 +944,7 @@ func msAndOr(a, b, c msType) (msType, bool) {
 // msThresh is Correctness::threshold and ExtData::threshold.
 func msThresh(k int, subs []msType) (msType, bool) {
 	args := 0
-	cost := 1 + msScriptNumSize(k)
+	cost := 1 + msScriptNumSize(uint32(k))
 	h := 0
 	ops := 0
 	dissat := some(msSat{})

@@ -134,6 +134,14 @@ jobs:
     # twin (cmd/emu/platform_nfc_refugium.go) is the same kind of uncompiled-
     # by-default file the step above exists for, so it is vetted the same way.
     - run: GOOS=js GOARCH=wasm go vet -tags refugium ./cmd/emu/
+    # The firmware's int is 32 bits (TinyGo, RP2350). An untyped constant
+    # that fits a 64-bit int but not a 32-bit one compiles on the host and
+    # breaks the device build (thresh review r2 C-1), so md is vetted and the
+    # device-side packages built for a 32-bit target on every run. (gui's
+    # tests are not vetted here: gui/singlesig_restore_test.go already
+    # overflows a 32-bit int.)
+    - run: GOARCH=arm go vet ./md/
+    - run: GOARCH=arm go build ./md/ ./gui/
     # gui's suite under the tag. The script enumerates the tagged test list,
     # runs it in anchored shards, and requires every listed test to PASS or to
     # step aside through skipUnderRefugium with a named reason; any other SKIP,
