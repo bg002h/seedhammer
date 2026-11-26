@@ -98,82 +98,80 @@ func canonicalize(d *descriptor) (*descriptor, error) {
 // walkCollectFirst walks node in pre-order, recording the first occurrence of
 // each placeholder index in firstOccurrences. seen[i] toggles true the first
 // time @i is encountered. Port of canonicalize.rs:45-98.
-func walkCollectFirst(n node, seen []bool, firstOccurrences *[]uint8) {
-	switch b := n.body.(type) {
-	case keyArgBody:
-		if int(b.index) < len(seen) && !seen[b.index] {
-			seen[b.index] = true
-			*firstOccurrences = append(*firstOccurrences, b.index)
-		}
-	case trBody:
-		// SPEC §7: is_nums=true → internal key is the NUMS H-point, not a
-		// placeholder reference; skip registration.
-		if !b.isNums() {
-			if int(b.keyIndex) < len(seen) && !seen[b.keyIndex] {
-				seen[b.keyIndex] = true
-				*firstOccurrences = append(*firstOccurrences, b.keyIndex)
+func walkCollectFirst(root node, seen []bool, firstOccurrences *[]uint8) {
+	// An explicit stack in pre-order, children left to right (review r3
+	// I-P1: the recursion grew with the card's depth).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch b := n.body.(type) {
+		case keyArgBody:
+			if int(b.index) < len(seen) && !seen[b.index] {
+				seen[b.index] = true
+				*firstOccurrences = append(*firstOccurrences, b.index)
 			}
-		}
-		if b.tree != nil {
-			walkCollectFirst(*b.tree, seen, firstOccurrences)
-		}
-	case childrenBody:
-		for _, c := range b.children {
-			walkCollectFirst(c, seen, firstOccurrences)
-		}
-	case variableBody:
-		for _, c := range b.children {
-			walkCollectFirst(c, seen, firstOccurrences)
-		}
-	case multiKeysBody:
-		for _, idx := range b.indices {
-			if int(idx) < len(seen) && !seen[idx] {
-				seen[idx] = true
-				*firstOccurrences = append(*firstOccurrences, idx)
+		case trBody:
+			// SPEC §7: is_nums=true → internal key is the NUMS H-point, not a
+			// placeholder reference; skip registration.
+			if !b.isNums() {
+				if int(b.keyIndex) < len(seen) && !seen[b.keyIndex] {
+					seen[b.keyIndex] = true
+					*firstOccurrences = append(*firstOccurrences, b.keyIndex)
+				}
 			}
+			if b.tree != nil {
+				work = append(work, *b.tree)
+			}
+		case childrenBody:
+			work = pushReversed(work, b.children)
+		case variableBody:
+			work = pushReversed(work, b.children)
+		case multiKeysBody:
+			for _, idx := range b.indices {
+				if int(idx) < len(seen) && !seen[idx] {
+					seen[idx] = true
+					*firstOccurrences = append(*firstOccurrences, idx)
+				}
+			}
+		case hash256Body, hash160Body, timelockBody, emptyBody:
 		}
-	case hash256Body, hash160Body, timelockBody, emptyBody:
 	}
+}
+
+// pushReversed pushes children onto a pre-order work stack so the first child
+// is popped first.
+func pushReversed(work, children []node) []node {
+	for i := len(children) - 1; i >= 0; i-- {
+		work = append(work, children[i])
+	}
+	return work
 }
 
 // remapIndices returns a copy of n with perm[old_idx]->new_idx applied to every
 // KeyArg index and Tr key_index (recursive). Port of canonicalize.rs:102-139.
 func remapIndices(n node, perm []uint8) node {
-	switch b := n.body.(type) {
-	case keyArgBody:
-		return node{tag: n.tag, body: keyArgBody{index: perm[b.index]}}
-	case trBody:
-		nb := trBody{ik: b.ik, keyIndex: b.keyIndex}
-		if !b.isNums() {
-			nb.keyIndex = perm[b.keyIndex]
+	return rebuildTree(n, func(n node) node {
+		switch b := n.body.(type) {
+		case keyArgBody:
+			return node{tag: n.tag, body: keyArgBody{index: perm[b.index]}}
+		case trBody:
+			nb := trBody{ik: b.ik, keyIndex: b.keyIndex}
+			if !b.isNums() {
+				nb.keyIndex = perm[b.keyIndex]
+			}
+			return node{tag: n.tag, body: nb}
+		case multiKeysBody:
+			indices := make([]uint8, len(b.indices))
+			for i, idx := range b.indices {
+				indices[i] = perm[idx]
+			}
+			return node{tag: n.tag, body: multiKeysBody{k: b.k, indices: indices}}
+		default:
+			// hash256Body, hash160Body, timelockBody, emptyBody — no indices.
+			return n
 		}
-		if b.tree != nil {
-			t := remapIndices(*b.tree, perm)
-			nb.tree = &t
-		}
-		return node{tag: n.tag, body: nb}
-	case childrenBody:
-		children := make([]node, len(b.children))
-		for i, c := range b.children {
-			children[i] = remapIndices(c, perm)
-		}
-		return node{tag: n.tag, body: childrenBody{children: children}}
-	case variableBody:
-		children := make([]node, len(b.children))
-		for i, c := range b.children {
-			children[i] = remapIndices(c, perm)
-		}
-		return node{tag: n.tag, body: variableBody{k: b.k, children: children}}
-	case multiKeysBody:
-		indices := make([]uint8, len(b.indices))
-		for i, idx := range b.indices {
-			indices[i] = perm[idx]
-		}
-		return node{tag: n.tag, body: multiKeysBody{k: b.k, indices: indices}}
-	default:
-		// hash256Body, hash160Body, timelockBody, emptyBody — no indices.
-		return n
-	}
+	})
 }
 
 // remapUseSiteVec/remapFPVec/remapPubVec/remapOriginVec remap the idx column of
@@ -211,40 +209,37 @@ func remapOriginVec(v []idxOrigin, perm []uint8) {
 // checkPlaceholderBounds verifies every @N reference in node falls within 0..n.
 // Returns errPlaceholderRange on the first violation. Port of
 // canonicalize.rs:252-... check_placeholder_bounds.
-func checkPlaceholderBounds(n node, max uint8) error {
-	switch b := n.body.(type) {
-	case keyArgBody:
-		if b.index >= max {
-			return errPlaceholderRange
-		}
-	case trBody:
-		if !b.isNums() && b.keyIndex >= max {
-			return errPlaceholderRange
-		}
-		if b.tree != nil {
-			if err := checkPlaceholderBounds(*b.tree, max); err != nil {
-				return err
-			}
-		}
-	case childrenBody:
-		for _, c := range b.children {
-			if err := checkPlaceholderBounds(c, max); err != nil {
-				return err
-			}
-		}
-	case variableBody:
-		for _, c := range b.children {
-			if err := checkPlaceholderBounds(c, max); err != nil {
-				return err
-			}
-		}
-	case multiKeysBody:
-		for _, idx := range b.indices {
-			if idx >= max {
+func checkPlaceholderBounds(root node, max uint8) error {
+	// An explicit stack in pre-order, so the first violation is the
+	// recursion's (review r3 I-P1).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch b := n.body.(type) {
+		case keyArgBody:
+			if b.index >= max {
 				return errPlaceholderRange
 			}
+		case trBody:
+			if !b.isNums() && b.keyIndex >= max {
+				return errPlaceholderRange
+			}
+			if b.tree != nil {
+				work = append(work, *b.tree)
+			}
+		case childrenBody:
+			work = pushReversed(work, b.children)
+		case variableBody:
+			work = pushReversed(work, b.children)
+		case multiKeysBody:
+			for _, idx := range b.indices {
+				if idx >= max {
+					return errPlaceholderRange
+				}
+			}
+		case hash256Body, hash160Body, timelockBody, emptyBody:
 		}
-	case hash256Body, hash160Body, timelockBody, emptyBody:
 	}
 	return nil
 }
@@ -304,32 +299,85 @@ func clonePathDecl(p pathDecl) pathDecl {
 }
 
 func cloneNode(n node) node {
-	switch b := n.body.(type) {
-	case childrenBody:
-		children := make([]node, len(b.children))
-		for i, c := range b.children {
-			children[i] = cloneNode(c)
+	return rebuildTree(n, func(n node) node {
+		switch b := n.body.(type) {
+		case multiKeysBody:
+			return node{tag: n.tag, body: multiKeysBody{k: b.k, indices: cloneSlice(b.indices)}}
+		case trBody:
+			return node{tag: n.tag, body: trBody{ik: b.ik, keyIndex: b.keyIndex}}
+		default:
+			// keyArgBody, hash256Body, hash160Body, timelockBody, emptyBody — value
+			// types, copied by assignment.
+			return n
 		}
-		return node{tag: n.tag, body: childrenBody{children: children}}
-	case variableBody:
-		children := make([]node, len(b.children))
-		for i, c := range b.children {
-			children[i] = cloneNode(c)
+	})
+}
+
+// rebuildTree returns a copy of root built bottom-up with an explicit stack,
+// not recursion (review r3 I-P1: cloneNode and remapIndices recursed once per
+// level of the card). Every childrenBody and variableBody gets a fresh
+// children slice of its own length (non-nil, as make gives, even when empty),
+// and a tr's tree a fresh node. leaf maps every other node, and a tr's own
+// fields: it is given the tr with tree nil and must return a trBody, to which
+// the rebuilt tree is then attached.
+func rebuildTree(root node, leaf func(node) node) node {
+	type frame struct {
+		src  node
+		kids []node // src's children; a tr's tree is its one child
+		out  []node // the rebuilt children so far
+	}
+	kidsOf := func(n node) ([]node, bool) {
+		switch b := n.body.(type) {
+		case childrenBody:
+			return b.children, true
+		case variableBody:
+			return b.children, true
+		case trBody:
+			if b.tree != nil {
+				return []node{*b.tree}, true
+			}
 		}
-		return node{tag: n.tag, body: variableBody{k: b.k, children: children}}
-	case multiKeysBody:
-		return node{tag: n.tag, body: multiKeysBody{k: b.k, indices: cloneSlice(b.indices)}}
-	case trBody:
-		nb := trBody{ik: b.ik, keyIndex: b.keyIndex}
-		if b.tree != nil {
-			t := cloneNode(*b.tree)
-			nb.tree = &t
+		return nil, false
+	}
+	var stack []frame
+	n := root
+	for {
+		if kids, ok := kidsOf(n); ok {
+			stack = append(stack, frame{src: n, kids: kids, out: make([]node, 0, len(kids))})
+		} else {
+			built := leaf(n)
+			if len(stack) == 0 {
+				return built
+			}
+			top := &stack[len(stack)-1]
+			top.out = append(top.out, built)
 		}
-		return node{tag: n.tag, body: nb}
-	default:
-		// keyArgBody, hash256Body, hash160Body, timelockBody, emptyBody — value
-		// types, copied by the node struct copy.
-		return node{tag: n.tag, body: n.body}
+		// Close every frame whose children are all built, then descend into
+		// the next child still to build.
+		for {
+			top := &stack[len(stack)-1]
+			if len(top.out) < len(top.kids) {
+				n = top.kids[len(top.out)]
+				break
+			}
+			var built node
+			switch b := top.src.body.(type) {
+			case childrenBody:
+				built = node{tag: top.src.tag, body: childrenBody{children: top.out}}
+			case variableBody:
+				built = node{tag: top.src.tag, body: variableBody{k: b.k, children: top.out}}
+			case trBody:
+				nb := leaf(node{tag: top.src.tag, body: trBody{ik: b.ik, keyIndex: b.keyIndex}}).body.(trBody)
+				t := top.out[0]
+				nb.tree = &t
+				built = node{tag: top.src.tag, body: nb}
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return built
+			}
+			stack[len(stack)-1].out = append(stack[len(stack)-1].out, built)
+		}
 	}
 }
 

@@ -1,10 +1,14 @@
 package md
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"runtime/debug"
+	"strings"
 	"testing"
+	"unsafe"
 )
 
 // ─── review r2 I-1: the type rule on hostile, maximally deep cards ─────────
@@ -153,42 +157,207 @@ func TestTypeRuleCompletesOnMaxDepthCards(t *testing.T) {
 	}
 }
 
-// typeCheckStackLimit is the stack the type check may use on the host: the
-// device's 16 KB goroutine budget. A proxy, not a device measurement: gc's
-// amd64 frames are not TinyGo's Thumb frames. What it proves is that the stack
-// does not grow with depth: the iterative check also passes at 8 KB, while the
-// recursive one it replaced overflowed 32 KB.
-const typeCheckStackLimit = 16 << 10
+// typeCheckStackLimit and loadStackLimit are the stacks the max-depth work
+// may use on the host. loadStackLimit is the device's 16 KB goroutine budget:
+// a hostile max-depth card must decode (Reassemble) and summarise
+// (PolicyShapeChunks) within it, because the decoder runs on every md1 load
+// (review r3 I-P1). The type check alone is held to half of that (review r3
+// n-3): its stack is constant, about 2.5 KB of arm frames. These are proxies,
+// not device measurements: gc's frames are not TinyGo's Thumb frames. What
+// they prove is that no stack grows with depth: the recursive decoder and walk
+// they replaced needed 32-64 KB here, the recursive type check over 16 KB.
+const (
+	typeCheckStackLimit = 8 << 10
+	loadStackLimit      = 16 << 10
+)
 
-// TestTypeRuleStackIsBoundedAtMaxDepth runs treeTypeChecks on every decoded
-// max-depth tree in a child process whose goroutine stacks are capped at
-// typeCheckStackLimit (debug.SetMaxStack: exceeding it is a fatal error, which
-// the parent sees as a failed child).
-func TestTypeRuleStackIsBoundedAtMaxDepth(t *testing.T) {
-	if os.Getenv("MD_TYPECHECK_STACK_CHILD") == "1" {
+// stackChildTest is TestMaxDepthCardsFitTheStack's own name. The parent runs
+// the child with -test.run pinned to it and requires stackChildDone in the
+// child's output, so a renamed test cannot pass by running nothing (review r3
+// n-1).
+const (
+	stackChildTest = "TestMaxDepthCardsFitTheStack"
+	stackChildDone = "MD_STACK_CHILD_DONE"
+)
+
+// TestMaxDepthCardsFitTheStack runs the type check, then Reassemble and
+// PolicyShapeChunks, on every max-depth card in a child process whose
+// goroutine stacks are capped (debug.SetMaxStack: exceeding it is a fatal
+// error, which the parent sees as a failed child).
+func TestMaxDepthCardsFitTheStack(t *testing.T) {
+	if os.Getenv("MD_STACK_CHILD") == "1" {
 		var trees []node
+		var cards [][]string
 		for _, c := range depthCases(t) {
-			_, tree := depthCard(t, c.tree)
+			chunks, tree := depthCard(t, c.tree)
 			trees = append(trees, tree)
+			cards = append(cards, chunks)
 		}
-		debug.SetMaxStack(typeCheckStackLimit)
-		done := make(chan struct{})
-		go func() {
+		run := func(limit int, f func()) {
+			debug.SetMaxStack(limit)
+			done := make(chan struct{})
+			go func() {
+				f()
+				close(done)
+			}()
+			<-done
+		}
+		run(typeCheckStackLimit, func() {
 			for _, tree := range trees {
 				treeTypeChecks(tree)
 			}
-			close(done)
-		}()
-		<-done
+		})
+		var errs []error
+		run(loadStackLimit, func() {
+			for _, chunks := range cards {
+				if _, err := Reassemble(chunks); err != nil {
+					errs = append(errs, err)
+				}
+				if _, err := PolicyShapeChunks(chunks); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		})
+		debug.SetMaxStack(1 << 30)
+		for _, err := range errs {
+			t.Error(err)
+		}
+		fmt.Println(stackChildDone)
 		return
 	}
 	if testing.Short() {
 		t.Skip("spawns a child test process")
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTypeRuleStackIsBoundedAtMaxDepth$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "MD_TYPECHECK_STACK_CHILD=1")
+	if name := t.Name(); name != stackChildTest {
+		t.Fatalf("test is named %q; update stackChildTest", name)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^"+stackChildTest+"$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), "MD_STACK_CHILD=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("type check exceeded a %d-byte stack at max depth: %v\n%s", typeCheckStackLimit, err, out)
+		t.Fatalf("a max-depth card exceeded its stack (type check %d B, load %d B): %v\n%s", typeCheckStackLimit, loadStackLimit, err, out)
+	}
+	if !strings.Contains(string(out), stackChildDone) {
+		t.Fatalf("the child ran no stack check (no %s marker):\n%s", stackChildDone, out)
+	}
+}
+
+// ─── review r3 m-1: the type check's heap is capped, fail closed ───────────
+
+// nestedThreshTree is review r3 m-1's tree: thresh(1, 0×31, thresh(1, …)),
+// levels deep, a key at the bottom. The walk refuses it (a thresh child is
+// not on the allowlist), so policyShape never type-checks it; a direct call
+// used to hold every completed sibling on the type stack (about 3,100 types).
+func nestedThreshTree(levels int) node {
+	x := tpWrap(tagCheck, tpKey(tagPkK, 0))
+	for i := 0; i < levels; i++ {
+		cs := make([]node, 32)
+		for j := range cs[:31] {
+			cs[j] = tpEmpty(tagFalse)
+		}
+		cs[31] = x
+		x = tpThresh(1, cs...)
+	}
+	return tpWsh(x)
+}
+
+// TestTypeCheckHeapIsCappedOnHostileTrees: past msMaxPending pending entries
+// the check stops and answers false, so a hostile tree cannot make it
+// allocate without bound. The answer is Rust's anyway: such a tree is refused
+// by the walk, and so by policyShape, before the type check runs.
+func TestTypeCheckHeapIsCappedOnHostileTrees(t *testing.T) {
+	tree := nestedThreshTree(100)
+	if walkShape(tree).Complete {
+		t.Fatal("the walk accepts the nested thresh; the cap's parity argument no longer holds")
+	}
+	if treeTypeChecks(tree) {
+		t.Fatal("the nested thresh type-checks")
+	}
+	// The stacks stop at msMaxPending entries, each a type or a work frame (a
+	// node, an int, a bool); slice growth at most doubles what is live.
+	entry := unsafe.Sizeof(msType{}) + unsafe.Sizeof(node{}) + 2*unsafe.Sizeof(int(0))
+	budget := uint64(2 * msMaxPending * entry)
+	for _, levels := range []int{100, 400} {
+		tree := nestedThreshTree(levels)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		treeTypeChecks(tree)
+		runtime.ReadMemStats(&after)
+		if got := after.TotalAlloc - before.TotalAlloc; got > budget {
+			t.Errorf("type check of the %d-level nested thresh allocated %d bytes, budget %d", levels, got, budget)
+		}
+	}
+}
+
+// capMarginTrees are the typed, walk-complete trees that hold the most
+// pending entries at the decoder's depth limit: andor chains through X (as
+// and_n) and through Z, an and_v chain, a 32-child thresh at the bottom of
+// one, and the typed, walk-complete max-depth cases. The chains are tap
+// leaves (125 levels under tr), where no ops limit refuses them first.
+func capMarginTrees(t *testing.T) map[string]node {
+	t.Helper()
+	pk := func(i uint8) node { return tpWrap(tagCheck, tpKey(tagPkK, i)) }
+	chain := func(levels int, leaf node, wrap func(x node) node) node {
+		for i := 0; i < levels; i++ {
+			leaf = wrap(leaf)
+		}
+		return leaf
+	}
+	andor := func(x, y, z node) node {
+		return node{tag: tagAndOr, body: childrenBody{children: []node{x, y, z}}}
+	}
+	andV := func(x node) node { return tpPair(tagAndV, tpWrap(tagVerify, pk(1)), x) }
+	wide := make([]node, 32)
+	wide[0] = pk(0)
+	for i := 1; i < 32; i++ {
+		wide[i] = tpWrap(tagSwap, pk(uint8(i)))
+	}
+	trees := map[string]node{
+		"tr(andor through Z)":          tpTrLeaf(chain(125, pk(0), func(x node) node { return andor(pk(1), pk(2), x) })),
+		"tr(and_n through X)":          tpTrLeaf(chain(125, pk(0), func(x node) node { return andor(x, pk(1), tpEmpty(tagFalse)) })),
+		"tr(and_v chain)":              tpTrLeaf(chain(125, pk(0), andV)),
+		"tr(thresh(32) at the bottom)": tpTrLeaf(chain(124, tpThresh(32, wide...), andV)),
+	}
+	for _, c := range depthCases(t) {
+		if c.walk && c.typed {
+			trees[c.name] = c.tree
+		}
+	}
+	return trees
+}
+
+// capInner is the script msNode types for a wsh tree or a one-leaf-path tr
+// tree (the right-most leaf of a taptree spine), and its context.
+func capInner(tree node) (node, msCtx) {
+	if tree.tag == tagTr {
+		inner := *tree.body.(trBody).tree
+		for inner.tag == tagTapTree {
+			inner = inner.body.(childrenBody).children[1]
+		}
+		return inner, ctxTap
+	}
+	return tree.body.(childrenBody).children[0], ctxSegwitv0
+}
+
+// TestTypeCheckCapLeavesWalkAcceptedTreesAlone: the cap must never change an
+// answer the walk lets through. On capMarginTrees the check types the tree at
+// half the cap, the same as with none: a margin of two.
+func TestTypeCheckCapLeavesWalkAcceptedTreesAlone(t *testing.T) {
+	for name, tree := range capMarginTrees(t) {
+		t.Run(name, func(t *testing.T) {
+			if !walkShape(tree).Complete {
+				t.Fatal("the walk refuses this tree; it does not test the cap's margin")
+			}
+			inner, ctx := capInner(tree)
+			t2, ok2 := msNodeCapped(inner, ctx, 1<<30)
+			if !ok2 {
+				t.Fatal("untyped with no cap; a refusal at any cap would agree, so it tests nothing")
+			}
+			t1, ok1 := msNodeCapped(inner, ctx, msMaxPending/2)
+			if ok1 != ok2 || t1 != t2 {
+				t.Errorf("at half the cap: (%v, %+v); uncapped: (%v, %+v)", ok1, t1, ok2, t2)
+			}
+		})
 	}
 }

@@ -242,27 +242,39 @@ func walkShape(tree node) PolicyShape {
 }
 
 // walkTapTree descends a binary taptree, appending one Branch per LEAF. Every
-// leaf is visited: a summary that stopped early would hide a spend path.
-func walkTapTree(n node, depth int, s *PolicyShape) {
-	if n.tag == tagTapTree {
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			s.Complete = false
-			return
+// leaf is visited: a summary that stopped early would hide a spend path. A
+// malformed TapTree node or an unsummarisable leaf clears Complete and the walk
+// goes on to the next leaf. It walks with an explicit stack, left leaf first,
+// not recursion (review r3 I-P1); the root is at depth.
+func walkTapTree(root node, depth int, s *PolicyShape) {
+	type item struct {
+		n     node
+		depth int
+	}
+	work := []item{{root, depth}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		n, depth := it.n, it.depth
+		if n.tag == tagTapTree {
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				s.Complete = false
+				continue
+			}
+			work = append(work, item{b.children[1], depth + 1}, item{b.children[0], depth + 1})
+			continue
 		}
-		walkTapTree(b.children[0], depth+1, s)
-		walkTapTree(b.children[1], depth+1, s)
-		return
+		if depth-1 > s.TapDepth {
+			s.TapDepth = depth - 1
+		}
+		brs, ok := splitBranches(n, depth-1, false)
+		if !ok {
+			s.Complete = false
+			continue
+		}
+		s.Branches = append(s.Branches, brs...)
 	}
-	if depth-1 > s.TapDepth {
-		s.TapDepth = depth - 1
-	}
-	brs, ok := splitBranches(n, depth-1, false)
-	if !ok {
-		s.Complete = false
-		return
-	}
-	s.Branches = append(s.Branches, brs...)
 }
 
 // splitBranches turns a node into one Branch per ALTERNATIVE: or_b/or_c/or_d/
@@ -275,46 +287,47 @@ func walkTapTree(n node, depth int, s *PolicyShape) {
 //
 // orBSecond is true only for the second child of an or_b: the one place the
 // type system puts a wrapped (a:) thresh at a path root.
-func splitBranches(n node, depth int, orBSecond bool) ([]Branch, bool) {
-	switch n.tag {
-	case tagOrB, tagOrC, tagOrD, tagOrI:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			return nil, false
-		}
-		left, ok := splitBranches(b.children[0], depth, false)
-		if !ok {
-			return nil, false
-		}
-		right, ok := splitBranches(b.children[1], depth, n.tag == tagOrB)
-		if !ok {
-			return nil, false
-		}
-		return append(left, right...), true
-	case tagAndOr:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 3 {
-			return nil, false
-		}
-		// The X-and-Y half is summarized as a conjunction; the synthetic node is
-		// never emitted or encoded, only walked.
-		xy := node{tag: tagAndV, body: childrenBody{children: []node{b.children[0], b.children[1]}}}
-		left, ok := splitBranches(xy, depth, false)
-		if !ok {
-			return nil, false
-		}
-		right, ok := splitBranches(b.children[2], depth, false)
-		if !ok {
-			return nil, false
-		}
-		return append(left, right...), true
-	default:
-		br, ok := branchOf(n, depth, orBSecond)
-		if !ok {
-			return nil, false
-		}
-		return []Branch{br}, true
+//
+// It walks with an explicit stack, not recursion (review r3 I-P1): a 126-deep
+// or_d chain needed about 38 KB of recursive frames. Alternatives come out
+// left to right, as the recursion appended them, and depth is the same for
+// every one of them.
+func splitBranches(root node, depth int, orBSecond bool) ([]Branch, bool) {
+	type item struct {
+		n         node
+		orBSecond bool
 	}
+	var out []Branch
+	work := []item{{root, orBSecond}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		n := it.n
+		switch n.tag {
+		case tagOrB, tagOrC, tagOrD, tagOrI:
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				return nil, false
+			}
+			work = append(work, item{b.children[1], n.tag == tagOrB}, item{b.children[0], false})
+		case tagAndOr:
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 3 {
+				return nil, false
+			}
+			// The X-and-Y half is summarized as a conjunction; the synthetic
+			// node is never emitted or encoded, only walked.
+			xy := node{tag: tagAndV, body: childrenBody{children: []node{b.children[0], b.children[1]}}}
+			work = append(work, item{b.children[2], false}, item{xy, false})
+		default:
+			br, ok := branchOf(n, depth, it.orBSecond)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, br)
+		}
+	}
+	return out, true
 }
 
 // branchOf summarizes ONE spend path. ok=false means an unrecognised tag, or a
@@ -413,8 +426,12 @@ func branchOf(n node, depth int, orBSecond bool) (Branch, bool) {
 // this function answers only the first.
 func soleMulti(n node) (k, nkeys int, sorted, ok bool) {
 	var found int
-	var walk func(node)
-	walk = func(n node) {
+	// An explicit stack, not recursion (review r3 I-P1); the order of visits
+	// does not matter, only the count and the one multi's fields.
+	work := []node{n}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
 		switch n.tag {
 		case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 			found++
@@ -425,20 +442,15 @@ func soleMulti(n node) (k, nkeys int, sorted, ok bool) {
 				// A malformed body is not a threshold this can report.
 				found++
 			}
-			return
+			continue
 		}
 		switch b := n.body.(type) {
 		case childrenBody:
-			for _, c := range b.children {
-				walk(c)
-			}
+			work = append(work, b.children...)
 		case variableBody:
-			for _, c := range b.children {
-				walk(c)
-			}
+			work = append(work, b.children...)
 		}
 	}
-	walk(n)
 	if found != 1 {
 		return 0, 0, false, false
 	}
@@ -470,31 +482,51 @@ func plainMulti(n node) (int, int, bool, bool) {
 
 // collect walks one branch, recording key references and the presence of
 // time/hash locks. It returns false on ANY tag it does not know — the whole
-// point of Complete.
-func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
+// point of Complete. It walks with an explicit stack in the recursion's order
+// (a node, then its children left to right), so Locks and Hashlocks come out
+// in the same order (review r3 I-P1).
+func collect(root node, br *Branch, keys map[uint8]struct{}) bool {
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		children, ok := collectNode(n, br, keys)
+		if !ok {
+			return false
+		}
+		for i := len(children) - 1; i >= 0; i-- {
+			work = append(work, children[i])
+		}
+	}
+	return true
+}
+
+// collectNode records what n itself contributes to the branch and returns the
+// children collect must walk next (none for a leaf or a thresh).
+func collectNode(n node, br *Branch, keys map[uint8]struct{}) ([]node, bool) {
 	switch n.tag {
 	case tagPkK, tagPkH, tagPkh, tagRawPkH, tagWpkh:
 		if b, ok := n.body.(keyArgBody); ok {
 			keys[b.index] = struct{}{}
-			return true
+			return nil, true
 		}
 		// A raw key hash carries no placeholder; it is still a known shape.
-		return true
+		return nil, true
 	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
-			return false
+			return nil, false
 		}
 		for _, i := range b.indices {
 			keys[i] = struct{}{}
 		}
-		return true
+		return nil, true
 	case tagAfter, tagOlder:
 		br.Timelock = true
 		if v, ok := n.body.(timelockBody); ok {
 			br.Locks = append(br.Locks, lockFromWire(n.tag, uint32(v)))
 		}
-		return true
+		return nil, true
 	case tagSha256, tagHash256, tagRipemd160, tagHash160:
 		br.Hashlock = true
 		// Every kind records its digest, at its own width. Switched on the tag
@@ -521,9 +553,9 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 				br.Hashlocks = append(br.Hashlocks, l)
 			}
 		}
-		return true
+		return nil, true
 	case tagTrue, tagFalse:
-		return true
+		return nil, true
 	case tagThresh:
 		// md-codec 0.49.0 (seedhammer I-1): inside a path only k == n is a
 		// conjunction, and only when every child is on the allowlist -- a child
@@ -534,11 +566,11 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 		// collect.
 		b, ok := n.body.(variableBody)
 		if !ok || int(b.k) != len(b.children) {
-			return false
+			return nil, false
 		}
 		slots, locks, ok := threshConditions(b.children)
 		if !ok {
-			return false
+			return nil, false
 		}
 		for _, i := range slots {
 			keys[i] = struct{}{}
@@ -547,7 +579,7 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 			br.Timelock = true
 			br.Locks = append(br.Locks, locks...)
 		}
-		return true
+		return nil, true
 	case tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI:
 		// A DISJUNCTION INSIDE A BRANCH (port of md-codec 0.48.5's rule,
 		// policy_shape.rs `collect`). splitBranches splits an `or` only at the
@@ -564,7 +596,7 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 		// that is never satisfiable, so they are not disjunctions.
 		b, ok := n.body.(childrenBody)
 		if !ok {
-			return false
+			return nil, false
 		}
 		zeroArm := false
 		switch n.tag {
@@ -578,31 +610,21 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 			zeroArm = len(b.children) > 2 && b.children[2].tag == tagFalse
 		}
 		if !zeroArm {
-			return false
+			return nil, false
 		}
-		for _, c := range b.children {
-			if !collect(c, br, keys) {
-				return false
-			}
-		}
-		return true
+		return b.children, true
 	case tagAndB, tagAndV,
 		tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual,
 		tagWsh, tagSh:
 		b, ok := n.body.(childrenBody)
 		if !ok {
-			return false
+			return nil, false
 		}
-		for _, c := range b.children {
-			if !collect(c, br, keys) {
-				return false
-			}
-		}
-		return true
+		return b.children, true
 	default:
 		// tagTr and tagTapTree cannot appear inside a branch; anything else is
 		// a tag this walk has not been taught. Refuse rather than guess.
-		return false
+		return nil, false
 	}
 }
 

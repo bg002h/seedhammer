@@ -24,7 +24,7 @@
 # being committed.
 set -uo pipefail
 
-if [ $# -gt 0 ]; then PKGS=("$@"); else PKGS=(./sysw/ ./nfc/ndef/ ./bip32/); fi  # nfc/ndef: a uint32 NDEF length widened to int (review-build5-sh-ndef-reader-s1 I1); bip32: ParseInt bitSize 0 is int-wide (whole-diff-sh26-s1 I1)
+if [ $# -gt 0 ]; then PKGS=("$@"); else PKGS=(./sysw/ ./nfc/ndef/ ./bip32/ ./md/); fi  # nfc/ndef: a uint32 NDEF length widened to int (review-build5-sh-ndef-reader-s1 I1); bip32: ParseInt bitSize 0 is int-wide (whole-diff-sh26-s1 I1); md: a 2^31 constant in an int overflowed at 32-bit (seedhammer I-1 review r2 C-1), and md's vectors, depth and witness-limit tests should run at the device's word size (review r3 m-3)
 fail=0
 
 # 386 both builds AND runs here, which is what makes the assertion real.

@@ -385,6 +385,20 @@ func msGlobalOK(t msType, tg tag, ctx msCtx) bool {
 	return false
 }
 
+// msMaxPending caps the entries msNode holds at once on its two stacks (work
+// frames plus finished child types), so a hostile tree cannot make the check
+// allocate without bound (review r3 m-1). Past it the check answers false:
+// fail closed, the tree is not called typed. That is Rust's answer wherever
+// it matters, because policyShape type-checks only a tree the walk accepted,
+// and a walk-accepted tree holds about three entries per level (an andor's
+// pending children) plus one thresh's 32: about 410 at the decoder's 128
+// levels, 376 measured on the worst shapes
+// (TestTypeCheckCapLeavesWalkAcceptedTreesAlone checks them at half the cap).
+// A tree the walk refuses, such as review r3's 100-deep nested
+// thresh(1, 0×31, …), used to hold some 3,100 types (833 KB at 32-bit); it
+// now stops at the cap.
+const msMaxPending = 1024
+
 // msNode is node_to_miniscript followed by Miniscript::from_ast: the type of
 // n in ctx, or ok=false where Rust's conversion errors.
 //
@@ -395,6 +409,12 @@ func msGlobalOK(t msType, tg tag, ctx msCtx) bool {
 // anywhere fails the whole tree, as one `?` does in Rust, so a post-order
 // evaluation with early exit is the same function as the recursion.
 func msNode(root node, ctx msCtx) (msType, bool) {
+	return msNodeCapped(root, ctx, msMaxPending)
+}
+
+// msNodeCapped is msNode with the cap on pending entries as a parameter, so a
+// test can show the cap has room to spare.
+func msNodeCapped(root node, ctx msCtx, limit int) (msType, bool) {
 	type frame struct {
 		n        node
 		arity    int // children whose types sit on vals, once expanded
@@ -424,9 +444,15 @@ func msNode(root node, ctx msCtx) (msType, bool) {
 				return msType{}, false
 			}
 			vals = append(vals, t)
+			if len(work)+len(vals) > limit {
+				return msType{}, false
+			}
 			continue
 		}
 		work = append(work, frame{n: f.n, arity: len(children), expanded: true})
+		if len(work)+len(children)+len(vals) > limit {
+			return msType{}, false
+		}
 		// Pushed last-first, so the first child is evaluated first and the
 		// children's types land on vals in order.
 		for i := len(children) - 1; i >= 0; i-- {
