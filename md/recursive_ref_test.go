@@ -1,8 +1,11 @@
 package md
 
-// The recursive decoder and shape walk as they stood at 55d31dd, before review
-// r3 I-P1 made them iterative. Test-only: TestIterativeDecodeMatchesRecursive
-// and TestIterativeWalkMatchesRecursive hold the iterative versions to these,
+import btcaddr "github.com/btcsuite/btcd/address/v2"
+
+// The recursive tree walks as they stood before review r3 I-P1 made them
+// iterative: the decoder, validators, encoder and shape walk at 55d31dd, and
+// the script emitter and the other card entry points' walks at caa93e1.
+// Test-only: iterative_equiv_test.go holds the iterative versions to these,
 // result for result and error for error. Only the names changed (a Rec
 // suffix); keep the bodies as they were, so the comparison stays against the
 // code that shipped.
@@ -866,4 +869,652 @@ func writeNodeRec(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) 
 		return errOperatorContext
 	}
 	return nil
+}
+
+func emitFragmentRec(n node, e emitEnv, out *[]byte) error {
+	switch n.tag {
+	case tagPkK:
+		// A BARE `PkK` CARRIES AN IMPLICIT `c:` — it emits OP_CHECKSIG too.
+		//
+		// The md1 wire deliberately stores a bare key at every key-check
+		// position and reserves `Tag::Check` for wrapping NON-key children
+		// (SPEC §5.1 Q12); the renderer reconstructs the `pk(K)` shorthand from
+		// it. So the wire's `PkK` is miniscript's `c:pk_k`, and emitting only
+		// the push produces a script that is missing its signature check.
+		//
+		// This was invisible until a vector contained a bare `pk()`: the
+		// timelock/hashlock vector is all `multi` and hash/timelock fragments,
+		// so it passed with the push-only version. `keyed_wsh_or_b` caught it.
+		b, ok := n.body.(keyArgBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		k, ok := e.keys[b.index]
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		pushData(out, k)
+		*out = append(*out, opCHECKSIG)
+		return nil
+
+	case tagPkH:
+		// `pkh(K)` on the wire is miniscript's `c:pk_h(K)`, the same implicit
+		// `c:` as PkK above (SPEC §5.1 Q12), so the arm emits the whole
+		// DUP HASH160 <hash160(K)> EQUALVERIFY CHECKSIG. The key is hashed AS
+		// SUPPLIED: 33-byte compressed in segwit-v0, 32-byte x-only under tap
+		// (BIP-342's pk_h hashes the x-only key), exactly as PkK pushes it.
+		//
+		// The composer is the first producer of this fragment on this device
+		// (Multisig Build only ever wrote sortedmulti); md/compose_pkh_emit_test.go
+		// pins it to the Rust primary's addresses for five vectors.
+		b, ok := n.body.(keyArgBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		k, ok := e.keys[b.index]
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opDUP, opHASH160)
+		pushData(out, btcaddr.Hash160(k))
+		*out = append(*out, opEQUALVERIFY, opCHECKSIG)
+		return nil
+
+	case tagCheck:
+		// `c:X` — X then OP_CHECKSIG.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		// CHECK-IDEMPOTENCE over a bare key (port of md-codec to_miniscript.rs
+		// `to-miniscript-check-pkh-double-wrap`). A bare PkK/PkH already IS
+		// `c:pk_k`/`c:pk_h` (the arms above emit its OP_CHECKSIG), so
+		// `Check(PkK)` and `Check(PkH)` denote the SAME fragment as the bare
+		// tag. The toolkit before 0.55.0 and md-cli before 0.30 wrote that
+		// shape for every pk()/pkh() outside tap context, and such cards are
+		// already engraved. Appending a second OP_CHECKSIG built
+		// `<K> CHECKSIG CHECKSIG`: an unsatisfiable script whose address
+		// belongs to no wallet the Rust tools derive (bug hunt 2026-11-25
+		// SH#1). Only a bare-key child with a key-argument body is unwrapped,
+		// exactly as Rust matches it; every other child keeps the c: below.
+		if k := c.children[0]; k.tag == tagPkK || k.tag == tagPkH {
+			if _, ok := k.body.(keyArgBody); ok {
+				return emitFragmentRec(k, e, out)
+			}
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opCHECKSIG)
+		return nil
+
+	case tagVerify:
+		// `v:X` — THE SUBTLE ONE. It does not append OP_VERIFY blindly: if the
+		// wrapped fragment ends in a verifiable opcode, that opcode is REPLACED
+		// by its VERIFY form. Appending instead produces a longer script that
+		// still parses and hashes to a different address.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		before := len(*out)
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		if len(*out) == before {
+			return ErrScriptUnsupported
+		}
+		switch (*out)[len(*out)-1] {
+		case opCHECKSIG:
+			(*out)[len(*out)-1] = opCHECKSIGVERIFY
+		case opCHECKMULTISIG:
+			(*out)[len(*out)-1] = opCHECKMULTISIGVER
+		case opEQUAL:
+			(*out)[len(*out)-1] = opEQUALVERIFY
+		case opNUMEQUAL:
+			// `v:multi_a(...)`: multi_a terminates in OP_NUMEQUAL, and miniscript
+			// folds it to OP_NUMEQUALVERIFY exactly as it folds CHECKSIG and
+			// EQUAL. Missing here until the composer's corpus carried the first
+			// verify-wrapped multi_a (keyed_compose_tr_nums_three_leaves), which
+			// derived a WRONG taproot address against Rust's
+			// (composer-S2-implementation-report F-1). A Go-only convergence
+			// fix: the Rust primary emits scripts through rust-miniscript, whose
+			// verify fold has always covered NUMEQUAL.
+			(*out)[len(*out)-1] = opNUMEQUALVERIFY
+		default:
+			*out = append(*out, opVERIFY)
+		}
+		return nil
+
+	case tagAndV:
+		// `and_v(X,Y)` — concatenation, nothing more.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		return emitFragmentRec(c.children[1], e, out)
+
+	case tagOrI:
+		// `or_i(X,Y)` — OP_IF X OP_ELSE Y OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opIF)
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opELSE)
+		if err := emitFragmentRec(c.children[1], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagAndB:
+		// `and_b(X,Y)` — X Y OP_BOOLAND.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		if err := emitFragmentRec(c.children[1], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opBOOLAND)
+		return nil
+
+	case tagOrB:
+		// `or_b(X,Z)` — X Z OP_BOOLOR.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		if err := emitFragmentRec(c.children[1], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opBOOLOR)
+		return nil
+
+	case tagOrC:
+		// `or_c(X,Z)` — X OP_NOTIF Z OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opNOTIF)
+		if err := emitFragmentRec(c.children[1], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagOrD:
+		// `or_d(X,Z)` — X OP_IFDUP OP_NOTIF Z OP_ENDIF.
+		//
+		// The OP_IFDUP is what distinguishes it from or_c and is easy to drop:
+		// without it the script still parses and hashes elsewhere. It is the
+		// degrading-multisig idiom's fragment, so it earns its own vector.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opIFDUP, opNOTIF)
+		if err := emitFragmentRec(c.children[1], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagThresh:
+		// `thresh(k,X1,...,Xn)` — X1 (Xi OP_ADD)... <k> OP_EQUAL.
+		//
+		// The threshold is over SUB-POLICIES, not keys, which is why this is
+		// not multi: each branch contributes 0 or 1 and the sum is compared.
+		b, ok := n.body.(variableBody)
+		if !ok || len(b.children) == 0 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(b.children[0], e, out); err != nil {
+			return err
+		}
+		for _, c := range b.children[1:] {
+			if err := emitFragmentRec(c, e, out); err != nil {
+				return err
+			}
+			*out = append(*out, opADD)
+		}
+		pushNumber(out, uint32(b.k))
+		*out = append(*out, opEQUAL)
+		return nil
+
+	case tagSwap:
+		// `s:X` — OP_SWAP X.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opSWAP)
+		return emitFragmentRec(c.children[0], e, out)
+
+	case tagAlt:
+		// `a:X` — OP_TOALTSTACK X OP_FROMALTSTACK.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opTOALTSTACK)
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opFROMALTSTACK)
+		return nil
+
+	case tagDupIf:
+		// `d:X` — OP_DUP OP_IF X OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opDUP, opIF)
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagZeroNotEqual:
+		// `n:X` — X OP_0NOTEQUAL.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, op0NOTEQUAL)
+		return nil
+
+	case tagNonZero:
+		// `j:X` — OP_SIZE OP_0NOTEQUAL OP_IF X OP_ENDIF.
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 1 {
+			return ErrScriptUnsupported
+		}
+		*out = append(*out, opSIZE, op0NOTEQUAL, opIF)
+		if err := emitFragmentRec(c.children[0], e, out); err != nil {
+			return err
+		}
+		*out = append(*out, opENDIF)
+		return nil
+
+	case tagTrue:
+		*out = append(*out, 0x51) // OP_1
+		return nil
+
+	case tagFalse:
+		*out = append(*out, op0)
+		return nil
+
+	case tagOlder:
+		v, ok := n.body.(timelockBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		pushNumber(out, uint32(v))
+		*out = append(*out, opCSV)
+		return nil
+
+	case tagAfter:
+		v, ok := n.body.(timelockBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		pushNumber(out, uint32(v))
+		*out = append(*out, opCLTV)
+		return nil
+
+	case tagSha256, tagHash256:
+		h, ok := n.body.(hash256Body)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		op := byte(opSHA256)
+		if n.tag == tagHash256 {
+			op = opHASH256
+		}
+		// OP_SIZE <32> OP_EQUALVERIFY <hashop> <h> OP_EQUAL
+		*out = append(*out, opSIZE)
+		pushNumber(out, 32)
+		*out = append(*out, opEQUALVERIFY, op)
+		pushData(out, h[:])
+		*out = append(*out, opEQUAL)
+		return nil
+
+	case tagRipemd160, tagHash160:
+		h, ok := n.body.(hash160Body)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		op := byte(opRIPEMD160)
+		if n.tag == tagHash160 {
+			op = opHASH160
+		}
+		*out = append(*out, opSIZE)
+		pushNumber(out, 32)
+		*out = append(*out, opEQUALVERIFY, op)
+		pushData(out, h[:])
+		*out = append(*out, opEQUAL)
+		return nil
+
+	case tagMulti, tagSortedMulti:
+		// BIP-342 disabled OP_CHECKMULTISIG in tapscript. A `multi()` inside a
+		// tap leaf has no emission, and inventing the multi_a equivalent would
+		// change the policy.
+		if e.tap {
+			return ErrScriptUnsupported
+		}
+		b, ok := n.body.(multiKeysBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		ks := make([][]byte, 0, len(b.indices))
+		for _, i := range b.indices {
+			k, ok := e.keys[i]
+			if !ok {
+				return ErrScriptUnsupported
+			}
+			ks = append(ks, k)
+		}
+		if n.tag == tagSortedMulti {
+			sortByteSlices(ks)
+		}
+		pushNumber(out, uint32(b.k))
+		for _, k := range ks {
+			pushData(out, k)
+		}
+		pushNumber(out, uint32(len(ks)))
+		*out = append(*out, opCHECKMULTISIG)
+		return nil
+
+	case tagMultiA, tagSortedMultiA:
+		// `multi_a(k, ...)` — BIP-342's replacement for CHECKMULTISIG:
+		//
+		//	<k0> OP_CHECKSIG <k1> OP_CHECKSIGADD … <kn-1> OP_CHECKSIGADD <k> OP_NUMEQUAL
+		//
+		// The first key CHECKSIGs to seed the accumulator; every later one adds
+		// to it. Tapscript-only, for the same reason `multi` is not.
+		if !e.tap {
+			return ErrScriptUnsupported
+		}
+		b, ok := n.body.(multiKeysBody)
+		if !ok {
+			return ErrScriptUnsupported
+		}
+		ks := make([][]byte, 0, len(b.indices))
+		for _, i := range b.indices {
+			k, ok := e.keys[i]
+			if !ok {
+				return ErrScriptUnsupported
+			}
+			ks = append(ks, k)
+		}
+		// sortedmulti_a sorts the DERIVED keys, so the order depends on the
+		// address index — it cannot be precomputed from the template.
+		if n.tag == tagSortedMultiA {
+			sortByteSlices(ks)
+		}
+		for i, k := range ks {
+			pushData(out, k)
+			if i == 0 {
+				*out = append(*out, opCHECKSIG)
+			} else {
+				*out = append(*out, opCHECKSIGADD)
+			}
+		}
+		pushNumber(out, uint32(b.k))
+		*out = append(*out, opNUMEQUAL)
+		return nil
+
+	default:
+		return ErrScriptUnsupported
+	}
+}
+
+func guardNodeRec(n node, inCombinator bool) error {
+	switch n.tag {
+	case tagSortedMultiA:
+		// ADMITTED SINCE 2026-08-21 (F-215). This arm refused on the grounds that
+		// `sortedmulti_a` "has no rust-miniscript renderer" — true when written,
+		// and false since the S0 pin lift (PR #910 gave upstream
+		// `Terminal::SortedMultiA`) and R5.
+		//
+		// Re-measured on the current binaries before this line changed, because
+		// an enumerated safety argument goes stale silently:
+		//
+		//	md encode  tr(@0,sortedmulti_a(2,@0,@1))  -> 1 chunk
+		//	md decode  -> exit 0, the template verbatim
+		//	md verify  -> re-encodes to its own template
+		//	md address -> bc1p588jmtx4ptv76t9sclt6gt33eyydvsrea4njyayerqj2frw5m5aq5gzycw
+		//
+		// Fully recoverable with the shipped tooling, which is the only thing
+		// this guard was ever asking. Refusing it now blocks a legitimate
+		// template engrave (D4) and nothing else. Convergence toward the
+		// primary, which admits the shape at every stage.
+		return nil
+	case tagMultiA:
+		// multi_a renders (tr(NUMS, multi_a) is shipped) → admit; nothing below.
+		return nil
+	case tagSortedMulti:
+		if inCombinator {
+			// sortedmulti nested under a combinator → refuse (no rust-miniscript renderer).
+			return errTemplateUnsupportedShape
+		}
+		return nil
+	case tagMulti:
+		// Legacy multi renders fine inside combinators — the shipped toolkit ADMITS
+		// it (e.g. the §5 degrade2 wallet's wsh(or_i(and_v(...multi(3,...)),...)));
+		// only sortedmulti is the render-gap shape. Always admitted (C1, exec-review).
+		return nil
+	case tagWsh:
+		// wsh wrapper: its sole child stays on the canonical spine (NOT a
+		// combinator) so a direct wsh(sortedmulti) is admitted; deeper wrapping is
+		// handled by the child's own arm.
+		if b, ok := n.body.(childrenBody); ok {
+			for _, c := range b.children {
+				if err := guardNodeRec(c, false); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case tagSh:
+		// sh wrapper: a direct sh(sortedmulti/multi) and sh(wsh(...)) stay on the
+		// spine; everything else its child decides.
+		if b, ok := n.body.(childrenBody); ok {
+			for _, c := range b.children {
+				if err := guardNodeRec(c, false); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case tagTr:
+		// Taproot: a key-path-only tr is fine; a script tree is walked as a
+		// COMBINATOR context (its leaves are reached via tap branching) — so a
+		// sortedmulti leaf there is refused, and sortedmulti_a is refused by its own
+		// arm. multi_a and legacy multi are admitted.
+		if b, ok := n.body.(trBody); ok && b.tree != nil {
+			return guardNodeRec(*b.tree, true)
+		}
+		return nil
+	case tagTapTree:
+		if b, ok := n.body.(childrenBody); ok {
+			for _, c := range b.children {
+				if err := guardNodeRec(c, true); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	default:
+		// A combinator / miniscript fragment (or_i, and_v, thresh, …): descend with
+		// inCombinator=true so any sortedmulti below is refused (legacy multi admitted).
+		if b, ok := n.body.(childrenBody); ok {
+			for _, c := range b.children {
+				if err := guardNodeRec(c, true); err != nil {
+					return err
+				}
+			}
+		}
+		if b, ok := n.body.(variableBody); ok {
+			for _, c := range b.children {
+				if err := guardNodeRec(c, true); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+}
+
+func duplicateInTapTreeRec(n node) (uint8, bool) {
+	if n.tag == tagTapTree {
+		b, ok := n.body.(childrenBody)
+		if !ok || len(b.children) != 2 {
+			return 0, false
+		}
+		if slot, dup := duplicateInTapTreeRec(b.children[0]); dup {
+			return slot, true
+		}
+		return duplicateInTapTreeRec(b.children[1])
+	}
+	return duplicateInExpression(n)
+}
+
+func countKeySlotsRec(n node, counts *[256]int) {
+	switch b := n.body.(type) {
+	case keyArgBody:
+		counts[b.index]++
+	case multiKeysBody:
+		for _, idx := range b.indices {
+			counts[idx]++
+		}
+	case childrenBody:
+		for _, c := range b.children {
+			countKeySlotsRec(c, counts)
+		}
+	case variableBody:
+		for _, c := range b.children {
+			countKeySlotsRec(c, counts)
+		}
+	case trBody:
+		// F-612: a `tr` NESTED INSIDE A TAPLEAF hid its internal key and its
+		// whole subtree here -- this switch had no trBody arm, so such a policy
+		// reported DuplicateNone however many times a slot repeated inside it.
+		//
+		// It is unreachable today, and that is the uncomfortable part: it is
+		// unreachable only because `emitFragment` has no `tagTr` case, which is
+		// a property of a DIFFERENT function in a different file. Nothing
+		// connected the two, so teaching emitFragment taproot would have made
+		// this live silently. TestEmitFragmentHasNoTaprootCase is the wire that
+		// now connects them.
+		//
+		// !isNums for the same reason as DuplicateKeySlot's own arm (SPEC §7):
+		// a NUMS internal key is the H-point, not a reference to a slot, and
+		// keyIndex is a meaningless zero there.
+		if !b.isNums() {
+			counts[b.keyIndex]++
+		}
+		if b.tree != nil {
+			countKeySlotsRec(*b.tree, counts)
+		}
+	}
+}
+
+func tapBranchDepthRec(n node) int {
+	if n.tag != tagTapTree {
+		return 0 // a script leaf contributes no branch level
+	}
+	cb, ok := n.body.(childrenBody)
+	if !ok {
+		return 0
+	}
+	deepest := 0
+	for _, c := range cb.children {
+		if dch := tapBranchDepthRec(c); dch > deepest {
+			deepest = dch
+		}
+	}
+	return deepest + 1
+}
+
+func collectTapLeavesRec(n node, depth int, out *[]TapLeaf) error {
+	if n.tag == tagTapTree {
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return errTapTreeShape
+		}
+		if err := collectTapLeavesRec(c.children[0], depth+1, out); err != nil {
+			return err
+		}
+		return collectTapLeavesRec(c.children[1], depth+1, out)
+	}
+	leaf, err := describeTapLeaf(n)
+	if err != nil {
+		return err
+	}
+	leaf.Depth = depth
+	*out = append(*out, leaf)
+	return nil
+}
+
+func emitTapLeavesRec(n node, depth int, e emitEnv, out *[]TapLeafScript) error {
+	if n.tag == tagTapTree {
+		c, ok := n.body.(childrenBody)
+		if !ok || len(c.children) != 2 {
+			return errTapTreeShape
+		}
+		if err := emitTapLeavesRec(c.children[0], depth+1, e, out); err != nil {
+			return err
+		}
+		return emitTapLeavesRec(c.children[1], depth+1, e, out)
+	}
+	var script []byte
+	if err := emitFragmentRec(n, e, &script); err != nil {
+		return err
+	}
+	*out = append(*out, TapLeafScript{Depth: depth, Script: script})
+	return nil
+}
+
+func collectKeyOccurrencesRec(n node, out *[]uint8) {
+	switch b := n.body.(type) {
+	case keyArgBody:
+		*out = append(*out, b.index)
+	case multiKeysBody:
+		*out = append(*out, b.indices...)
+	case childrenBody:
+		for _, c := range b.children {
+			collectKeyOccurrencesRec(c, out)
+		}
+	case variableBody:
+		for _, c := range b.children {
+			collectKeyOccurrencesRec(c, out)
+		}
+	}
 }

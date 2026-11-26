@@ -276,18 +276,27 @@ func DuplicateKeySlotChunks(strs []string) (uint8, DuplicateKind, error) {
 // duplicateInTapTree checks each LEAF separately, because each leaf is its own
 // miniscript expression. A key in two different leaves is not a duplicate to
 // Core, and reporting it as one would warn about a wallet Core accepts.
-func duplicateInTapTree(n node) (uint8, bool) {
-	if n.tag == tagTapTree {
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			return 0, false
+func duplicateInTapTree(root node) (uint8, bool) {
+	// An explicit stack, leaves left to right, stopping at the first leaf
+	// with a duplicate, as the recursion did; a malformed TapTree node hides
+	// its own subtree only (review r3 I-P1).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		if n.tag == tagTapTree {
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				continue
+			}
+			work = append(work, b.children[1], b.children[0])
+			continue
 		}
-		if slot, dup := duplicateInTapTree(b.children[0]); dup {
+		if slot, dup := duplicateInExpression(n); dup {
 			return slot, true
 		}
-		return duplicateInTapTree(b.children[1])
 	}
-	return duplicateInExpression(n)
+	return 0, false
 }
 
 // duplicateInExpression counts key-slot occurrences in one expression and
@@ -308,7 +317,18 @@ func duplicateInExpression(n node) (uint8, bool) {
 //
 // A nested tr cannot occur inside a miniscript expression, so tr is not walked
 // here; DuplicateKeySlot handles the root case and nothing else produces one.
-func countKeySlots(n node, counts *[256]int) {
+func countKeySlots(root node, counts *[256]int) {
+	// An explicit stack (review r3 I-P1); a tally does not depend on the order.
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		countKeySlotsOf(n, counts, &work)
+	}
+}
+
+// countKeySlotsOf tallies n's own key references and pushes its children.
+func countKeySlotsOf(n node, counts *[256]int, work *[]node) {
 	switch b := n.body.(type) {
 	case keyArgBody:
 		counts[b.index]++
@@ -317,13 +337,9 @@ func countKeySlots(n node, counts *[256]int) {
 			counts[idx]++
 		}
 	case childrenBody:
-		for _, c := range b.children {
-			countKeySlots(c, counts)
-		}
+		*work = append(*work, b.children...)
 	case variableBody:
-		for _, c := range b.children {
-			countKeySlots(c, counts)
-		}
+		*work = append(*work, b.children...)
 	case trBody:
 		// F-612: a `tr` NESTED INSIDE A TAPLEAF hid its internal key and its
 		// whole subtree here -- this switch had no trBody arm, so such a policy
@@ -343,7 +359,7 @@ func countKeySlots(n node, counts *[256]int) {
 			counts[b.keyIndex]++
 		}
 		if b.tree != nil {
-			countKeySlots(*b.tree, counts)
+			*work = append(*work, *b.tree)
 		}
 	}
 }

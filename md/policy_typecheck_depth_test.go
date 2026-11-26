@@ -69,13 +69,20 @@ func depthCard(t *testing.T, tree node) ([]string, node) {
 	t.Helper()
 	next := 0
 	tree = zzRenumberForDepth(tree, &next)
+	return depthCardKeys(t, tree, uint8(next))
+}
+
+// depthCardKeys encodes a tree whose key slots are already numbered 0..n-1 in
+// first-occurrence order, and decodes it back.
+func depthCardKeys(t *testing.T, tree node, next uint8) ([]string, node) {
+	t.Helper()
 	shared := originPath{components: toComponents(DefaultOrigin(ComposeWsh, 0))}
 	if tree.tag == tagTr {
 		shared = originPath{components: toComponents(DefaultOrigin(ComposeTr, 0))}
 	}
 	d := &descriptor{
-		n:        uint8(next),
-		pathDecl: pathDecl{n: uint8(next), shared: &shared},
+		n:        next,
+		pathDecl: pathDecl{n: next, shared: &shared},
 		useSite:  useSitePath{hasMultipath: true, multipath: []alternative{{value: 0}, {value: 1}}},
 		tree:     tree,
 	}
@@ -157,6 +164,98 @@ func TestTypeRuleCompletesOnMaxDepthCards(t *testing.T) {
 	}
 }
 
+// keyLeafSpine is a taptree 126 TapTree nodes deep whose 127 leaves are all
+// keys, slots 0..31 reused in order (a card holds at most 32), under a tr with
+// internal key ik. Unlike depthCases' taptree (older leaves), every leaf is one
+// TapLeavesChunks can describe and a Liana-unspendable key can be computed
+// over, so those entry points walk the whole spine instead of refusing at
+// the first leaf.
+func keyLeafSpine(ik InternalKeyKind) node {
+	const levels = 126
+	x := tpKey(tagPkK, levels%32)
+	for i := levels - 1; i >= 0; i-- {
+		x = tpPair(tagTapTree, tpKey(tagPkK, uint8(i%32)), x)
+	}
+	return node{tag: tagTr, body: trBody{ik: ik, tree: &x}}
+}
+
+// maxDepthCard is one card at the decoder's depth limit, for the stack test.
+type maxDepthCard struct {
+	name   string
+	chunks []string
+	tr     bool
+	spine  bool // a key-leaf spine: TapLeavesChunks must describe it
+	liana  bool
+}
+
+func maxDepthCards(t *testing.T) []maxDepthCard {
+	t.Helper()
+	var cards []maxDepthCard
+	for _, c := range depthCases(t) {
+		chunks, _ := depthCard(t, c.tree)
+		cards = append(cards, maxDepthCard{name: c.name, chunks: chunks, tr: c.tree.tag == tagTr})
+	}
+	for _, ik := range []InternalKeyKind{InternalKeyNUMS, InternalKeyLianaUnspendable} {
+		chunks, _ := depthCardKeys(t, keyLeafSpine(ik), 32)
+		cards = append(cards, maxDepthCard{name: fmt.Sprintf("key-leaf spine, ik %d", ik), chunks: chunks,
+			tr: true, spine: true, liana: ik == InternalKeyLianaUnspendable})
+	}
+	return cards
+}
+
+// cardEntryPoints runs every exported entry point that takes an md1 card on
+// one max-depth card, and reports a result the card's kind says must not
+// fail (so each entry point is shown to walk the deep tree, not to refuse it
+// at the top).
+func cardEntryPoints(c maxDepthCard) []error {
+	var errs []error
+	must := func(what string, err error) {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %s: %w", c.name, what, err))
+		}
+	}
+	segwitKeys, tapKeys := map[uint8][]byte{}, map[uint8][]byte{}
+	xpubs := map[uint8][65]byte{}
+	for i := 0; i < 32; i++ {
+		k := make([]byte, 33)
+		k[0], k[1] = 2, byte(i)
+		segwitKeys[uint8(i)] = k
+		tapKeys[uint8(i)] = k[1:]
+		xpubs[uint8(i)] = [65]byte{1: byte(i)}
+	}
+	_, err := Reassemble(c.chunks)
+	must("Reassemble", err)
+	_, err = PolicyShapeChunks(c.chunks)
+	must("PolicyShapeChunks", err)
+	_, err = EmitWitnessScriptChunks(c.chunks, segwitKeys)
+	if !c.tr {
+		must("EmitWitnessScriptChunks", err)
+	}
+	_, _, _, err = EmitTapLeavesChunks(c.chunks, tapKeys)
+	if c.tr {
+		must("EmitTapLeavesChunks", err)
+	}
+	_, _, _, err = TapLeavesChunks(c.chunks)
+	if c.spine {
+		must("TapLeavesChunks", err)
+	}
+	_, err = LianaUnspendableKeyFor(c.chunks, xpubs)
+	if c.liana {
+		must("LianaUnspendableKeyFor", err)
+	}
+	_, _, err = DuplicateKeySlotChunks(c.chunks)
+	must("DuplicateKeySlotChunks", err)
+	must("TemplateEngraveShapeGuardChunks", TemplateEngraveShapeGuardChunks(c.chunks))
+	depth, err := TapTreeDepthChunks(c.chunks)
+	must("TapTreeDepthChunks", err)
+	if c.spine && depth != 126 {
+		errs = append(errs, fmt.Errorf("%s: TapTreeDepthChunks = %d, want 126", c.name, depth))
+	}
+	_, err = StripToTemplate(c.chunks)
+	must("StripToTemplate", err)
+	return errs
+}
+
 // typeCheckStackLimit and loadStackLimit are the stacks the max-depth work
 // may use on the host. loadStackLimit is the device's 16 KB goroutine budget:
 // a hostile max-depth card must decode (Reassemble) and summarise
@@ -180,19 +279,18 @@ const (
 	stackChildDone = "MD_STACK_CHILD_DONE"
 )
 
-// TestMaxDepthCardsFitTheStack runs the type check, then Reassemble and
-// PolicyShapeChunks, on every max-depth card in a child process whose
-// goroutine stacks are capped (debug.SetMaxStack: exceeding it is a fatal
+// TestMaxDepthCardsFitTheStack runs the type check, then every exported entry
+// point that takes an md1 card (cardEntryPoints), on every max-depth card in
+// a child process whose goroutine stacks are capped (debug.SetMaxStack: exceeding it is a fatal
 // error, which the parent sees as a failed child).
 func TestMaxDepthCardsFitTheStack(t *testing.T) {
 	if os.Getenv("MD_STACK_CHILD") == "1" {
 		var trees []node
-		var cards [][]string
 		for _, c := range depthCases(t) {
-			chunks, tree := depthCard(t, c.tree)
+			_, tree := depthCard(t, c.tree)
 			trees = append(trees, tree)
-			cards = append(cards, chunks)
 		}
+		cards := maxDepthCards(t)
 		run := func(limit int, f func()) {
 			debug.SetMaxStack(limit)
 			done := make(chan struct{})
@@ -209,13 +307,8 @@ func TestMaxDepthCardsFitTheStack(t *testing.T) {
 		})
 		var errs []error
 		run(loadStackLimit, func() {
-			for _, chunks := range cards {
-				if _, err := Reassemble(chunks); err != nil {
-					errs = append(errs, err)
-				}
-				if _, err := PolicyShapeChunks(chunks); err != nil {
-					errs = append(errs, err)
-				}
+			for _, c := range cards {
+				errs = append(errs, cardEntryPoints(c)...)
 			}
 		})
 		debug.SetMaxStack(1 << 30)

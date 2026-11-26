@@ -156,6 +156,10 @@ func eqCorpusTrees(t *testing.T) []node {
 		_, tree := depthCard(t, c.tree)
 		trees = append(trees, c.tree, tree)
 	}
+	for _, ik := range []InternalKeyKind{InternalKeyNUMS, InternalKeyLianaUnspendable} {
+		_, tree := depthCardKeys(t, keyLeafSpine(ik), 32)
+		trees = append(trees, tree)
+	}
 	return trees
 }
 
@@ -251,6 +255,32 @@ func TestIterativeDecodeMatchesRecursive(t *testing.T) {
 	}
 }
 
+// eqRooted draws a generated tree under a random root: wsh, sh, a tr over a
+// taptree of generated leaves (sometimes with a malformed TapTree node), or
+// none.
+func eqRooted(r *rand.Rand) node {
+	roots := []tag{tagWsh, tagSh, tagTr, tagWpkh, tagPkh, tagAndV}
+	inner := eqTree(r, 1+r.Intn(8))
+	switch root := roots[r.Intn(len(roots))]; root {
+	case tagWsh, tagSh:
+		return node{tag: root, body: childrenBody{children: []node{inner}}}
+	case tagTr:
+		leaf := inner
+		for d := r.Intn(4); d > 0; d-- {
+			kids := []node{leaf, eqTree(r, 3)}
+			if r.Intn(2) == 0 {
+				kids[0], kids[1] = kids[1], kids[0]
+			}
+			if r.Intn(20) == 0 {
+				kids = kids[:1]
+			}
+			leaf = node{tag: tagTapTree, body: childrenBody{children: kids}}
+		}
+		return node{tag: tagTr, body: trBody{ik: InternalKeyKind(r.Intn(4)), tree: &leaf}}
+	}
+	return inner
+}
+
 // shapeAgreesRec compares the iterative and recursive shape walks on one tree.
 func shapeAgreesRec(tree node) string {
 	var s1, s2 PolicyShape
@@ -272,31 +302,9 @@ func TestIterativeWalkMatchesRecursive(t *testing.T) {
 			t.Fatalf("corpus tree %d: %s", i, d)
 		}
 	}
-	roots := []tag{tagWsh, tagSh, tagTr, tagWpkh, tagPkh, tagAndV}
 	complete := 0
 	for i := 0; i < equivRounds(t, 40000); i++ {
-		inner := eqTree(r, 1+r.Intn(8))
-		var tree node
-		switch root := roots[r.Intn(len(roots))]; root {
-		case tagWsh, tagSh:
-			tree = node{tag: root, body: childrenBody{children: []node{inner}}}
-		case tagTr:
-			// A taptree of generated leaves, sometimes a malformed TapTree node.
-			leaf := inner
-			for d := r.Intn(4); d > 0; d-- {
-				kids := []node{leaf, eqTree(r, 3)}
-				if r.Intn(2) == 0 {
-					kids[0], kids[1] = kids[1], kids[0]
-				}
-				if r.Intn(20) == 0 {
-					kids = kids[:1]
-				}
-				leaf = node{tag: tagTapTree, body: childrenBody{children: kids}}
-			}
-			tree = node{tag: tagTr, body: trBody{ik: InternalKeyKind(r.Intn(4)), tree: &leaf}}
-		default:
-			tree = inner
-		}
+		tree := eqRooted(r)
 		if d := shapeAgreesRec(tree); d != "" {
 			t.Fatalf("generated tree %+v: %s", tree, d)
 		}
@@ -437,5 +445,151 @@ func eqMutateKeys(n node) {
 				work = append(work, *b.tree)
 			}
 		}
+	}
+}
+
+// TestIterativeCardWalksMatchRecursive holds the script emitter and the walks
+// behind the other card entry points (the template guard, the duplicate-key
+// check, the taptree depth, the tap-leaf lists, the Liana key occurrences) to
+// their recursive originals: the bytes, leaves, slots and errors, and panics.
+func TestIterativeCardWalksMatchRecursive(t *testing.T) {
+	r := rand.New(rand.NewSource(20261129))
+	errText := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		return fmt.Sprintf("%#v %s", err, err)
+	}
+	compare := func(what string, f1, f2 func() any) {
+		t.Helper()
+		var v1, v2 any
+		p1 := catch(func() { v1 = f1() })
+		p2 := catch(func() { v2 = f2() })
+		if !reflect.DeepEqual(p1, p2) {
+			t.Fatalf("%s: panic %v vs %v", what, p1, p2)
+		}
+		if !reflect.DeepEqual(v1, v2) {
+			t.Fatalf("%s: %+v vs %+v", what, v1, v2)
+		}
+	}
+	type emitted struct {
+		Script []byte
+		Err    string
+	}
+	type tapLeaves struct {
+		Leaves  []TapLeaf
+		Scripts []TapLeafScript
+		Err     string
+	}
+	type dup struct {
+		Slot uint8
+		Dup  bool
+	}
+	scripts := 0
+	one := func(what string, tree node) {
+		t.Helper()
+		// Keys for every slot, sometimes with one of the slots generated trees
+		// use (0..5) missing, so both the found and the refused key paths run.
+		keys := map[uint8][]byte{}
+		missing := r.Intn(12)
+		tap := r.Intn(2) == 0
+		for i := 0; i < 32; i++ {
+			if i == missing {
+				continue
+			}
+			k := make([]byte, 33)
+			k[0], k[1] = 2, byte(i)
+			if tap {
+				k = k[1:]
+			}
+			keys[uint8(i)] = k
+		}
+		e := emitEnv{keys: keys, tap: tap}
+		frags := []node{tree}
+		var tapRoot *node
+		switch b := tree.body.(type) {
+		case childrenBody:
+			if (tree.tag == tagWsh || tree.tag == tagSh) && len(b.children) == 1 {
+				frags = append(frags, b.children[0])
+			}
+		case trBody:
+			tapRoot = b.tree
+		}
+		for _, f := range frags {
+			compare(what+": emitFragment", func() any {
+				var out []byte
+				err := emitFragmentRec(f, e, &out)
+				return emitted{out, errText(err)}
+			}, func() any {
+				var out []byte
+				err := emitFragment(f, e, &out)
+				if err == nil && len(out) > 8 {
+					scripts++
+				}
+				return emitted{out, errText(err)}
+			})
+		}
+		in := r.Intn(2) == 0
+		compare(what+": guardNode", func() any { return errText(guardNodeRec(tree, in)) },
+			func() any { return errText(guardNode(tree, in)) })
+		compare(what+": countKeySlots", func() any {
+			var counts [256]int
+			countKeySlotsRec(tree, &counts)
+			return counts
+		}, func() any {
+			var counts [256]int
+			countKeySlots(tree, &counts)
+			return counts
+		})
+		compare(what+": collectKeyOccurrences", func() any {
+			var out []uint8
+			collectKeyOccurrencesRec(tree, &out)
+			return out
+		}, func() any {
+			var out []uint8
+			collectKeyOccurrences(tree, &out)
+			return out
+		})
+		taps := []node{tree}
+		if tapRoot != nil {
+			taps = append(taps, *tapRoot)
+		}
+		for _, n := range taps {
+			compare(what+": duplicateInTapTree", func() any {
+				s, d := duplicateInTapTreeRec(n)
+				return dup{s, d}
+			}, func() any {
+				s, d := duplicateInTapTree(n)
+				return dup{s, d}
+			})
+			compare(what+": tapBranchDepth", func() any { return tapBranchDepthRec(n) },
+				func() any { return tapBranchDepth(n) })
+			depth := r.Intn(3)
+			te := emitEnv{keys: keys, tap: true}
+			compare(what+": tap leaves", func() any {
+				var leaves []TapLeaf
+				var scripts []TapLeafScript
+				err1 := collectTapLeavesRec(n, depth, &leaves)
+				err2 := emitTapLeavesRec(n, depth, te, &scripts)
+				return tapLeaves{leaves, scripts, errText(err1) + "|" + errText(err2)}
+			}, func() any {
+				var leaves []TapLeaf
+				var scripts []TapLeafScript
+				err1 := collectTapLeaves(n, depth, &leaves)
+				err2 := emitTapLeaves(n, depth, te, &scripts)
+				return tapLeaves{leaves, scripts, errText(err1) + "|" + errText(err2)}
+			})
+		}
+	}
+	for i, tree := range eqCorpusTrees(t) {
+		one(fmt.Sprintf("corpus tree %d", i), tree)
+	}
+	rounds := equivRounds(t, 20000)
+	for i := 0; i < rounds; i++ {
+		one("generated tree", eqRooted(r))
+	}
+	// The generator must reach real scripts, not only early refusals.
+	if scripts < rounds/20 {
+		t.Errorf("only %d emissions of more than 8 bytes in %d rounds", scripts, rounds)
 	}
 }

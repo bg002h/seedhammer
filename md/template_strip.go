@@ -79,19 +79,33 @@ func TapTreeDepthChunks(strs []string) (int, error) {
 // tapBranchDepth returns the nesting depth of tagTapTree BRANCH nodes: a script
 // leaf = 0, a single {A,B} branch = 1, a nested {{A,B},C} = 2. The tr root that
 // has any script tree is at least depth 1 (a bare-leaf tree).
-func tapBranchDepth(n node) int {
-	if n.tag != tagTapTree {
-		return 0 // a script leaf contributes no branch level
-	}
-	cb, ok := n.body.(childrenBody)
-	if !ok {
-		return 0
+func tapBranchDepth(root node) int {
+	// An explicit stack (review r3 I-P1): the depth of n's deepest TapTree
+	// chain is its branch nesting, counted from 1 at root. A child that is
+	// not a TapTree (a leaf) or a TapTree whose body is not childrenBody adds
+	// no level of its own, as in the recursion.
+	type item struct {
+		n     node
+		level int // TapTree nodes above n, n's own not counted
 	}
 	deepest := 0
-	for _, c := range cb.children {
-		if dch := tapBranchDepth(c); dch > deepest {
-			deepest = dch
+	work := []item{{root, 0}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		if it.n.tag != tagTapTree {
+			continue
+		}
+		cb, ok := it.n.body.(childrenBody)
+		if !ok {
+			continue
+		}
+		if it.level+1 > deepest {
+			deepest = it.level + 1
+		}
+		for _, c := range cb.children {
+			work = append(work, item{c, it.level + 1})
 		}
 	}
-	return deepest + 1
+	return deepest
 }
