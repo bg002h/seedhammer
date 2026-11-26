@@ -172,6 +172,11 @@ var summaryGoldens = map[string][]string{
 	"thresh_kn_2of2":      {"Spend path: 1", "  1: 2 key(s), custom"},
 	"thresh_kn_3of3_lock": {"Spend path: 1", "  1: 2 key(s), custom +timelock"},
 	"thresh_kn_under_and": {"Spend path: 1", "  1: 3 key(s), custom"},
+	// Four chained 20-of-20 multis over the same 20 keys (md review r2 m-2):
+	// every key signs, and four thresholds have no single k-of-n, so the
+	// count is honest and the threshold is "custom". Its five-multi twin is
+	// over the 100-witness-item limit, so it is incomplete and prints nothing.
+	"typed_witness_items_84": {"Spend path: 1", "  1: 20 key(s), custom"},
 }
 
 // TestPolicySummaryLinesForEveryVendoredCase: every complete case prints its
