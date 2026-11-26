@@ -81,10 +81,17 @@ type Branch struct {
 	// which §5 lowers to pk and which Keys == 1 reports.
 	K, N int
 	// Keys counts distinct key placeholders the branch references. It is set
-	// even when K/N are not, so a branch is never reported as keyless.
+	// even when K/N are not, so a branch is never reported as keyless. For an
+	// any-of entry (AnyN > 0) it counts the key CONDITIONS, none of which is
+	// individually required.
 	Keys int
 	// Timelock/Hashlock report whether the branch requires one ANYWHERE within
-	// it. Locks and Hashlocks carry the values, in wire order, so the
+	// it -- for a conjunction. For an any-of entry (AnyN > 0) Timelock and
+	// Locks report timelock CONDITIONS, any AnyK of which (with the keys)
+	// satisfy it, so a lock listed there may never be needed; Hashlock is
+	// false and Hashlocks empty.
+	//
+	// Locks and Hashlocks carry the values, in wire order, so the
 	// composer's consent surface (SPEC_wallet_policy_composer.md §7e) can say
 	// "older 26280 blocks" instead of "time-locked"; a value is a fact from the
 	// decoded tree, not a rendering, so the no-text rule above still holds. A
@@ -113,6 +120,36 @@ type Branch struct {
 	Sorted bool
 	// Depth is the taptree depth of this leaf (0 for wsh/sh).
 	Depth int
+	// AnyK, AnyN: READ THESE FIRST (md-codec 0.49.0 Branch::any_of, seedhammer
+	// I-1). Both zero: the branch is a conjunction, and every key, lock and
+	// hashlock it lists is REQUIRED (K/N describe its one multi, if any).
+	// AnyN > 0: the branch is a thresh(AnyK, c_1..c_AnyN) with
+	// 1 <= AnyK < AnyN at a path root, every child spelled as one allowlisted
+	// key or timelock (threshConditions). Keys and Locks are then its AnyN
+	// CONDITIONS, any AnyK of which satisfy it, and none of them is
+	// individually required; K, N, Sorted are zero and Hashlocks is empty. A
+	// reader that ignores these repeats the defect they fix: a 2-of-3 shown
+	// as needing all three.
+	AnyK, AnyN int
+}
+
+// AnyOfMinKeys is, for an any-of entry (AnyN > 0), the fewest keys any
+// satisfying choice needs: AnyK less the timelock conditions, floored at zero
+// (Rust Branch::any_of_min_keys). Timelock conditions are counted as
+// AnyN - Keys, which equals len(Locks) because the allowlist admits only
+// well-formed timelock bodies. It assumes every lock can be met, so where two
+// cannot both be (a height and a time) it errs toward FEWER keys: a warning,
+// never an overstatement. Zero for a conjunction is NOT a claim; callers test
+// AnyN first.
+func (b Branch) AnyOfMinKeys() int {
+	if b.AnyN == 0 {
+		return 0
+	}
+	locks := b.AnyN - b.Keys
+	if locks >= b.AnyK {
+		return 0
+	}
+	return b.AnyK - locks
 }
 
 // PolicyShape is the structural summary of one decoded policy.
@@ -136,10 +173,26 @@ func PolicyShapeChunks(strs []string) (PolicyShape, error) {
 	return policyShape(d.tree), nil
 }
 
-// policyShape walks a decoded tree. It never errors: an unrecognised shape is
-// reported as Complete=false, because "I do not understand this" is a RESULT the
-// caller must act on, not an exception to swallow.
+// policyShape summarizes a decoded tree. It never errors: an unrecognised shape
+// is reported as Complete=false, because "I do not understand this" is a RESULT
+// the caller must act on, not an exception to swallow. A tree that is not typed
+// miniscript in its context (treeTypeChecks, THE TYPE RULE of md review r2 I-1)
+// is also Complete=false: Complete = walk && typed, and every other field is
+// left as the walk left it (md-codec policy_shape, descriptor-mnemonic
+// ca48a05e).
 func policyShape(tree node) PolicyShape {
+	s := walkShape(tree)
+	// The rule can only lower Complete, so a walk that already refused needs
+	// no type check (review r2 m-3); TestPolicyTypeChecksAgreesWithRustCases
+	// still runs it on every vendored tree.
+	if s.Complete && !treeTypeChecks(tree) {
+		s.Complete = false
+	}
+	return s
+}
+
+// walkShape is the structural walk behind policyShape, before the type rule.
+func walkShape(tree node) PolicyShape {
 	s := PolicyShape{Complete: true}
 	switch tree.tag {
 	case tagTr:
@@ -172,14 +225,14 @@ func policyShape(tree node) PolicyShape {
 			}
 			inner = ib.children[0]
 		}
-		brs, ok := splitBranches(inner, 0)
+		brs, ok := splitBranches(inner, 0, false)
 		if !ok {
 			return PolicyShape{}
 		}
 		s.Branches = append(s.Branches, brs...)
 	default:
 		// wpkh/pkh and anything else: a single-key or unclassifiable root.
-		brs, ok := splitBranches(tree, 0)
+		brs, ok := splitBranches(tree, 0, false)
 		if !ok {
 			return PolicyShape{}
 		}
@@ -189,80 +242,132 @@ func policyShape(tree node) PolicyShape {
 }
 
 // walkTapTree descends a binary taptree, appending one Branch per LEAF. Every
-// leaf is visited: a summary that stopped early would hide a spend path.
-func walkTapTree(n node, depth int, s *PolicyShape) {
-	if n.tag == tagTapTree {
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			s.Complete = false
-			return
+// leaf is visited: a summary that stopped early would hide a spend path. A
+// malformed TapTree node or an unsummarisable leaf clears Complete and the walk
+// goes on to the next leaf. It walks with an explicit stack, left leaf first,
+// not recursion (review r3 I-P1); the root is at depth.
+func walkTapTree(root node, depth int, s *PolicyShape) {
+	type item struct {
+		n     node
+		depth int
+	}
+	work := []item{{root, depth}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		n, depth := it.n, it.depth
+		if n.tag == tagTapTree {
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				s.Complete = false
+				continue
+			}
+			work = append(work, item{b.children[1], depth + 1}, item{b.children[0], depth + 1})
+			continue
 		}
-		walkTapTree(b.children[0], depth+1, s)
-		walkTapTree(b.children[1], depth+1, s)
-		return
+		if depth-1 > s.TapDepth {
+			s.TapDepth = depth - 1
+		}
+		brs, ok := splitBranches(n, depth-1, false)
+		if !ok {
+			s.Complete = false
+			continue
+		}
+		s.Branches = append(s.Branches, brs...)
 	}
-	if depth-1 > s.TapDepth {
-		s.TapDepth = depth - 1
-	}
-	brs, ok := splitBranches(n, depth-1)
-	if !ok {
-		s.Complete = false
-		return
-	}
-	s.Branches = append(s.Branches, brs...)
 }
 
 // splitBranches turns a node into one Branch per ALTERNATIVE: or_b/or_c/or_d/
 // or_i are two alternatives each (recursively), andor(X,Y,Z) is (X and Y) or
 // Z, and anything else is one branch. thresh(k,...) with k < n is also a set
-// of alternatives but a combinatorial one; it stays one branch, honestly
-// described by collect. ok=false propagates an unknown tag exactly as
-// branchOf does.
-func splitBranches(n node, depth int) ([]Branch, bool) {
-	switch n.tag {
-	case tagOrB, tagOrC, tagOrD, tagOrI:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 2 {
-			return nil, false
-		}
-		left, ok := splitBranches(b.children[0], depth)
-		if !ok {
-			return nil, false
-		}
-		right, ok := splitBranches(b.children[1], depth)
-		if !ok {
-			return nil, false
-		}
-		return append(left, right...), true
-	case tagAndOr:
-		b, ok := n.body.(childrenBody)
-		if !ok || len(b.children) != 3 {
-			return nil, false
-		}
-		// The X-and-Y half is summarized as a conjunction; the synthetic node is
-		// never emitted or encoded, only walked.
-		xy := node{tag: tagAndV, body: childrenBody{children: []node{b.children[0], b.children[1]}}}
-		left, ok := splitBranches(xy, depth)
-		if !ok {
-			return nil, false
-		}
-		right, ok := splitBranches(b.children[2], depth)
-		if !ok {
-			return nil, false
-		}
-		return append(left, right...), true
-	default:
-		br, ok := branchOf(n, depth)
-		if !ok {
-			return nil, false
-		}
-		return []Branch{br}, true
+// of alternatives but a combinatorial one; at a path root with every child on
+// the allowlist it is ONE any-of entry (branchOf), anywhere else it is
+// refused (md-codec 0.49.0, seedhammer I-1). ok=false propagates an unknown
+// tag exactly as branchOf does.
+//
+// orBSecond is true only for the second child of an or_b: the one place the
+// type system puts a wrapped (a:) thresh at a path root.
+//
+// It walks with an explicit stack, not recursion (review r3 I-P1): a 126-deep
+// or_d chain needed about 38 KB of recursive frames. Alternatives come out
+// left to right, as the recursion appended them, and depth is the same for
+// every one of them.
+func splitBranches(root node, depth int, orBSecond bool) ([]Branch, bool) {
+	type item struct {
+		n         node
+		orBSecond bool
 	}
+	var out []Branch
+	work := []item{{root, orBSecond}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		n := it.n
+		switch n.tag {
+		case tagOrB, tagOrC, tagOrD, tagOrI:
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 2 {
+				return nil, false
+			}
+			work = append(work, item{b.children[1], n.tag == tagOrB}, item{b.children[0], false})
+		case tagAndOr:
+			b, ok := n.body.(childrenBody)
+			if !ok || len(b.children) != 3 {
+				return nil, false
+			}
+			// The X-and-Y half is summarized as a conjunction; the synthetic
+			// node is never emitted or encoded, only walked.
+			xy := node{tag: tagAndV, body: childrenBody{children: []node{b.children[0], b.children[1]}}}
+			work = append(work, item{b.children[2], false}, item{xy, false})
+		default:
+			br, ok := branchOf(n, depth, it.orBSecond)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, br)
+		}
+	}
+	return out, true
 }
 
-// branchOf summarizes ONE spend path. ok=false means an unrecognised tag, which
-// forces Complete=false upstream.
-func branchOf(n node, depth int) (Branch, bool) {
+// branchOf summarizes ONE spend path. ok=false means an unrecognised tag, or a
+// thresh this summary refuses, which forces Complete=false upstream.
+func branchOf(n node, depth int, orBSecond bool) (Branch, bool) {
+	if root, ok := anyOfRoot(n, orBSecond); ok {
+		b, ok := root.body.(variableBody)
+		if !ok {
+			return Branch{}, false
+		}
+		if int(b.k) != len(b.children) {
+			// md-codec 0.49.0 (seedhammer I-1): k < n is a disjunction. One
+			// any-of entry when every child is on the allowlist and the key
+			// slots are distinct; otherwise refused. Before this, the thresh
+			// fell to collect below and was summarised as a CONJUNCTION of all
+			// its children: a 2-of-3 shown as needing all three keys.
+			if b.k == 0 || int(b.k) > len(b.children) {
+				return Branch{}, false
+			}
+			slots, locks, ok := threshConditions(b.children)
+			if !ok {
+				return Branch{}, false
+			}
+			seen := map[uint8]struct{}{}
+			for _, i := range slots {
+				if _, dup := seen[i]; dup {
+					return Branch{}, false
+				}
+				seen[i] = struct{}{}
+			}
+			return Branch{
+				Depth:    depth,
+				Keys:     len(slots),
+				Timelock: len(locks) > 0,
+				Locks:    locks,
+				AnyK:     int(b.k),
+				AnyN:     len(b.children),
+			}, true
+		}
+	}
 	br := Branch{Depth: depth}
 	keys := map[uint8]struct{}{}
 	if !collect(n, &br, keys) {
@@ -321,8 +426,12 @@ func branchOf(n node, depth int) (Branch, bool) {
 // this function answers only the first.
 func soleMulti(n node) (k, nkeys int, sorted, ok bool) {
 	var found int
-	var walk func(node)
-	walk = func(n node) {
+	// An explicit stack, not recursion (review r3 I-P1); the order of visits
+	// does not matter, only the count and the one multi's fields.
+	work := []node{n}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
 		switch n.tag {
 		case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 			found++
@@ -333,20 +442,15 @@ func soleMulti(n node) (k, nkeys int, sorted, ok bool) {
 				// A malformed body is not a threshold this can report.
 				found++
 			}
-			return
+			continue
 		}
 		switch b := n.body.(type) {
 		case childrenBody:
-			for _, c := range b.children {
-				walk(c)
-			}
+			work = append(work, b.children...)
 		case variableBody:
-			for _, c := range b.children {
-				walk(c)
-			}
+			work = append(work, b.children...)
 		}
 	}
-	walk(n)
 	if found != 1 {
 		return 0, 0, false, false
 	}
@@ -378,31 +482,51 @@ func plainMulti(n node) (int, int, bool, bool) {
 
 // collect walks one branch, recording key references and the presence of
 // time/hash locks. It returns false on ANY tag it does not know — the whole
-// point of Complete.
-func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
+// point of Complete. It walks with an explicit stack in the recursion's order
+// (a node, then its children left to right), so Locks and Hashlocks come out
+// in the same order (review r3 I-P1).
+func collect(root node, br *Branch, keys map[uint8]struct{}) bool {
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		children, ok := collectNode(n, br, keys)
+		if !ok {
+			return false
+		}
+		for i := len(children) - 1; i >= 0; i-- {
+			work = append(work, children[i])
+		}
+	}
+	return true
+}
+
+// collectNode records what n itself contributes to the branch and returns the
+// children collect must walk next (none for a leaf or a thresh).
+func collectNode(n node, br *Branch, keys map[uint8]struct{}) ([]node, bool) {
 	switch n.tag {
 	case tagPkK, tagPkH, tagPkh, tagRawPkH, tagWpkh:
 		if b, ok := n.body.(keyArgBody); ok {
 			keys[b.index] = struct{}{}
-			return true
+			return nil, true
 		}
 		// A raw key hash carries no placeholder; it is still a known shape.
-		return true
+		return nil, true
 	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
-			return false
+			return nil, false
 		}
 		for _, i := range b.indices {
 			keys[i] = struct{}{}
 		}
-		return true
+		return nil, true
 	case tagAfter, tagOlder:
 		br.Timelock = true
 		if v, ok := n.body.(timelockBody); ok {
 			br.Locks = append(br.Locks, lockFromWire(n.tag, uint32(v)))
 		}
-		return true
+		return nil, true
 	case tagSha256, tagHash256, tagRipemd160, tagHash160:
 		br.Hashlock = true
 		// Every kind records its digest, at its own width. Switched on the tag
@@ -429,36 +553,233 @@ func collect(n node, br *Branch, keys map[uint8]struct{}) bool {
 				br.Hashlocks = append(br.Hashlocks, l)
 			}
 		}
-		return true
+		return nil, true
 	case tagTrue, tagFalse:
-		return true
+		return nil, true
 	case tagThresh:
+		// md-codec 0.49.0 (seedhammer I-1): inside a path only k == n is a
+		// conjunction, and only when every child is on the allowlist -- a child
+		// outside it can feed the ADD chain a number other than 0 or 1, so
+		// wsh(thresh(3,pk(@0),s:pk(@1),av:pk(@2))), which @2 spends ALONE, was
+		// summarised as a three-key conjunction. A k < n thresh that is not a
+		// path root has no single-entry summary. Children are not walked with
+		// collect.
 		b, ok := n.body.(variableBody)
+		if !ok || int(b.k) != len(b.children) {
+			return nil, false
+		}
+		slots, locks, ok := threshConditions(b.children)
 		if !ok {
-			return false
+			return nil, false
 		}
-		for _, c := range b.children {
-			if !collect(c, br, keys) {
-				return false
+		for _, i := range slots {
+			keys[i] = struct{}{}
+		}
+		if len(locks) > 0 {
+			br.Timelock = true
+			br.Locks = append(br.Locks, locks...)
+		}
+		return nil, true
+	case tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI:
+		// A DISJUNCTION INSIDE A BRANCH (port of md-codec 0.48.5's rule,
+		// policy_shape.rs `collect`). splitBranches splits an `or` only at the
+		// top of a branch; one under and_v or a wrapper used to be walked here
+		// like a conjunction, merging both alternatives into ONE Branch and
+		// leaving Complete true. wsh(and_v(v:pk(@0),or_d(pk(@1),older(52560))))
+		// then summarised as "Spend path: 1 / 2 key(s), custom +timelock" while
+		// @0 can spend ALONE after the lock (bug hunt 2026-11-25 SH#2). Showing
+		// every alternative would need a cross product of branches; the summary
+		// refuses instead, so the consent falls to its honest-minimal screen.
+		//
+		// The one exception is Rust's too: `l:X` = or_i(0,X), `u:X` =
+		// or_i(X,0) and `and_n(X,Y)` = andor(X,Y,0) carry a `0` alternative
+		// that is never satisfiable, so they are not disjunctions.
+		b, ok := n.body.(childrenBody)
+		if !ok {
+			return nil, false
+		}
+		zeroArm := false
+		switch n.tag {
+		case tagOrI:
+			for _, c := range b.children {
+				if c.tag == tagFalse {
+					zeroArm = true
+				}
 			}
+		case tagAndOr:
+			zeroArm = len(b.children) > 2 && b.children[2].tag == tagFalse
 		}
-		return true
-	case tagAndB, tagAndV, tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI,
+		if !zeroArm {
+			return nil, false
+		}
+		return b.children, true
+	case tagAndB, tagAndV,
 		tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual,
 		tagWsh, tagSh:
 		b, ok := n.body.(childrenBody)
 		if !ok {
-			return false
+			return nil, false
 		}
-		for _, c := range b.children {
-			if !collect(c, br, keys) {
-				return false
-			}
-		}
-		return true
+		return b.children, true
 	default:
 		// tagTr and tagTapTree cannot appear inside a branch; anything else is
 		// a tag this walk has not been taught. Refuse rather than guess.
-		return false
+		return nil, false
 	}
+}
+
+// anyOfRoot is the thresh an any-of entry is rooted at: n itself, or, only as
+// the second child of an or_b, the thresh under an a:. No other wrapper is
+// looked through (Rust any_of_root).
+func anyOfRoot(n node, orBSecond bool) (node, bool) {
+	if n.tag == tagThresh {
+		return n, true
+	}
+	if orBSecond && n.tag == tagAlt {
+		if c, ok := soleChild(n); ok && c.tag == tagThresh {
+			return c, true
+		}
+	}
+	return node{}, false
+}
+
+// threshConditions is the thresh child ALLOWLIST (md-codec 0.49.0
+// thresh_conditions; DESIGN_thresh_summary section 1). It returns the key slots
+// and the locks, each in wire order, when EVERY child is spelled exactly as one
+// listed form, and ok=false otherwise. Each listed spelling is one the
+// miniscript type rules make leave exactly 0 or 1 on the stack (BIP-379:
+// "X_1 is Bdu; others are Wdu"), so "k of n" is exact. Nothing that is not on
+// the list is looked through: this port has no type checker, so the list IS
+// the type check.
+//
+//   - X_1: KEY, or LOCK.
+//   - later: s: over a pk KEY (never pkh: it is not "o"), a: over any KEY,
+//     s: or a: over a LOCK.
+func threshConditions(children []node) (slots []uint8, locks []Lock, ok bool) {
+	if len(children) == 0 {
+		return nil, nil, false
+	}
+	take := func(c node, allowPkH bool) bool {
+		if slot, isPkH, ok := threshKey(c); ok {
+			if isPkH && !allowPkH {
+				return false
+			}
+			slots = append(slots, slot)
+			return true
+		}
+		l, ok := threshLock(c)
+		if !ok {
+			return false
+		}
+		locks = append(locks, l)
+		return true
+	}
+	if !take(children[0], true) {
+		return nil, nil, false
+	}
+	for _, c := range children[1:] {
+		inner, ok := soleChild(c)
+		if !ok {
+			return nil, nil, false
+		}
+		switch c.tag {
+		case tagSwap:
+			ok = take(inner, false)
+		case tagAlt:
+			ok = take(inner, true)
+		default:
+			ok = false
+		}
+		if !ok {
+			return nil, nil, false
+		}
+	}
+	return slots, locks, true
+}
+
+// soleChild is the one child of a one-child node.
+func soleChild(n node) (node, bool) {
+	b, ok := n.body.(childrenBody)
+	if !ok || len(b.children) != 1 {
+		return node{}, false
+	}
+	return b.children[0], true
+}
+
+// threshKey is KEY: pk_k/pk_h over a placeholder, bare (the wire's spelling of
+// pk/pkh) or under exactly one c:. It reports the slot and whether it is pkh.
+func threshKey(n node) (slot uint8, isPkH, ok bool) {
+	if n.tag == tagCheck {
+		if n, ok = soleChild(n); !ok {
+			return 0, false, false
+		}
+	}
+	if n.tag != tagPkK && n.tag != tagPkH {
+		return 0, false, false
+	}
+	b, ok := n.body.(keyArgBody)
+	if !ok {
+		return 0, false, false
+	}
+	return b.index, n.tag == tagPkH, true
+}
+
+// threshTimelock is T: after/older with an operand 1 <= v < 2^31 (BIP-379).
+func threshTimelock(n node) (Lock, bool) {
+	if n.tag != tagAfter && n.tag != tagOlder {
+		return Lock{}, false
+	}
+	v, ok := n.body.(timelockBody)
+	if !ok || v < 1 || uint32(v) >= 1<<31 {
+		return Lock{}, false
+	}
+	return lockFromWire(n.tag, uint32(v)), true
+}
+
+// zeroArmOther is the non-0 child of an or_i with exactly two children, exactly
+// one of them 0.
+func zeroArmOther(n node) (node, bool) {
+	if n.tag != tagOrI {
+		return node{}, false
+	}
+	b, ok := n.body.(childrenBody)
+	if !ok || len(b.children) != 2 {
+		return node{}, false
+	}
+	z0, z1 := b.children[0].tag == tagFalse, b.children[1].tag == tagFalse
+	switch {
+	case z0 && !z1:
+		return b.children[1], true
+	case z1 && !z0:
+		return b.children[0], true
+	}
+	return node{}, false
+}
+
+// threshLock is LOCK: ln:T / un:T (or_i with 0, over n:T) or nl:T / nu:T (n:
+// over or_i with 0, over T).
+func threshLock(n node) (Lock, bool) {
+	switch n.tag {
+	case tagOrI:
+		other, ok := zeroArmOther(n)
+		if !ok || other.tag != tagZeroNotEqual {
+			return Lock{}, false
+		}
+		t, ok := soleChild(other)
+		if !ok {
+			return Lock{}, false
+		}
+		return threshTimelock(t)
+	case tagZeroNotEqual:
+		c, ok := soleChild(n)
+		if !ok {
+			return Lock{}, false
+		}
+		t, ok := zeroArmOther(c)
+		if !ok {
+			return Lock{}, false
+		}
+		return threshTimelock(t)
+	}
+	return Lock{}, false
 }

@@ -49,6 +49,10 @@ var (
 	errEmptyTLV         = errors.New("md: empty TLV entry")
 	errPlaceholderRange = errors.New("md: placeholder index out of range")
 	errOverrideOrder    = errors.New("md: override order violation")
+	// errMalformedPayloadPadding: a non-zero bit in the <=7-bit tail the TLV
+	// loop accepts as padding (port of md-codec tlv.rs reject_non_zero_pad,
+	// F-A8, md-codec 0.41.0).
+	errMalformedPayloadPadding = errors.New("md: malformed payload padding (trailing pad bits not all zero)")
 )
 
 // ─── Tag (port of tag.rs). 6-bit primary codes 0x00..=0x23; 0x24..=0x3E
@@ -385,81 +389,117 @@ func readNode(r *bitReader, kiw uint8, wireVersion uint8) (node, error) {
 	return readNodeDepth(r, kiw, wireVersion, 0)
 }
 
+// readNodeDepth reads one node and its subtree, the root at depth. It walks
+// with an explicit stack, not recursion (review r3 I-P1): a hostile card at
+// maxDecodeDepth needed about 32 KB of recursive frames, twice the device's
+// 16 KB goroutine stack, and the decoder runs on every md1 load. The bits are
+// read in the order the recursive port of tree.rs read_node read them (a
+// node's own fields, then its children left to right), and a node at depth >=
+// maxDecodeDepth is refused before its tag is read, so the tree, the error and
+// the reader's position are the recursive version's (held to it by
+// TestIterativeDecodeMatchesRecursive).
 func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (node, error) {
-	if depth >= maxDecodeDepth {
-		return node{}, errDepthExceeded
+	var stack []decodeFrame
+	d := depth
+	for {
+		if d >= maxDecodeDepth {
+			return node{}, errDepthExceeded
+		}
+		n, f, err := readNodeHead(r, kiw, wireVersion)
+		if err != nil {
+			return node{}, err
+		}
+		if f.need > 0 {
+			f.depth = d
+			f.children = make([]node, 0, f.need)
+			stack = append(stack, f)
+			d++
+			continue
+		}
+		// n is complete: hand it to its parent, and close every parent it
+		// completes.
+		for {
+			if len(stack) == 0 {
+				return n, nil
+			}
+			top := &stack[len(stack)-1]
+			top.children = append(top.children, n)
+			if len(top.children) < top.need {
+				d = top.depth + 1
+				break
+			}
+			n = top.node()
+			stack = stack[:len(stack)-1]
+		}
 	}
+}
+
+// decodeFrame is a node whose own fields are read and whose children are
+// being read: need children in all, read so far in children.
+type decodeFrame struct {
+	tag      tag
+	depth    uint8
+	need     int
+	k        uint8  // tagThresh
+	tr       trBody // tagTr: every field but tree
+	children []node
+}
+
+// node builds the frame's node once its children are read, with the body the
+// recursive reader built for the tag.
+func (f *decodeFrame) node() node {
+	switch f.tag {
+	case tagThresh:
+		return node{tag: f.tag, body: variableBody{k: f.k, children: f.children}}
+	case tagTr:
+		b := f.tr
+		b.tree = &f.children[0]
+		return node{tag: f.tag, body: b}
+	}
+	return node{tag: f.tag, body: childrenBody{children: f.children}}
+}
+
+// readNodeHead reads one node's tag and own fields. A node with children
+// comes back as a frame (need > 0) for readNodeDepth to fill; any other node
+// comes back whole.
+func readNodeHead(r *bitReader, kiw uint8, wireVersion uint8) (node, decodeFrame, error) {
 	t, err := readTag(r)
 	if err != nil {
-		return node{}, err
+		return node{}, decodeFrame{}, err
 	}
 	var b body
 	switch t {
 	case tagPkK, tagPkH, tagWpkh, tagPkh:
 		idx, err := r.read(int(kiw))
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		b = keyArgBody{index: uint8(idx)}
 	case tagSh, tagWsh, tagCheck, tagVerify, tagSwap, tagAlt, tagDupIf, tagNonZero, tagZeroNotEqual:
-		child, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		b = childrenBody{children: []node{child}}
-	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI:
-		l, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		r2, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		b = childrenBody{children: []node{l, r2}}
+		return node{}, decodeFrame{tag: t, need: 1}, nil
+	case tagAndV, tagAndB, tagOrB, tagOrC, tagOrD, tagOrI, tagTapTree:
+		return node{}, decodeFrame{tag: t, need: 2}, nil
 	case tagAndOr:
-		a, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		bb, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		c, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		b = childrenBody{children: []node{a, bb, c}}
-	case tagTapTree:
-		l, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		r2, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-		if err != nil {
-			return node{}, err
-		}
-		b = childrenBody{children: []node{l, r2}}
+		return node{}, decodeFrame{tag: t, need: 3}, nil
 	case tagMulti, tagSortedMulti, tagMultiA, tagSortedMultiA:
 		kRaw, err := r.read(5)
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		countRaw, err := r.read(5)
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		k := uint8(kRaw) + 1
 		count := int(countRaw) + 1
 		if int(k) > count {
-			return node{}, errKGreaterThanN
+			return node{}, decodeFrame{}, errKGreaterThanN
 		}
 		indices := make([]uint8, 0, count)
 		for i := 0; i < count; i++ {
 			idx, err := r.read(int(kiw))
 			if err != nil {
-				return node{}, err
+				return node{}, decodeFrame{}, err
 			}
 			indices = append(indices, uint8(idx))
 		}
@@ -467,32 +507,24 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 	case tagThresh:
 		kRaw, err := r.read(5)
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		countRaw, err := r.read(5)
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		k := uint8(kRaw) + 1
 		count := int(countRaw) + 1
 		if int(k) > count {
-			return node{}, errKGreaterThanN
+			return node{}, decodeFrame{}, errKGreaterThanN
 		}
-		children := make([]node, 0, count)
-		for i := 0; i < count; i++ {
-			c, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-			if err != nil {
-				return node{}, err
-			}
-			children = append(children, c)
-		}
-		b = variableBody{k: k, children: children}
+		return node{}, decodeFrame{tag: t, need: count, k: k}, nil
 	case tagTr:
 		// is_nums(1) | [kind(1) iff is_nums && v==8] | [key_index(kiw) iff
 		// !is_nums] | has_tree(1) | [tree] -- tree.rs read_node's Tr arm.
 		isNums, err := r.readBool()
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		ik := InternalKeySlot
 		if isNums {
@@ -500,7 +532,7 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 			if wireVersion == wfUnspendableVersion {
 				kind, err := r.readBool()
 				if err != nil {
-					return node{}, err
+					return node{}, decodeFrame{}, err
 				}
 				if kind { // SPEC §3d: kind bit 1 = Liana unspendable, 0 = NUMS.
 					ik = InternalKeyLianaUnspendable
@@ -511,27 +543,22 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 		if !isNums {
 			idx, err := r.read(int(kiw))
 			if err != nil {
-				return node{}, err
+				return node{}, decodeFrame{}, err
 			}
 			keyIndex = uint8(idx)
 		}
 		hasTree, err := r.readBool()
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
-		var sub *node
 		if hasTree {
-			child, err := readNodeDepth(r, kiw, wireVersion, depth+1)
-			if err != nil {
-				return node{}, err
-			}
-			sub = &child
+			return node{}, decodeFrame{tag: t, need: 1, tr: trBody{ik: ik, keyIndex: keyIndex}}, nil
 		}
-		b = trBody{ik: ik, keyIndex: keyIndex, tree: sub}
+		b = trBody{ik: ik, keyIndex: keyIndex}
 	case tagAfter, tagOlder:
 		v, err := r.read(32)
 		if err != nil {
-			return node{}, err
+			return node{}, decodeFrame{}, err
 		}
 		b = timelockBody(uint32(v))
 	case tagSha256, tagHash256:
@@ -539,7 +566,7 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 		for i := range h {
 			v, err := r.read(8)
 			if err != nil {
-				return node{}, err
+				return node{}, decodeFrame{}, err
 			}
 			h[i] = uint8(v)
 		}
@@ -549,7 +576,7 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 		for i := range h {
 			v, err := r.read(8)
 			if err != nil {
-				return node{}, err
+				return node{}, decodeFrame{}, err
 			}
 			h[i] = uint8(v)
 		}
@@ -557,9 +584,9 @@ func readNodeDepth(r *bitReader, kiw uint8, wireVersion uint8, depth uint8) (nod
 	case tagFalse, tagTrue:
 		b = emptyBody{}
 	default:
-		return node{}, errTagOutOfRange
+		return node{}, decodeFrame{}, errTagOutOfRange
 	}
-	return node{tag: t, body: b}, nil
+	return node{tag: t, body: b}, decodeFrame{}, nil
 }
 
 // ─── TLV (port of tlv.rs:210-447). ───────────────────────────────────────────
@@ -614,7 +641,12 @@ func readTLV(r *bitReader, kiw uint8, n uint8) (tlvSection, error) {
 	for {
 		entryStart := r.pos()
 		if r.remaining() < 5 {
-			break // not enough bits for even a tag — clean end-of-stream
+			// Not enough bits for even a tag — the codex32 byte padding. The
+			// reference encoder always zero-pads, so a set bit is malformed.
+			if err := rejectNonZeroPad(r); err != nil {
+				return tlvSection{}, err
+			}
+			break
 		}
 		ok, err := readTLVEntry(r, kiw, n, &section, &haveLastTag, &lastTag)
 		if ok {
@@ -623,11 +655,35 @@ func readTLV(r *bitReader, kiw uint8, n uint8) (tlvSection, error) {
 		// Decide: rollback-as-padding or propagate error.
 		r.restore(entryStart)
 		if r.remaining() <= 7 {
+			if err := rejectNonZeroPad(r); err != nil {
+				return tlvSection{}, err
+			}
 			break
 		}
 		return tlvSection{}, err
 	}
 	return section, nil
+}
+
+// rejectNonZeroPad verifies the remaining (<=7) trailing bits are all zero,
+// without moving the cursor (port of md-codec tlv.rs reject_non_zero_pad, F-A8,
+// md-codec 0.41.0). Called at both points where readTLV accepts the tail as
+// padding (bug hunt 2026-11-25 SH#3).
+func rejectNonZeroPad(r *bitReader) error {
+	bits := r.remaining()
+	if bits == 0 {
+		return nil
+	}
+	saved := r.pos()
+	pad, err := r.read(bits)
+	r.restore(saved)
+	if err != nil {
+		return err
+	}
+	if pad != 0 {
+		return errMalformedPayloadPadding
+	}
+	return nil
 }
 
 // readTLVEntry parses one TLV entry. Returns (true, nil) on success;
@@ -994,32 +1050,45 @@ func validatePlaceholderUsage(root node, n uint8) error {
 	return nil
 }
 
-func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
+func walkForPlaceholders(root node, seen []bool, firstOccurrences *[]uint8) error {
+	// An explicit stack in the recursion's order (a node, then its children
+	// left to right), so first occurrences and the first error are the same
+	// (review r3 I-P1: the recursion grew with the card's depth).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		children, err := placeholdersOf(n, seen, firstOccurrences)
+		if err != nil {
+			return err
+		}
+		for i := len(children) - 1; i >= 0; i-- {
+			work = append(work, children[i])
+		}
+	}
+	return nil
+}
+
+// placeholdersOf records the placeholders n itself references and returns the
+// children walkForPlaceholders visits next.
+func placeholdersOf(n node, seen []bool, firstOccurrences *[]uint8) ([]node, error) {
 	switch b := n.body.(type) {
 	case keyArgBody:
 		if int(b.index) >= len(seen) {
-			return errPlaceholderRange
+			return nil, errPlaceholderRange
 		}
 		if !seen[b.index] {
 			seen[b.index] = true
 			*firstOccurrences = append(*firstOccurrences, b.index)
 		}
 	case childrenBody:
-		for _, c := range b.children {
-			if err := walkForPlaceholders(c, seen, firstOccurrences); err != nil {
-				return err
-			}
-		}
+		return b.children, nil
 	case variableBody:
-		for _, c := range b.children {
-			if err := walkForPlaceholders(c, seen, firstOccurrences); err != nil {
-				return err
-			}
-		}
+		return b.children, nil
 	case multiKeysBody:
 		for _, index := range b.indices {
 			if int(index) >= len(seen) {
-				return errPlaceholderRange
+				return nil, errPlaceholderRange
 			}
 			if !seen[index] {
 				seen[index] = true
@@ -1029,7 +1098,7 @@ func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
 	case trBody:
 		if !b.isNums() {
 			if int(b.keyIndex) >= len(seen) {
-				return errNUMSConflict
+				return nil, errNUMSConflict
 			}
 			if !seen[b.keyIndex] {
 				seen[b.keyIndex] = true
@@ -1037,13 +1106,11 @@ func walkForPlaceholders(n node, seen []bool, firstOccurrences *[]uint8) error {
 			}
 		}
 		if b.tree != nil {
-			if err := walkForPlaceholders(*b.tree, seen, firstOccurrences); err != nil {
-				return err
-			}
+			return []node{*b.tree}, nil
 		}
 	case hash256Body, hash160Body, timelockBody, emptyBody:
 	}
-	return nil
+	return nil, nil
 }
 
 // validateMultipathConsistency: all multipath groups (shared default + per-@N
@@ -1075,19 +1142,24 @@ func validateMultipathConsistency(shared useSitePath, overrides []idxUseSite) er
 
 // validateTapScriptTree: all leaves in a tap-script-tree must be permitted-leaf
 // tags per §6.3.1 (port of validate.rs:141-169).
-func validateTapScriptTree(n node) error {
-	if n.tag == tagTapTree {
-		if b, ok := n.body.(childrenBody); ok {
-			for _, c := range b.children {
-				if err := validateTapScriptTree(c); err != nil {
-					return err
+func validateTapScriptTree(root node) error {
+	// An explicit stack, leaves left to right as the recursion visited them
+	// (review r3 I-P1).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		if n.tag == tagTapTree {
+			if b, ok := n.body.(childrenBody); ok {
+				for i := len(b.children) - 1; i >= 0; i-- {
+					work = append(work, b.children[i])
 				}
 			}
+			continue
 		}
-		return nil
-	}
-	if isForbiddenLeafTag(n.tag) {
-		return errForbiddenTapLeaf
+		if isForbiddenLeafTag(n.tag) {
+			return errForbiddenTapLeaf
+		}
 	}
 	return nil
 }
@@ -1215,6 +1287,9 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 		if err := validateMultipathConsistency(d.useSite, d.tlv.useSiteOverrides); err != nil {
 			return nil, err
 		}
+		if err := validateUseSiteOverridesCanonical(d.useSite, d.tlv.useSiteOverrides); err != nil {
+			return nil, err
+		}
 	}
 	if d.tree.tag == tagTr {
 		if b, ok := d.tree.body.(trBody); ok && b.tree != nil {
@@ -1223,6 +1298,9 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 			}
 		}
 	}
+	if err := validateNoEmptyOriginOverrides(d); err != nil {
+		return nil, err
+	}
 	if err := validateExplicitOriginRequired(d); err != nil {
 		return nil, err
 	}
@@ -1230,6 +1308,63 @@ func decodePayloadValidated(b []byte, totalBits int) (*descriptor, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+var (
+	errBaselineUseSiteOverride  = errors.New("md: use-site override keyed on baseline @0")
+	errRedundantUseSiteOverride = errors.New("md: redundant use-site override (equals the baseline use-site path)")
+	errEmptyOriginOverride      = errors.New("md: origin-path override present but empty")
+)
+
+// validateUseSiteOverridesCanonical refuses the two use-site override shapes no
+// encoder writes: an entry keyed on @0 (the baseline cannot be overridden) and
+// an entry equal to the baseline. Port of md-codec validate.rs
+// validate_use_site_overrides_canonical (md-codec 0.37.0), in its order: the @0
+// check first. Before it, Go applied an @0 override and derived @0 from it
+// while every Rust tool refused the card (bug hunt 2026-11-25 SH#3).
+func validateUseSiteOverridesCanonical(baseline useSitePath, overrides []idxUseSite) error {
+	for _, o := range overrides {
+		if o.idx == 0 {
+			return errBaselineUseSiteOverride
+		}
+		if useSitePathEqual(o.path, baseline) {
+			return errRedundantUseSiteOverride
+		}
+	}
+	return nil
+}
+
+// useSitePathEqual is Rust's derived PartialEq on UseSitePath: multipath
+// (None, or the same alternatives in order) and the wildcard's hardening.
+func useSitePathEqual(a, b useSitePath) bool {
+	if a.hasMultipath != b.hasMultipath || a.wildcardHardened != b.wildcardHardened {
+		return false
+	}
+	if !a.hasMultipath {
+		return true
+	}
+	if len(a.multipath) != len(b.multipath) {
+		return false
+	}
+	for i := range a.multipath {
+		if a.multipath[i] != b.multipath[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// validateNoEmptyOriginOverrides refuses an origin-path override that is
+// present with zero components, unconditionally (port of md-codec validate.rs
+// validate_no_empty_origin_overrides, md-codec 0.42.0; bug hunt 2026-11-25
+// SH#3).
+func validateNoEmptyOriginOverrides(d *descriptor) error {
+	for _, o := range d.tlv.originOverrides {
+		if len(o.path.components) == 0 {
+			return errEmptyOriginOverride
+		}
+	}
+	return nil
 }
 
 // ─── Public template types ───────────────────────────────────────────────────

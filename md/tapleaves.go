@@ -81,23 +81,32 @@ func tapLeaves(tree node) (uint8, InternalKeyKind, []TapLeaf, error) {
 	return b.keyIndex, b.ik, out, nil
 }
 
-func collectTapLeaves(n node, depth int, out *[]TapLeaf) error {
-	if n.tag == tagTapTree {
-		c, ok := n.body.(childrenBody)
-		if !ok || len(c.children) != 2 {
-			return errTapTreeShape
+func collectTapLeaves(root node, depth int, out *[]TapLeaf) error {
+	// An explicit stack, leaves left to right, first refusal wins (review r3
+	// I-P1: the recursion went one frame per taptree level).
+	type item struct {
+		n     node
+		depth int
+	}
+	work := []item{{root, depth}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		if it.n.tag == tagTapTree {
+			c, ok := it.n.body.(childrenBody)
+			if !ok || len(c.children) != 2 {
+				return errTapTreeShape
+			}
+			work = append(work, item{c.children[1], it.depth + 1}, item{c.children[0], it.depth + 1})
+			continue
 		}
-		if err := collectTapLeaves(c.children[0], depth+1, out); err != nil {
+		leaf, err := describeTapLeaf(it.n)
+		if err != nil {
 			return err
 		}
-		return collectTapLeaves(c.children[1], depth+1, out)
+		leaf.Depth = it.depth
+		*out = append(*out, leaf)
 	}
-	leaf, err := describeTapLeaf(n)
-	if err != nil {
-		return err
-	}
-	leaf.Depth = depth
-	*out = append(*out, leaf)
 	return nil
 }
 
@@ -112,11 +121,20 @@ func describeTapLeaf(n node) (TapLeaf, error) {
 		}
 		return TapLeaf{Kind: TapLeafPK, KeyIndices: []uint8{b.index}, K: 1}, nil
 	case tagCheck:
+		// Unwrap ONLY a bare key (PkK/PkH with a key argument), the one child
+		// over which `c:` is idempotent in the Rust primary and in
+		// emitFragment's tagCheck arm. Unwrapping any child described
+		// `Check(Check(PkK))` as a plain pk leaf, a tree the emitter and Rust
+		// both read differently (bug hunt 2026-11-25 SH#1, describe vs emit).
 		b, ok := n.body.(childrenBody)
 		if !ok || len(b.children) != 1 {
 			return TapLeaf{}, errTapLeafUnsupported
 		}
-		return describeTapLeaf(b.children[0])
+		k := b.children[0]
+		if k.tag != tagPkK && k.tag != tagPkH {
+			return TapLeaf{}, errTapLeafUnsupported
+		}
+		return describeTapLeaf(k)
 	case tagMultiA, tagSortedMultiA:
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
@@ -210,26 +228,35 @@ func EmitTapLeavesChunks(strs []string, keys map[uint8][]byte) (internalKeyIndex
 	return b.keyIndex, b.ik, out, nil
 }
 
-// emitTapLeaves mirrors collectTapLeaves' walk exactly — same recursion, same
+// emitTapLeaves mirrors collectTapLeaves' walk exactly — same traversal, same
 // depth accounting, same binary-tree refusal. Kept as a sibling rather than
 // folded together because the two return different things and the shared part
 // is four lines; a single walk parameterised by "describe or emit" would be
 // harder to read than either.
-func emitTapLeaves(n node, depth int, e emitEnv, out *[]TapLeafScript) error {
-	if n.tag == tagTapTree {
-		c, ok := n.body.(childrenBody)
-		if !ok || len(c.children) != 2 {
-			return errTapTreeShape
+func emitTapLeaves(root node, depth int, e emitEnv, out *[]TapLeafScript) error {
+	// An explicit stack, leaves left to right, first refusal wins (review r3
+	// I-P1), the same walk as collectTapLeaves.
+	type item struct {
+		n     node
+		depth int
+	}
+	work := []item{{root, depth}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		if it.n.tag == tagTapTree {
+			c, ok := it.n.body.(childrenBody)
+			if !ok || len(c.children) != 2 {
+				return errTapTreeShape
+			}
+			work = append(work, item{c.children[1], it.depth + 1}, item{c.children[0], it.depth + 1})
+			continue
 		}
-		if err := emitTapLeaves(c.children[0], depth+1, e, out); err != nil {
+		var script []byte
+		if err := emitFragment(it.n, e, &script); err != nil {
 			return err
 		}
-		return emitTapLeaves(c.children[1], depth+1, e, out)
+		*out = append(*out, TapLeafScript{Depth: it.depth, Script: script})
 	}
-	var script []byte
-	if err := emitFragment(n, e, &script); err != nil {
-		return err
-	}
-	*out = append(*out, TapLeafScript{Depth: depth, Script: script})
 	return nil
 }

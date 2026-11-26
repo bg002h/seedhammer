@@ -67,7 +67,9 @@ func composerSelfCheck(st *composerState, chunks []string) error {
 	if err != nil {
 		return err
 	}
-	if !shape.Complete {
+	// An any-of entry is a shape the composer cannot build and the checks
+	// below would read as a conjunction (composerShapeHasAnyOf).
+	if !shape.Complete || composerShapeHasAnyOf(shape) {
 		return errors.New("self-check: the decoded policy cannot be described")
 	}
 	// THE KEY-PATH CHOICE LANDED (F-449 stage 4). The operator chose a kind on

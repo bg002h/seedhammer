@@ -17,8 +17,38 @@ import (
 	"seedhammer.com/bip380"
 )
 
+// Change derives the change address at index. A descriptor none of whose keys
+// has a multipath (range) step has no change chain, and Change refuses it with
+// ErrNoChangeChain rather than deriving the receive address again.
 func Change(desc *bip380.Descriptor, index uint32) (string, error) {
+	if len(desc.Keys) > 0 && !HasChangeChain(desc.Keys) {
+		return "", ErrNoChangeChain
+	}
 	return addressAt(desc, index, true)
+}
+
+// ErrNoChangeChain: no key has a multipath step, so there is no change chain.
+var ErrNoChangeChain = errors.New("address: no change chain (no key has a <0;1> multipath step)")
+
+// HasChangeChain reports whether any key's derivation, as derivePubKey sees it
+// (an empty one is <0;1>/*), has a range step, i.e. whether chain 1 exists.
+//
+// THE RUST PRIMARY'S RULE (md-codec 0.48.7 check_chain_in_range): a chain is
+// refused at or beyond the widest multipath alt-count across all keys, a key
+// with no multipath counting as 1. derivePubKey consults `change` only on a
+// range step, so for keys written `@N/*` the change chain derived exactly the
+// receive addresses and a screen titled them "Change addresses" (bug hunt
+// 2026-11-25 SH#6). A key without a range step beside one that has it still
+// ignores `change`, as in Rust, where its derivation path is empty.
+func HasChangeChain(keys []bip380.Key) bool {
+	for _, k := range keys {
+		for _, c := range effectiveChildren(k) {
+			if c.Type == bip380.RangeDerivation {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func Receive(desc *bip380.Descriptor, index uint32) (string, error) {
@@ -77,6 +107,11 @@ func Find(desc *bip380.Descriptor, candidate string, gap uint32) (chain int, ind
 		if got == wantStr {
 			return 0, i, true, nil
 		}
+	}
+	if !HasChangeChain(desc.Keys) {
+		// No change chain to scan (SH#6): Change would refuse, and a receive
+		// match has already been ruled out above.
+		return 0, 0, false, nil
 	}
 	for i := uint32(0); i < gap; i++ {
 		got, e := Change(desc, i)

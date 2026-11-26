@@ -5,11 +5,43 @@
 // taproot internal key's three states and kind bit -- and the identity hashes
 // track descriptor-mnemonic/crates/md-codec 0.47.0 (descriptor-mnemonic
 // cf35d61a, tag descriptor-mnemonic-md-cli-v0.19.0), with the kind-1 vectors
-// vendored from descriptor-mnemonic 430ea478. Known lags, each with a
-// follow-up: pathless shared origins (F-166); md-codec's compose `--unspendable`
-// selection and SPEC §6's kind-1 mint refusals (F-654). compose.go carries its
-// own, older pin (md-codec::compose at 66bdf2f4). Vendored corpora are pinned
-// per file in md/testdata/*.provenance.json.
+// vendored from descriptor-mnemonic 430ea478.
+//
+// Converged since, against md-codec 0.48.7 (descriptor-mnemonic c8cde234),
+// bug hunt 2026-11-25: Check over a bare PkK/PkH emits the bare key
+// (to_miniscript.rs Check-idempotence, SH#1); policy_shape refuses a
+// disjunction inside a branch (0.48.5, SH#2); decode refuses an @0 or
+// redundant use-site override (0.37.0), an empty origin override (0.42.0) and
+// a non-zero TLV padding tail (0.41.0) (SH#3).
+//
+// policy_shape converged against md-codec 0.49.0 (descriptor-mnemonic
+// 6620a7dd; shape vectors vendored from d05655ac, whose only change on top is
+// design/FOLLOWUPS.md), seedhammer I-1: the disjunction rule above is no longer
+// the whole rule for a thresh. A thresh(k<n) at a path root whose every child
+// is on the allowlist is ONE any-of entry (Branch.AnyK/AnyN); a k == n thresh
+// is a conjunction only over the same allowlist; every other thresh makes the
+// shape incomplete. THE TYPE RULE (md reviews r2 I-1, r3, r4; descriptor-mnemonic
+// ca48a05e, f8b4a675, 5ad5a9b2; vectors re-vendored from 1dac0e10 with `git show`)
+// then ANDs in whether the tree is valid miniscript in its context: Complete =
+// walk && treeTypeChecks, a port of rust-miniscript's type, placement,
+// script-size and satisfaction-limit checks (within_resource_limits) over
+// md's conversion rules, every script root B and every tap leaf satisfiable
+// (md/policy_typecheck.go, by the six groups of policy_type_checks' doc).
+// md/policy_shape_cases_test.go holds the walk and the type rule to Rust on
+// every vendored case; md/policy_shape_props_test.go enumerates the thresh
+// allowlist.
+//
+// Known lags, each with a follow-up: pathless shared origins (F-166);
+// md-codec's compose `--unspendable` selection and SPEC §6's kind-1 mint
+// refusals (F-654); policy_shape's 0.48.0 "duplicate-index multi reports no
+// k-of-n" in its bare spelling (plainMulti still reports one). NOT AUDITED
+// against this port: the rest of 0.48.0-0.48.7 (among them 0.48.5's thresh
+// older() BIP-68 check, origin/multipath values above 2^29-1, non-ASCII
+// aliasing, and 0.48.6's out-of-order slot numbering at mint). The
+// emitter has no miniscript type checker, so it emits trees Rust refuses at
+// type-check (e.g. Check(Check(PkK))) instead of refusing them. compose.go
+// carries its own, older pin (md-codec::compose at 66bdf2f4). Vendored
+// corpora are pinned per file in md/testdata/*.provenance.json.
 package md
 
 import "errors"

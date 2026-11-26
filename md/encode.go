@@ -43,21 +43,25 @@ func (d *descriptor) wireVersion() uint8 {
 	return wfRedesignVersion
 }
 
-func needsV8(n node) bool {
-	switch b := n.body.(type) {
-	case trBody:
-		return b.ik == InternalKeyLianaUnspendable || (b.tree != nil && needsV8(*b.tree))
-	case childrenBody:
-		for _, c := range b.children {
-			if needsV8(c) {
+func needsV8(root node) bool {
+	// An explicit stack (review r3 I-P1); the answer does not depend on the
+	// order of visits.
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch b := n.body.(type) {
+		case trBody:
+			if b.ik == InternalKeyLianaUnspendable {
 				return true
 			}
-		}
-	case variableBody:
-		for _, c := range b.children {
-			if needsV8(c) {
-				return true
+			if b.tree != nil {
+				work = append(work, *b.tree)
 			}
+		case childrenBody:
+			work = append(work, b.children...)
+		case variableBody:
+			work = append(work, b.children...)
 		}
 	}
 	return false
@@ -196,45 +200,56 @@ const maxAltCount = 9
 // arm writes a kind bit only at version 8. Callers pass
 // descriptor.wireVersion(), NEVER a constant -- the identity hashes included
 // (SPEC §3e: at version 4 the two unspendable kinds hash identically).
-func writeNode(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) error {
+func writeNode(w *bitWriter, root node, keyIndexWidth uint8, wireVersion uint8) error {
+	// An explicit stack in pre-order, children left to right: the bits, and
+	// the first error, are the recursion's (review r3 I-P1: computeEncodingID
+	// re-encodes every decoded card, so this ran at the card's depth too).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		children, err := writeNodeHead(w, n, keyIndexWidth, wireVersion)
+		if err != nil {
+			return err
+		}
+		work = pushReversed(work, children)
+	}
+	return nil
+}
+
+// writeNodeHead writes n's tag and own fields and returns the children
+// writeNode writes next.
+func writeNodeHead(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) ([]node, error) {
 	writeTag(w, n.tag)
 	switch b := n.body.(type) {
 	case keyArgBody:
 		w.write(uint64(b.index), int(keyIndexWidth))
 	case childrenBody:
-		for _, c := range b.children {
-			if err := writeNode(w, c, keyIndexWidth, wireVersion); err != nil {
-				return err
-			}
-		}
+		return b.children, nil
 	case variableBody:
 		// Thresh: (k-1) 5b, (len-1) 5b, children. Enforce k,n∈1..32 & k≤n.
 		if b.k < 1 || b.k > 32 {
-			return errThresholdRange
+			return nil, errThresholdRange
 		}
 		if len(b.children) < 1 || len(b.children) > 32 {
-			return errChildCount
+			return nil, errChildCount
 		}
 		if int(b.k) > len(b.children) {
-			return errKGreaterThanN
+			return nil, errKGreaterThanN
 		}
 		w.write(uint64(b.k-1), 5)
 		w.write(uint64(len(b.children)-1), 5)
-		for _, c := range b.children {
-			if err := writeNode(w, c, keyIndexWidth, wireVersion); err != nil {
-				return err
-			}
-		}
+		return b.children, nil
 	case multiKeysBody:
 		// Multi-family: (k-1) 5b, (n-1) 5b, then RAW kiw-width indices.
 		if b.k < 1 || b.k > 32 {
-			return errThresholdRange
+			return nil, errThresholdRange
 		}
 		if len(b.indices) < 1 || len(b.indices) > 32 {
-			return errChildCount
+			return nil, errChildCount
 		}
 		if int(b.k) > len(b.indices) {
-			return errKGreaterThanN
+			return nil, errKGreaterThanN
 		}
 		w.write(uint64(b.k-1), 5)
 		w.write(uint64(len(b.indices)-1), 5)
@@ -252,7 +267,7 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) err
 				// Kind 1 has no representation below version 8; writing it
 				// would silently emit a NUMS wallet. Fail closed (Rust
 				// debug_asserts the same state at tree.rs write_node).
-				return errLianaNeedsVersion8
+				return nil, errLianaNeedsVersion8
 			}
 		}
 		if !b.isNums() {
@@ -260,9 +275,7 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) err
 		}
 		w.write(uint64(b2u(b.tree != nil)), 1)
 		if b.tree != nil {
-			if err := writeNode(w, *b.tree, keyIndexWidth, wireVersion); err != nil {
-				return err
-			}
+			return []node{*b.tree}, nil
 		}
 	case timelockBody:
 		w.write(uint64(uint32(b)), 32)
@@ -277,9 +290,9 @@ func writeNode(w *bitWriter, n node, keyIndexWidth uint8, wireVersion uint8) err
 	case emptyBody:
 		// nothing
 	default:
-		return errOperatorContext
+		return nil, errOperatorContext
 	}
-	return nil
+	return nil, nil
 }
 
 // ─── TLV (inverse of readTLV md.go:536-557; tlv.rs:86-208). ──────────────────

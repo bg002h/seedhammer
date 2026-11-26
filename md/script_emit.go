@@ -153,8 +153,100 @@ func pushNumber(out *[]byte, v uint32) {
 	pushData(out, buf[:n])
 }
 
-// emitFragment appends one fragment's script.
-func emitFragment(n node, e emitEnv, out *[]byte) error {
+// emitFragment appends one fragment's script. It walks with an explicit stack,
+// not recursion (review r3 I-P1: a max-depth card needed 64 KB of stack at
+// 32-bit here). A container's opcodes before its children are written when it
+// is reached (emitStep); the rest are queued between and after its children,
+// so the bytes, and the first error, are those of the recursive emitter
+// (iterative_equiv_test.go).
+func emitFragment(root node, e emitEnv, out *[]byte) error {
+	work := []emitItem{emitNode(root)}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch it.act {
+		case emitActOps:
+			*out = append(*out, it.ops...)
+			continue
+		case emitActVerify:
+			if err := emitVerifyFold(out, it.before); err != nil {
+				return err
+			}
+			continue
+		case emitActThresh:
+			// thresh's tail: <k> OP_EQUAL.
+			pushNumber(out, it.k)
+			*out = append(*out, opEQUAL)
+			continue
+		}
+		next, err := emitStep(it.n, e, out)
+		if err != nil {
+			return err
+		}
+		for i := len(next) - 1; i >= 0; i-- {
+			work = append(work, next[i])
+		}
+	}
+	return nil
+}
+
+// emitItem is one step of emitFragment's work: a fragment to emit, or opcodes
+// a container owes once the children before them are emitted.
+type emitItem struct {
+	act    emitAct
+	n      node   // emitActNode
+	ops    []byte // emitActOps
+	before int    // emitActVerify: the script's length when the v: child began
+	k      uint32 // emitActThresh
+}
+
+type emitAct uint8
+
+const (
+	emitActNode emitAct = iota
+	emitActOps
+	emitActVerify
+	emitActThresh
+)
+
+func emitNode(n node) emitItem     { return emitItem{act: emitActNode, n: n} }
+func emitOps(ops ...byte) emitItem { return emitItem{act: emitActOps, ops: ops} }
+
+// emitVerifyFold finishes `v:X` once X is emitted from before onwards: it does
+// not append OP_VERIFY blindly. If X ends in a verifiable opcode, that opcode
+// is REPLACED by its VERIFY form; appending instead produces a longer script
+// that still parses and hashes to a different address.
+func emitVerifyFold(out *[]byte, before int) error {
+	if len(*out) == before {
+		return ErrScriptUnsupported
+	}
+	switch (*out)[len(*out)-1] {
+	case opCHECKSIG:
+		(*out)[len(*out)-1] = opCHECKSIGVERIFY
+	case opCHECKMULTISIG:
+		(*out)[len(*out)-1] = opCHECKMULTISIGVER
+	case opEQUAL:
+		(*out)[len(*out)-1] = opEQUALVERIFY
+	case opNUMEQUAL:
+		// `v:multi_a(...)`: multi_a terminates in OP_NUMEQUAL, and miniscript
+		// folds it to OP_NUMEQUALVERIFY exactly as it folds CHECKSIG and
+		// EQUAL. Missing here until the composer's corpus carried the first
+		// verify-wrapped multi_a (keyed_compose_tr_nums_three_leaves), which
+		// derived a WRONG taproot address against Rust's
+		// (composer-S2-implementation-report F-1). A Go-only convergence
+		// fix: the Rust primary emits scripts through rust-miniscript, whose
+		// verify fold has always covered NUMEQUAL.
+		(*out)[len(*out)-1] = opNUMEQUALVERIFY
+	default:
+		*out = append(*out, opVERIFY)
+	}
+	return nil
+}
+
+// emitStep appends n's own opcodes that come before its children, and returns
+// what emitFragment must do next, in order: child fragments, and the opcodes a
+// container owes between and after them.
+func emitStep(n node, e emitEnv, out *[]byte) ([]emitItem, error) {
 	switch n.tag {
 	case tagPkK:
 		// A BARE `PkK` CARRIES AN IMPLICIT `c:` — it emits OP_CHECKSIG too.
@@ -170,15 +262,15 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// so it passed with the push-only version. `keyed_wsh_or_b` caught it.
 		b, ok := n.body.(keyArgBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		k, ok := e.keys[b.index]
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		pushData(out, k)
 		*out = append(*out, opCHECKSIG)
-		return nil
+		return nil, nil
 
 	case tagPkH:
 		// `pkh(K)` on the wire is miniscript's `c:pk_h(K)`, the same implicit
@@ -192,28 +284,40 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// pins it to the Rust primary's addresses for five vectors.
 		b, ok := n.body.(keyArgBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		k, ok := e.keys[b.index]
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opDUP, opHASH160)
 		pushData(out, btcaddr.Hash160(k))
 		*out = append(*out, opEQUALVERIFY, opCHECKSIG)
-		return nil
+		return nil, nil
 
 	case tagCheck:
 		// `c:X` — X then OP_CHECKSIG.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
+		// CHECK-IDEMPOTENCE over a bare key (port of md-codec to_miniscript.rs
+		// `to-miniscript-check-pkh-double-wrap`). A bare PkK/PkH already IS
+		// `c:pk_k`/`c:pk_h` (the arms above emit its OP_CHECKSIG), so
+		// `Check(PkK)` and `Check(PkH)` denote the SAME fragment as the bare
+		// tag. The toolkit before 0.55.0 and md-cli before 0.30 wrote that
+		// shape for every pk()/pkh() outside tap context, and such cards are
+		// already engraved. Appending a second OP_CHECKSIG built
+		// `<K> CHECKSIG CHECKSIG`: an unsatisfiable script whose address
+		// belongs to no wallet the Rust tools derive (bug hunt 2026-11-25
+		// SH#1). Only a bare-key child with a key-argument body is unwrapped,
+		// exactly as Rust matches it; every other child keeps the c: below.
+		if k := c.children[0]; k.tag == tagPkK || k.tag == tagPkH {
+			if _, ok := k.body.(keyArgBody); ok {
+				return []emitItem{emitNode(k)}, nil
+			}
 		}
-		*out = append(*out, opCHECKSIG)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opCHECKSIG)}, nil
 
 	case tagVerify:
 		// `v:X` — THE SUBTLE ONE. It does not append OP_VERIFY blindly: if the
@@ -222,110 +326,51 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// still parses and hashes to a different address.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		before := len(*out)
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		if len(*out) == before {
-			return ErrScriptUnsupported
-		}
-		switch (*out)[len(*out)-1] {
-		case opCHECKSIG:
-			(*out)[len(*out)-1] = opCHECKSIGVERIFY
-		case opCHECKMULTISIG:
-			(*out)[len(*out)-1] = opCHECKMULTISIGVER
-		case opEQUAL:
-			(*out)[len(*out)-1] = opEQUALVERIFY
-		case opNUMEQUAL:
-			// `v:multi_a(...)`: multi_a terminates in OP_NUMEQUAL, and miniscript
-			// folds it to OP_NUMEQUALVERIFY exactly as it folds CHECKSIG and
-			// EQUAL. Missing here until the composer's corpus carried the first
-			// verify-wrapped multi_a (keyed_compose_tr_nums_three_leaves), which
-			// derived a WRONG taproot address against Rust's
-			// (composer-S2-implementation-report F-1). A Go-only convergence
-			// fix: the Rust primary emits scripts through rust-miniscript, whose
-			// verify fold has always covered NUMEQUAL.
-			(*out)[len(*out)-1] = opNUMEQUALVERIFY
-		default:
-			*out = append(*out, opVERIFY)
-		}
-		return nil
+		// The fold runs once the child is emitted (emitVerifyFold).
+		return []emitItem{emitNode(c.children[0]), {act: emitActVerify, before: len(*out)}}, nil
 
 	case tagAndV:
 		// `and_v(X,Y)` — concatenation, nothing more.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		return emitFragment(c.children[1], e, out)
+		return []emitItem{emitNode(c.children[0]), emitNode(c.children[1])}, nil
 
 	case tagOrI:
 		// `or_i(X,Y)` — OP_IF X OP_ELSE Y OP_ENDIF.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opIF)
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opELSE)
-		if err := emitFragment(c.children[1], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opENDIF)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opELSE), emitNode(c.children[1]), emitOps(opENDIF)}, nil
 
 	case tagAndB:
 		// `and_b(X,Y)` — X Y OP_BOOLAND.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		if err := emitFragment(c.children[1], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opBOOLAND)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitNode(c.children[1]), emitOps(opBOOLAND)}, nil
 
 	case tagOrB:
 		// `or_b(X,Z)` — X Z OP_BOOLOR.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		if err := emitFragment(c.children[1], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opBOOLOR)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitNode(c.children[1]), emitOps(opBOOLOR)}, nil
 
 	case tagOrC:
 		// `or_c(X,Z)` — X OP_NOTIF Z OP_ENDIF.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opNOTIF)
-		if err := emitFragment(c.children[1], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opENDIF)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opNOTIF), emitNode(c.children[1]), emitOps(opENDIF)}, nil
 
 	case tagOrD:
 		// `or_d(X,Z)` — X OP_IFDUP OP_NOTIF Z OP_ENDIF.
@@ -335,17 +380,9 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// degrading-multisig idiom's fragment, so it earns its own vector.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 2 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opIFDUP, opNOTIF)
-		if err := emitFragment(c.children[1], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opENDIF)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opIFDUP, opNOTIF), emitNode(c.children[1]), emitOps(opENDIF)}, nil
 
 	case tagThresh:
 		// `thresh(k,X1,...,Xn)` — X1 (Xi OP_ADD)... <k> OP_EQUAL.
@@ -354,111 +391,89 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// not multi: each branch contributes 0 or 1 and the sum is compared.
 		b, ok := n.body.(variableBody)
 		if !ok || len(b.children) == 0 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(b.children[0], e, out); err != nil {
-			return err
-		}
+		items := make([]emitItem, 0, 2*len(b.children)+1)
+		items = append(items, emitNode(b.children[0]))
 		for _, c := range b.children[1:] {
-			if err := emitFragment(c, e, out); err != nil {
-				return err
-			}
-			*out = append(*out, opADD)
+			items = append(items, emitNode(c), emitOps(opADD))
 		}
-		pushNumber(out, uint32(b.k))
-		*out = append(*out, opEQUAL)
-		return nil
+		return append(items, emitItem{act: emitActThresh, k: uint32(b.k)}), nil
 
 	case tagSwap:
 		// `s:X` — OP_SWAP X.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opSWAP)
-		return emitFragment(c.children[0], e, out)
+		return []emitItem{emitNode(c.children[0])}, nil
 
 	case tagAlt:
 		// `a:X` — OP_TOALTSTACK X OP_FROMALTSTACK.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opTOALTSTACK)
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opFROMALTSTACK)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opFROMALTSTACK)}, nil
 
 	case tagDupIf:
 		// `d:X` — OP_DUP OP_IF X OP_ENDIF.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opDUP, opIF)
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opENDIF)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opENDIF)}, nil
 
 	case tagZeroNotEqual:
 		// `n:X` — X OP_0NOTEQUAL.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, op0NOTEQUAL)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(op0NOTEQUAL)}, nil
 
 	case tagNonZero:
 		// `j:X` — OP_SIZE OP_0NOTEQUAL OP_IF X OP_ENDIF.
 		c, ok := n.body.(childrenBody)
 		if !ok || len(c.children) != 1 {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		*out = append(*out, opSIZE, op0NOTEQUAL, opIF)
-		if err := emitFragment(c.children[0], e, out); err != nil {
-			return err
-		}
-		*out = append(*out, opENDIF)
-		return nil
+		return []emitItem{emitNode(c.children[0]), emitOps(opENDIF)}, nil
 
 	case tagTrue:
 		*out = append(*out, 0x51) // OP_1
-		return nil
+		return nil, nil
 
 	case tagFalse:
 		*out = append(*out, op0)
-		return nil
+		return nil, nil
 
 	case tagOlder:
 		v, ok := n.body.(timelockBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		pushNumber(out, uint32(v))
 		*out = append(*out, opCSV)
-		return nil
+		return nil, nil
 
 	case tagAfter:
 		v, ok := n.body.(timelockBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		pushNumber(out, uint32(v))
 		*out = append(*out, opCLTV)
-		return nil
+		return nil, nil
 
 	case tagSha256, tagHash256:
 		h, ok := n.body.(hash256Body)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		op := byte(opSHA256)
 		if n.tag == tagHash256 {
@@ -470,12 +485,12 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		*out = append(*out, opEQUALVERIFY, op)
 		pushData(out, h[:])
 		*out = append(*out, opEQUAL)
-		return nil
+		return nil, nil
 
 	case tagRipemd160, tagHash160:
 		h, ok := n.body.(hash160Body)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		op := byte(opRIPEMD160)
 		if n.tag == tagHash160 {
@@ -486,24 +501,24 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		*out = append(*out, opEQUALVERIFY, op)
 		pushData(out, h[:])
 		*out = append(*out, opEQUAL)
-		return nil
+		return nil, nil
 
 	case tagMulti, tagSortedMulti:
 		// BIP-342 disabled OP_CHECKMULTISIG in tapscript. A `multi()` inside a
 		// tap leaf has no emission, and inventing the multi_a equivalent would
 		// change the policy.
 		if e.tap {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		ks := make([][]byte, 0, len(b.indices))
 		for _, i := range b.indices {
 			k, ok := e.keys[i]
 			if !ok {
-				return ErrScriptUnsupported
+				return nil, ErrScriptUnsupported
 			}
 			ks = append(ks, k)
 		}
@@ -516,7 +531,7 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		}
 		pushNumber(out, uint32(len(ks)))
 		*out = append(*out, opCHECKMULTISIG)
-		return nil
+		return nil, nil
 
 	case tagMultiA, tagSortedMultiA:
 		// `multi_a(k, ...)` — BIP-342's replacement for CHECKMULTISIG:
@@ -526,17 +541,17 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		// The first key CHECKSIGs to seed the accumulator; every later one adds
 		// to it. Tapscript-only, for the same reason `multi` is not.
 		if !e.tap {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		b, ok := n.body.(multiKeysBody)
 		if !ok {
-			return ErrScriptUnsupported
+			return nil, ErrScriptUnsupported
 		}
 		ks := make([][]byte, 0, len(b.indices))
 		for _, i := range b.indices {
 			k, ok := e.keys[i]
 			if !ok {
-				return ErrScriptUnsupported
+				return nil, ErrScriptUnsupported
 			}
 			ks = append(ks, k)
 		}
@@ -555,10 +570,10 @@ func emitFragment(n node, e emitEnv, out *[]byte) error {
 		}
 		pushNumber(out, uint32(b.k))
 		*out = append(*out, opNUMEQUAL)
-		return nil
+		return nil, nil
 
 	default:
-		return ErrScriptUnsupported
+		return nil, ErrScriptUnsupported
 	}
 }
 

@@ -46,19 +46,21 @@ var (
 // collectKeyOccurrences appends every placeholder index in n, left-first
 // pre-order. A TapTree node's two children are visited left then right, which
 // is the leaves' left-to-right order; inside a leaf it is the fragment order.
-func collectKeyOccurrences(n node, out *[]uint8) {
-	switch b := n.body.(type) {
-	case keyArgBody:
-		*out = append(*out, b.index)
-	case multiKeysBody:
-		*out = append(*out, b.indices...)
-	case childrenBody:
-		for _, c := range b.children {
-			collectKeyOccurrences(c, out)
-		}
-	case variableBody:
-		for _, c := range b.children {
-			collectKeyOccurrences(c, out)
+func collectKeyOccurrences(root node, out *[]uint8) {
+	// An explicit stack in the same left-first pre-order (review r3 I-P1).
+	work := []node{root}
+	for len(work) > 0 {
+		n := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch b := n.body.(type) {
+		case keyArgBody:
+			*out = append(*out, b.index)
+		case multiKeysBody:
+			*out = append(*out, b.indices...)
+		case childrenBody:
+			work = pushReversed(work, b.children)
+		case variableBody:
+			work = pushReversed(work, b.children)
 		}
 	}
 }

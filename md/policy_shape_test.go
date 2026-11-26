@@ -128,23 +128,16 @@ func TestPolicyShapeNeverClaimsAPlainThresholdItCannotSee(t *testing.T) {
 			}}},
 		}},
 	}}}}
+	// SINCE bug hunt 2026-11-25 SH#2 (md-codec 0.48.5's rule) the walk no
+	// longer merges an `or` under and_v into one branch: it refuses the
+	// summary, which is stronger than the 0/0 this case used to pin -- no
+	// line at all reaches the consent, so neither a k-of-n nor a "2 key(s)"
+	// can misdescribe the path @3 spends alone.
 	ms := policyShape(mixed)
-	if !ms.Complete {
-		t.Fatal("the mixed branch should be understood")
-	}
-	if len(ms.Branches) != 1 {
-		t.Fatalf("branches = %d, want 1 -- splitBranches does not split an or under and_v, "+
-			"which is what makes this branch mixed", len(ms.Branches))
-	}
-	mb := ms.Branches[0]
-	if mb.Keys != 4 {
-		t.Fatalf("INCONCLUSIVE: Keys = %d, want 4 -- the fixture is not a mixed branch", mb.Keys)
-	}
-	if mb.K != 0 || mb.N != 0 {
-		t.Errorf("K/N = %d/%d for a branch holding a multi(2,@0,@1,@2) AND c:pk_k(@3), want 0/0 "+
-			"-- @3 can spend this branch alone after 10 blocks, and labelling it %d-of-%d "+
-			"tells an operator two of three signatures are needed",
-			mb.K, mb.N, mb.K, mb.N)
+	if ms.Complete || len(ms.Branches) != 0 {
+		t.Fatalf("an or_d under and_v was summarized (complete=%v, %d branch(es) %+v); "+
+			"@3 can spend alone after 10 blocks, so the summary must be refused",
+			ms.Complete, len(ms.Branches), ms.Branches)
 	}
 	// The same shape without the timelock, so the finding's second tree is
 	// pinned too: a branch is mixed because of its KEYS, not its locks.
@@ -218,3 +211,58 @@ func TestPolicyShapeReportsEveryLeafOfADeepTree(t *testing.T) {
 }
 
 func ptr(n node) *node { return &n }
+
+// TestPolicyShapeRefusesADisjunctionInsideABranch: bug hunt 2026-11-25 SH#2,
+// the port of md-codec 0.48.5 (tests/bughunt.rs
+// bughunt_md_05b_every_nested_disjunction_tag_marks_incomplete). An `or`/andor
+// under and_v is two spend paths the summary cannot list without a cross
+// product, so it refuses; walking it as a conjunction printed ONE path
+// ("2 key(s), custom +timelock") for wsh(and_v(v:pk(@0),or_d(pk(@1),
+// older(52560)))), where @0 spends alone after the lock.
+func TestPolicyShapeRefusesADisjunctionInsideABranch(t *testing.T) {
+	key := func(i uint8) node { return node{tag: tagPkK, body: keyArgBody{index: i}} }
+	under := func(inner node) node {
+		return node{tag: tagWsh, body: childrenBody{children: []node{{
+			tag: tagAndV,
+			body: childrenBody{children: []node{
+				{tag: tagVerify, body: childrenBody{children: []node{key(0)}}},
+				inner,
+			}},
+		}}}}
+	}
+	// The finding's own tree.
+	finding := under(node{tag: tagOrD, body: childrenBody{children: []node{
+		key(1), {tag: tagOlder, body: timelockBody(52560)},
+	}}})
+	if s := policyShape(finding); s.Complete || len(s.Branches) != 0 {
+		t.Errorf("wsh(and_v(v:pk(@0),or_d(pk(@1),older(52560)))): complete=%v branches=%+v, "+
+			"want incomplete with no branches", s.Complete, s.Branches)
+	}
+	// Every disjunction tag, the trees the Rust test builds.
+	for _, tg := range []tag{tagAndOr, tagOrB, tagOrC, tagOrD, tagOrI} {
+		kids := []node{key(1), key(2)}
+		if tg == tagAndOr {
+			kids = append(kids, key(3))
+		}
+		s := policyShape(under(node{tag: tg, body: childrenBody{children: kids}}))
+		if s.Complete || len(s.Branches) != 0 {
+			t.Errorf("tag 0x%02x under and_v: complete=%v branches=%+v, want incomplete with none",
+				uint8(tg), s.Complete, s.Branches)
+		}
+	}
+	// NOT disjunctions, as in Rust: l:X = or_i(0,X), u:X = or_i(X,0) and
+	// and_n(X,Y) = andor(X,Y,0) have an unsatisfiable `0` alternative, so the
+	// branch is still one path and stays summarised.
+	f := node{tag: tagFalse, body: emptyBody{}}
+	for name, inner := range map[string]node{
+		"l:":    {tag: tagOrI, body: childrenBody{children: []node{f, key(1)}}},
+		"u:":    {tag: tagOrI, body: childrenBody{children: []node{key(1), f}}},
+		"and_n": {tag: tagAndOr, body: childrenBody{children: []node{key(1), key(2), f}}},
+	} {
+		s := policyShape(under(inner))
+		if !s.Complete || len(s.Branches) != 1 {
+			t.Errorf("%s under and_v: complete=%v branches=%d, want one summarised branch",
+				name, s.Complete, len(s.Branches))
+		}
+	}
+}

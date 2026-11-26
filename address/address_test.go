@@ -200,3 +200,41 @@ func TestFindPropagatesDerivationError(t *testing.T) { // R0-I2/§2.1b: don't sw
 		t.Fatalf("want propagated derivation error, got found=%v err=%v", found, ferr)
 	}
 }
+
+// Bug hunt 2026-11-25 SH#6: with no key holding a multipath step there is no
+// change chain (Rust md-codec 0.48.7 refuses chain 1); Change refused to
+// re-derive the receive chain under that name, and Find scans receive only.
+func TestNoMultipathHasNoChangeChain(t *testing.T) {
+	bare, err := nonstandard.OutputDescriptor([]byte("wpkh(" + xpubs[0] + "/*)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HasChangeChain(bare.Keys) {
+		t.Fatal("HasChangeChain(@0/*) = true")
+	}
+	recv0, err := Receive(bare, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Change(bare, 0); !errors.Is(err, ErrNoChangeChain) {
+		t.Fatalf("Change(@0/*) = (%s, %v), want ErrNoChangeChain; receive 0 is %s", got, err, recv0)
+	}
+	if chain, idx, found, err := Find(bare, recv0, 20); err != nil || !found || chain != 0 || idx != 0 {
+		t.Fatalf("Find(receive 0) = (%d, %d, %v, %v)", chain, idx, found, err)
+	}
+	if _, _, found, err := Find(bare, "bc1qkwl5qpx6k93cqmnygn6kgucgka8q3z4kur2nm8", 20); found || err != nil {
+		t.Fatalf("Find(non-member) = found %v err %v, want a clean miss", found, err)
+	}
+	for _, s := range []string{"wpkh(" + xpubs[0] + "/<0;1>/*)", "wpkh(" + xpubs[0] + ")"} {
+		d, err := nonstandard.OutputDescriptor([]byte(s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !HasChangeChain(d.Keys) {
+			t.Fatalf("HasChangeChain(%s) = false", s)
+		}
+		if _, err := Change(d, 0); err != nil {
+			t.Fatalf("Change(%s): %v", s, err)
+		}
+	}
+}

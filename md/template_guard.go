@@ -45,7 +45,32 @@ func TemplateEngraveShapeGuardChunks(strs []string) error {
 // canonical wrapper spine (wsh/sh/sh-wsh) into a combinator/script body, so a
 // sortedmulti under it is refused (legacy multi is always admitted); a tap-script
 // tree refuses sortedmulti_a on any leaf.
-func guardNode(n node, inCombinator bool) error {
+func guardNode(root node, inCombinator bool) error {
+	// An explicit stack in pre-order, children left to right, so the first
+	// refusal is the recursion's (review r3 I-P1: a max-depth card recursed
+	// once per level here).
+	type item struct {
+		n            node
+		inCombinator bool
+	}
+	work := []item{{root, inCombinator}}
+	for len(work) > 0 {
+		it := work[len(work)-1]
+		work = work[:len(work)-1]
+		children, childIn, err := guardStep(it.n, it.inCombinator)
+		if err != nil {
+			return err
+		}
+		for i := len(children) - 1; i >= 0; i-- {
+			work = append(work, item{children[i], childIn})
+		}
+	}
+	return nil
+}
+
+// guardStep checks n itself and returns the children guardNode walks next,
+// with the context they are walked in.
+func guardStep(n node, inCombinator bool) (children []node, childInCombinator bool, err error) {
 	switch n.tag {
 	case tagSortedMultiA:
 		// ADMITTED SINCE 2026-08-21 (F-215). This arm refused on the grounds that
@@ -65,79 +90,59 @@ func guardNode(n node, inCombinator bool) error {
 		// this guard was ever asking. Refusing it now blocks a legitimate
 		// template engrave (D4) and nothing else. Convergence toward the
 		// primary, which admits the shape at every stage.
-		return nil
+		return nil, false, nil
 	case tagMultiA:
 		// multi_a renders (tr(NUMS, multi_a) is shipped) → admit; nothing below.
-		return nil
+		return nil, false, nil
 	case tagSortedMulti:
 		if inCombinator {
 			// sortedmulti nested under a combinator → refuse (no rust-miniscript renderer).
-			return errTemplateUnsupportedShape
+			return nil, false, errTemplateUnsupportedShape
 		}
-		return nil
+		return nil, false, nil
 	case tagMulti:
 		// Legacy multi renders fine inside combinators — the shipped toolkit ADMITS
 		// it (e.g. the §5 degrade2 wallet's wsh(or_i(and_v(...multi(3,...)),...)));
 		// only sortedmulti is the render-gap shape. Always admitted (C1, exec-review).
-		return nil
+		return nil, false, nil
 	case tagWsh:
 		// wsh wrapper: its sole child stays on the canonical spine (NOT a
 		// combinator) so a direct wsh(sortedmulti) is admitted; deeper wrapping is
 		// handled by the child's own arm.
 		if b, ok := n.body.(childrenBody); ok {
-			for _, c := range b.children {
-				if err := guardNode(c, false); err != nil {
-					return err
-				}
-			}
+			return b.children, false, nil
 		}
-		return nil
+		return nil, false, nil
 	case tagSh:
 		// sh wrapper: a direct sh(sortedmulti/multi) and sh(wsh(...)) stay on the
 		// spine; everything else its child decides.
 		if b, ok := n.body.(childrenBody); ok {
-			for _, c := range b.children {
-				if err := guardNode(c, false); err != nil {
-					return err
-				}
-			}
+			return b.children, false, nil
 		}
-		return nil
+		return nil, false, nil
 	case tagTr:
 		// Taproot: a key-path-only tr is fine; a script tree is walked as a
 		// COMBINATOR context (its leaves are reached via tap branching) — so a
 		// sortedmulti leaf there is refused, and sortedmulti_a is refused by its own
 		// arm. multi_a and legacy multi are admitted.
 		if b, ok := n.body.(trBody); ok && b.tree != nil {
-			return guardNode(*b.tree, true)
+			return []node{*b.tree}, true, nil
 		}
-		return nil
+		return nil, false, nil
 	case tagTapTree:
 		if b, ok := n.body.(childrenBody); ok {
-			for _, c := range b.children {
-				if err := guardNode(c, true); err != nil {
-					return err
-				}
-			}
+			return b.children, true, nil
 		}
-		return nil
+		return nil, false, nil
 	default:
 		// A combinator / miniscript fragment (or_i, and_v, thresh, …): descend with
 		// inCombinator=true so any sortedmulti below is refused (legacy multi admitted).
-		if b, ok := n.body.(childrenBody); ok {
-			for _, c := range b.children {
-				if err := guardNode(c, true); err != nil {
-					return err
-				}
-			}
+		switch b := n.body.(type) {
+		case childrenBody:
+			return b.children, true, nil
+		case variableBody:
+			return b.children, true, nil
 		}
-		if b, ok := n.body.(variableBody); ok {
-			for _, c := range b.children {
-				if err := guardNode(c, true); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return nil, false, nil
 	}
 }

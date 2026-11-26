@@ -69,8 +69,17 @@ func composerUnspendableFires(st *composerState) (bool, composerUnspendableDrop)
 	if err != nil {
 		return false, composerUnspendableDrop{unbuilt: true}
 	}
-	shape, err := md.PolicyShapeChunks(chunks)
-	if err != nil || !shape.Complete {
+	return composerUnspendableJudge(md.PolicyShapeChunks(chunks))
+}
+
+// composerUnspendableJudge is composerUnspendableFires' verdict on the decoded
+// kind-1 composition's shape (separated so a shape the composer cannot build
+// can be fed to it).
+func composerUnspendableJudge(shape md.PolicyShape, err error) (bool, composerUnspendableDrop) {
+	// An any-of entry is a shape the composer cannot build, and Liana's
+	// classifier below would read its optional lock as required
+	// (composerShapeHasAnyOf).
+	if err != nil || !shape.Complete || composerShapeHasAnyOf(shape) {
 		return false, composerUnspendableDrop{unbuilt: true}
 	}
 	if class := composerLianaOutsideModelClass(md.ScriptTr, shape); class != "" {

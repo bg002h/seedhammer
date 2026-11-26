@@ -358,20 +358,48 @@ func walletPolicyAddressLines(md1 []string, tpl md.Template, keys []md.ExpandedK
 	// the two and made this branch reachable for a warned policy. It was
 	// implemented the other way: ONE predicate, widened, with a third kind for
 	// BIP 388's rule, so `ok` here still implies DuplicateNone.
-	lines := []string{""}
+	proof, err := addressProofLines(at)
+	if err != nil {
+		return []string{"", "Address derivation failed.", "Do not engrave this card."}
+	}
+	return append([]string{""}, proof...)
+}
+
+// noChangeChainLine is what the consent screens print in place of the change
+// addresses for a policy with no change chain.
+const noChangeChainLine = "Change: none (no change chain)"
+
+// addressProofLines is the consent screens' address proof: addrProofPerChain
+// receive addresses, then as many change addresses, as "<Chain> <i>:" / address
+// pairs. ONE place for both consents (Wallet Policy and composer).
+//
+// A POLICY WITH NO CHANGE CHAIN IS NOT A FAILURE (bug hunt 2026-11-25 SH#6,
+// review r1 I-1). When no key has a multipath step, the change chain does not
+// exist -- the Rust primary refuses chain 1 for it -- and policyAddressAt
+// returns address.ErrNoChangeChain. That card is valid and its receive chain is
+// derivable, so the proof keeps the receive lines and says there is no change
+// chain; treating the refusal as a derivation failure told the operator "Do not
+// engrave this card" about a card Rust accepts. Any OTHER error, on either
+// chain, is still a failure, reported with the chain and index that failed.
+func addressProofLines(at func(uint32, bool) (string, error)) ([]string, error) {
+	var lines []string
 	for _, chain := range []struct {
 		label  string
 		change bool
 	}{{"Receive", false}, {"Change", true}} {
 		for i := 0; i < addrProofPerChain; i++ {
 			a, err := at(uint32(i), chain.change)
+			if chain.change && i == 0 && errors.Is(err, address.ErrNoChangeChain) {
+				lines = append(lines, noChangeChainLine)
+				break
+			}
 			if err != nil {
-				return []string{"", "Address derivation failed.", "Do not engrave this card."}
+				return nil, fmt.Errorf("md: address derivation failed for %s %d: %w", chain.label, i, err)
 			}
 			lines = append(lines, fmt.Sprintf("%s %d:", chain.label, i), a)
 		}
 	}
-	return lines
+	return lines, nil
 }
 
 // policyAddressAt resolves a decoded policy to an address deriver, over BOTH
