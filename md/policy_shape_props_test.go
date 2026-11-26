@@ -213,11 +213,10 @@ type typeRuleCase struct {
 // typeRuleCases are the trees review r1 m-1 named, and the context rules the
 // vendored file does not reach. Each answer is the one rust-miniscript gives
 // (the reasoning is in the comment). A differential probe of
-// descriptor-mnemonic a7680cf2 agreed on every row md can encode as a card, but
-// the tap-leaf B rows, which follow md review r3 ahead of the pin; tr(multi)
-// and the two 97/98-key rows have no card (md refuses a multi leaf and n > 32),
-// so their answers are checked against rust-miniscript's source arithmetic
-// only.
+// descriptor-mnemonic 6ca7e05c agreed on every row md can encode as a card;
+// tr(multi), the 67/68-key rows and the six-multi rows have no card (md
+// refuses a multi leaf and n > 32), so their answers are checked against
+// rust-miniscript's source arithmetic only.
 func typeRuleCases() []typeRuleCase {
 	pk := func(i uint8) node { return tpKey(tagPkK, i) }
 	s := func(x node) node { return tpWrap(tagSwap, x) }
@@ -229,6 +228,23 @@ func typeRuleCases() []typeRuleCase {
 			out[i] = uint8(i)
 		}
 		return out
+	}
+	// multiThresh is thresh(1, multi(1,20 keys), a:multi(1,20 keys), ...)
+	// with n children.
+	multiThresh := func(n int) node {
+		cs := []node{tpMulti(tagMulti, 1, keys(20)...)}
+		for i := 1; i < n; i++ {
+			cs = append(cs, a(tpMulti(tagMulti, 1, keys(20)...)))
+		}
+		return tpThresh(1, cs...)
+	}
+	// hashThresh is thresh(1, sha256, a:sha256 x m).
+	hashThresh := func(m int) node {
+		cs := []node{{tag: tagSha256, body: hash256Body{}}}
+		for i := 0; i < m; i++ {
+			cs = append(cs, a(node{tag: tagSha256, body: hash256Body{}}))
+		}
+		return tpThresh(1, cs...)
 	}
 	// bigThresh is thresh(1, pk, s:pk, ...) over n keys.
 	bigThresh := func(n int) node {
@@ -264,9 +280,8 @@ func typeRuleCases() []typeRuleCase {
 		{"tr(sortedmulti_a)", tpTrLeaf(tpMulti(tagSortedMultiA, 1, 0, 1)), true, true},
 		{"tr(and_v(v:pk,sortedmulti_a))", tpTrLeaf(tpPair(tagAndV, v(pk(2)), tpMulti(tagSortedMultiA, 1, 0, 1))), false, false},
 		{"wsh(and_v(v:pk,sortedmulti))", tpWsh(tpPair(tagAndV, v(pk(2)), tpMulti(tagSortedMulti, 1, 0, 1))), false, false},
-		// The root must be B in wsh/sh and in every tap leaf. The leaf
-		// rule is md review r3's; at the vendored pin a7680cf2 Rust still
-		// calls tr(v:pk) typed (the one row this table leads it on).
+		// The root must be B in wsh/sh and in every tap leaf (md review
+		// r3: a v:/a:/s: leaf can never leave BIP-342's one true element).
 		{"wsh(v:pk)", tpWsh(v(pk(0))), false, false},
 		{"sh(v:pk)", tpSh(v(pk(0))), false, false},
 		{"tr(v:pk)", tpTrLeaf(v(pk(0))), false, false},
@@ -275,16 +290,48 @@ func typeRuleCases() []typeRuleCase {
 			return &x
 		}()}}, false, false},
 		// Legacy's 520-byte redeem script: multi over 15 keys is 2+15*34+1 =
-		// 513, over 16 is 547. sortedmulti is built unchecked (no size rule).
+		// 513, over 16 is 547. sortedmulti is built unchecked, but the root's
+		// within_resource_limits runs the same size check on it.
 		{"sh(multi 15)", tpSh(tpMulti(tagMulti, 1, keys(15)...)), true, true},
 		{"sh(multi 16)", tpSh(tpMulti(tagMulti, 1, keys(16)...)), false, false},
-		{"sh(sortedmulti 20)", tpSh(tpMulti(tagSortedMulti, 1, keys(20)...)), true, true},
-		{"sh(sortedmulti 21)", tpSh(tpMulti(tagSortedMulti, 1, keys(21)...)), false, false},
-		// Segwitv0's standard 3600 bytes: thresh(1, pk, s:pk, ...) over n
-		// keys costs 2 (k, EQUAL) + 35 + 36(n-1) + (n-1) ADDs = 37n, so 97
-		// keys is 3589 and 98 is 3626.
-		{"wsh(thresh 97)", tpWsh(bigThresh(97)), true, true},
-		{"wsh(thresh 98)", tpWsh(bigThresh(98)), false, false},
+		{"sh(sortedmulti 15)", tpSh(tpMulti(tagSortedMulti, 1, keys(15)...)), true, true},
+		{"sh(sortedmulti 16)", tpSh(tpMulti(tagSortedMulti, 1, keys(16)...)), false, false},
+		{"wsh(sortedmulti 20)", tpWsh(tpMulti(tagSortedMulti, 1, keys(20)...)), true, true},
+		{"wsh(sortedmulti 21)", tpWsh(tpMulti(tagSortedMulti, 1, keys(21)...)), false, false},
+		// The 201-op limit: thresh(1, pk, s:pk, ...) over n keys runs n
+		// CHECKSIGs, n-1 SWAPs, n-1 ADDs and an EQUAL: 3n-1 ops, so 67 keys is
+		// 200 and 68 is 203.
+		{"wsh(thresh 67)", tpWsh(bigThresh(67)), true, true},
+		{"wsh(thresh 68)", tpWsh(bigThresh(68)), false, false},
+		// The executed half of the count: a multi runs one CHECKMULTISIG
+		// plus n executed key ops. and_v(v:multi(1,20 keys), thresh(1,
+		// sha256, a:sha256 x m)) has 1 + (4 + 6m + 1 + m) static ops and 20
+		// executed ones: 7m+26, so m = 25 is 201 and m = 26 is 208 (188
+		// static). Hash children are off the walk's allowlist.
+		{"wsh(v:multi20 + 25 hashes)", tpWsh(tpPair(tagAndV, v(tpMulti(tagMulti, 1, keys(20)...)), hashThresh(25))), true, false},
+		{"wsh(v:multi20 + 26 hashes)", tpWsh(tpPair(tagAndV, v(tpMulti(tagMulti, 1, keys(20)...)), hashThresh(26))), false, false},
+		// Segwitv0's standard 3600 bytes, reached under 201 ops through
+		// 20-key multis (a multi's slots repeat across children here: the
+		// checker reads no slot). A multi costs 3+680+1 = 684 bytes, an
+		// a:multi 686; five children are 2+684+4*686+4 = 3434, six are 4121.
+		// multi children are off the walk's allowlist, so no summary either
+		// way.
+		{"wsh(thresh multi x5)", tpWsh(multiThresh(5)), true, false},
+		{"wsh(thresh multi x6)", tpWsh(multiThresh(6)), false, false},
+		// Some satisfaction must exist in wsh/sh; a tap leaf's local checks
+		// do not ask (Tap::check_local_consensus_validity reads sat_data only
+		// when it is Some), so Rust and this port summarize the never-
+		// spendable leaf as a one-key path. Reported to the primary; a port
+		// follows Rust here, it does not lead.
+		{"wsh(and_v(v:pk,0))", tpWsh(tpPair(tagAndV, v(pk(0)), tpEmpty(tagFalse))), false, false},
+		{"tr(and_v(v:pk,0))", tpTrLeaf(tpPair(tagAndV, v(pk(0)), tpEmpty(tagFalse))), true, true},
+		// ExtData::threshold satisfies the k+1 costliest children (`i <= k`)
+		// and counts a missing satisfaction as none at all, so a never-
+		// satisfiable s:or_i(0,0) child sinks the thresh when k+1 reaches it
+		// (Rust's own measured example) and not when it does not.
+		{"thresh(2,pk,s:pk,s:or_i(0,0))", tpWsh(tpThresh(2, pk(0), s(pk(1)), s(tpPair(tagOrI, tpEmpty(tagFalse), tpEmpty(tagFalse))))), false, false},
+		{"thresh(1,pk,s:pk,s:or_i(0,0))", tpWsh(tpThresh(1, pk(0), s(pk(1)), s(tpPair(tagOrI, tpEmpty(tagFalse), tpEmpty(tagFalse))))), true, false},
+		{"thresh(2,pk,s:pk,s:pk,s:or_i(0,0))", tpWsh(tpThresh(2, pk(0), s(pk(1)), s(pk(2)), s(tpPair(tagOrI, tpEmpty(tagFalse), tpEmpty(tagFalse))))), true, false},
 	}
 }
 

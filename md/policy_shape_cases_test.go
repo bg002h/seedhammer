@@ -61,9 +61,9 @@ type shapeCase struct {
 }
 
 // policyShapeCaseCount is the number of cases at the pinned primary commit
-// (descriptor-mnemonic a7680cf2). A count, not ">0": a truncated copy that kept
+// (descriptor-mnemonic 6ca7e05c). A count, not ">0": a truncated copy that kept
 // one case would otherwise pass.
-const policyShapeCaseCount = 84
+const policyShapeCaseCount = 99
 
 func policyShapeCases(t *testing.T) []shapeCase {
 	t.Helper()
@@ -241,10 +241,10 @@ func TestPolicyShapeAgreesWithRustCases(t *testing.T) {
 			}
 		})
 	}
-	// 81 of the 84 carry a card; md1_absent names why the other three cannot
-	// (k = 0, k > n, no placeholder).
-	if fromCard != 81 {
-		t.Errorf("%d cases compared from a card, want 81", fromCard)
+	// 95 of the 99 carry a card; md1_absent names why the other four cannot
+	// (k = 0, k > n, no placeholder, multi in a tap leaf).
+	if fromCard != 95 {
+		t.Errorf("%d cases compared from a card, want 95", fromCard)
 	}
 }
 
