@@ -158,6 +158,7 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	m := hashlockMethodOf(rec.Method)
 	x, ok := hashlockDeriveFlow(ctx, th, phrase, m)
 	if !ok {
+		wipeBytes(phrase) // nothing held it
 		return hashlockBackToWhichHash
 	}
 	// F-535: the record names the method and not the kind, so the kind comes
@@ -166,6 +167,7 @@ func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, 
 	body := composerCopyHashlockConfirm(hashlockFirst8Last8(h), m.String(), len(phrase),
 		hashlockRelationLine(payload, h), hashlockOtherPathLine(st, idx, h), h.Kind())
 	if !composerConfirmScreen(ctx, th, "Hash lock", composerConfirmBody(body)) {
+		wipeBytes(phrase) // declined: nothing held it
 		return hashlockBackToWhichHash
 	}
 	st.list.Paths[idx].Hash = h
