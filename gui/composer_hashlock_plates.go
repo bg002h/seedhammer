@@ -89,7 +89,8 @@ func hashlockPlatesRecords(s *syswSession) []hashlockPlatesRecord {
 			ph++
 			out = append(out, hashlockPlatesRecord{
 				isPhrase: true, pos: ph,
-				phrase: []byte(rec.Phrase), method: hashlockMethodOf(rec.Method),
+				// The record's own buffer, not a copy: hashlockPlatesScrub wipes it.
+				phrase: rec.Phrase, method: hashlockMethodOf(rec.Method),
 			})
 		}
 	}

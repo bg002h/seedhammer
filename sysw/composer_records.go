@@ -12,6 +12,7 @@ package sysw
 // history through a shared helper.
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -83,10 +84,18 @@ func (m HashlockMethod) String() string {
 	return "hardened"
 }
 
-// PhraseRecord is a parsed phrase: record. Phrase is SECRET; the caller scrubs.
+// PhraseRecord is a parsed phrase: record. Phrase is SECRET and is bytes so
+// that it can be wiped: the record owns it, and the caller calls Wipe when it
+// is done (or hands the slice to an owner that wipes it).
 type PhraseRecord struct {
 	Method HashlockMethod
-	Phrase string
+	Phrase []byte
+}
+
+// Wipe zeroes the phrase and drops it.
+func (r *PhraseRecord) Wipe() {
+	clear(r.Phrase)
+	r.Phrase = nil
 }
 
 // KeyRecord is a parsed key: record.
@@ -128,7 +137,10 @@ func classifyComposer(record string) Class {
 			return ClassNow
 		}
 	case strings.HasPrefix(record, PhrasePrefix):
-		if _, err := ParsePhraseRecord(record); err == nil {
+		// Parsed only to be judged: the phrase is wiped before it is dropped.
+		rec, err := ParsePhraseRecord(record)
+		rec.Wipe()
+		if err == nil {
 			return ClassPhrase
 		}
 	}
@@ -153,15 +165,19 @@ func ParsePhraseRecord(record string) (PhraseRecord, error) {
 		return PhraseRecord{}, ErrPhraseRecord
 	}
 	b, ok := unhexLower(body)
+	// The decoded buffer holds the phrase: wiped on EVERY return, including
+	// the refusals below. The returned phrase is a copy the record owns.
+	defer clear(b)
 	if !ok || !utf8.Valid(b) {
 		return PhraseRecord{}, ErrPhraseRecord
 	}
-	methodText, phrase, hasComma := strings.Cut(string(b), ",")
-	if !hasComma {
+	comma := bytes.IndexByte(b, ',')
+	if comma < 0 {
 		return PhraseRecord{}, ErrPhraseRecord
 	}
+	phrase := b[comma+1:]
 	var method HashlockMethod
-	switch methodText {
+	switch string(b[:comma]) {
 	case "hardened":
 		method = HashlockHardened
 	case "sha256":
@@ -169,7 +185,7 @@ func ParsePhraseRecord(record string) (PhraseRecord, error) {
 	default:
 		return PhraseRecord{}, ErrPhraseRecord
 	}
-	if err := hashlock.ValidatePhrase([]byte(phrase)); err != nil {
+	if err := hashlock.ValidatePhrase(phrase); err != nil {
 		return PhraseRecord{}, ErrPhraseRecord
 	}
 	// THE WIRE STILL REFUSES A DIGEST-SHAPED PHRASE, and this is deliberate
@@ -188,7 +204,7 @@ func ParsePhraseRecord(record string) (PhraseRecord, error) {
 	// commit, which is what the lockstep fixture exists to force -- the device
 	// must never admit a record the host calls malformed, or refuse one it
 	// accepts.
-	return PhraseRecord{Method: method, Phrase: phrase}, nil
+	return PhraseRecord{Method: method, Phrase: bytes.Clone(phrase)}, nil
 }
 
 // PhraseRecordString builds a phrase: record. The text is NOT validated here;

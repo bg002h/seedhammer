@@ -9,6 +9,7 @@
 package hashlock
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -155,8 +156,8 @@ func DigestOf(k md.HashKind, x *[32]byte) []byte {
 }
 
 // ValidatePhrase applies SPEC_ms_hashlock §4.3 to the typed BYTES, in the host's
-// order, and changes nothing: no trim, no case fold, no normalisation. The shape
-// test works on a copy.
+// order, and changes nothing: no trim, no case fold, no normalisation. It makes
+// no copy of the phrase either: the shape test streams over the bytes.
 func ValidatePhrase(phrase []byte) error {
 	if len(phrase) == 0 {
 		return ErrEmpty
@@ -166,7 +167,7 @@ func ValidatePhrase(phrase []byte) error {
 			return ErrNotPrintableASCII
 		}
 	}
-	if IsMS1Shaped(string(phrase)) {
+	if isMS1ShapedBytes(phrase) {
 		return ErrMS1Shaped
 	}
 	if len(phrase) > PhraseMaxChars {
@@ -187,32 +188,51 @@ const minMS1Len = 48
 // lowercase, strip the display separators (whitespace, '-', ','), then at least
 // 48 characters, an `ms1` prefix and only bech32 characters. NO checksum -- a
 // grouped or mistyped plate the host refuses is refused here too.
+//
+// It allocates nothing: a phrase is secret and Go cannot wipe a string, so a
+// normalised copy would outlive the call. The test streams over the bytes.
 func IsMS1Shaped(s string) bool {
-	// ASCII-only case fold, as the host's to_ascii_lowercase (post-impl N-2):
-	// strings.ToLower would fold non-ASCII runes the host leaves alone.
-	t := strings.Map(func(r rune) rune {
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return r
-	}, strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range t {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '-' || r == ',' {
+	return ms1Shaped(strings.TrimSpace(s))
+}
+
+// isMS1ShapedBytes is IsMS1Shaped for a phrase held as bytes, which
+// ValidatePhrase uses so that no string copy of the phrase is made.
+func isMS1ShapedBytes(b []byte) bool {
+	return ms1Shaped(bytes.TrimSpace(b))
+}
+
+// ms1Shaped tests the already-trimmed token. ASCII-only case fold, as the
+// host's to_ascii_lowercase (post-impl N-2): strings.ToLower would fold
+// non-ASCII runes the host leaves alone. A non-ASCII byte is never in the
+// charset, so it fails here exactly as its rune failed before.
+func ms1Shaped[T string | []byte](t T) bool {
+	n := 0
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch c {
+		case ' ', '\t', '\n', '\r', '-', ',':
 			continue
 		}
-		b.WriteRune(r)
-	}
-	t = b.String()
-	if len(t) < minMS1Len || !strings.HasPrefix(t, "ms1") {
-		return false
-	}
-	for _, r := range t[3:] {
-		if !strings.ContainsRune(bech32Charset, r) {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		var ok bool
+		switch n {
+		case 0:
+			ok = c == 'm'
+		case 1:
+			ok = c == 's'
+		case 2:
+			ok = c == '1'
+		default:
+			ok = strings.IndexByte(bech32Charset, c) >= 0
+		}
+		if !ok {
 			return false
 		}
+		n++
 	}
-	return true
+	return n >= minMS1Len
 }
 
 func isHex(b []byte) bool {
