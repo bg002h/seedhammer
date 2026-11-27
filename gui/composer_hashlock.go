@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -152,7 +153,8 @@ func hashlockPhraseRoute(ctx *Context, th *Colors, st *composerState, idx int, p
 // nothing assigned -- the same contract the phrase route's own phrase screen
 // has (§4.6).
 func hashlockPayloadRoute(ctx *Context, th *Colors, st *composerState, idx int, rec sysw.PhraseRecord, payload []*md.HashLock) hashlockOutcome {
-	phrase := []byte(rec.Phrase)
+	// A copy: the material held below outlives the row set, which wipes rec.
+	phrase := bytes.Clone(rec.Phrase)
 	m := hashlockMethodOf(rec.Method)
 	x, ok := hashlockDeriveFlow(ctx, th, phrase, m)
 	if !ok {

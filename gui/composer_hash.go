@@ -515,7 +515,7 @@ func hashlockDerivedDigest(st *composerState, rec sysw.PhraseRecord) *md.HashLoc
 		if m.provenance != hashlockFromPayload || m.method != want {
 			continue
 		}
-		if string(m.phrase) != rec.Phrase {
+		if !bytes.Equal(m.phrase, rec.Phrase) {
 			continue
 		}
 		return m.lock
@@ -545,6 +545,14 @@ type composerHashRowSet struct {
 	phraseRow    int
 	hexRow       int
 	noneRow      int
+}
+
+// scrub wipes the phrase: records the row set holds.
+func (r *composerHashRowSet) scrub() {
+	for i := range r.phrases {
+		r.phrases[i].Wipe()
+	}
+	r.phrases = nil
 }
 
 // composerHashRows builds §5.1's SIX bands, in order, and records where each
@@ -632,8 +640,13 @@ func composerHashInPayload(r composerHashRowSet, st *composerState, d *md.HashLo
 // writes p.Hash, and the predicate reads it.
 func composerHashEdit(ctx *Context, th *Colors, st *composerState, idx int) bool {
 	title := fmt.Sprintf("Path %d hash", idx+1)
+	// The row set holds the payload's phrase: records (secret), so each one is
+	// wiped when it is replaced and when this function returns.
+	var rows composerHashRowSet
+	defer func() { rows.scrub() }()
 	for {
-		rows := composerHashRows(ctx.sysw, st)
+		rows.scrub()
+		rows = composerHashRows(ctx.sysw, st)
 		sel, ok := composerPickScreen(ctx, th, title, rows.lead, rows.labels)
 		if !ok {
 			return false // Back at `Which hash?` -- the ONLY false this function returns (spec §4.6)

@@ -300,3 +300,25 @@ func TestPreimagePlateIsItsOwnClassAndOnlyUnderTheHashID(t *testing.T) {
 			ClassPreimage.IsSecret(), ClassPhrase.IsSecret())
 	}
 }
+
+// TestPhraseRecordWipe: the phrase is bytes the caller can zero, and Wipe
+// zeroes the buffer the record handed out, not a copy of it.
+func TestPhraseRecordWipe(t *testing.T) {
+	rec, err := ParsePhraseRecord(PhraseRecordString(HashlockHardened, "correct horse battery staple"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rec.Phrase) != "correct horse battery staple" {
+		t.Fatalf("phrase = %q", rec.Phrase)
+	}
+	held := rec.Phrase
+	rec.Wipe()
+	if rec.Phrase != nil {
+		t.Fatal("Wipe left the phrase attached")
+	}
+	for i, c := range held {
+		if c != 0 {
+			t.Fatalf("byte %d not wiped", i)
+		}
+	}
+}
